@@ -1,20 +1,26 @@
 --!strict
 --[[
-	The creative inventory, old-school: Minecraft Pocket Edition's "Item selection" panel.
+	The creative inventory's "Item selection" panel (Minecraft Pocket Edition's), drawn in the
+	inventory family's survival look (Ui/Theme, Style.Dayz):
 
-	  * a gray beveled panel titled "Item selection" with a search box (filters with Items.search
-	    as you type; while it has focus, keys type instead of acting);
-	  * a grid of every item (Items.list, filtered), 8 columns and 5 rows of slots, with a
-	    Minecraft-style scrollbar: the mouse wheel scrolls it a row at a time, the thumb can be
-	    dragged (or the track clicked), and on touch screens the grid scrolls with the finger;
-	  * the hotbar row underneath is the real one: the HUD's hotbar stays on screen below the panel
-	    and its slots are clicked like inventory slots (Ui/Hud, mode "creative");
-	  * tabs above the panel switch to the inventory screen (armor, the 2 x 2 crafting grid and the
-	    rest) and back.
+	  * a dark Panel (with a hairline) under a black bar titled "ITEM SELECTION" (a body-less
+	    Style.Dayz.section, so it is the inventory's section bar; the touch close button at its
+	    right end), a search field (filters with Items.search as you type; while it has focus,
+	    keys type instead of acting);
+	  * a grid of every item (Items.list, filtered), 8 columns and 5 rows, as a catalogue: no slot
+	    faces or grid lines, the dayz item pictures, a white outline on the hovered one; a flat
+	    scrollbar (the mouse wheel scrolls a row at a time, the thumb can be dragged or the track
+	    clicked, and on touch screens the grid scrolls with the finger);
+	  * the hotbar row underneath is the real one: the HUD's quickbar stays on screen below the
+	    panel and its slots are clicked like inventory slots (Ui/Hud, mode "creative");
+	  * tabs above the panel switch to the inventory screen (armor, crafting and the rest) and back.
 
-	The grid only has as many slot widgets as are visible; scrolling changes which items they
-	show. Clicks are Ui/SlotClicks (grid targets: full stacks, deleting carried ones), driven by
-	Ui/Screens; this module draws and hit-tests (screen pixels, the InputObject.Position space).
+	Layout and API are Minecraft's as before (176 x 130 under the 26 px tabs; the grid at (8, 34),
+	the scrollbar's track at (154, 33), 14 x 90). The grid only has as many slot widgets as are
+	visible; scrolling changes which items they show. Clicks are Ui/SlotClicks (grid targets: full
+	stacks, deleting carried ones), driven by Ui/Screens; this module draws and hit-tests (screen
+	pixels, the InputObject.Position space). Outlines and text weights follow the GUI scale Ui/Screens
+	gives the root (its UIScale, read when it changes).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -31,9 +37,12 @@ local HoverTip = require(script.Parent.HoverTip)
 local ItemIcon = require(script.Parent.ItemIcon)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
+local Theme = require(script.Parent.Theme)
 
 type Window = Types.Window
 type Target = SlotClicks.Target
+
+local Dayz = Style.Dayz
 
 local WIDTH = 176
 local PANEL_HEIGHT = 130
@@ -41,9 +50,13 @@ local TOP = ItemIcon.TAB_HEIGHT
 local COLUMNS, ROWS = 8, 5
 -- Item position of the grid's first slot.
 local GRID_X, GRID_Y = 8, 34
--- The scrollbar: its track (inset) and thumb (Minecraft's 12 x 15 scroller).
+-- The title bar and its touch close button, the search field.
+local BAR_H = Theme.Size.SECTION_HEADER
+local CLOSE = 12
+local SEARCH_X, SEARCH_Y = 7, 17
+-- The scrollbar's track; its thumb is Style.Dayz.scrollbar's (THUMB_H tall).
 local TRACK_X, TRACK_Y, TRACK_W, TRACK_H = 154, 33, 14, 90
-local THUMB_W, THUMB_H = 12, 15
+local THUMB_H = 15
 
 type Cell = { view: ItemIcon.Slot, item: number }
 
@@ -72,9 +85,10 @@ type Self = CreativeScreen & {
 	search: TextBox,
 	cells: { Cell },
 	byButton: { [GuiObject]: Cell },
-	track: Frame,
-	thumb: Frame,
-	thumbFace: Frame,
+	scrollbar: Style.Scrollbar,
+	scaled: Style.Scaled,
+	-- The root's UIScale (Ui/Screens'), found once it is there.
+	uiScale: UIScale?,
 	filtered: { Items.ItemDef },
 	-- Rows scrolled (fractional while dragging / swiping; the grid shows the nearest row).
 	scroll: number,
@@ -106,6 +120,8 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 	root.Size = UDim2.fromOffset(WIDTH, TOP + PANEL_HEIGHT)
 	root.Visible = false
 	root.Parent = parent
+	Dayz.mark(root)
+	local scaled = Dayz.scaled()
 
 	local self = (
 		setmetatable({
@@ -114,6 +130,8 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 			onClose = function() end,
 			cells = {},
 			byButton = {},
+			scaled = scaled,
+			uiScale = nil,
 			filtered = Items.list,
 			scroll = 0,
 			shownRow = -1,
@@ -125,8 +143,8 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 	) :: Self
 
 	-- Tabs: this screen (active) and the inventory.
-	local thisTab = ItemIcon.tab(root, 0, itemNamed("Grass"), true)
-	local inventoryTab = ItemIcon.tab(root, ItemIcon.TAB_WIDTH + 1, itemNamed("Chest"), false)
+	local thisTab = ItemIcon.tab(root, 0, itemNamed("Grass"), true, scaled)
+	local inventoryTab = ItemIcon.tab(root, ItemIcon.TAB_WIDTH + 1, itemNamed("Chest"), false, scaled)
 	self.tabFrames =
 		table.move(inventoryTab.frames, 1, #inventoryTab.frames, #thisTab.frames + 1, table.clone(thisTab.frames))
 	inventoryTab.button.Activated:Connect(function()
@@ -135,12 +153,19 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 	end)
 	HoverTip.attach(inventoryTab.button, "creative.inventoryTab")
 
-	local panel = Style.panel(root, 0, TOP, WIDTH, PANEL_HEIGHT)
+	local panel = Style.frame(root, 0, TOP, WIDTH, PANEL_HEIGHT, Dayz.Colour.Panel, 1)
 	panel.Name = "Items"
+	panel.BackgroundTransparency = Dayz.Alpha.Panel
+	panel.Active = true
+	Dayz.outline(panel, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, scaled)
 	self.panel = panel
-	Style.text(panel, "Item selection", 8, 6, 140, 8, Style.Colour.Title, 5)
 
-	local close = Style.button(panel, "x", WIDTH - 15, 3, 12, 12, 6)
+	-- The title bar (a body-less Style.Dayz.section, drawn as the inventory's section bars: black,
+	-- the title in capitals) and the touch close button.
+	local titleBar = Dayz.section(panel, "Item selection", { face = "none", scaled = scaled })
+	titleBar.root.Name = "TitleBar"
+	titleBar:place(0, 0, WIDTH, BAR_H, 0)
+	local close = Dayz.button(panel, "x", WIDTH - CLOSE - 1, 1, CLOSE, CLOSE, 6, scaled)
 	close.Visible = UserInputService.TouchEnabled
 	close.Activated:Connect(function()
 		SoundPlayer.click()
@@ -148,49 +173,24 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 	end)
 	HoverTip.attach(close, "creative.close")
 
-	-- Search box: Minecraft's text field (black, gray border).
-	Style.frame(panel, 7, 17, WIDTH - 14, 12, Style.Colour.FieldBorder, 4)
-	-- (The field clips long text.)
-	local field = Style.frame(panel, 8, 18, WIDTH - 16, 10, Style.Colour.Field, 5)
-	field.ClipsDescendants = true
-	local search = Instance.new("TextBox")
-	search.Name = "Search"
-	search.BackgroundTransparency = 1
-	search.BorderSizePixel = 0
-	search.Position = UDim2.fromOffset(2, 1)
-	search.Size = UDim2.fromOffset(WIDTH - 20, 8)
-	search.ClearTextOnFocus = false
-	search.Font = Style.FONT
-	search.TextSize = Style.TEXT_SIZE
-	search.TextColor3 = Style.Colour.Text
-	search.PlaceholderText = "Search..."
-	search.PlaceholderColor3 = Color3.fromRGB(112, 112, 112)
-	search.TextXAlignment = Enum.TextXAlignment.Left
-	search.TextYAlignment = Enum.TextYAlignment.Top
-	search.Text = ""
-	search.ZIndex = 1
-	search.SelectionImageObject = Style.selectionImage
-	search.Parent = field
+	local search = Dayz.field(panel, SEARCH_X, SEARCH_Y, WIDTH - 2 * SEARCH_X, "Search...", 5, scaled)
 	self.search = search
 	search:GetPropertyChangedSignal("Text"):Connect(function()
 		self.filtered = Items.search(search.Text)
 		self.scroll = 0
 	end)
 
+	-- The grid: a catalogue (faces stay unfilled, no lines), outlined when hovered.
 	for row = 0, ROWS - 1 do
 		for column = 0, COLUMNS - 1 do
-			local view = ItemIcon.slot(panel, GRID_X + column * 18, GRID_Y + row * 18)
+			local view = ItemIcon.slot(panel, GRID_X + column * 18, GRID_Y + row * 18, nil, false, scaled)
 			local cell: Cell = { view = view, item = 0 }
 			table.insert(self.cells, cell)
 			self.byButton[view.button] = cell
 		end
 	end
 
-	self.track = Style.inset(panel, TRACK_X, TRACK_Y, TRACK_W, TRACK_H, 4)
-	local thumb = Style.frame(self.track, 1, 1, THUMB_W, THUMB_H, Style.Colour.PanelDark, 5)
-	Style.frame(thumb, 0, 0, THUMB_W - 1, THUMB_H - 1, Style.Colour.PanelLight, 1)
-	self.thumbFace = Style.frame(thumb, 1, 1, THUMB_W - 2, THUMB_H - 2, Style.Colour.Panel, 2)
-	self.thumb = thumb
+	self.scrollbar = Dayz.scrollbar(panel, TRACK_X, TRACK_Y, TRACK_W, TRACK_H, 4)
 
 	return self
 end
@@ -212,21 +212,22 @@ function CreativeScreen.rowPixels(self: Self): number
 end
 
 local function scrollTo(self: Self, point: Vector2)
-	-- Minecraft centres the thumb on the pointer.
-	local position, size = self.track.AbsolutePosition, self.track.AbsoluteSize
+	-- (Minecraft centres the thumb on the pointer.)
+	local track = self.scrollbar.track
+	local position, size = track.AbsolutePosition, track.AbsoluteSize
 	local pixels = size.Y / TRACK_H
-	local thumb = THUMB_H * pixels
-	local span = size.Y - 2 * pixels - thumb
+	local thumb = math.min(THUMB_H, TRACK_H) * pixels
+	local span = size.Y - thumb
 	if span <= 0 then
 		return
 	end
-	local fraction = math.clamp((point.Y - position.Y - pixels - thumb / 2) / span, 0, 1)
+	local fraction = math.clamp((point.Y - position.Y - thumb / 2) / span, 0, 1)
 	self.scroll = fraction * maxRow(self)
 end
 
 -- A press on the scrollbar starts dragging it (true: the press is taken).
 function CreativeScreen.pointerDown(self: Self, point: Vector2): boolean
-	if not self.root.Visible or not Style.contains(self.track, point) then
+	if not self.root.Visible or not Style.contains(self.scrollbar.track, point) then
 		return false
 	end
 	self.draggingThumb = true
@@ -268,6 +269,16 @@ function CreativeScreen.releaseFocus(self: Self)
 end
 
 function CreativeScreen.render(self: Self, window: Window, hover: Target?, dragged: { [number]: boolean })
+	-- (Outlines and text weights follow the scale Ui/Screens gives the root.)
+	local uiScale = self.uiScale
+	if uiScale == nil then
+		local found = self.root:FindFirstChildOfClass("UIScale")
+		uiScale = found
+		self.uiScale = found
+	end
+	if uiScale then
+		self.scaled:setScale(uiScale.Scale)
+	end
 	self.hotbarBase = Menu.windowIndex(window, "inventory", 1) or self.hotbarBase
 	self.scroll = math.clamp(self.scroll, 0, maxRow(self))
 	local row = math.floor(self.scroll + 0.5)
@@ -282,10 +293,7 @@ function CreativeScreen.render(self: Self, window: Window, hover: Target?, dragg
 	end
 	local hovered = if hover and hover.kind == "grid" and hover.item ~= 0 then hover.item else -1
 	for _, cell in self.cells do
-		local lit = cell.item == hovered
-		if cell.view.hover.Visible ~= lit then
-			cell.view.hover.Visible = lit
-		end
+		Dayz.setLit(cell.view.hover, cell.item == hovered)
 	end
 
 	-- The HUD's hotbar is this screen's hotbar row.
@@ -307,9 +315,7 @@ function CreativeScreen.render(self: Self, window: Window, hover: Target?, dragg
 	Hud.setHover(slot)
 
 	local rows = maxRow(self)
-	local fraction = if rows > 0 then self.scroll / rows else 0
-	self.thumb.Position = UDim2.fromOffset(1, 1 + math.floor((TRACK_H - 2 - THUMB_H) * fraction + 0.5))
-	self.thumbFace.BackgroundColor3 = if rows > 0 then Style.Colour.Panel else Style.Colour.Slot
+	self.scrollbar:place(if rows > 0 then self.scroll / rows else 0, rows > 0)
 end
 
 -- What is under `point`: a grid item, a hotbar slot, nil over the panel, or outside.

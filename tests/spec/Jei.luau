@@ -1,8 +1,10 @@
 --[[
 	JEI's pure parts: the recipe index (Ui/Jei/JeiData: recipes, uses, the 3 x 3 display, tags,
 	texts), the smelting and fuel enumerations it reads (Crafting/Smelting), the layouts
-	(Ui/Jei/JeiLayout) and the recipe transfer (Ui/Jei/JeiTransfer), whose plans are applied with
-	Inventory/Menu and must leave exactly the recipe in the grid without losing anything.
+	(Ui/Jei/JeiLayout: the list beside a panel, and docked in every ITEMS body the survival
+	inventory makes, Ui/InventoryColumns; cells told from placement) and the recipe transfer
+	(Ui/Jei/JeiTransfer), whose plans are applied with Inventory/Menu and must leave exactly the
+	recipe in the grid without losing anything.
 ]]
 
 return function(t, shared, require, _server, client)
@@ -504,6 +506,144 @@ return function(t, shared, require, _server, client)
 			local text = JeiLayout.pageText(12, 12, room(columns), measure)
 			t.ok(measure(text) <= room(columns), `{columns} columns: "{text}" fits`)
 		end
+	end)
+
+	t.test("jei: the docked list fills the inventory's ITEMS body", function()
+		local SLOT, PAD = JeiLayout.SLOT, JeiLayout.DOCK_PAD
+		local function check(w: number, h: number, scale: number)
+			local layout = JeiLayout.docked(40, 70, w, h, scale)
+			if layout == nil then
+				return nil
+			end
+			t.ok(layout.docked == true, "docked")
+			t.eq(layout.x, 40, "its top left as given")
+			t.eq(layout.y, 70)
+			t.eq(layout.width, w, "the whole rect")
+			t.eq(layout.height, h)
+			t.eq(layout.scale, scale)
+			t.ok(layout.columns >= JeiLayout.MIN_COLUMNS and layout.columns <= JeiLayout.MAX_COLUMNS, "columns")
+			t.ok(layout.rows >= 1 and layout.rows <= JeiLayout.MAX_ROWS, "rows")
+			t.ok(layout.columns * SLOT + 2 * PAD <= w, `{w}: the columns fit`)
+			t.ok(
+				JeiLayout.NAV_HEIGHT + layout.rows * SLOT + JeiLayout.SEARCH_HEIGHT + 2 * PAD <= h,
+				`{h}: the rows fit`
+			)
+			t.ok(
+				layout.columns == JeiLayout.MAX_COLUMNS or (layout.columns + 1) * SLOT + 2 * PAD > w,
+				`{w}: as many columns as fit`
+			)
+			t.ok(
+				layout.rows == JeiLayout.MAX_ROWS
+					or JeiLayout.NAV_HEIGHT + (layout.rows + 1) * SLOT + JeiLayout.SEARCH_HEIGHT + 2 * PAD > h,
+				`{h}: as many rows as fit`
+			)
+			local parts = JeiLayout.listParts(layout)
+			for name, part in parts :: any do
+				t.ok(
+					part.x >= PAD and part.y >= PAD and part.x + part.w <= w - PAD and part.y + part.h <= h - PAD,
+					`{name} inside the dock's padding`
+				)
+			end
+			t.eq(parts.grid.w, layout.columns * SLOT, "the grid is its cells")
+			t.ok(math.abs(parts.grid.x + parts.grid.w / 2 - w / 2) <= 1, "the grid centred in the width")
+			t.ok(not overlaps(parts.prev :: any, parts.next :: any), "arrows apart")
+			t.ok(parts.search.y >= parts.grid.y + parts.grid.h, "search under the grid")
+			return layout
+		end
+		local full = check(176, 52, 4)
+		t.ok(full ~= nil and full.columns == 9 and full.rows == 1, "ITEMS at its least: nine columns, one row")
+		t.eq(check(176, 51, 4), nil, "no room for a row: hidden")
+		t.eq(check(55, 200, 2), nil, "under three columns: hidden")
+		local three = check(56, 200, 2)
+		t.ok(three ~= nil and three.columns == 3, "three columns' room: shown")
+		local tall = check(176, 2000, 1)
+		t.ok(tall ~= nil and tall.rows == JeiLayout.MAX_ROWS, "rows capped")
+		t.eq(JeiLayout.docked(0, 0, 176, 200, 0), nil, "no scale: hidden")
+		-- Every ITEMS body the inventory makes holds nine columns.
+		local Blocks = require(shared.Blocks)
+		local Machines = require(shared.Machines)
+		local InventoryColumns = require(client.Ui.InventoryColumns)
+		local MenuLayout = require(client.Ui.MenuLayout)
+		local containers: { any } = {
+			false,
+			{ kind = "chest", block = Blocks.id.Chest, size = 27, slots = {} },
+			{ kind = "chest", block = Blocks.id.Chest, size = 54, slots = {} },
+			Types.newCrafting("crafting", Blocks.id.CraftingTable),
+			{ kind = "furnace", block = Blocks.id.Furnace, size = 3, slots = {} },
+		}
+		for block = 0, Blocks.count - 1 do
+			if Machines.isMachine(block) then
+				table.insert(containers, Machines.newContainer(block))
+			end
+		end
+		local count = 0
+		for _, container in containers do
+			local panel = if container then MenuLayout.panel(container) else nil
+			for _, mode in { "wide", "narrow" } do
+				for _, input in { { false, 14 }, { true, 22 }, { true, 26 } } do
+					for collapsed = 0, 31 do
+						if not bit32.btest(collapsed, InventoryColumns.BIT.jei) then
+							local layoutInput: any = {
+								mode = mode,
+								touch = input[1],
+								top = input[2],
+								container = if panel then panel.height else nil,
+								panel = panel,
+								equipment = container == false,
+								collapsed = collapsed,
+							}
+							local _, least = InventoryColumns.minimum(layoutInput)
+							for _, height in { least, least + 37, InventoryColumns.MAX_HEIGHT } do
+								layoutInput.height = height
+								local body = InventoryColumns.arrange(layoutInput).jei :: any
+								t.ok(body ~= nil, "ITEMS open has a body")
+								local docked = JeiLayout.docked(0, 0, body.w, body.h, 2)
+								t.ok(docked ~= nil and docked.columns == 9, `{body.w} x {body.h}: nine columns`)
+								count += 1
+							end
+						end
+					end
+				end
+			end
+		end
+		t.ok(count > 1000, `{count} ITEMS bodies`)
+	end)
+
+	t.test("jei: layouts tell their cells from their placement", function()
+		local docked = JeiLayout.docked(100, 100, 176, 2 + 32 + 4 * 18, 3) :: any
+		t.ok(docked ~= nil and docked.rows == 4, "four rows docked")
+		local list = {
+			columns = docked.columns,
+			rows = docked.rows,
+			x = 100,
+			y = 100,
+			width = docked.columns * JeiLayout.SLOT,
+			height = JeiLayout.NAV_HEIGHT + docked.rows * JeiLayout.SLOT + JeiLayout.SEARCH_HEIGHT,
+			scale = 3,
+			docked = false,
+		}
+		t.ok(JeiLayout.sameCells(docked, list), "equal columns and rows: the same cells")
+		t.ok(not JeiLayout.samePlacement(docked, list), "but not the same placement")
+		t.ok(JeiLayout.sameCells(docked, docked) and JeiLayout.samePlacement(docked, docked), "itself")
+		local again = JeiLayout.docked(100, 100, 176, 2 + 32 + 4 * 18, 3) :: any
+		t.ok(JeiLayout.samePlacement(docked, again), "the same dock: the same placement")
+		-- A taller dock with its rows capped: the same cells, not the same placement.
+		local capped = JeiLayout.docked(100, 100, 176, 2000, 3) :: any
+		local taller = JeiLayout.docked(100, 100, 176, 2400, 3) :: any
+		t.eq(capped.rows, JeiLayout.MAX_ROWS)
+		t.ok(JeiLayout.sameCells(capped, taller), "capped rows: the same cells")
+		t.ok(not JeiLayout.samePlacement(capped, taller), "taller: placed again")
+		-- Moved, scaled: placed again, cells kept.
+		local moved = JeiLayout.docked(101, 100, 176, 2000, 3) :: any
+		t.ok(JeiLayout.sameCells(capped, moved) and not JeiLayout.samePlacement(capped, moved), "moved")
+		local scaled = JeiLayout.docked(100, 100, 176, 2000, 4) :: any
+		t.ok(JeiLayout.sameCells(capped, scaled) and not JeiLayout.samePlacement(capped, scaled), "scaled")
+		-- The list beside a panel says it is not docked.
+		local beside = JeiLayout.list(1920, 36, 1080, 1100, 3) :: any
+		t.ok(beside ~= nil and beside.docked == false, "list: not docked")
+		local parts = JeiLayout.listParts(beside)
+		t.eq(parts.prev.x, 0, "a list's parts start at its edge")
+		t.eq(parts.grid.w, beside.width)
 	end)
 
 	--[[ Transfer ]]

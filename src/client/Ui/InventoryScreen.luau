@@ -1,243 +1,124 @@
 --!strict
 --[[
-	The survival inventory screen (also a creative tab), laid out like Minecraft's 176 x 166
-	inventory:
+	The survival inventory screen (also creative's inventory tab), in the inventory family's dark
+	survival look (Ui/Theme, Style.Dayz). Ui/InventoryColumns lays it out and picks its scale; this
+	module builds the pieces once, places them when the layout changes, draws the window every
+	frame and hit-tests (screen pixels, the InputObject.Position space). Wide, three columns over a
+	band; narrow (small screens), the two side columns:
 
-	  * the armor column on the left (head, chest, legs, feet); an empty armor slot shows a faint
-	    outline of its piece;
-	  * next to it the player, drawn in a ViewportFrame (the character cloned into a WorldModel),
-	    facing the viewer and turning a little towards the mouse like Minecraft's;
-	  * at the top right the 2 x 2 crafting grid under its "Crafting" label, an arrow and the
-	    result slot (window 0's own "inventory" container, slots 2..5 and 1);
-	  * the 27 inventory slots and, below them after a small gap, the hotbar row;
-	  * Terraria's equipment (window 0 only: the inventory alone, also creative's inventory tab), a
-	    panel of its own 84 x 166 docked 2 px right of the player panel (Terraria's is right of
-	    its inventory too), so `size` is 262 wide then: the title "Equipment" at (8, 6), seven
-	    rows at y = 17 + 18 (r - 1): the vanity armor (x 8, rows 1..4, the armor ghosts tinted
-	    violet, a 6 x 6 eye in each slot's top right corner hiding that armor piece's look, its
-	    button 8 x 8 out to the frame's corner on touch: MenuLayout.armorEye), the
-	    vanity accessories (x 28), the accessories (x 48: rows past the open ones darkened with a
-	    padlock, "Opens at the Industrial Age"), and a 9 x 9 eye per accessory row (x 68; a 16 x
-	    18 button, so a finger finds it) hiding that accessory's look (Types `hidden`: the
-	    inventory's `hide` action, predicted like any other). The preview wears what the
-	    character shows (Player/EquipmentLooks.dress, again whenever the equipment changes).
+	  VICINITY   (left) a grey top header (with the creative "items" button while the creative tabs
+	             are shown), the GROUND strip (Ui/GroundStrip: dropped items nearby; the only place
+	             inside the screen that throws), then CRAFTING (window 0's 2 x 2 grid, a chevron,
+	             its result) or the open block's section (Ui/ContainerPanel: a chest's "CHEST
+	             (n/27)", a crafting table, a furnace, a machine, its picture the block's icon),
+	             then ITEMS: JEI's list docked in its body (`jeiDock`; Ui/Jei)
+	  centre     (wide) the player, unboxed (Ui/PlayerPreview, turning towards the pointer), over
+	             HANDS: a grey header, the held item's name on a black bar with its condition dot,
+	             the item large (a slot of its own: the selected hotbar slot), its condition word
+	             and one detail line (Theme.handsLines: durability, sips, a stack's count, energy)
+	  EQUIPMENT  (right) a grey top header with the gear (the Options menu) and, on touch, the
+	             close button; a strip of the worn armor over the accessories (window 0; other
+	             windows the armor alone), each empty one showing its silhouette, closed accessory
+	             slots shaded under a padlock, an eye per accessory hiding its look (in the slot's
+	             corner on a mouse, a finger's button under it on touch); BACKPACK (n/27): the 27
+	             inventory slots; VANITY (window 0): the vanity armor (an eye each) and vanity
+	             accessories, fainter silhouettes with a corner mark
+	  band       the window's nine hotbar slots as the quickbar (Style.Dayz quick cells, the
+	             selected one olive under an outline, number boxes from the Hotbar Slot key
+	             bindings: hidden on touch and while too small to read), the status icons docked
+	             at its right (`statusRect`, Ui/StatusDock; survival-like modes only)
 
-	When a block's window is open, its panel sits ABOVE the player panel (Ui/MenuLayout):
-	  chest     its name and size / 9 rows of 9 slots
-	  crafting  "Crafting": the 3 x 3 grid, an arrow and the result in a large frame
-	  furnace   "Furnace": the input over the flame over the fuel, the progress arrow and the output;
-	            the flame burns down and the arrow fills from the container's `data`
-	  machine   a Mekanism machine (Shared/Machines): its name, its kind's slots (an empty upgrade
-	            slot shows a faint outline of its card), gauges, status line and the lines under it
-	            (a battery's input and output), Mekanism's vertical energy bar filling from the
-	            bottom, red when nearly empty to green when full, and a fluid gauge per tank (the
-	            Heat Generator's lava, the Oil Refinery's oil and fuel, the Combustion Generator's
-	            fuel: Mekanism's 18 x 60 GuiFluidGauge, the fluid's colour filling it from the bottom
-	            under the gauge's scale marks); hovering the bar shows "stored / capacity", a gauge
-	            "Lava: 5,000 mB" and its capacity (`tooltipAt`)
-	Machines' items that hold energy (charged batteries, machines broken with energy in them) show
-	Mekanism's energy bar where a worn tool's durability bar goes (Ui/ItemIcon).
-	The player panel then shows the player's name where the 2 x 2 grid was: that window has no 2 x 2
-	grid. In creative mode (with no block open) two tabs above the panel switch between the item
-	selection and this screen. A gear button where Minecraft's recipe book button is (20 x 18 at
-	104, 61) opens the Options menu (`onSettings`, Ui/Screens).
+	Behind the side columns (wide) two dark strips run from the screen's edges to 3 GUI pixels
+	past them. Every root of the family is marked for the look (Ui/Screens), so button tooltips
+	here draw the dark box.
 
-	A crafting result Progression keeps back (a later Age's, or a skill's not unlocked: the window's
-	recipe gate, Shared/Progression) is drawn greyed in the empty result slot, and hovering it
-	says what it needs ("Requires the Iron Age"): the grid still matches it (Crafting.match), but
-	the server never offers it, so it can't be taken.
+	Sections: CRAFTING, the block's, ITEMS, BACKPACK and VANITY collapse to their bar when it is
+	clicked (Ui/HoverTip "inventory.section" says what a click does), per section for the
+	session; VANITY starts collapsed on touch screens. A collapsed or absent section's slots are not
+	live (SlotWidgets: window -1, hidden, not Selectable): no click or gamepad selection reaches
+	them, and the layout gives their room to ITEMS and the character. A collapsed section still
+	counts what it holds in its title ("BACKPACK (12/27)": InventoryColumns.used reads the window,
+	not the drawn slots), and a collapsed block's gauges say nothing (their frames stay where the
+	body was, over ITEMS).
 
-	This module only draws and hit-tests (in screen pixels, the InputObject.Position space): the
-	clicks themselves are Ui/SlotClicks, driven by Ui/Screens, and Inventory/Menu applies the rules
-	of each slot (results are only taken, crafting happens there). Slots map to window slots by the
-	window layout of Inventory/Types (container, armor, inventory 10..36, hotbar, equipment). The
-	eyes are buttons of their own (Activated): over one, `targetAt` says nothing, so no slot click
-	happens under it. The eyes, the gear, the creative tab and the touch close button describe
-	themselves when hovered, selected or long pressed (Ui/HoverTip, Ui/ButtonHelp's
-	"inventory.*").
+	Slots are Ui/SlotWidgets (faces, outlines, ghosts, locks, eyes, the locked crafting result):
+	clicks are Ui/SlotClicks, driven by Ui/Screens, and Inventory/Menu applies the rules of each
+	slot; slots map to window slots by the window layout of Inventory/Types. While a stack is
+	carried the hovered slot's outline takes the drag feedback colour (`setFeedback`, from
+	Theme.feedback) and the GROUND strip is outlined as the drop place.
+
+	What is under a point (`targetAt`): a live slot; over the GROUND strip (its items included) or
+	outside the screen's root, `outside` (a carried stack is thrown); anywhere else inside the root
+	(headers, buttons, eyes, section bodies, gauges, gaps, the character, the band) nothing.
+	`tooltipAt` covers what is no item: a locked crafting result ("Requires the Iron Age"), a closed
+	accessory slot ("Opens at the Industrial Age"), a machine's energy bar and tanks (only while the
+	block's section is open), a ground item (its name, count and "Walk over it to pick it up").
+
+	Ui/Screens' layout hooks (each optional on the type, all here):
+
+	  place       lays the screen out for the screens GUI's size (InventoryColumns.place and
+	              arrange), positions the root (its UIScale is Screens'), rebuilds what the layout
+	              changed, re-scales strokes and text weights; returns the GUI scale. Nothing is
+	              built while the view, the block, the collapsed sections, the equipment and the
+	              recipe view are what they were (one compare, no allocation).
+	  jeiDock     ITEMS' body for JEI's list (x, y screen pixels; w, h GUI pixels), the same table
+	              until the layout changes; false while ITEMS is collapsed.
+	  jeiViewX    the recipe view's centre: over the centre and right columns (narrow: the right).
+	  statusRect  the band's status place (absolute screen pixels) and the scale.
+	  setViewing  the recipe view opened: the centre, the right column, the band and the strips
+	              hide (the VICINITY column stays, inert: Screens routes no clicks under the view).
+	  setFeedback the drag feedback for the hovered slot (every frame while carrying, nil after).
+	  inDropZone  over the GROUND strip (a touch tap there does not close the screen).
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Accessories = require(Shared.Items.Accessories)
 local Ages = require(Shared.Progression.Ages)
 local Config = require(Shared.Config)
-local Crafting = require(Shared.Crafting)
-local Fluids = require(Shared.Fluids)
+local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
-local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
-local EquipmentLooks = require(script.Parent.Parent.Player.EquipmentLooks)
-local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
+local ContainerPanel = require(script.Parent.ContainerPanel)
+local GroundStrip = require(script.Parent.GroundStrip)
 local HoverTip = require(script.Parent.HoverTip)
+local InventoryColumns = require(script.Parent.InventoryColumns)
 local ItemIcon = require(script.Parent.ItemIcon)
 local MenuLayout = require(script.Parent.MenuLayout)
+local PlayerPreview = require(script.Parent.PlayerPreview)
 local SlotClicks = require(script.Parent.SlotClicks)
+local SlotWidgets = require(script.Parent.SlotWidgets)
 local Style = require(script.Parent.Style)
 local Theme = require(script.Parent.Theme)
 
 type Window = Types.Window
 type Target = SlotClicks.Target
+type Arrangement = InventoryColumns.Arrangement
+type Kind = InventoryColumns.Kind
 
-local WIDTH = MenuLayout.WIDTH
-local PLAYER_HEIGHT = MenuLayout.PLAYER_HEIGHT
--- Gap between the container panel and the player panel.
-local GAP = 2
-local TAB_HEIGHT = ItemIcon.TAB_HEIGHT
--- Terraria's equipment panel: its width (right of the player panel, GAP apart), its rows' first
--- y and the columns: vanity armor, vanity accessories, accessories, the accessories' eyes.
-local EQUIP_W = 84
-local EQUIP_ROW = 17
-local EQUIP_VANITY_X, EQUIP_VANITY_ACC_X, EQUIP_ACC_X, EQUIP_EYE_X = 8, 28, 48, 68
--- The vanity armor slots' ghosts: the armor ones, tinted violet (Terraria's vanity slots).
-local VANITY_GHOST = Color3.fromRGB(128, 112, 150)
--- A closed accessory row: dark over the slot, and a padlock.
-local LOCK_SHADE = Color3.fromRGB(0, 0, 0)
-local LOCK_SHADE_TRANSPARENCY = 0.45
-local LOCK_ART = {
-	"..###..",
-	".#...#.",
-	".#...#.",
-	"#######",
-	"###.###",
-	"###.###",
-	"#######",
-}
--- The eyes: open (shown) and shut (hidden), 9 x 9 for accessories and 6 x 6 for armor.
-local EYE_ART = {
-	".........",
-	"..#####..",
-	".#.....#.",
-	"#..###..#",
-	"#..#W#..#",
-	"#..###..#",
-	".#.....#.",
-	"..#####..",
-	".........",
-}
-local EYE_SHUT_ART = {
-	".........",
-	".........",
-	".........",
-	"#.......#",
-	".#.....#.",
-	"..#####..",
-	"..#.#.#..",
-	".........",
-	".........",
-}
-local SMALL_EYE_ART = {
-	"......",
-	".####.",
-	"#.WW.#",
-	"#.WW.#",
-	".####.",
-	"......",
-}
-local SMALL_EYE_SHUT_ART = {
-	"......",
-	"......",
-	"#....#",
-	".####.",
-	"#.#.#.",
-	"......",
-}
-local EYE_COLOUR = Color3.fromRGB(64, 64, 64)
-local EYE_SHUT_COLOUR = Color3.fromRGB(110, 110, 110)
--- The character preview box (Minecraft's: 51 x 72 at (26, 8)).
-local PREVIEW_X, PREVIEW_Y, PREVIEW_W, PREVIEW_H = 26, 8, 49, 69
-local PREVIEW_FOV = 30
--- The crafting arrows and the furnace's unlit flame are the slot grey; its progress arrow fills
--- white over the grey one, inside the 24 x 16 progress area (one pixel in).
-local ARROW_COLOUR = Style.Colour.Slot
-local PROGRESS_COLOUR = Color3.new(1, 1, 1)
-local PROGRESS_ARROW_W, PROGRESS_ARROW_H = 22, 15
--- A tank gauge's empty inside, and its scale: TANK_MARKS parts, marked over the fluid from the
--- right edge (Mekanism's gauge overlay), dark and see-through.
-local TANK_BACK = Color3.fromRGB(64, 64, 64)
-local TANK_MARKS = 8
-local TANK_MARK_LONG, TANK_MARK_SHORT = 8, 4
-local TANK_MARK_COLOUR = Color3.new(0, 0, 0)
-local TANK_MARK_TRANSPARENCY = 0.45
-local FIRE_PALETTE = Style.FirePalette
-local UNLIT_PALETTE: { [string]: Color3 } = { R = ARROW_COLOUR, O = ARROW_COLOUR, Y = ARROW_COLOUR, W = ARROW_COLOUR }
+local Dayz = Style.Dayz
+local Size = Theme.Size
+local BIT = InventoryColumns.BIT
 
--- Faint outlines in empty armor slots (16 x 16 pixel art).
-local ARMOR_GHOSTS: { { string } } = {
-	{
-		"................",
-		"................",
-		"................",
-		"....GGGGGGGG....",
-		"...GGGGGGGGGG...",
-		"...GGGGGGGGGG...",
-		"...GG......GG...",
-		"...GG......GG...",
-		"...GG......GG...",
-		"...GG......GG...",
-	},
-	{
-		"................",
-		"................",
-		"...GGG....GGG...",
-		"..GGGGG..GGGGG..",
-		"..GGGGGGGGGGGG..",
-		"..GGGGGGGGGGGG..",
-		"..GG.GGGGGG.GG..",
-		"..GG.GGGGGG.GG..",
-		".....GGGGGG.....",
-		".....GGGGGG.....",
-		".....GGGGGG.....",
-		".....GGGGGG.....",
-		".....GGGGGG.....",
-	},
-	{
-		"................",
-		"................",
-		"................",
-		"....GGGGGGGG....",
-		"....GGGGGGGG....",
-		"....GGG..GGG....",
-		"....GGG..GGG....",
-		"....GG....GG....",
-		"....GG....GG....",
-		"....GG....GG....",
-		"....GG....GG....",
-		"....GG....GG....",
-		"....GG....GG....",
-	},
-	{
-		"................",
-		"................",
-		"................",
-		"................",
-		"................",
-		"................",
-		"................",
-		"...GG......GG...",
-		"...GG......GG...",
-		"...GG......GG...",
-		"..GGG......GGG..",
-		"..GGG......GGG..",
-	},
-}
-
-type SlotWidget = {
-	view: ItemIcon.Slot,
-	store: string,
-	-- Index in the store (container 1..n, armor 1..4, inventory 1..36).
-	index: number,
-	-- Window slot (depends on the container's size).
-	window: number,
-	ghost: Frame?,
-}
+-- The worn slots' silhouettes (Ui/Silhouettes names), armor 1..4 and every accessory.
+local ARMOR_GHOSTS = { "head", "chest", "legs", "feet" }
+local ACCESSORY_GHOST = "accessory"
+-- CRAFTING's chevron (body coordinates) and its glyph size.
+local CRAFT_ARROW = { x = 86, y = 14, w = 16, h = 13 }
+local CHEVRON = 8
+-- The side strips reach this far past the side columns (GUI pixels).
+local STRIP_REACH = 3
+-- Number boxes show from this many screen pixels of text (Theme.Text.tiny x scale).
+local NUMBER_MIN = 8
+-- The block's picture in its section bar: a 16 px icon at this UIScale (Theme HEADER_PICTURE).
+local PICTURE_SCALE = Size.HEADER_PICTURE / Style.ITEM
+-- Key binding names longer than this are left off the quickbar's number boxes.
+local NUMBER_CHARS = 2
 
 --[[
 	Where the screens' GUI is, for `place` (Ui/Screens keeps one table and updates its fields): its
@@ -294,229 +175,280 @@ export type InventoryScreen = {
 	inDropZone: ((self: InventoryScreen, point: Vector2) -> boolean)?,
 }
 
--- A furnace panel's gauge: a clipping frame over `rect` showing part of the lit art (in `holder`).
-type Gauge = { clip: Frame, holder: Frame, rect: MenuLayout.Rect, shown: number }
-
--- A machine's energy bar: its sunken frame and the fill (rows shown, colour key).
-type EnergyBar = { frame: Frame, fill: Frame, rect: MenuLayout.Rect, shown: number, colour: string }
--- A machine's tank gauge: its sunken frame, the fluid filling it (rows and fluid shown).
-type TankGauge = { frame: Frame, fill: Frame, spot: MenuLayout.TankSpot, shown: number, fluid: number }
-
-type Self = InventoryScreen & {
-	playerPanel: Frame,
-	containerPanel: Frame?,
-	containerKey: string,
-	tabFrames: { GuiObject },
-	tabsShown: boolean,
-	playerSlots: { SlotWidget },
-	containerSlots: { SlotWidget },
-	-- The player panel's 2 x 2 crafting area (window 0) and the name shown instead of it.
-	gridGroup: Frame,
-	gridSlots: { SlotWidget },
-	gridShown: boolean,
-	nameLabel: TextLabel,
-	-- The open furnace's flame (rows shown) and arrow (columns shown).
-	flame: Gauge?,
-	progress: Gauge?,
-	-- A machine's panel: where its gauges read their data, its energy bar and status line, and
-	-- the data they last showed (`machineShown`: drawn at all since the panel was built).
-	layout: MenuLayout.Panel?,
-	energyBar: EnergyBar?,
-	statusLabel: TextLabel?,
-	-- Its extra lines under the status line (a battery's input and output), one label each.
-	lineLabels: { TextLabel },
-	tankGauges: { TankGauge },
-	machineData: { number }?,
-	machineShown: boolean,
-	byButton: { [GuiObject]: SlotWidget },
-	-- The crafting result the recipe gate keeps back (`lockedResult`): the grid's stacks it was
-	-- matched from (stacks are values: a change is a new table), the progression status it was
-	-- read with, the result (nil: none) and why.
-	lockedGrid: { Types.Stack | false },
-	lockedStatus: any,
-	lockedItem: number?,
-	lockedCount: number,
-	lockedText: string?,
-	height: number,
-	-- The player panel's touch close button (hidden under a container panel, which has its own).
-	playerClose: TextButton,
-	preview: ViewportFrame,
-	previewCamera: Camera,
-	world: WorldModel,
-	clone: Model?,
-	cloneYaw: number,
-	-- Item drawn in the preview's hand (false: not drawn yet), its model and the item look
-	-- generation it was built with (ItemModels.generation).
-	heldItem: number | false | nil,
-	heldModel: Model?,
-	heldLook: number,
-	-- Terraria's equipment panel (window 0 only), its slots, its eyes and the padlocks over the
-	-- closed accessory rows; what they last showed (hidden bits, open slots); the root's width.
-	equipPanel: Frame,
-	equipmentSlots: { SlotWidget },
-	equipShown: boolean,
-	eyes: { Eye },
-	locks: { Frame },
-	shownHidden: number,
-	shownOpen: number,
-	width: number,
-	-- The preview's equipment: the stacks and bits it was dressed from (stacks are values: a
-	-- change is a new table), the looks text and the pieces' folder (Player/EquipmentLooks.dress).
-	looksRefs: { any },
-	looksText: string?,
-	looksFolder: Folder?,
+-- HANDS' texts and its item.
+type Hands = {
+	header: Style.TopHeader,
+	section: Style.Section,
+	bar: Frame,
+	dot: Frame,
+	name: TextLabel,
+	condition: TextLabel,
+	detail: TextLabel,
+	holder: Frame,
+	widget: SlotWidgets.SlotWidget,
+	-- The held stack its texts show (compared by value: a drag preview copies stacks).
+	item: number?,
+	count: number,
+	damage: number?,
+	data: any,
 }
 
--- An eye toggling a look: its button, the open and shut art, and the `hide` action's slot.
-type Eye = { button: TextButton, open: Frame, shut: Frame, slot: number }
+-- The band: its quick cells and slot widgets (hotbar 1..9), the selection outline.
+type Band = {
+	frame: Frame,
+	cells: { Style.QuickCell },
+	widgets: { SlotWidgets.SlotWidget },
+	selection: Frame,
+	numbers: { string },
+	selected: number,
+}
+
+type Self = InventoryScreen & {
+	scaled: Style.Scaled,
+	handsScaled: Style.Scaled,
+	widgets: SlotWidgets.SlotWidgets,
+	left: Style.TopHeader,
+	right: Style.TopHeader,
+	itemsButton: TextButton,
+	gear: TextButton,
+	close: TextButton,
+	-- The sections by InventoryColumns kind (the block's while one is open).
+	sections: { [string]: Style.Section },
+	hands: Hands,
+	ground: GroundStrip.GroundStrip,
+	preview: PlayerPreview.PlayerPreview,
+	band: Band,
+	strips: { Frame },
+	-- The eyes of the worn strip's accessories and of VANITY's armor, in slot order.
+	accessoryEyes: { SlotWidgets.Eye },
+	vanityEyes: { SlotWidgets.Eye },
+	-- The open block: its panel, picture icon, key and MenuLayout panel; its slot count shown.
+	panel: ContainerPanel.ContainerPanel?,
+	picture: ItemIcon.ItemIcon?,
+	panelKey: string,
+	containerSize: number,
+	containerCount: number,
+	backpackCount: number,
+	-- The window's layout the widgets' slots are numbered by (only its container's size matters).
+	layoutWindow: Window,
+	gridShown: boolean,
+	equipShown: boolean,
+	tabsShown: boolean,
+	viewing: boolean,
+	collapsed: number,
+	-- Whether VANITY was opened or closed by hand (else it follows the input: closed on touch).
+	vanityChosen: boolean,
+	touch: boolean,
+	-- The layout and what it was made for (place's key).
+	arrangement: Arrangement?,
+	scale: number,
+	keyW: number,
+	keyH: number,
+	keyTop: number,
+	keyBase: number,
+	keyTouch: boolean,
+	keyPanel: string,
+	keyCollapsed: number,
+	keyEquip: boolean,
+	keyViewing: boolean,
+	wide: InventoryColumns.Input,
+	narrow: InventoryColumns.Input,
+	-- Which widget groups are live (SlotWidgets.assign), kept and updated.
+	live: { [string]: boolean },
+	dock: Rect | false,
+	viewX: number?,
+	status: Rect?,
+	width: number,
+	height: number,
+	lastPoint: Vector2?,
+}
 
 local InventoryScreen = {}
 InventoryScreen.__index = InventoryScreen
 
-local function itemNamed(name: string): number?
-	local ok, id = pcall(function()
-		return Items.id[name]
-	end)
-	return if ok then id else nil
+-- The quickbar number box text of hotbar slot `i`: its key binding's name when short enough.
+local function numberOf(i: number): string
+	local name = Keybinds.name(`hotbar{i}`)
+	return if #name <= NUMBER_CHARS then name else ""
 end
 
--- A crafting arrow filling `rect` (Style pixel art).
-local function drawArrow(parent: Instance, rect: MenuLayout.Rect, colour: Color3, z: number)
-	Style.pixelArt(parent, rect.x, rect.y, MenuLayout.arrowArt(rect.w, rect.h), { ["#"] = colour }, z)
-end
-
--- The touch close button ("x") at the top right of a panel.
-local function closeButton(self: Self, panel: Frame): TextButton
-	local button = Style.button(panel, "x", WIDTH - 15, 3, 12, 12, 6)
-	button.Visible = UserInputService.TouchEnabled
-	button.Activated:Connect(function()
+-- Makes `section` collapse (its `bit`) when its bar is clicked; its tooltip says what a click does.
+local function collapsible(self: Self, section: Style.Section, bit: number)
+	section.header.Activated:Connect(function()
 		SoundPlayer.click()
-		self.onClose()
-	end)
-	HoverTip.attach(button, "inventory.close")
-	return button
-end
-
-local function newSlot(
-	self: Self,
-	parent: Frame,
-	list: { SlotWidget },
-	x: number,
-	y: number,
-	store: string,
-	index: number,
-	big: boolean?
-)
-	local view = ItemIcon.slot(parent, x, y, nil, big)
-	local widget: SlotWidget = { view = view, store = store, index = index, window = -1, ghost = nil }
-	table.insert(list, widget)
-	self.byButton[view.button] = widget
-	return widget
-end
-
--- Gives a slot the faint outline `art` (16 x 16 pixel art) shown while it is empty (render()).
-local function addGhost(widget: SlotWidget, art: { string })
-	local ghost = Instance.new("Frame")
-	ghost.BackgroundTransparency = 1
-	ghost.Position = UDim2.fromOffset(1, 1)
-	ghost.Size = UDim2.fromOffset(Style.ITEM, Style.ITEM)
-	ghost.ZIndex = 3
-	ghost.Parent = widget.view.button
-	Style.pixelArt(ghost, 0, 0, art, { G = Style.Colour.SlotGhost }, 1)
-	widget.ghost = ghost
-end
-
--- An eye button at (x, y) of `parent`, `w` x `h`, its art (`small`: the armor's 6 x 6) centred.
-local function newEye(parent: Instance, x: number, y: number, w: number, h: number, small: boolean, slot: number): Eye
-	local button = Instance.new("TextButton")
-	button.Text = ""
-	button.AutoButtonColor = false
-	button.BackgroundTransparency = 1
-	button.Position = UDim2.fromOffset(x, y)
-	button.Size = UDim2.fromOffset(w, h)
-	button.ZIndex = 12
-	button.Parent = parent
-	local size = if small then 6 else 9
-	local function art(rows: { string }, colour: Color3): Frame
-		local holder = Instance.new("Frame")
-		holder.BackgroundTransparency = 1
-		holder.Position = UDim2.fromOffset((w - size) // 2, (h - size) // 2)
-		holder.Size = UDim2.fromOffset(size, size)
-		holder.ZIndex = 12
-		holder.Parent = button
-		Style.pixelArt(holder, 0, 0, rows, { ["#"] = colour, W = Color3.new(1, 1, 1) }, 13)
-		return holder
-	end
-	local open = art(if small then SMALL_EYE_ART else EYE_ART, EYE_COLOUR)
-	local shut = art(if small then SMALL_EYE_SHUT_ART else EYE_SHUT_ART, EYE_SHUT_COLOUR)
-	shut.Visible = false
-	local eye: Eye = { button = button, open = open, shut = shut, slot = slot }
-	-- (Its tooltip says what a click does now: hide or show, an armor piece or an accessory.)
-	HoverTip.attach(button, "inventory.eye", function(): string?
-		local what = if slot > Types.HIDE_ARMOR then "Armor" else "Accessory"
-		return if shut.Visible then `show{what}` else `hide{what}`
-	end)
-	button.Activated:Connect(function()
-		local hidden = not shut.Visible
-		SoundPlayer.click()
-		ClientInventory.apply({ kind = "hide", slot = slot, hidden = hidden })
-	end)
-	return eye
-end
-
---[[
-	Terraria's equipment panel (see the header), right of the player panel: hidden until
-	setLayout shows it for window 0.
-]]
-local function buildEquipment(self: Self, root: Frame)
-	local panel = Style.panel(root, WIDTH + GAP, 0, EQUIP_W, PLAYER_HEIGHT)
-	panel.Name = "Equipment"
-	panel.Visible = false
-	self.equipPanel = panel
-	Style.text(panel, "Equipment", 8, 6, EQUIP_W - 10, 8, Style.Colour.Title, 5)
-	local touch = UserInputService.TouchEnabled
-	for row = 1, Types.ACCESSORY_SIZE do
-		local y = EQUIP_ROW + (row - 1) * Style.SLOT
-		if row <= Types.VANITY_ARMOR_SIZE then
-			local widget = newSlot(self, panel, self.equipmentSlots, EQUIP_VANITY_X, y, "vanityArmor", row)
-			addGhost(widget, ARMOR_GHOSTS[row])
-			for _, frame in (widget.ghost :: Frame):GetDescendants() do
-				if frame:IsA("Frame") then
-					frame.BackgroundColor3 = VANITY_GHOST
-				end
-			end
-			-- Hiding the armor piece's look: a small eye in the slot's top right corner (on touch
-			-- a little larger, out to the frame's corner: never over the slot's middle).
-			local eye = MenuLayout.armorEye(EQUIP_VANITY_X, y, touch)
-			table.insert(self.eyes, newEye(panel, eye.x, eye.y, eye.w, eye.h, true, Types.HIDE_ARMOR + row))
+		if bit == BIT.vanity then
+			self.vanityChosen = true
 		end
-		newSlot(self, panel, self.equipmentSlots, EQUIP_VANITY_ACC_X, y, "vanityAccessory", row)
-		local accessory = newSlot(self, panel, self.equipmentSlots, EQUIP_ACC_X, y, "accessory", row)
-		-- A closed row: dark, with a padlock (shown by render).
-		local lock = Style.frame(accessory.view.button, 1, 1, Style.ITEM, Style.ITEM, LOCK_SHADE, 11)
-		lock.BackgroundTransparency = LOCK_SHADE_TRANSPARENCY
-		lock.Visible = false
-		Style.pixelArt(lock, 5, 4, LOCK_ART, { ["#"] = Style.Colour.Panel }, 12)
-		table.insert(self.locks, lock)
-		-- The accessory's eye: 9 x 9, in a 16 x 18 button on touch screens.
-		local w = if touch then 16 else 9
-		local h = if touch then 18 else 9
-		table.insert(
-			self.eyes,
-			newEye(panel, EQUIP_EYE_X + (9 - w) // 2 + (if touch then 4 else 0), y + 4 - (h - 9) // 2, w, h, false, row)
-		)
+		self.collapsed = bit32.bxor(self.collapsed, bit)
+	end)
+	HoverTip.attach(section.header, "inventory.section", function(): string?
+		return if section.collapsed then "expand" else "collapse"
+	end)
+end
+
+-- A section of the screen (see Style.Dayz.section) registered by `kind`.
+local function newSection(self: Self, kind: Kind, title: string, options: Style.SectionOptions): Style.Section
+	options.scaled = self.scaled
+	local section = Dayz.section(self.root, title, options)
+	self.sections[kind] = section
+	local bit = (BIT :: any)[kind]
+	if options.collapsible and bit then
+		collapsible(self, section, bit)
 	end
+	return section
+end
+
+-- Grid lines and slots for `spots` (InventoryColumns) in `body`, in widget group `group`.
+local function addSlots(self: Self, body: Frame, group: string, spots: { InventoryColumns.Spot }, lines: boolean)
+	if lines then
+		Dayz.lines(body, InventoryColumns.gridLines(spots), 1)
+	end
+	local made: { SlotWidgets.SlotWidget } = {}
+	for _, spot in spots do
+		table.insert(made, self.widgets:slot(body, group, spot.x, spot.y, spot.store, spot.slot, spot.big, self.scaled))
+	end
+	return made
+end
+
+-- The worn strip and VANITY (built once; window 0 shows the accessories and VANITY).
+local function buildEquipment(self: Self)
+	local input = { equipment = true, touch = false } :: any
+	local strip = newSection(self, "equipment", "", { face = "strip" })
+	for _, spot in InventoryColumns.spots("equipment", input) do
+		local group = if spot.store == "armor" then "equipment" else "accessories"
+		local widget = self.widgets:slot(strip.body, group, spot.x, spot.y, spot.store, spot.slot, false, self.scaled)
+		if spot.store == "armor" then
+			self.widgets:ghost(widget, ARMOR_GHOSTS[spot.slot], false)
+		else
+			self.widgets:ghost(widget, ACCESSORY_GHOST, false)
+			self.widgets:lock(widget)
+			table.insert(self.accessoryEyes, self.widgets:eye(strip.body, "accessories", spot.slot))
+		end
+	end
+	local vanity = newSection(self, "vanity", "Vanity", { face = "strip", collapsible = true, glyph = "vanity" })
+	for _, spot in InventoryColumns.spots("vanity", input) do
+		local widget =
+			self.widgets:slot(vanity.body, "vanity", spot.x, spot.y, spot.store, spot.slot, false, self.scaled)
+		if spot.store == "vanityArmor" then
+			self.widgets:ghost(widget, ARMOR_GHOSTS[spot.slot], true)
+			table.insert(self.vanityEyes, self.widgets:eye(vanity.body, "vanity", Types.HIDE_ARMOR + spot.slot))
+		else
+			self.widgets:ghost(widget, ACCESSORY_GHOST, true)
+		end
+	end
+end
+
+-- HANDS: the grey header over the body (its name bar, the item, its condition and detail).
+local function buildHands(self: Self): Hands
+	local header = Dayz.topHeader(self.root, "Hands", 3, self.scaled)
+	local section = Dayz.section(self.root, "", { face = "hands", scaled = self.scaled })
+	local body = section.body
+	local bar = Style.frame(body, 0, 0, 0, Size.SECTION_HEADER, Dayz.Colour.SectionHeader, 2)
+	bar.Name = "NameBar"
+	bar.BackgroundTransparency = Dayz.Alpha.SectionHeader
+	local dot = Dayz.dot(bar, 0, 0, Size.DOT, 3)
+	dot.Visible = false
+	local name = Dayz.label(
+		bar,
+		"",
+		0,
+		0,
+		0,
+		Size.SECTION_HEADER,
+		"body",
+		Dayz.Colour.Text,
+		3,
+		Enum.TextXAlignment.Center,
+		self.scaled
+	)
+	name.TextTruncate = Enum.TextTruncate.AtEnd
+	local condition =
+		Dayz.label(body, "", 0, 0, 0, 0, "small", Dayz.Colour.Text, 3, Enum.TextXAlignment.Center, self.scaled)
+	local detail =
+		Dayz.label(body, "", 0, 0, 0, 0, "small", Dayz.Colour.TextSoft, 3, Enum.TextXAlignment.Center, self.scaled)
+	-- The item: a 16 px slot blown up to the item's size by its own UIScale.
+	local holder = Instance.new("Frame")
+	holder.Name = "Held"
+	holder.BackgroundTransparency = 1
+	holder.BorderSizePixel = 0
+	holder.Size = UDim2.fromOffset(Style.ITEM, Style.ITEM)
+	holder.ZIndex = 3
+	holder.Parent = body
+	local scale = Instance.new("UIScale")
+	scale.Scale = Size.BIG_FACE / Style.ITEM
+	scale.Parent = holder
+	local widget = self.widgets:slot(holder, "hands", 0, 0, "inventory", 1, false, self.handsScaled)
+	return {
+		header = header,
+		section = section,
+		bar = bar,
+		dot = dot,
+		name = name,
+		condition = condition,
+		detail = detail,
+		holder = holder,
+		widget = widget,
+		item = nil,
+		count = 0,
+		damage = nil,
+		data = nil,
+	}
+end
+
+-- The band: nine quick cells with the hotbar's slots over them, and the selection outline.
+local function buildBand(self: Self): Band
+	local frame = Instance.new("Frame")
+	frame.Name = "Quickbar"
+	frame.BackgroundTransparency = 1
+	frame.BorderSizePixel = 0
+	frame.ZIndex = 2
+	frame.Parent = self.root
+	local cells: { Style.QuickCell } = {}
+	local made: { SlotWidgets.SlotWidget } = {}
+	local numbers: { string } = {}
+	for i = 1, Types.HOTBAR_SIZE do
+		local cell = Dayz.quickCell(frame, 0, 0, 2, self.scaled)
+		local widget = self.widgets:slot(frame, "band", 0, 0, "inventory", i, false, self.scaled)
+		widget.quick = true
+		widget.face = cell.face
+		table.insert(cells, cell)
+		table.insert(made, widget)
+		table.insert(numbers, numberOf(i))
+	end
+	local selection = Instance.new("Frame")
+	selection.Name = "Selected"
+	selection.BackgroundTransparency = 1
+	selection.BorderSizePixel = 0
+	selection.Size = UDim2.fromOffset(Size.PITCH, Size.PITCH)
+	selection.ZIndex = 9
+	selection.Parent = frame
+	Dayz.outline(selection, nil, nil, self.scaled)
+	return { frame = frame, cells = cells, widgets = made, selection = selection, numbers = numbers, selected = 0 }
 end
 
 function InventoryScreen.new(parent: Instance): InventoryScreen
 	local root = Instance.new("Frame")
 	root.Name = "Inventory"
 	root.BackgroundTransparency = 1
-	root.AnchorPoint = Vector2.new(0.5, 0.5)
-	root.Position = UDim2.fromScale(0.5, 0.5)
-	root.Size = UDim2.fromOffset(WIDTH, PLAYER_HEIGHT)
+	root.BorderSizePixel = 0
+	root.AnchorPoint = Vector2.zero
+	root.Size = UDim2.fromOffset(InventoryColumns.LEFT_W, InventoryColumns.MAX_HEIGHT)
 	root.Visible = false
 	root.Parent = parent
+
+	local function input(mode: InventoryColumns.Mode): InventoryColumns.Input
+		return {
+			mode = mode,
+			touch = false,
+			top = Size.TOP_HEADER,
+			container = nil,
+			panel = nil,
+			equipment = true,
+			collapsed = 0,
+			height = nil,
+			centreW = nil,
+		}
+	end
 
 	local self = (
 		setmetatable({
@@ -524,834 +456,618 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			onTab = function() end,
 			onClose = function() end,
 			onSettings = function() end,
-			containerPanel = nil,
-			containerKey = "",
+			scaled = Dayz.scaled(),
+			handsScaled = Dayz.scaled(),
+			widgets = SlotWidgets.new(),
+			sections = {},
+			strips = {},
+			accessoryEyes = {},
+			vanityEyes = {},
+			panel = nil,
+			picture = nil,
+			panelKey = "",
+			containerSize = 0,
+			containerCount = -1,
+			backpackCount = -1,
+			layoutWindow = Types.newWindow(Types.newInventory()),
+			gridShown = true,
+			equipShown = true,
 			tabsShown = false,
-			playerSlots = {},
-			containerSlots = {},
-			gridSlots = {},
-			lockedGrid = {},
-			lockedStatus = nil,
-			lockedItem = nil,
-			lockedCount = 0,
-			lockedText = nil,
-			gridShown = false,
-			flame = nil,
-			progress = nil,
-			layout = nil,
-			energyBar = nil,
-			statusLabel = nil,
-			lineLabels = {},
-			tankGauges = {},
-			machineData = nil,
-			machineShown = false,
-			byButton = {},
-			height = PLAYER_HEIGHT,
-			clone = nil,
-			cloneYaw = math.huge,
-			heldItem = false,
-			heldModel = nil,
-			heldLook = 0,
-			equipmentSlots = {},
-			equipShown = false,
-			eyes = {},
-			locks = {},
-			shownHidden = -1,
-			shownOpen = -1,
-			width = WIDTH,
-			looksRefs = {},
-			looksText = nil,
-			looksFolder = nil,
+			viewing = false,
+			collapsed = 0,
+			vanityChosen = false,
+			touch = false,
+			arrangement = nil,
+			scale = 1,
+			keyW = -1,
+			keyH = -1,
+			keyTop = -1,
+			keyBase = -1,
+			keyTouch = false,
+			keyPanel = "",
+			keyCollapsed = -1,
+			keyEquip = false,
+			keyViewing = false,
+			wide = input("wide"),
+			narrow = input("narrow"),
+			live = {},
+			dock = false,
+			viewX = nil,
+			status = nil,
+			width = InventoryColumns.LEFT_W,
+			height = InventoryColumns.MAX_HEIGHT,
+			lastPoint = nil,
 		}, InventoryScreen) :: any
 	) :: Self
 
-	-- Creative tabs: item selection, and this screen (active). Hidden in survival.
-	local itemsTab = ItemIcon.tab(root, 0, itemNamed("Grass"), false)
-	local thisTab = ItemIcon.tab(root, ItemIcon.TAB_WIDTH + 1, itemNamed("Chest"), true)
-	self.tabFrames = table.move(thisTab.frames, 1, #thisTab.frames, #itemsTab.frames + 1, table.clone(itemsTab.frames))
-	for _, frame in self.tabFrames do
-		frame.Visible = false
+	-- The dark strips behind the side columns (wide), from the screen's edges.
+	for _ = 1, 2 do
+		local strip = Style.frame(root, 0, 0, 0, 0, Dayz.Colour.SideStrip, 0)
+		strip.Name = "SideStrip"
+		strip.BackgroundTransparency = Dayz.Alpha.SideStrip
+		strip.Visible = false
+		table.insert(self.strips, strip)
 	end
-	itemsTab.button.Activated:Connect(function()
+
+	-- The top headers and their buttons.
+	self.left = Dayz.topHeader(root, "Vicinity", 3, self.scaled)
+	self.right = Dayz.topHeader(root, "Equipment", 3, self.scaled)
+	local items = self.left:button("items", 1, Size.HEADER_BUTTON)
+	items.Visible = false
+	items.Activated:Connect(function()
 		SoundPlayer.click()
 		self.onTab()
 	end)
-	HoverTip.attach(itemsTab.button, "inventory.itemsTab")
-
-	local panel = Style.panel(root, 0, 0, WIDTH, PLAYER_HEIGHT)
-	panel.Name = "Player"
-	self.playerPanel = panel
-	self.playerClose = closeButton(self, panel)
-
-	-- The Options menu's gear, where Minecraft's recipe book button is (this game has JEI).
-	local gear = Style.button(panel, "", 104, 61, 20, 18, 6)
-	gear.Name = "Settings"
-	Style.gear(gear, 4, 3, 5)
+	HoverTip.attach(items, "inventory.itemsTab")
+	self.itemsButton = items
+	local gear = self.right:button("gear", 1, Size.HEADER_BUTTON)
 	gear.Activated:Connect(function()
 		SoundPlayer.click()
 		self.onSettings()
 	end)
 	HoverTip.attach(gear, "inventory.options")
+	self.gear = gear
+	local close = self.right:button("close", 1, Size.HEADER_BUTTON)
+	close.Visible = false
+	close.Activated:Connect(function()
+		SoundPlayer.click()
+		self.onClose()
+	end)
+	HoverTip.attach(close, "inventory.close")
+	self.close = close
 
-	-- Armor column.
-	for slot = 1, Types.ARMOR_SIZE do
-		local widget = newSlot(self, panel, self.playerSlots, 8, 8 + (slot - 1) * 18, "armor", slot)
-		addGhost(widget, ARMOR_GHOSTS[slot])
-	end
+	-- VICINITY: the GROUND strip, CRAFTING, ITEMS (the block's section comes with setLayout).
+	local ground = newSection(self, "ground", "", { face = "ground" })
+	self.ground = GroundStrip.new(ground.body, self.scaled)
+	local craft = newSection(self, "craft", "Crafting", { face = "grid", collapsible = true, glyph = "crafting" })
+	addSlots(self, craft.body, "craft", InventoryColumns.spots("craft", self.wide), true)
+	SlotWidgets.silhouette(
+		craft.body,
+		"chevron",
+		CRAFT_ARROW.x + (CRAFT_ARROW.w - CHEVRON) // 2,
+		CRAFT_ARROW.y + (CRAFT_ARROW.h - CHEVRON) // 2,
+		CHEVRON,
+		CHEVRON,
+		Dayz.Colour.Chevron,
+		Dayz.Alpha.Chevron,
+		3
+	)
+	newSection(self, "jei", "Items", { face = "panel", collapsible = true })
 
-	-- The player, in a black box.
-	Style.inset(panel, PREVIEW_X - 1, PREVIEW_Y - 1, PREVIEW_W + 2, PREVIEW_H + 2, 4, Color3.new(0, 0, 0))
-	local preview = Instance.new("ViewportFrame")
-	preview.BackgroundTransparency = 1
-	preview.Position = UDim2.fromOffset(PREVIEW_X, PREVIEW_Y)
-	preview.Size = UDim2.fromOffset(PREVIEW_W, PREVIEW_H)
-	preview.ZIndex = 5
-	preview.Ambient = Color3.fromRGB(170, 170, 170)
-	preview.LightColor = Color3.fromRGB(140, 140, 140)
-	preview.LightDirection = Vector3.new(-0.4, -1, 0.6)
-	preview.Parent = panel
-	local camera = Instance.new("Camera")
-	camera.FieldOfView = PREVIEW_FOV
-	camera.Parent = preview
-	preview.CurrentCamera = camera
-	local world = Instance.new("WorldModel")
-	world.Parent = preview
-	self.preview, self.previewCamera, self.world = preview, camera, world
+	-- The centre: the player over HANDS.
+	local character = newSection(self, "character", "", { face = "none" })
+	self.preview = PlayerPreview.new(character.body, 2)
+	self.hands = buildHands(self)
+	self.sections.hands = self.hands.section
 
-	-- With a block's window open (it has no 2 x 2 grid), the player's name takes the grid's place.
-	local name = Style.text(panel, Players.LocalPlayer.DisplayName, 80, 8, 78, 8, Style.Colour.Title, 5)
-	name.TextTruncate = Enum.TextTruncate.AtEnd
-	self.nameLabel = name
+	-- EQUIPMENT: the worn strip, BACKPACK, VANITY.
+	buildEquipment(self)
+	local backpack = newSection(self, "backpack", "Backpack", { face = "grid", collapsible = true, glyph = "backpack" })
+	addSlots(self, backpack.body, "backpack", InventoryColumns.spots("backpack", self.wide), true)
 
-	-- The 2 x 2 crafting area (Minecraft's InventoryScreen), shown with window 0.
-	local grid = Instance.new("Frame")
-	grid.Name = "Crafting"
-	grid.BackgroundTransparency = 1
-	grid.Size = UDim2.fromOffset(WIDTH, PLAYER_HEIGHT)
-	grid.ZIndex = 4
-	grid.Visible = false
-	grid.Parent = panel
-	self.gridGroup = grid
-	local area = MenuLayout.inventoryGrid
-	Style.text(grid, area.label.text, area.label.x, area.label.y, 70, 8, Style.Colour.Title, 5)
-	for _, spot in area.slots do
-		newSlot(self, grid, self.gridSlots, spot.x, spot.y, "container", spot.slot, spot.big)
-	end
-	drawArrow(grid, area.arrow, ARROW_COLOUR, 5)
-
-	-- Inventory slots 10..36, then the hotbar.
-	for row = 0, 2 do
-		for column = 0, 8 do
-			newSlot(self, panel, self.playerSlots, 8 + column * 18, 84 + row * 18, "inventory", 10 + row * 9 + column)
+	self.band = buildBand(self)
+	Keybinds.changed:Connect(function()
+		for i = 1, Types.HOTBAR_SIZE do
+			self.band.numbers[i] = numberOf(i)
 		end
-	end
-	for column = 0, 8 do
-		newSlot(self, panel, self.playerSlots, 8 + column * 18, 142, "inventory", 1 + column)
-	end
-
-	buildEquipment(self, root)
+	end)
 
 	self:setLayout(nil, false)
 	return self
 end
 
--- Size of the content in GUI pixels (262 wide with the equipment panel: window 0).
+-- Size of the content in GUI pixels (the arrangement's).
 function InventoryScreen.size(self: Self): Vector2
 	return Vector2.new(self.width, self.height)
 end
 
-local function assignIndices(self: Self, window: Window)
-	for _, widget in self.playerSlots do
-		widget.window = Menu.windowIndex(window, widget.store, widget.index) or -1
+--[[ Layout ]]
+
+-- Which widget groups are live for the arrangement and the window's layout, then the slots.
+local function refreshLive(self: Self)
+	local a = self.arrangement
+	local live = self.live
+	local function on(kind: Kind): boolean
+		return a ~= nil and InventoryColumns.live(a, kind)
 	end
-	for _, widget in self.containerSlots do
-		widget.window = Menu.windowIndex(window, widget.store, widget.index) or -1
-	end
-	-- (The 2 x 2 grid's slots are window 0's container slots: they are nothing in other windows.)
-	for _, widget in self.gridSlots do
-		widget.window = if self.gridShown then Menu.windowIndex(window, widget.store, widget.index) or -1 else -1
-	end
-	-- (The equipment's only with its panel: window 0.)
-	for _, widget in self.equipmentSlots do
-		widget.window = if self.equipShown then Menu.windowIndex(window, widget.store, widget.index) or -1 else -1
-	end
+	live.craft = self.gridShown and on("craft")
+	live.container = self.panel ~= nil and on("container")
+	live.backpack = on("backpack")
+	live.equipment = on("equipment")
+	live.accessories = self.equipShown and on("equipment")
+	live.vanity = self.equipShown and on("vanity")
+	live.hands = on("hands")
+	live.band = a ~= nil
+	self.widgets:assign(self.layoutWindow, live)
 end
 
 --[[
-	A furnace gauge: `draw` draws its art grey in the panel, and again lit inside a clipping frame
-	that render() grows (from the bottom for the flame, from the left for the arrow).
-]]
-local function newGauge(panel: Frame, rect: MenuLayout.Rect, draw: (parent: Instance, lit: boolean) -> ()): Gauge
-	draw(panel, false)
-	local clip = Instance.new("Frame")
-	clip.BackgroundTransparency = 1
-	clip.ClipsDescendants = true
-	clip.Position = UDim2.fromOffset(rect.x, rect.y)
-	clip.Size = UDim2.fromOffset(0, 0)
-	clip.ZIndex = 6
-	clip.Parent = panel
-	local holder = Instance.new("Frame")
-	holder.BackgroundTransparency = 1
-	holder.Size = UDim2.fromOffset(rect.w, rect.h)
-	holder.ZIndex = 1
-	holder.Parent = clip
-	draw(holder, true)
-	return { clip = clip, holder = holder, rect = rect, shown = 0 }
-end
-
--- A block's panel above the player panel (Ui/MenuLayout.panel).
-local function buildPanel(self: Self, container: Types.Container)
-	local layout = MenuLayout.panel(container)
-	local panel = Style.panel(self.root, 0, 0, WIDTH, layout.height)
-	panel.Name = "Container"
-	if layout.centred then
-		Style.text(panel, layout.title, 0, layout.titleY, WIDTH, 8, Style.Colour.Title, 5, Enum.TextXAlignment.Center)
-	else
-		Style.text(panel, layout.title, layout.titleX, layout.titleY, 140, 8, Style.Colour.Title, 5)
-	end
-	for _, spot in layout.slots do
-		local widget = newSlot(self, panel, self.containerSlots, spot.x, spot.y, "container", spot.slot, spot.big)
-		-- (A machine's upgrade slots show the card's outline while empty.)
-		local ghost = spot.ghost
-		if ghost then
-			addGhost(widget, ghost)
-		end
-	end
-	local arrow = layout.arrow
-	if arrow then
-		drawArrow(panel, arrow, ARROW_COLOUR, 5)
-	end
-	local flame = layout.flame
-	if flame then
-		self.flame = newGauge(panel, flame, function(parent: Instance, lit: boolean)
-			local x, y = if lit then 0 else flame.x, if lit then 0 else flame.y
-			Style.pixelArt(parent, x, y, MenuLayout.FLAME_ART, if lit then FIRE_PALETTE else UNLIT_PALETTE, 5)
-		end)
-	end
-	local progress = layout.progress
-	if progress then
-		self.progress = newGauge(panel, progress, function(parent: Instance, lit: boolean)
-			local x, y = if lit then 1 else progress.x + 1, if lit then 1 else progress.y + 1
-			local rect = { x = x, y = y, w = PROGRESS_ARROW_W, h = PROGRESS_ARROW_H }
-			drawArrow(parent, rect, if lit then PROGRESS_COLOUR else ARROW_COLOUR, 5)
-		end)
-	end
-	local energy = layout.energy
-	if energy then
-		-- Mekanism's vertical power bar: a sunken frame, filling from the bottom.
-		local frame = Style.inset(panel, energy.x - 1, energy.y - 1, energy.w + 2, energy.h + 2, 5, Color3.new(0, 0, 0))
-		local fill = Style.frame(frame, 1, 1 + energy.h, energy.w, 0, Color3.new(0, 1, 0), 3)
-		self.energyBar = { frame = frame, fill = fill, rect = energy, shown = -1, colour = "" }
-	end
-	local status = layout.status
-	if status then
-		local label = Style.text(panel, "", status.x, status.y, WIDTH - status.x - 16, 8, Style.Colour.Title, 5)
-		-- (A long line ends in "..." before the energy bar instead of running under it.)
-		label.TextTruncate = Enum.TextTruncate.AtEnd
-		self.statusLabel = label
-	end
-	for _, at in layout.lines do
-		local label = Style.text(panel, "", at.x, at.y, WIDTH - at.x - 16, 8, Style.Colour.Title, 5)
-		label.TextTruncate = Enum.TextTruncate.AtEnd
-		table.insert(self.lineLabels, label)
-	end
-	for _, spot in layout.tanks do
-		-- Mekanism's GuiFluidGauge: a sunken frame, the fluid filling it from the bottom, the
-		-- scale's marks over it (a long one every quarter, short ones between).
-		local rect = spot.frame
-		local frame = Style.inset(panel, rect.x, rect.y, rect.w, rect.h, 5, TANK_BACK)
-		local inner = spot.inner
-		local fill = Style.frame(frame, 1, 1 + inner.h, inner.w, 0, TANK_BACK, 3)
-		for mark = 1, TANK_MARKS - 1 do
-			local long = mark % 2 == 0
-			local y = 1 + math.floor(inner.h * mark / TANK_MARKS)
-			local w = if long then TANK_MARK_LONG else TANK_MARK_SHORT
-			local line = Style.frame(frame, 1 + inner.w - w, y, w, 1, TANK_MARK_COLOUR, 4)
-			line.BackgroundTransparency = TANK_MARK_TRANSPARENCY
-		end
-		table.insert(self.tankGauges, { frame = frame, fill = fill, spot = spot, shown = -1, fluid = -1 })
-	end
-	self.layout = layout
-	closeButton(self, panel)
-	self.containerPanel = panel
-end
-
--- Shows `shown` rows of a flame (from the bottom) or columns of an arrow (from the left).
-local function setGauge(gauge: Gauge?, shown: number, vertical: boolean)
-	if gauge == nil or gauge.shown == shown then
-		return
-	end
-	gauge.shown = shown
-	local rect = gauge.rect
-	if vertical then
-		gauge.clip.Position = UDim2.fromOffset(rect.x, rect.y + rect.h - shown)
-		gauge.clip.Size = UDim2.fromOffset(rect.w, shown)
-		gauge.holder.Position = UDim2.fromOffset(0, shown - rect.h)
-	else
-		gauge.clip.Size = UDim2.fromOffset(shown, rect.h)
-	end
-end
-
---[[
-	Shows the panels for the window's container and the creative tabs. A block's container gets its
-	panel above the player panel (rebuilt only when its kind, block or size changes); window 0's
-	"inventory" container is the player panel's 2 x 2 grid and has no panel.
+	Shows the open block's section (rebuilt only when its kind, block or size changes; window 0's
+	2 x 2 grid is CRAFTING) and the creative "items" button (`tabs`, without a block).
 ]]
 function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs: boolean)
 	local panelContainer = if container and MenuLayout.hasPanel(container) then container else nil
 	local key = MenuLayout.panelKey(container)
-	if key ~= self.containerKey then
-		self.containerKey = key
-		local old = self.containerPanel
-		if old then
-			for _, widget in self.containerSlots do
-				self.byButton[widget.view.button] = nil
-				widget.view.icon:destroy()
-			end
-			old:Destroy()
-		end
-		self.containerSlots = {}
-		self.containerPanel = nil
-		self.flame = nil
-		self.progress = nil
-		self.layout = nil
-		self.energyBar = nil
-		self.statusLabel = nil
-		self.lineLabels = {}
-		self.tankGauges = {}
-		self.machineData = nil
-		self.machineShown = false
-		if panelContainer then
-			buildPanel(self, panelContainer)
-		end
-	end
-	-- The 2 x 2 grid only belongs to window 0; other windows show the player's name there. So does
-	-- the equipment panel.
 	local grid = MenuLayout.showsGrid(container)
-	if grid ~= self.gridShown then
-		self.gridShown = grid
-		self.gridGroup.Visible = grid
-		self.nameLabel.Visible = not grid
+	self.tabsShown = tabs and panelContainer == nil
+	if self.itemsButton.Visible ~= self.tabsShown then
+		self.itemsButton.Visible = self.tabsShown
 	end
-	if grid ~= self.equipShown then
-		self.equipShown = grid
-		self.equipPanel.Visible = grid
-	end
-	self.width = if grid then WIDTH + GAP + EQUIP_W else WIDTH
-	self.playerClose.Visible = UserInputService.TouchEnabled and panelContainer == nil
-	local showTabs = tabs and panelContainer == nil
-	self.tabsShown = showTabs
-	for _, frame in self.tabFrames do
-		frame.Visible = showTabs
-	end
-	local top = 0
-	local panel = self.containerPanel
-	if panel then
-		top = panel.Size.Y.Offset + GAP
-	elseif showTabs then
-		top = TAB_HEIGHT
-	end
-	self.playerPanel.Position = UDim2.fromOffset(0, top)
-	self.equipPanel.Position = UDim2.fromOffset(WIDTH + GAP, top)
-	self.height = top + PLAYER_HEIGHT
-	self.root.Size = UDim2.fromOffset(self.width, self.height)
-	-- Window slots for this layout (only the container's size matters).
-	assignIndices(self, { id = 0, inventory = Types.newInventory(), container = container })
-end
-
--- A machine's tank gauges from its `data` (MenuLayout.tankRows / tankFluid / tankColour).
-local function renderTanks(self: Self, data: { number }?)
-	for _, gauge in self.tankGauges do
-		local spot = gauge.spot
-		local rows = MenuLayout.tankRows(data, spot)
-		local fluid = MenuLayout.tankFluid(data, spot)
-		if rows ~= gauge.shown then
-			gauge.shown = rows
-			gauge.fill.Position = UDim2.fromOffset(1, 1 + spot.inner.h - rows)
-			gauge.fill.Size = UDim2.fromOffset(spot.inner.w, rows)
-		end
-		if fluid ~= gauge.fluid then
-			gauge.fluid = fluid
-			local rgb = MenuLayout.tankColour(fluid)
-			gauge.fill.BackgroundColor3 = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
-			-- (Water and fuel show a little of the gauge's back through them; lava and oil none.)
-			local record = Fluids.get(fluid)
-			gauge.fill.BackgroundTransparency = if record and record.light == 0 and fluid ~= Fluids.OIL then 0.1 else 0
-		end
-	end
-end
-
--- A machine's energy bar from its `data` (MenuLayout.energyRows / energyColour).
-local function renderEnergy(self: Self, data: { number }?)
-	local bar = self.energyBar
-	if bar == nil then
+	-- (Called on every inventory change: nothing more unless the window's layout changed.)
+	if key == self.panelKey and grid == self.gridShown then
 		return
 	end
-	local rect = bar.rect
-	local rows = MenuLayout.energyRows(data, rect.h)
-	local rgb = MenuLayout.energyColour(MenuLayout.energyFraction(data))
-	local colour = `{rgb[1]},{rgb[2]},{rgb[3]}`
-	if rows ~= bar.shown then
-		bar.shown = rows
-		bar.fill.Position = UDim2.fromOffset(1, 1 + rect.h - rows)
-		bar.fill.Size = UDim2.fromOffset(rect.w, rows)
+	if key ~= self.panelKey then
+		self.panelKey = key
+		self.widgets:drop("container")
+		local old = self.panel
+		if old then
+			old:destroy()
+			self.panel = nil
+		end
+		local picture = self.picture
+		if picture then
+			picture:destroy()
+			self.picture = nil
+		end
+		local section = self.sections.container
+		if section then
+			section:destroy()
+			self.sections.container = nil :: any
+		end
+		self.containerCount = -1
+		if panelContainer then
+			local layout = MenuLayout.panel(panelContainer)
+			local built = newSection(self, "container", layout.title, { face = "grid", collapsible = true })
+			-- Its picture: the block's icon, at the bar's picture size.
+			local holder = Instance.new("Frame")
+			holder.Name = "Block"
+			holder.BackgroundTransparency = 1
+			holder.BorderSizePixel = 0
+			holder.Size = UDim2.fromOffset(Style.ITEM, Style.ITEM)
+			holder.Parent = built.picture
+			local scale = Instance.new("UIScale")
+			scale.Scale = PICTURE_SCALE
+			scale.Parent = holder
+			local icon = ItemIcon.new(holder, 0, 0, 1, "dayz", self.scaled)
+			icon:set(if Items.isValid(panelContainer.block) then panelContainer.block else nil, 1)
+			self.picture = icon
+			self.containerSize = panelContainer.size
+			self.panel = ContainerPanel.new(built.body, layout, self.widgets, self.scaled)
+		end
 	end
-	if colour ~= bar.colour then
-		bar.colour = colour
-		bar.fill.BackgroundColor3 = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
+	self.gridShown = grid
+	self.equipShown = grid
+	-- Window slots for this layout (only the container's size matters); no slot is live until the
+	-- next `place` lays the new layout out.
+	self.layoutWindow = { id = 0, inventory = Types.newInventory(), container = container }
+	self.arrangement = nil
+	refreshLive(self)
+end
+
+-- Shows what the arrangement has (and, while the recipe view is open, only the VICINITY column).
+local function refreshVisibility(self: Self)
+	local a = self.arrangement
+	if a == nil then
+		return
 	end
+	local viewing = self.viewing
+	for kind, section in self.sections do
+		local placed = a.byKind[kind :: Kind]
+		local shown = placed ~= nil and (placed.column == 1 or not viewing)
+		if section.root.Visible ~= shown then
+			section.root.Visible = shown
+		end
+	end
+	local hands = a.byKind.hands
+	self.hands.header.root.Visible = hands ~= nil and not viewing
+	self.right.root.Visible = not viewing
+	self.band.frame.Visible = not viewing
+	local wide = a.mode == "wide"
+	for _, strip in self.strips do
+		strip.Visible = wide and not viewing
+	end
+end
+
+-- Sizes a top header's button `button` (`size` square, `fromRight` from its right end).
+local function placeButton(button: TextButton, fromRight: number, size: number)
+	local position, extent = UDim2.new(1, -fromRight, 0.5, 0), UDim2.fromOffset(size, size)
+	if button.Position ~= position then
+		button.Position = position
+	end
+	if button.Size ~= extent then
+		button.Size = extent
+	end
+end
+
+-- Places every piece for a new arrangement `a` at placement `p` on `view`.
+local function apply(
+	self: Self,
+	a: Arrangement,
+	p: InventoryColumns.Placement,
+	view: View,
+	input: InventoryColumns.Input
+)
+	local scale = p.scale
+	local root = self.root
+	root.Position = UDim2.fromOffset(p.x, p.y)
+	root.Size = UDim2.fromOffset(a.width, a.height)
+	self.width, self.height = a.width, a.height
+
+	-- Top headers and their buttons (touch: the header's height square, close at the far right).
+	local top = input.top
+	self.left:place(a.tops[1].x, a.tops[1].y, a.tops[1].w, a.tops[1].h)
+	self.right:place(a.tops[2].x, a.tops[2].y, a.tops[2].w, a.tops[2].h)
+	local touch = view.touch
+	local size = if touch then top else Size.HEADER_BUTTON
+	local inset = if touch then 0 else 1
+	placeButton(self.itemsButton, inset, size)
+	self.close.Visible = touch
+	placeButton(self.close, inset, size)
+	placeButton(self.gear, if touch then inset + size + 1 else inset, size)
+
+	-- Sections.
+	for _, placed in a.sections do
+		local section = self.sections[placed.kind]
+		if section then
+			if placed.kind == "hands" then
+				self.hands.header:place(placed.x, placed.y, placed.w, placed.header)
+				section:place(placed.x, placed.y + placed.header, placed.w, 0, placed.body)
+			else
+				section:place(placed.x, placed.y, placed.w, placed.header, placed.body)
+			end
+			section:setCollapsed(placed.collapsed)
+		end
+	end
+
+	-- The character and HANDS' parts.
+	local character = a.byKind.character
+	if character then
+		self.preview:setRect(0, 0, character.w, character.body)
+	end
+	local handsPlaced = a.byKind.hands
+	if handsPlaced then
+		local parts = InventoryColumns.hands(handsPlaced.w)
+		local hands = self.hands
+		hands.bar.Size = UDim2.fromOffset(parts.bar.w, parts.bar.h)
+		hands.dot.Position = UDim2.fromOffset(parts.dot.x, parts.dot.y)
+		local room = parts.dot.x + parts.dot.w + 2
+		hands.name.Position = UDim2.fromOffset(room, 0)
+		hands.name.Size = UDim2.fromOffset(math.max(0, parts.bar.w - 2 * room), parts.bar.h)
+		hands.holder.Position = UDim2.fromOffset(parts.item.x, parts.item.y)
+		hands.condition.Position = UDim2.fromOffset(parts.condition.x, parts.condition.y)
+		hands.condition.Size = UDim2.fromOffset(parts.condition.w, parts.condition.h)
+		hands.detail.Position = UDim2.fromOffset(parts.detail.x, parts.detail.y)
+		hands.detail.Size = UDim2.fromOffset(parts.detail.w, parts.detail.h)
+	end
+
+	-- Eyes (a mouse's in the slots' corners, a finger's larger).
+	for i, rect in InventoryColumns.eyes("equipment", input) do
+		local eye = self.accessoryEyes[i]
+		if eye then
+			self.widgets:placeEye(eye, rect)
+		end
+	end
+	for i, rect in InventoryColumns.eyes("vanity", input) do
+		local eye = self.vanityEyes[i]
+		if eye then
+			self.widgets:placeEye(eye, rect)
+		end
+	end
+
+	-- The band: the quickbar's cells and slots, at HudLayout's cell maths from the bar.
+	local band = self.band
+	band.frame.Position = UDim2.fromOffset(a.band.x, a.band.y)
+	band.frame.Size = UDim2.fromOffset(a.band.w, a.band.h)
+	local barX, barY = a.quickbar.x, a.quickbar.y - a.band.y
+	for i, cell in band.cells do
+		local cx, cy = InventoryColumns.quickCell(i)
+		cell.base.Position = UDim2.fromOffset(barX + cx, barY + cy)
+		band.widgets[i].view.button.Position = UDim2.fromOffset(barX + cx, barY + cy)
+	end
+	band.selected = 0
+
+	-- The side strips (wide), from the screen's edges to STRIP_REACH past the side columns.
+	local left, right = self.strips[1], self.strips[2]
+	if a.mode == "wide" then
+		local x0, y0 = -p.x / scale, -p.y / scale
+		local height = view.h / scale
+		local leftEnd = a.columns[1].x + a.columns[1].w + STRIP_REACH
+		local rightStart = a.columns[3].x - STRIP_REACH
+		left.Position = UDim2.fromOffset(x0, y0)
+		left.Size = UDim2.fromOffset(leftEnd - x0, height)
+		right.Position = UDim2.fromOffset(rightStart, y0)
+		right.Size = UDim2.fromOffset((view.w - p.x) / scale - rightStart, height)
+	end
+
+	-- JEI's dock, the recipe view's centre and the status icons' place (screen pixels).
+	local jei = a.jei
+	self.dock = if jei then { x = p.x + jei.x * scale, y = p.y + jei.y * scale, w = jei.w, h = jei.h } else false
+	self.viewX = p.x + InventoryColumns.viewCentre(a) * scale
+	local status = a.status
+	local parent = root.Parent
+	local origin = if parent and parent:IsA("GuiBase2d") then parent.AbsolutePosition else Vector2.zero
+	self.status = if status
+		then {
+			x = origin.X + p.x + status.x * scale,
+			y = origin.Y + p.y + status.y * scale,
+			w = status.w * scale,
+			h = status.h * scale,
+		}
+		else nil
+
+	refreshVisibility(self)
+	refreshLive(self)
 end
 
 --[[
-	The open furnace's flame and arrow, from its `data` (MenuLayout.flameRows / arrowColumns), or a
-	machine's gauges, energy bar and status line from the fields its panel names.
+	Lays the screen out for `view` (see the header) and returns the GUI scale; nothing is built or
+	written while the view and what the screen shows are unchanged.
 ]]
-local function renderGauges(self: Self, window: Window)
-	local container = window.container
-	local layout = self.layout
-	if container and container.kind == "machine" and layout then
-		local data = container.data
-		-- (Snapshots and replays replace the data table, never change it: the same table shows
-		-- the same, so nothing is worked out again every frame.)
-		if self.machineShown and data == self.machineData then
-			return
+function InventoryScreen.place(self: Self, view: View): number
+	-- (VANITY starts closed on touch screens, until opened or closed by hand.)
+	if not self.vanityChosen then
+		local closed = bit32.btest(self.collapsed, BIT.vanity)
+		if closed ~= view.touch then
+			self.collapsed = bit32.bxor(self.collapsed, BIT.vanity)
 		end
-		self.machineShown = true
-		self.machineData = data
-		setGauge(self.flame, MenuLayout.machineFlameRows(data, layout.flameSource), true)
-		local columns = MenuLayout.machineArrowColumns(data, layout.progressSource)
-		setGauge(self.progress, if columns > 0 then columns + 1 else 0, false)
-		renderEnergy(self, data)
-		renderTanks(self, data)
-		local label = self.statusLabel
-		if label then
-			local text = MenuLayout.statusText(container)
-			if label.Text ~= text then
-				label.Text = text
-			end
-		end
-		local labels = self.lineLabels
-		if #labels > 0 then
-			local texts = MenuLayout.lineTexts(container)
-			for i, line in labels do
-				local text = texts[i] or ""
-				if line.Text ~= text then
-					line.Text = text
-				end
-			end
-		end
-		return
 	end
-	if self.flame == nil and self.progress == nil then
-		return
+	if
+		self.arrangement ~= nil
+		and view.w == self.keyW
+		and view.h == self.keyH
+		and view.top == self.keyTop
+		and view.base == self.keyBase
+		and view.touch == self.keyTouch
+		and self.panelKey == self.keyPanel
+		and self.collapsed == self.keyCollapsed
+		and self.equipShown == self.keyEquip
+		and self.viewing == self.keyViewing
+	then
+		return self.scale
 	end
-	local data = if container and container.kind == "furnace" then container.data else nil
-	setGauge(self.flame, MenuLayout.flameRows(data), true)
-	-- (Minecraft draws the arrow one column wider than its progress; the art starts one in.)
-	local columns = MenuLayout.arrowColumns(data)
-	setGauge(self.progress, if columns > 0 then columns + 1 else 0, false)
+	self.keyW, self.keyH, self.keyTop, self.keyBase, self.keyTouch = view.w, view.h, view.top, view.base, view.touch
+	self.keyPanel, self.keyCollapsed, self.keyEquip, self.keyViewing =
+		self.panelKey, self.collapsed, self.equipShown, self.viewing
+	self.touch = view.touch
+	local panel = self.panel
+	local layout = if panel then panel.layout else nil
+	for _, input in { self.wide, self.narrow } do
+		input.container = if layout then layout.height else nil
+		input.panel = layout
+		input.equipment = self.equipShown
+		input.collapsed = self.collapsed
+	end
+	local p = InventoryColumns.place(view, self.wide, self.narrow)
+	local input = if p.mode == "wide" then self.wide else self.narrow
+	input.height, input.centreW = p.height, p.centreW
+	local a = InventoryColumns.arrange(input)
+	self.arrangement, self.scale = a, p.scale
+	apply(self, a, p, view, input)
+	self.scaled:setScale(p.scale)
+	self.handsScaled:setScale(p.scale * Size.BIG_FACE / Style.ITEM)
+	return p.scale
 end
 
--- Puts the selected item in the preview's hand (rebuilt only when it or item looks change).
-local function updateHeld(self: Self, window: Window)
-	local inventory = window.inventory
-	local stack = inventory.slots[inventory.selected]
+function InventoryScreen.jeiDock(self: Self): Rect | false
+	return self.dock
+end
+
+function InventoryScreen.jeiViewX(self: Self): number?
+	return self.viewX
+end
+
+-- The band's status place (absolute screen pixels) and the scale, while a survival-like player
+-- sees the band.
+function InventoryScreen.statusRect(self: Self): (Rect?, number)
+	if self.viewing or not GameMode.isSurvivalLike(ClientInventory.mode()) then
+		return nil, self.scale
+	end
+	return self.status, self.scale
+end
+
+function InventoryScreen.setViewing(self: Self, viewing: boolean)
+	if viewing == self.viewing then
+		return
+	end
+	self.viewing = viewing
+	refreshVisibility(self)
+end
+
+function InventoryScreen.setFeedback(self: Self, feedback: Theme.Feedback?)
+	self.widgets:setFeedback(feedback)
+end
+
+function InventoryScreen.inDropZone(self: Self, point: Vector2): boolean
+	return self.ground:covers(point)
+end
+
+--[[ Drawing ]]
+
+-- HANDS' texts for the held `stack` (only when it changed).
+local function renderHands(self: Self, stack: Types.Stack?)
+	local hands = self.hands
 	local item = if stack and stack.count > 0 then stack.item else nil
-	local look = ItemModels.generation()
-	if item == self.heldItem and look == self.heldLook then
+	local count = if stack then stack.count else 0
+	local damage = if stack then stack.damage else nil
+	local data = if stack then stack.data else nil
+	if item == hands.item and count == hands.count and damage == hands.damage and data == hands.data then
 		return
 	end
-	self.heldItem = item
-	self.heldLook = look
-	local old = self.heldModel
-	if old then
-		old:Destroy()
-		self.heldModel = nil
-	end
-	local clone = self.clone
-	-- Held as Player/HeldItems holds it on characters (tools upright from the fist).
-	local at = if clone and item then ItemModels.handPivot(item, clone) else nil
-	if clone and at and item then
-		local model = ItemModels.build(item, ItemModels.handSize(item))
-		model:PivotTo(at)
-		-- Inside the clone, so it turns with it.
-		model.Parent = clone
-		self.heldModel = model
+	hands.item, hands.count, hands.damage, hands.data = item, count, damage, data
+	local lines = if item then Theme.handsLines(stack) else nil
+	local condition = lines and lines.condition
+	hands.name.Text = if lines then lines.name else ""
+	hands.condition.Text = if condition then condition.name else ""
+	hands.detail.Text = if lines then lines.detail or "" else ""
+	hands.dot.Visible = condition ~= nil
+	if condition then
+		hands.dot.BackgroundColor3 = Color3.fromRGB(condition.rgb[1], condition.rgb[2], condition.rgb[3])
+		hands.dot.BackgroundTransparency = Theme.DOT_T
 	end
 end
 
---[[
-	The crafting result the recipe gate keeps back from `window`'s grid (Window `recipes`): what the
-	grid matches while the result slot is empty and the gate refuses it. Its item, count and why;
-	nil when there is none. Matched again only when a grid stack or the progression changed.
-]]
-local function lockedResult(self: Self, window: Window): (number?, number, string?)
-	local container = window.container
-	local width = Types.craftWidth(container)
-	if container == nil or width == 0 or window.recipes == nil or container.slots[Types.CRAFT_RESULT] ~= nil then
-		return nil, 0, nil
+-- The band's number boxes and selection outline.
+local function renderBand(self: Self, inventory: Types.Inventory, selected: number)
+	local band = self.band
+	local show = not self.touch and Theme.Text.tiny * self.scale >= NUMBER_MIN
+	for i, cell in band.cells do
+		Dayz.paintNumber(cell, if show then band.numbers[i] else "", inventory.slots[i] ~= nil)
 	end
-	local cached = self.lockedGrid
-	local same = #cached == width * width and self.lockedStatus == ProgressionState.get()
-	for i = 1, width * width do
-		local stack = container.slots[Types.CRAFT_RESULT + i]
-		if (cached[i] or nil) ~= stack then
-			same = false
-			cached[i] = stack or false
-		end
-	end
-	for i = width * width + 1, #cached do
-		cached[i] = nil
-	end
-	if not same then
-		local grid: { [number]: Types.Stack? } = {}
-		for i = 1, width * width do
-			grid[i] = container.slots[Types.CRAFT_RESULT + i]
-		end
-		local result = Crafting.match(grid, width)
-		self.lockedStatus = ProgressionState.get()
-		self.lockedItem = if result then result.item else nil
-		self.lockedCount = if result then result.count else 0
-		self.lockedText = if result then ProgressionState.lockText(result.item) else nil
-	end
-	if self.lockedText == nil then
-		return nil, 0, nil
-	end
-	return self.lockedItem, self.lockedCount, self.lockedText
-end
-
--- Is `widget` the open crafting grid's result slot?
-local function isResultWidget(widget: SlotWidget, window: Window): boolean
-	return widget.store == "container" and widget.index == Types.CRAFT_RESULT and Types.craftWidth(window.container) > 0
-end
-
--- The eyes (open or shut by the `hidden` bits) and the closed accessory rows' padlocks.
-local function renderEquipment(self: Self, window: Window)
-	local inventory = window.inventory
-	local hidden = inventory.hidden
-	if hidden ~= self.shownHidden then
-		self.shownHidden = hidden
-		for _, eye in self.eyes do
-			local shut = bit32.btest(hidden, bit32.lshift(1, eye.slot - 1))
-			eye.open.Visible = not shut
-			eye.shut.Visible = shut
-		end
-	end
-	local open = inventory.accessorySlots
-	if open ~= self.shownOpen then
-		self.shownOpen = open
-		for row, lock in self.locks do
-			lock.Visible = row > open
+	if selected ~= band.selected then
+		band.selected = selected
+		local cell = band.cells[selected]
+		band.selection.Visible = cell ~= nil
+		if cell then
+			band.selection.Position = cell.base.Position
 		end
 	end
 end
 
---[[
-	Dresses the preview in what the character shows (Player/EquipmentLooks.dress), again only when
-	an armor or equipment stack, the hidden bits or the open slots changed (compared by table:
-	stacks are values) and the looks text with them.
-]]
-local function updateLooks(self: Self, window: Window)
-	local clone = self.clone
-	if clone == nil then
-		return
-	end
-	local inventory = window.inventory
-	local refs = self.looksRefs
-	local changed = false
-	local i = 0
-	for slot = 1, Types.ARMOR_SIZE do
-		i += 1
-		if refs[i] ~= inventory.armor[slot] then
-			refs[i], changed = inventory.armor[slot], true
-		end
-		i += 1
-		if refs[i] ~= inventory.vanityArmor[slot] then
-			refs[i], changed = inventory.vanityArmor[slot], true
-		end
-	end
-	for slot = 1, Types.ACCESSORY_SIZE do
-		i += 1
-		if refs[i] ~= inventory.accessories[slot] then
-			refs[i], changed = inventory.accessories[slot], true
-		end
-		i += 1
-		if refs[i] ~= inventory.vanityAccessories[slot] then
-			refs[i], changed = inventory.vanityAccessories[slot], true
-		end
-	end
-	i += 1
-	if refs[i] ~= inventory.hidden then
-		refs[i], changed = inventory.hidden, true
-	end
-	i += 1
-	if refs[i] ~= inventory.accessorySlots then
-		refs[i], changed = inventory.accessorySlots, true
-	end
-	if not changed and self.looksText ~= nil then
-		return
-	end
-	local looks = Accessories.looks(inventory)
-	if looks == self.looksText then
-		return
-	end
-	self.looksText = looks
-	local old = self.looksFolder
-	if old then
-		old:Destroy()
-	end
-	self.looksFolder = EquipmentLooks.dress(clone, looks)
-end
-
--- Draws `window`; `hover` gets the white overlay, so do the slots of a drag in progress.
+-- Draws `window` (the hovered slot outlined, so are the slots of a drag in progress).
 function InventoryScreen.render(self: Self, window: Window, hover: Target?, dragged: { [number]: boolean })
-	updateHeld(self, window)
-	local hovered = if hover and hover.kind == "slot" then hover.index else -1
-	local function draw(widget: SlotWidget)
-		local stack = Menu.get(window, widget.window)
-		if stack == nil and widget.window >= 0 and isResultWidget(widget, window) then
-			-- (A locked result: greyed, never taken.)
-			local item, count = lockedResult(self, window)
-			widget.view.icon:set(item, count)
-			widget.view.icon:setDimmed(item ~= nil)
-		else
-			widget.view.icon:set(
-				stack and stack.item,
-				stack and stack.count,
-				stack and stack.damage,
-				stack and stack.data
-			)
-			widget.view.icon:setDimmed(false)
-		end
-		local lit = widget.window == hovered or dragged[widget.window] == true
-		if widget.view.hover.Visible ~= lit then
-			widget.view.hover.Visible = lit
-		end
-		local ghost = widget.ghost
-		if ghost and ghost.Visible ~= (stack == nil) then
-			ghost.Visible = stack == nil
-		end
+	if self.arrangement == nil then
+		return
 	end
-	for _, widget in self.containerSlots do
-		draw(widget)
+	local inventory = window.inventory
+	local selected = inventory.selected
+	-- HANDS is the selected hotbar slot.
+	local held = self.hands.widget
+	held.index = selected
+	held.window = if self.live.hands then Menu.windowIndex(window, "inventory", selected) or -1 else -1
+	self.widgets:draw(window, hover, dragged, selected)
+	-- Section titles with their counts (from the window: a collapsed section draws no slots).
+	local packed = InventoryColumns.used(inventory.slots, Types.HOTBAR_SIZE + 1, Types.INVENTORY_SIZE)
+	if packed ~= self.backpackCount then
+		self.backpackCount = packed
+		self.sections.backpack:setTitle(
+			Theme.sectionTitle("Backpack", packed, Types.INVENTORY_SIZE - Types.HOTBAR_SIZE)
+		)
 	end
-	if self.gridShown then
-		for _, widget in self.gridSlots do
-			draw(widget)
+	local panel = self.panel
+	if panel then
+		local section = self.sections.container
+		local layout = panel.layout
+		local container = window.container
+		if section and container and layout.kind == "chest" then
+			local used = InventoryColumns.used(container.slots, 1, self.containerSize)
+			if used ~= self.containerCount then
+				self.containerCount = used
+				section:setTitle(Theme.sectionTitle(layout.title, used, self.containerSize))
+			end
 		end
+		panel:render(window)
 	end
-	for _, widget in self.playerSlots do
-		draw(widget)
-	end
-	if self.equipShown then
-		for _, widget in self.equipmentSlots do
-			draw(widget)
-		end
-		renderEquipment(self, window)
-	end
-	updateLooks(self, window)
-	renderGauges(self, window)
+	renderHands(self, inventory.slots[selected])
+	renderBand(self, inventory, selected)
+	local point = self.lastPoint
+	self.ground:render(os.clock(), inventory.cursor ~= nil, point ~= nil and self.ground:covers(point))
+	self.preview:update(window)
 end
 
--- What is under `point` (screen pixels): a slot, nil over a panel, or outside.
+--[[ Hit tests ]]
+
+-- What is under `point` (screen pixels): a slot, outside (the GROUND strip, or off the screen's
+-- root), or nothing.
 function InventoryScreen.targetAt(self: Self, point: Vector2): Target?
 	-- (An eye is a button of its own: no slot click under it.)
-	if self.equipShown then
-		for _, eye in self.eyes do
-			if Style.contains(eye.button, point) then
-				return nil
-			end
-		end
-	end
-	for _, list in { self.containerSlots, self.gridSlots, self.playerSlots, self.equipmentSlots } do
-		for _, widget in list do
-			if widget.window >= 0 and Style.contains(widget.view.button, point) then
-				return { kind = "slot", index = widget.window }
-			end
-		end
-	end
-	local container = self.containerPanel
-	if
-		Style.contains(self.playerPanel, point)
-		or (container and Style.contains(container, point))
-		or Style.contains(self.equipPanel, point)
-	then
+	if self.widgets:eyeAt(point) then
 		return nil
 	end
-	for _, frame in self.tabFrames do
-		if Style.contains(frame, point) then
-			return nil
-		end
+	local widget = self.widgets:widgetAt(point)
+	if widget then
+		return { kind = "slot", index = widget.window }
 	end
-	return { kind = "outside" }
+	if self.ground:covers(point) or not Style.contains(self.root, point) then
+		return { kind = "outside" }
+	end
+	return nil
 end
 
 --[[
 	A tooltip for what is under `point` besides items: a locked crafting result ("Iron Pickaxe",
-	"Requires the Iron Age"), a machine's energy bar ("1.2 kJ / 20 kJ"), a tank gauge ("Lava:
-	5,000 mB", "Capacity: 24,000 mB").
+	"Requires the Iron Age"), a closed accessory slot ("Opens at the Industrial Age"), a machine's
+	energy bar ("1.2 kJ / 20 kJ") or tank ("Lava: 5,000 mB"), a ground item.
 ]]
 function InventoryScreen.tooltipAt(self: Self, point: Vector2, window: Window): { string }?
-	-- A locked crafting result: its name and what it needs.
-	for _, list in { self.containerSlots, self.gridSlots } do
-		for _, widget in list do
-			if widget.window >= 0 and isResultWidget(widget, window) and Style.contains(widget.view.button, point) then
-				local item, _, text = lockedResult(self, window)
-				if item and text then
-					return { Items.displayName(item), text }
-				end
+	local widget = self.widgets:widgetAt(point)
+	if widget then
+		if self.widgets:isResult(widget, window) then
+			local item, _, text = self.widgets:lockedResult(window)
+			if item and text then
+				return { Items.displayName(item), text }
 			end
 		end
+		if widget.locked then
+			local age = Ages.byId(Config.Accessories.ExtraSlotAges[widget.index - Types.BASE_ACCESSORY_SLOTS] or "")
+			return { if age then `Opens at the {age.name}` else "Closed" }
+		end
+		return nil
 	end
-	-- The equipment: a closed accessory row says when it opens (an eye is a button: Ui/HoverTip
-	-- says what it does).
-	if self.equipShown then
-		for row, lock in self.locks do
-			if lock.Visible and Style.contains(lock, point) then
-				local age = Ages.byId(Config.Accessories.ExtraSlotAges[row - Types.BASE_ACCESSORY_SLOTS] or "")
-				return { if age then `Opens at the {age.name}` else "Closed" }
-			end
+	-- (A collapsed block section's gauges keep their frames where its body was: over ITEMS.)
+	local panel = self.panel
+	if panel and self.live.container then
+		local lines = panel:tooltipAt(point, window)
+		if lines then
+			return lines
 		end
 	end
-	local bar = self.energyBar
-	local container = window.container
-	if bar and container and Style.contains(bar.frame, point) then
-		return { MenuLayout.energyTooltip(container.data) }
-	end
-	if container then
-		for _, gauge in self.tankGauges do
-			if Style.contains(gauge.frame, point) then
-				return MenuLayout.tankTooltip(container.data, gauge.spot)
-			end
-		end
-	end
-	return nil
+	return self.ground:tooltipAt(point)
 end
 
--- The target of a (gamepad) selected object, if it is one of this screen's slots.
+-- The target of a (gamepad) selected object: a live slot, or the GROUND strip (outside).
 function InventoryScreen.targetOf(self: Self, object: GuiObject): Target?
-	local widget = self.byButton[object]
-	if widget and widget.window >= 0 then
-		return { kind = "slot", index = widget.window }
+	if object == self.ground.button then
+		return { kind = "outside" }
 	end
-	return nil
+	return self.widgets:targetOf(object)
 end
 
--- Where gamepad selection starts: the block panel's first slot (a grid's top left, a furnace's
--- input), else the first hotbar slot.
+-- Where gamepad selection starts: the block's first slot (a grid's top left, a furnace's input),
+-- else the first hotbar slot.
 function InventoryScreen.firstSelectable(self: Self): GuiObject?
-	local first = self.containerSlots[1]
-	if first then
-		return first.view.button
-	end
-	local hotbar = self.playerSlots[#self.playerSlots - Types.HOTBAR_SIZE + 1]
-	return if hotbar then hotbar.view.button else nil
+	local first = self.widgets:first("container") or self.widgets:first("band")
+	return if first then first.view.button else nil
 end
 
---[[ Character preview ]]
+--[[ Opening and the character ]]
 
-local function cloneCharacter(): Model?
-	local character = Players.LocalPlayer.Character
-	if character == nil then
-		return nil
-	end
-	local archivable = character.Archivable
-	character.Archivable = true
-	local ok, result = pcall(function()
-		return character:Clone()
-	end)
-	character.Archivable = archivable
-	if not ok or result == nil then
-		return nil
-	end
-	local clone = result :: Model
-	for _, descendant in clone:GetDescendants() do
-		if
-			descendant:IsA("BaseScript")
-			or descendant:IsA("Sound")
-			or descendant:IsA("Constraint")
-			or descendant:IsA("BodyMover")
-			or descendant:IsA("VectorForce")
-			or descendant:IsA("ParticleEmitter")
-		then
-			descendant:Destroy()
-		elseif descendant:IsA("BasePart") then
-			descendant.Anchored = true
-			descendant.CanCollide = false
-			descendant.CanQuery = false
-			descendant.CanTouch = false
-		elseif descendant:IsA("Humanoid") then
-			descendant.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-		end
-	end
-	local root = clone:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		clone.PrimaryPart = root
-		root.Transparency = 1
-	end
-	return clone
-end
-
--- Builds the character preview (when the screen opens).
 function InventoryScreen.opened(self: Self)
-	self:closed()
-	local clone = cloneCharacter()
-	if clone == nil then
-		return
-	end
-	-- Upright at the origin facing -Z, the camera in front of it (on the -Z side).
-	clone:PivotTo(CFrame.identity)
-	clone.Parent = self.world
-	local box, size = clone:GetBoundingBox()
-	local height = math.max(size.Y, 1)
-	local aspect = PREVIEW_W / PREVIEW_H
-	local half = math.max(height / 2, size.X / 2 / aspect) / 0.9
-	local distance = half / math.tan(math.rad(PREVIEW_FOV / 2)) + size.Z / 2
-	local centre = box.Position
-	self.previewCamera.CFrame = CFrame.lookAt(centre - Vector3.new(0, 0, distance), centre)
-	self.clone = clone
-	self.cloneYaw = 0
-	self.heldItem = false
-	-- (Dressed by the next render.)
-	table.clear(self.looksRefs)
-	self.looksText = nil
-	self.looksFolder = nil
+	self.preview:opened()
+	self.ground:reset()
 end
 
 function InventoryScreen.closed(self: Self)
-	local clone = self.clone
-	if clone then
-		clone:Destroy()
-		self.clone = nil
-	end
-	self.heldModel = nil
-	self.heldItem = false
-	self.looksFolder = nil
-	self.looksText = nil
+	self.preview:closed()
+	self.ground:reset()
+	self.lastPoint = nil
 end
 
---[[
-	Turns the player towards the pointer like Minecraft's renderEntityInInventoryFollowsMouse:
-	atan(offset / 40 GUI pixels) x 20 degrees.
-]]
+-- Turns the player towards the pointer (Ui/PlayerPreview); the pointer is kept for the GROUND
+-- strip's outline.
 function InventoryScreen.follow(self: Self, point: Vector2?)
-	local clone = self.clone
-	if clone == nil then
-		return
-	end
-	local yaw = 0
-	if point then
-		local position, size = self.preview.AbsolutePosition, self.preview.AbsoluteSize
-		local pixels = size.X / PREVIEW_W
-		if pixels > 0 then
-			local dx = (point.X - (position.X + size.X / 2)) / pixels
-			yaw = math.atan(dx / 40) * math.rad(20)
-		end
-	end
-	if math.abs(yaw - self.cloneYaw) > 1e-3 then
-		self.cloneYaw = yaw
-		clone:PivotTo(CFrame.Angles(0, yaw, 0))
-	end
+	self.lastPoint = point
+	self.preview:follow(point)
 end
 
 return InventoryScreen

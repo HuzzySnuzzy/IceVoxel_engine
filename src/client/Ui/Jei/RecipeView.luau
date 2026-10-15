@@ -1,33 +1,43 @@
 --!strict
 --[[
-	JEI's recipe view: the recipes or the uses of one item (Jei/JeiData groups), in a panel that
-	takes the inventory panel's place (Minecraft's 176 x 166) while the item list stays beside it.
+	JEI's recipe view: the recipes or the uses of one item (Jei/JeiData groups), in a 176 x 166
+	panel (Jei/JeiLayout) drawn in the inventory family's survival look (Style.Dayz): a dark Panel
+	with a hairline, a black title bar (a body-less Style.Dayz.section, so it is the inventory's
+	section bar to the pixel), flat buttons, the recipes' slots as dayz ItemIcon slots on grid lines
+	(InventoryColumns.gridLines per recipe), thin bars for gauges. Over the survival inventory it
+	covers the centre and right columns (Ui/Jei places it there); over the creative screen it is in
+	the middle. The item list stays beside it.
 
 	  tabs      above the panel, one per category that has entries (crafting table, furnace, coal:
 	            JEI's catalysts); the active one merges into the panel like the creative tabs
-	  title     Back (when there is somewhere to go back to), the category's name, and the touch
-	            close button
+	  title     the bar: Back (when there is somewhere to go back to), the category's name in
+	            capitals, and the touch close button
 	  pages     "<" "n / m" ">" (wrapping); the mouse wheel over the panel turns them too
 	  recipes   as many of the category as fit (Jei/JeiLayout):
 	              crafting  the 3 x 3 grid (an ingredient a tag or several items accept shows each
-	                        in turn, one a second; the looked-up item stays put), an arrow, the
+	                        in turn, one a second; the looked-up item stays put), a chevron, the
 	                        result and its count; the shapeless mark (tooltip "Shapeless"); and the
 	                        "+" while a crafting grid is open: it moves the ingredients there
 	                        (Jei/JeiTransfer), shift-click as many sets as there are. It is greyed
 	                        out with the reason in its tooltip when the recipe is too big for the
 	                        grid, items are missing or the inventory has no room for what is in
 	                        the way; hovering it then shows the missing ingredients in red, like JEI
-	              smelting  the input over a lit flame, the arrow filling over the 10 s it takes,
-	                        the output, "10 s"
-	              fuel      a flame burning down over the fuel's burn time, the fuel,
+	              smelting  the input over a full fuel bar, the progress bar filling over the 10 s
+	                        it takes, the output, "10 s"
+	              fuel      a fuel bar burning down over the fuel's burn time, the fuel,
 	                        "Burns 8 items" and the burn time
 	              refining  the oil as a fluid stack (its colour in a slot, "Oil" and "1,000 mB"
-	                        on hover), an arrow filling over the 5 s a bucket takes, the fuel,
+	                        on hover), a progress bar filling over the 5 s a bucket takes, the fuel,
 	                        "5 s, 20 kJ" and "200 J/t"
-	              heating, combustion  a flame burning down over a bucket's burn time, the lava
+	              heating, combustion  a fuel bar burning down over a bucket's burn time, the lava
 	                        or fuel as a fluid stack, "Makes 4 MJ" and "200 J/t for 1000 s"
 	                        (fuel: "Makes 10 MJ" and "2.5 kJ/t for 200 s")
 	            A fluid stack stands for its bucket in navigation (clicks, R / U, gamepad).
+
+	The gauges are the inventory's (Ui/ContainerPanel): the progress a white bar 2 tall across the
+	arrow's place on a light track, the flame the same bar in the fuel orange, a static arrow a
+	chevron (Ui/Silhouettes "chevron"). Slot faces stay unfilled (only the inventory's slot widgets
+	and the quickbar paint faces); hovering a slot outlines it.
 
 	A recipe the player may not make yet (Progression: a later Age's result; the controller's
 	`setLocks`, JeiData.lockText) has its output greyed with a padlock on it; hovering the output
@@ -47,9 +57,11 @@ local Items = require(Shared.Items)
 
 local SoundPlayer = require(script.Parent.Parent.Parent.Audio.SoundPlayer)
 local HoverTip = require(script.Parent.Parent.HoverTip)
+local InventoryColumns = require(script.Parent.Parent.InventoryColumns)
 local ItemIcon = require(script.Parent.Parent.ItemIcon)
-local MenuLayout = require(script.Parent.Parent.MenuLayout)
+local SlotWidgets = require(script.Parent.Parent.SlotWidgets)
 local Style = require(script.Parent.Parent.Style)
+local Theme = require(script.Parent.Parent.Theme)
 local JeiData = require(script.Parent.JeiData)
 local JeiLayout = require(script.Parent.JeiLayout)
 local JeiTransfer = require(script.Parent.JeiTransfer)
@@ -58,6 +70,8 @@ local TransmitterModel = require(script.Parent.Parent.Parent.Rendering.Transmitt
 type Entry = JeiData.Entry
 type Group = JeiData.Group
 type Rect = JeiLayout.Rect
+
+local Dayz = Style.Dayz
 
 export type Line = { text: string, colour: Color3 }
 
@@ -72,30 +86,16 @@ export type State = {
 
 local WIDTH, HEIGHT = JeiLayout.VIEW_WIDTH, JeiLayout.VIEW_HEIGHT
 local TAB_HEIGHT, TAB_WIDTH = ItemIcon.TAB_HEIGHT, ItemIcon.TAB_WIDTH
+-- The title bar (panel coordinates): it holds Back and the close button (JeiLayout.BACK, CLOSE).
+local TITLE_BAR = { x = 0, y = 3, w = WIDTH, h = Theme.Size.SECTION_HEADER }
+-- The page row's text (around JeiLayout.PAGE_Y, between the arrows).
+local PAGE_ROW = { y = JeiLayout.PREV.y, h = JeiLayout.PREV.h }
 -- The red over a missing ingredient (JEI: 0x66FF0000 over the slot).
 local MISSING_TRANSPARENCY = 0.6
-local UNLIT_PALETTE: { [string]: Color3 } = {
-	R = Style.Colour.Slot,
-	O = Style.Colour.Slot,
-	Y = Style.Colour.Slot,
-	W = Style.Colour.Slot,
-}
--- The padlock over a locked recipe's output (7 x 8): K outline, Y body, S shackle.
-local PADLOCK_ART = {
-	"..KKK..",
-	".KSKSK.",
-	".KS.SK.",
-	"KKKKKKK",
-	"KYYYYYK",
-	"KYYKYYK",
-	"KYYYYYK",
-	"KKKKKKK",
-}
-local PADLOCK_PALETTE: { [string]: Color3 } = {
-	K = Color3.fromRGB(40, 30, 10),
-	Y = Color3.fromRGB(230, 180, 40),
-	S = Color3.fromRGB(200, 200, 210),
-}
+-- The gauges' bars (GUI pixels thick) and the chevron and padlock sizes.
+local BAR = 2
+local CHEVRON = 8
+local PADLOCK = 8
 -- JEI's shapeless mark: two arrows crossing over (9 x 10).
 local SHAPELESS_ART = {
 	".....#...",
@@ -114,9 +114,6 @@ type CellWidget = { slot: ItemIcon.Slot, items: { number }?, cell: number, missi
 -- A fluid stack: a slot holding a square of the fluid's colour.
 type FluidWidget = { slot: ItemIcon.Slot, stack: JeiData.FluidStack }
 
--- An animated sprite: grey art, with the lit art in a clipping frame that grows (Ui/InventoryScreen).
-type Gauge = { clip: Frame, holder: Frame, rect: Rect, shown: number, vertical: boolean }
-
 type EntryWidget = {
 	entry: Entry,
 	frame: Frame,
@@ -124,15 +121,18 @@ type EntryWidget = {
 	fluids: { FluidWidget },
 	output: ItemIcon.Slot?,
 	-- The padlock over a locked output, and what the recipe needs (nil: not locked).
-	padlock: Frame?,
+	padlock: GuiObject?,
 	lock: string?,
 	plus: TextButton?,
 	setPlus: ((enabled: boolean) -> ())?,
 	status: JeiTransfer.Status?,
 	shapeless: Frame?,
-	arrow: Gauge?,
-	flame: Gauge?,
-	-- Seconds one round of the gauge's animation takes.
+	-- The animated bars: the progress filling, the fuel burning down (a pixel a step).
+	arrow: Style.Bar?,
+	flame: Style.Bar?,
+	arrowSteps: number,
+	flameSteps: number,
+	-- Seconds one round of the gauges' animation takes.
 	period: number,
 }
 
@@ -154,6 +154,8 @@ export type RecipeView = {
 	show: (self: RecipeView, state: State, canBack: boolean) -> (),
 	state: (self: RecipeView) -> State?,
 	size: (self: RecipeView) -> Vector2,
+	-- The view's GUI scale (its outlines and text weights follow it).
+	setScale: (self: RecipeView, scale: number) -> (),
 	turn: (self: RecipeView, delta: number) -> (),
 	selectCategory: (self: RecipeView, index: number) -> (),
 	setTransfer: (self: RecipeView, statusOf: (entry: Entry) -> JeiTransfer.Status?) -> (),
@@ -172,8 +174,10 @@ export type RecipeView = {
 }
 
 type Self = RecipeView & {
+	scaled: Style.Scaled,
 	panel: Frame,
-	title: TextLabel,
+	-- The black title bar: a body-less Style.Dayz.section, so it is drawn as the inventory's bars.
+	titleBar: Style.Section,
 	pageLabel: TextLabel,
 	back: TextButton,
 	close: TextButton,
@@ -205,15 +209,15 @@ local function newTab(self: Self, root: Frame, category: JeiData.Category)
 		frame.Name = `{category}Tab`
 		frame.BackgroundTransparency = 1
 		frame.Size = UDim2.fromOffset(TAB_WIDTH, TAB_HEIGHT + 4)
-		-- (Sibling ZIndex: the active tab draws over the panel's border, the others behind it.)
+		-- (Sibling ZIndex: the active tab draws over the panel's edge, the others behind it.)
 		frame.ZIndex = if active then 2 else 0
 		frame.Visible = false
 		frame.Parent = root
 		return frame
 	end
 	local active, inactive = holder(true), holder(false)
-	local activeTab = ItemIcon.tab(active, 0, item, true)
-	local inactiveTab = ItemIcon.tab(inactive, 0, item, false)
+	local activeTab = ItemIcon.tab(active, 0, item, true, self.scaled)
+	local inactiveTab = ItemIcon.tab(inactive, 0, item, false, self.scaled)
 	activeTab.button.Selectable = false
 	HoverTip.attach(activeTab.button, "jei.tab", category)
 	HoverTip.attach(inactiveTab.button, "jei.tab", category)
@@ -249,6 +253,7 @@ function RecipeView.new(parent: Instance): RecipeView
 	root.Visible = false
 	root.ZIndex = 3
 	root.Parent = parent
+	Dayz.mark(root)
 
 	local self = (
 		setmetatable({
@@ -256,6 +261,7 @@ function RecipeView.new(parent: Instance): RecipeView
 			onBack = function() end,
 			onClose = function() end,
 			onTransfer = function() end,
+			scaled = Dayz.scaled(),
 			tabs = {},
 			current = nil,
 			widgets = {},
@@ -265,39 +271,56 @@ function RecipeView.new(parent: Instance): RecipeView
 			lockOf = nil,
 		}, RecipeView) :: any
 	) :: Self
+	local scaled = self.scaled
 
 	for _, category in JeiData.CATEGORIES do
 		newTab(self, root, category :: JeiData.Category)
 	end
 
-	local panel = Style.panel(root, 0, TAB_HEIGHT, WIDTH, HEIGHT)
+	local panel = Style.frame(root, 0, TAB_HEIGHT, WIDTH, HEIGHT, Dayz.Colour.Panel, 1)
 	panel.Name = "Panel"
+	panel.BackgroundTransparency = Dayz.Alpha.Panel
+	panel.Active = true
+	Dayz.outline(panel, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, scaled)
 	self.panel = panel
-	self.title =
-		Style.text(panel, "", 0, JeiLayout.TITLE_Y, WIDTH, 8, Style.Colour.Title, 5, Enum.TextXAlignment.Center)
-	self.pageLabel =
-		Style.text(panel, "", 0, JeiLayout.PAGE_Y, WIDTH, 8, Style.Colour.Title, 5, Enum.TextXAlignment.Center)
+	local titleBar = Dayz.section(panel, "", { face = "none", scaled = scaled })
+	titleBar.root.Name = "TitleBar"
+	titleBar:place(TITLE_BAR.x, TITLE_BAR.y, TITLE_BAR.w, TITLE_BAR.h, 0)
+	self.titleBar = titleBar
+	self.pageLabel = Dayz.label(
+		panel,
+		"",
+		0,
+		PAGE_ROW.y,
+		WIDTH,
+		PAGE_ROW.h,
+		"small",
+		Dayz.Colour.TextSoft,
+		5,
+		Enum.TextXAlignment.Center,
+		scaled
+	)
 
 	local b = JeiLayout.BACK
-	self.back = Style.button(panel, "Back", b.x, b.y, b.w, b.h, 6)
+	self.back = Dayz.button(panel, "Back", b.x, b.y, b.w, b.h, 6, scaled)
 	self.back.Activated:Connect(function()
 		SoundPlayer.click()
 		self.onBack()
 	end)
 	local c = JeiLayout.CLOSE
-	self.close = Style.button(panel, "x", c.x, c.y, c.w, c.h, 6)
+	self.close = Dayz.button(panel, "x", c.x, c.y, c.w, c.h, 6, scaled)
 	self.close.Visible = UserInputService.TouchEnabled
 	self.close.Activated:Connect(function()
 		SoundPlayer.click()
 		self.onClose()
 	end)
 	local p, n = JeiLayout.PREV, JeiLayout.NEXT
-	local previous = Style.button(panel, "<", p.x, p.y, p.w, p.h, 6)
+	local previous = Dayz.button(panel, "<", p.x, p.y, p.w, p.h, 6, scaled)
 	previous.Activated:Connect(function()
 		SoundPlayer.click()
 		self:turn(-1)
 	end)
-	local following = Style.button(panel, ">", n.x, n.y, n.w, n.h, 6)
+	local following = Dayz.button(panel, ">", n.x, n.y, n.w, n.h, 6, scaled)
 	following.Activated:Connect(function()
 		SoundPlayer.click()
 		self:turn(1)
@@ -317,64 +340,24 @@ function RecipeView.state(self: Self): State?
 	return self.current
 end
 
+function RecipeView.setScale(self: Self, scale: number)
+	self.scaled:setScale(scale)
+end
+
 --[[ Building a page ]]
 
-local function newGauge(
-	parent: Frame,
-	rect: Rect,
-	vertical: boolean,
-	draw: (parent: Instance, lit: boolean) -> ()
-): Gauge
-	draw(parent, false)
-	local clip = Instance.new("Frame")
-	clip.BackgroundTransparency = 1
-	clip.ClipsDescendants = true
-	clip.Position = UDim2.fromOffset(rect.x, rect.y)
-	clip.Size = UDim2.fromOffset(0, 0)
-	clip.ZIndex = 6
-	clip.Parent = parent
-	local holder = Instance.new("Frame")
-	holder.BackgroundTransparency = 1
-	holder.Size = UDim2.fromOffset(rect.w, rect.h)
-	holder.ZIndex = 1
-	holder.Parent = clip
-	draw(holder, true)
-	return { clip = clip, holder = holder, rect = rect, shown = -1, vertical = vertical }
-end
-
--- Shows `shown` rows of a flame (from the bottom) or columns of an arrow (from the left).
-local function setGauge(gauge: Gauge?, shown: number)
-	if gauge == nil or gauge.shown == shown then
-		return
-	end
-	gauge.shown = shown
-	local rect = gauge.rect
-	if gauge.vertical then
-		gauge.clip.Position = UDim2.fromOffset(rect.x, rect.y + rect.h - shown)
-		gauge.clip.Size = UDim2.fromOffset(rect.w, shown)
-		gauge.holder.Position = UDim2.fromOffset(0, shown - rect.h)
-	else
-		gauge.clip.Size = UDim2.fromOffset(shown, rect.h)
-	end
-end
-
-local function flameArt(rect: Rect): (parent: Instance, lit: boolean) -> ()
-	return function(parent: Instance, lit: boolean)
-		local x, y = if lit then 0 else rect.x, if lit then 0 else rect.y
-		Style.pixelArt(parent, x, y, MenuLayout.FLAME_ART, if lit then Style.FirePalette else UNLIT_PALETTE, 5)
-	end
-end
-
-local function arrowArt(rect: Rect): (parent: Instance, lit: boolean) -> ()
-	return function(parent: Instance, lit: boolean)
-		local x, y = if lit then 1 else rect.x + 1, if lit then 1 else rect.y + 1
-		local art = MenuLayout.arrowArt(rect.w - 2, rect.h - 1)
-		Style.pixelArt(parent, x, y, art, { ["#"] = if lit then Color3.new(1, 1, 1) else Style.Colour.Slot }, 5)
-	end
+-- A thin bar across the middle of `rect` (an arrow's or a flame's place): `colour` on the light track.
+local function gaugeBar(parent: Frame, rect: Rect, colour: Color3): Style.Bar
+	local bar = Dayz.bar(parent, rect.x, rect.y + math.floor((rect.h - BAR) / 2), rect.w, BAR, false, 5)
+	bar.track.BackgroundColor3 = Dayz.Colour.QuantityTrack
+	bar.track.BackgroundTransparency = Dayz.Alpha.QuantityTrack
+	bar.fill.BackgroundColor3 = colour
+	return bar
 end
 
 local function buildEntry(self: Self, entry: Entry, x: number, y: number): EntryWidget
 	local layout = JeiLayout.entry(entry.category)
+	local scaled = self.scaled
 	local frame = Instance.new("Frame")
 	frame.Name = "Recipe"
 	frame.BackgroundTransparency = 1
@@ -396,11 +379,36 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		shapeless = nil,
 		arrow = nil,
 		flame = nil,
+		arrowSteps = if layout.arrow then layout.arrow.w else 1,
+		flameSteps = if layout.flame then layout.flame.w else 1,
 		period = math.max(entry.ticks / 20, 0.5),
 	}
+	-- The grid lines of every slot the recipe shows.
+	local spots: { InventoryColumns.Spot } = {}
+	local function addSpot(spot: JeiLayout.Spot?)
+		if spot then
+			table.insert(spots, { store = "container", slot = 0, x = spot.x, y = spot.y, big = spot.big })
+		end
+	end
+	for _, spot in layout.inputs do
+		addSpot(spot)
+	end
+	if entry.fluidInputs then
+		for i in entry.fluidInputs do
+			addSpot(layout.fluidInputs[i])
+		end
+	end
+	if entry.fluidOutput then
+		addSpot(layout.fluidOutput)
+	end
+	if entry.output then
+		addSpot(layout.output)
+	end
+	Dayz.lines(frame, InventoryColumns.gridLines(spots), 1)
+
 	for index, spot in layout.inputs do
-		local slot = ItemIcon.slot(frame, spot.x, spot.y, 4, spot.big)
-		local missing = Style.frame(slot.button, 1, 1, Style.ITEM, Style.ITEM, Style.Colour.Missing, 9)
+		local slot = ItemIcon.slot(frame, spot.x, spot.y, 4, spot.big, scaled)
+		local missing = Style.frame(slot.button, 1, 1, Style.ITEM, Style.ITEM, Dayz.Colour.Warning, 9)
 		missing.BackgroundTransparency = MISSING_TRANSPARENCY
 		missing.Visible = false
 		local cell: CellWidget = { slot = slot, items = entry.inputs[index], cell = index, missing = missing }
@@ -412,7 +420,7 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		if spot == nil or stack == nil then
 			return
 		end
-		local slot = ItemIcon.slot(frame, spot.x, spot.y, 4, false)
+		local slot = ItemIcon.slot(frame, spot.x, spot.y, 4, false, scaled)
 		local rgb = TransmitterModel.fluidColour(stack.fluid)
 		local fill = Style.frame(slot.button, 1, 1, Style.ITEM, Style.ITEM, Color3.fromRGB(rgb[1], rgb[2], rgb[3]), 5)
 		fill.Name = "Fluid"
@@ -433,44 +441,51 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 	local out = layout.output
 	local output = entry.output
 	if out and output then
-		local slot = ItemIcon.slot(frame, out.x, out.y, 4, out.big)
+		local slot = ItemIcon.slot(frame, out.x, out.y, 4, out.big, scaled)
 		slot.icon:set(output.item, output.count)
 		widget.output = slot
 		self.byButton[slot.button] = slot.icon
 		-- (Shown while the recipe is locked: `refreshLocks`.)
-		local padlock = Instance.new("Frame")
-		padlock.Name = "Padlock"
-		padlock.BackgroundTransparency = 1
-		padlock.Position = UDim2.fromOffset(out.x + Style.ITEM - 7, out.y - 1)
-		padlock.Size = UDim2.fromOffset(7, 8)
-		padlock.ZIndex = 9
+		local padlock = SlotWidgets.silhouette(
+			frame,
+			"padlock",
+			out.x + Style.ITEM - PADLOCK + 1,
+			out.y - 1,
+			PADLOCK,
+			PADLOCK,
+			Dayz.Colour.Text,
+			0,
+			9
+		)
 		padlock.Visible = false
-		padlock.Parent = frame
-		Style.pixelArt(padlock, 0, 0, PADLOCK_ART, PADLOCK_PALETTE, 1)
 		widget.padlock = padlock
 	end
 	local arrow = layout.arrow
 	if arrow then
 		if entry.category == "smelting" or entry.category == "refining" then
-			widget.arrow = newGauge(frame, arrow, false, arrowArt(arrow))
+			widget.arrow = gaugeBar(frame, arrow, Dayz.Colour.Quantity)
 		else
-			Style.pixelArt(
+			SlotWidgets.silhouette(
 				frame,
-				arrow.x,
-				arrow.y,
-				MenuLayout.arrowArt(arrow.w, arrow.h),
-				{ ["#"] = Style.Colour.Slot },
+				"chevron",
+				arrow.x + math.floor((arrow.w - CHEVRON) / 2),
+				arrow.y + math.floor((arrow.h - CHEVRON) / 2),
+				CHEVRON,
+				CHEVRON,
+				Dayz.Colour.Chevron,
+				Dayz.Alpha.Chevron,
 				5
 			)
 		end
 	end
 	local flame = layout.flame
 	if flame then
+		local bar = gaugeBar(frame, flame, Dayz.Colour.Fuel)
 		if entry.category == "fuel" or entry.category == "heating" or entry.category == "combustion" then
-			widget.flame = newGauge(frame, flame, true, flameArt(flame))
+			widget.flame = bar
 		else
 			-- Smelting: the furnace is lit.
-			Style.pixelArt(frame, flame.x, flame.y, MenuLayout.FLAME_ART, Style.FirePalette, 5)
+			bar:set(1)
 		end
 	end
 	local mark = layout.shapeless
@@ -482,12 +497,12 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		holder.Size = UDim2.fromOffset(mark.w, mark.h)
 		holder.ZIndex = 5
 		holder.Parent = frame
-		Style.pixelArt(holder, 0, 0, SHAPELESS_ART, { ["#"] = Style.Colour.Title }, 1)
+		Dayz.glyph(holder, 0, 0, SHAPELESS_ART, Dayz.Colour.TextSoft, 1)
 		widget.shapeless = holder
 	end
 	local plus = layout.plus
 	if plus and entry.recipe then
-		local button, setEnabled = Style.toggleButton(frame, "+", plus.x, plus.y, plus.w, plus.h, 6)
+		local button, setEnabled = Dayz.toggleButton(frame, "+", plus.x, plus.y, plus.w, plus.h, 6)
 		button.Visible = false
 		button.Activated:Connect(function()
 			local status = widget.status
@@ -515,7 +530,7 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 			local align = if entry.category == "smelting" or entry.category == "boiling"
 				then Enum.TextXAlignment.Right
 				else Enum.TextXAlignment.Left
-			Style.text(frame, text, r.x, r.y, r.w, r.h, Style.Colour.Title, 5, align)
+			Dayz.label(frame, text, r.x, r.y, r.w, r.h, "small", Dayz.Colour.TextSoft, 5, align, scaled)
 		end
 	end
 	return widget
@@ -588,7 +603,7 @@ local function build(self: Self, canBack: boolean?)
 			x += TAB_WIDTH + 1
 		end
 	end
-	self.title.Text = JeiData.TITLES[category]
+	self.titleBar:setTitle(JeiData.TITLES[category])
 	local entries = if group then group.entries else {}
 	local perPage = JeiLayout.perPage(category)
 	local pages = JeiData.pageCount(#entries, perPage)
@@ -697,8 +712,14 @@ function RecipeView.refreshTransfer(self: Self)
 	applyTransfer(self)
 end
 
+-- Outlines `slot` while it shows something (`any`) and is hovered or selected.
+local function light(slot: ItemIcon.Slot, any: boolean, selected: GuiObject?, point: Vector2?)
+	local lit = any and (selected == slot.button or (point ~= nil and Style.contains(slot.button, point)))
+	Dayz.setLit(slot.hover, lit)
+end
+
 -- Per frame: cycling ingredients, the animated gauges, the red over missing items while the
--- hovered "+" is greyed out.
+-- hovered "+" is greyed out, the outline on the hovered (or selected) slot.
 function RecipeView.render(self: Self, now: number, point: Vector2?)
 	local state = self.current
 	if state == nil or not self.root.Visible then
@@ -706,37 +727,26 @@ function RecipeView.render(self: Self, now: number, point: Vector2?)
 	end
 	local focus = state.item
 	local selected = GuiService.SelectedObject
-	-- The white overlay on the slot under the pointer (or selected with a gamepad).
-	local function light(slot: ItemIcon.Slot)
-		local lit = slot.icon.item ~= nil
-			and (selected == slot.button or (point ~= nil and Style.contains(slot.button, point)))
-		if slot.hover.Visible ~= lit then
-			slot.hover.Visible = lit
-		end
-	end
 	for _, widget in self.widgets do
 		for _, cell in widget.cells do
 			cell.slot.icon:set(JeiData.shown(cell.items, now, focus), 1)
-			light(cell.slot)
+			light(cell.slot, cell.slot.icon.item ~= nil, selected, point)
 		end
 		for _, fluid in widget.fluids do
-			local lit = selected == fluid.slot.button or (point ~= nil and Style.contains(fluid.slot.button, point))
-			if fluid.slot.hover.Visible ~= lit then
-				fluid.slot.hover.Visible = lit
-			end
+			light(fluid.slot, true, selected, point)
 		end
 		local output = widget.output
 		if output then
-			light(output)
+			light(output, output.icon.item ~= nil, selected, point)
 		end
 		local phase = (now % widget.period) / widget.period
 		local arrow = widget.arrow
 		if arrow then
-			setGauge(arrow, math.floor(phase * arrow.rect.w))
+			arrow:set(math.floor(phase * widget.arrowSteps) / widget.arrowSteps)
 		end
 		local flame = widget.flame
 		if flame then
-			setGauge(flame, flame.rect.h - math.floor(phase * flame.rect.h))
+			flame:set(1 - math.floor(phase * widget.flameSteps) / widget.flameSteps)
 		end
 		local status = widget.status
 		local plus = widget.plus
@@ -812,23 +822,23 @@ function RecipeView.infoAt(self: Self, point: Vector2): { Line }?
 	for _, widget in self.widgets do
 		local plus, status = widget.plus, widget.status
 		if plus and status and plus.Visible and Style.contains(plus, point) then
-			local lines: { Line } = { { text = "Move Items", colour = Style.Colour.Text } }
+			local lines: { Line } = { { text = "Move Items", colour = Dayz.Colour.Text } }
 			if status.ok then
-				table.insert(lines, { text = "Shift: as many as possible", colour = Style.Colour.Gray })
+				table.insert(lines, { text = "Shift: as many as possible", colour = Dayz.Colour.TextMuted })
 			else
-				table.insert(lines, { text = status.reason or JeiTransfer.FAILED, colour = Style.Colour.Red })
+				table.insert(lines, { text = status.reason or JeiTransfer.FAILED, colour = Dayz.Colour.Warning })
 			end
 			return lines
 		end
 		local mark = widget.shapeless
 		if mark and Style.contains(mark, point) then
-			return { { text = "Shapeless", colour = Style.Colour.Text } }
+			return { { text = "Shapeless", colour = Dayz.Colour.Text } }
 		end
 	end
 	for _, tab in self.tabs do
 		local art = if tab.active.Visible then tab.activeArt elseif tab.inactive.Visible then tab.inactiveArt else nil
 		if art and Style.contains(art, point) then
-			return { { text = JeiData.TITLES[tab.category], colour = Style.Colour.Text } }
+			return { { text = JeiData.TITLES[tab.category], colour = Dayz.Colour.Text } }
 		end
 	end
 	return nil

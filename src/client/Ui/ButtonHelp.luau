@@ -170,6 +170,7 @@ local TEXTS: { [string]: Entry } = {
 		hideAccessory = "Hides this accessory's look; it still works.",
 		showAccessory = "Shows this accessory's look again.",
 	},
+	["inventory.section"] = { collapse = "Hides this section.", expand = "Shows this section." },
 	["creative.inventoryTab"] = "Your survival inventory: armor, equipment and crafting.",
 	["creative.close"] = "Closes the item selection.",
 

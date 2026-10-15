@@ -26,6 +26,14 @@
 	               checked again when the player's progression changes
 
 	Lookups that find nothing do nothing, like JEI.
+
+	Placement (`place`, every frame from Ui/Screens: nothing is laid out again while it is the same):
+	the survival inventory docks the list into its ITEMS section (`docked`, the inventory's dock
+	table: JeiLayout.docked, worked out again only when that table or the scale changes; hidden
+	while the dock is false or too small) and centres the recipe view over its centre and right
+	columns (`viewX`); the creative screen keeps the list beside its panel (JeiLayout.list, worked
+	out again only when the screen's numbers change) and the view in the middle. Both are drawn in
+	the inventory family's survival look (Style.Dayz, scaled with the GUI scale).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -105,6 +113,16 @@ type Self = Jei & {
 	viewScale: UIScale,
 	history: { RecipeView.State },
 	transferDirty: boolean,
+	-- The list's layout and what it was worked out from (place: nothing new while they match).
+	layout: JeiLayout.ListLayout?,
+	dock: { x: number, y: number, w: number, h: number }?,
+	docked: boolean,
+	keyX: number,
+	keyTop: number,
+	keyBottom: number,
+	keyRight: number,
+	keyScale: number,
+	viewX: number?,
 }
 
 local Jei = {}
@@ -129,6 +147,15 @@ function Jei.new(parent: Instance, host: Host): Jei
 			viewScale = viewScale,
 			history = {},
 			transferDirty = true,
+			layout = nil,
+			dock = nil,
+			docked = false,
+			keyX = -1,
+			keyTop = -1,
+			keyBottom = -1,
+			keyRight = -1,
+			keyScale = -1,
+			viewX = nil,
 		}, Jei) :: any
 	) :: Self
 
@@ -188,12 +215,44 @@ function Jei.setVisible(self: Self, visible: boolean)
 	end
 end
 
+--[[
+	Places the list and the view (see the header): docked where the inventory says, or beside the
+	screen's panel; worked out again only when what it is worked out from changed.
+]]
 function Jei.place(self: Self, placement: Placement)
-	local layout =
-		JeiLayout.list(placement.viewportX, placement.top, placement.bottom, placement.guiRight, placement.scale)
-	self.list:setLayout(layout)
+	local scale = placement.scale
+	if placement.docked then
+		local dock = placement.dock
+		if type(dock) ~= "table" then
+			self.layout, self.dock = nil, nil
+		elseif not self.docked or dock ~= self.dock or scale ~= self.keyScale then
+			self.dock, self.keyScale = dock, scale
+			self.layout = JeiLayout.docked(dock.x, dock.y, dock.w, dock.h, scale)
+		end
+		self.docked = true
+	elseif
+		self.docked
+		or placement.viewportX ~= self.keyX
+		or placement.top ~= self.keyTop
+		or placement.bottom ~= self.keyBottom
+		or placement.guiRight ~= self.keyRight
+		or scale ~= self.keyScale
+	then
+		self.docked, self.dock = false, nil
+		self.keyX, self.keyTop, self.keyBottom, self.keyRight, self.keyScale =
+			placement.viewportX, placement.top, placement.bottom, placement.guiRight, scale
+		self.layout = JeiLayout.list(placement.viewportX, placement.top, placement.bottom, placement.guiRight, scale)
+	end
+	self.list:setLayout(self.layout)
 	if self.viewScale.Scale ~= placement.viewScale then
 		self.viewScale.Scale = placement.viewScale
+	end
+	self.view:setScale(placement.viewScale)
+	-- The view over the inventory's centre and right columns, or in the middle of the screen.
+	local viewX = placement.viewX
+	if viewX ~= self.viewX then
+		self.viewX = viewX
+		self.view.root.Position = if viewX then UDim2.new(0, viewX, 0.5, 0) else UDim2.fromScale(0.5, 0.5)
 	end
 end
 
@@ -374,8 +433,8 @@ function Jei.tooltipAt(self: Self, point: Vector2): (number?, { Line }?)
 	if fluid then
 		return nil,
 			{
-				{ text = Fluids.name(fluid.fluid), colour = Style.Colour.Text },
-				{ text = JeiData.fluidAmount(fluid), colour = Style.Colour.Gray },
+				{ text = Fluids.name(fluid.fluid), colour = Style.Dayz.Colour.Text },
+				{ text = JeiData.fluidAmount(fluid), colour = Style.Dayz.Colour.TextMuted },
 			}
 	end
 	local item, items = self.view:itemAt(point)
@@ -383,11 +442,11 @@ function Jei.tooltipAt(self: Self, point: Vector2): (number?, { Line }?)
 		-- (A locked recipe's output: what it needs.)
 		local lock = self.view:lockAt(point)
 		if lock then
-			return item, { { text = lock, colour = Style.Colour.Red } }
+			return item, { { text = lock, colour = Style.Dayz.Colour.Warning } }
 		end
 		local tag = JeiData.tagOf(items)
 		if tag then
-			return item, { { text = `Any {tag}`, colour = Style.Colour.Gray } }
+			return item, { { text = `Any {tag}`, colour = Style.Dayz.Colour.TextMuted } }
 		end
 		return item, nil
 	end

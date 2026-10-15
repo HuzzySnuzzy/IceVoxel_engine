@@ -3,12 +3,23 @@
 	Where JEI's pieces go, in Minecraft GUI pixels like the other screens (Ui/MenuLayout). Pure: no
 	Roblox APIs, so the tests check that nothing overlaps.
 
-	  item list    the grid of every item at the right of the screen, beside the inventory panel:
-	               the page row on top ("<", "n / m" or just "n" when narrow, ">"), rows of 18 x 18
-	               item cells, the search field at the bottom. As many columns as fit right of the
-	               panel (at most MAX_COLUMNS), centred in that space; fewer on narrow screens, and
-	               none at all (hidden) when not even MIN_COLUMNS fit. As many rows as fit, up to
-	               MAX_ROWS.
+	  item list    the grid of every item: the page row on top ("<", "n / m" or just "n" when
+	               narrow, ">"), rows of 18 x 18 item cells, the search field at the bottom. Two
+	               places:
+	                 beside   (`list`: the creative screen) at the right of the screen, beside the
+	                          panel: as many columns as fit right of it (at most MAX_COLUMNS),
+	                          centred in that space; fewer on narrow screens, and none at all
+	                          (hidden) when not even MIN_COLUMNS fit. As many rows as fit, up to
+	                          MAX_ROWS.
+	                 docked   (`docked`: the survival inventory's ITEMS section) filling a rect
+	                          given in screen pixels and GUI pixels, DOCK_PAD inside its edges: as
+	                          many columns and rows as fit (the same caps), the grid centred in the
+	                          width; hidden when not MIN_COLUMNS columns or one row fit. The ITEMS
+	                          bar above it is the inventory's own.
+	               A layout's cells (`sameCells`: its columns and rows) and its placement
+	               (`samePlacement`: where, how big, at what scale, docked or not) are told apart, so
+	               the list rebuilds its cells only when they change and moves its parts whenever
+	               the placement does.
 	  recipe view  a 176 x 166 panel (the inventory's size, so it takes the inventory's place) with
 	               category tabs above it: the title row (Back, the category's name, a touch close
 	               button), the page row, then as many recipes of the category as fit, each drawn
@@ -63,6 +74,8 @@ export type ListLayout = {
 	width: number,
 	height: number,
 	scale: number,
+	-- Filling the inventory's ITEMS section (`docked`), not beside a panel (`list`; nil reads false).
+	docked: boolean?,
 }
 
 JeiLayout.SLOT = 18
@@ -79,6 +92,8 @@ JeiLayout.GAP = 6
 JeiLayout.MARGIN = 4
 -- Page row: arrow buttons at both ends.
 JeiLayout.ARROW_W, JeiLayout.ARROW_H = 12, 12
+-- GUI pixels a docked list keeps inside its rect's edges.
+JeiLayout.DOCK_PAD = 1
 
 -- Recipe view: the panel (the tabs add ItemIcon.TAB_HEIGHT above it).
 JeiLayout.VIEW_WIDTH = 176
@@ -241,7 +256,52 @@ function JeiLayout.list(viewportX: number, top: number, bottom: number, guiRight
 		width = width,
 		height = JeiLayout.NAV_HEIGHT + rows * slot + JeiLayout.SEARCH_HEIGHT,
 		scale = scale,
+		docked = false,
 	}
+end
+
+--[[
+	The item list filling a rect (the inventory's ITEMS body): `x`, `y` its top left in screen
+	pixels, `w` x `h` GUI pixels, at GUI `scale`. As many columns and rows as fit inside DOCK_PAD
+	(capped like `list`'s), the grid centred in the width; the layout is the whole rect. nil when
+	fewer than MIN_COLUMNS columns or no row fit.
+]]
+function JeiLayout.docked(x: number, y: number, w: number, h: number, scale: number): ListLayout?
+	if scale <= 0 or w ~= w or h ~= h then
+		return nil
+	end
+	local slot, pad = JeiLayout.SLOT, JeiLayout.DOCK_PAD
+	local columns = math.min(JeiLayout.MAX_COLUMNS, math.floor((w - 2 * pad) / slot))
+	local rows =
+		math.min(JeiLayout.MAX_ROWS, math.floor((h - JeiLayout.NAV_HEIGHT - JeiLayout.SEARCH_HEIGHT - 2 * pad) / slot))
+	if columns < JeiLayout.MIN_COLUMNS or rows < 1 then
+		return nil
+	end
+	return {
+		columns = columns,
+		rows = rows,
+		x = x,
+		y = y,
+		width = w,
+		height = h,
+		scale = scale,
+		docked = true,
+	}
+end
+
+-- Do two layouts have the same cells (columns and rows)?
+function JeiLayout.sameCells(a: ListLayout, b: ListLayout): boolean
+	return a.columns == b.columns and a.rows == b.rows
+end
+
+-- Are two layouts placed alike (where, how big, at what scale, docked or not)?
+function JeiLayout.samePlacement(a: ListLayout, b: ListLayout): boolean
+	return a.x == b.x
+		and a.y == b.y
+		and a.width == b.width
+		and a.height == b.height
+		and a.scale == b.scale
+		and (a.docked == true) == (b.docked == true)
 end
 
 --[[
@@ -256,17 +316,22 @@ function JeiLayout.pageText(page: number, pages: number, room: number, measure: 
 	return tostring(page)
 end
 
--- The list's parts in its own GUI pixels: the page arrows and text, the grid's top, the search field.
+--[[
+	The list's parts in its own GUI pixels: the page arrows and text, the grid, the search field. A
+	docked list keeps them DOCK_PAD inside its edges, the grid (columns x 18) centred in its width.
+]]
 function JeiLayout.listParts(layout: ListLayout): { prev: Rect, next: Rect, page: Rect, grid: Rect, search: Rect }
-	local w = layout.width
-	local gridTop = JeiLayout.NAV_HEIGHT
+	local pad = if layout.docked then JeiLayout.DOCK_PAD else 0
+	local w = layout.width - 2 * pad
+	local gridTop = pad + JeiLayout.NAV_HEIGHT
 	local gridHeight = layout.rows * JeiLayout.SLOT
+	local gridWidth = if layout.docked then layout.columns * JeiLayout.SLOT else w
 	return {
-		prev = rect(0, 1, JeiLayout.ARROW_W, JeiLayout.ARROW_H),
-		next = rect(w - JeiLayout.ARROW_W, 1, JeiLayout.ARROW_W, JeiLayout.ARROW_H),
-		page = rect(JeiLayout.ARROW_W, 3, w - 2 * JeiLayout.ARROW_W, 8),
-		grid = rect(0, gridTop, w, gridHeight),
-		search = rect(0, gridTop + gridHeight + 3, w, 12),
+		prev = rect(pad, pad + 1, JeiLayout.ARROW_W, JeiLayout.ARROW_H),
+		next = rect(pad + w - JeiLayout.ARROW_W, pad + 1, JeiLayout.ARROW_W, JeiLayout.ARROW_H),
+		page = rect(pad + JeiLayout.ARROW_W, pad + 3, w - 2 * JeiLayout.ARROW_W, 8),
+		grid = rect(pad + math.floor((w - gridWidth) / 2), gridTop, gridWidth, gridHeight),
+		search = rect(pad, gridTop + gridHeight + 3, w, 12),
 	}
 end
 
