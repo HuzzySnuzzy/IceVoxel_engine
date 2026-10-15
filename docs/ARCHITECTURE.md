@@ -6090,7 +6090,10 @@ burp unless `burp` is false).
   per limb, the hat and vest). A rig is scaled `sy = height × BlockSize / 5.2`, `sx = sy ×
   rig.width` (default 0.8), then posed rigidly: each part's frame is its parent's × the pivot's
   offset × Rx(pitch) × Rz(roll) × the centre's offset, composed in plain numbers (12 a part,
-  CFrame.new's order; no CFrame, so Lune measures it as Roblox runs it). Gaits (`GAITS`): shamble
+  CFrame.new's order; no CFrame, so Lune measures it as Roblox runs it). The proportions and
+  stances the bullets' boxes follow (the R15 height, root, waist, neck and head, each standing
+  gait's lean and droop, the crawl's pose) are `Shared/Entities/MobShape`'s, read here, so a head
+  is hit where it is drawn (the Ballistics spec poses every kind to check). Gaits (`GAITS`): shamble
   (Minecraft's zombie: legs ±cos(phase × 0.6662) × 1.4 × walk, arms forward −π/2.25, −π/1.9
   aggressive, an id-hashed head tilt, sway), run (a sprinter's stride, arms pumping), brute
   (splayed, hunched), crawl (pitched 88° about the hips 0.22 blocks above the floor, arms reaching,
@@ -6371,12 +6374,26 @@ inventory prediction, and draws its own shot at once. Everything that decides is
   | 4 fire mode | the mode changed | `mode` | `Config.Weapons.ModeTicks` |
   | anything else (5 the light, 6 detach, a refused op, another item) | | nil | 0 |
 
+  `changeLock` is the same for a gun changed in hand by anything but a weapon op (an inventory
+  click, drag, key or creative slot on the hotbar slot in hand): any change to a firearm there
+  (its magazine, chamber, rounds, jam, fire mode, parts or wear, or another stack in its place)
+  lowers it, and the same gun locks as long as the ops that do the same, added up: a magazine in
+  `reloadTicks`, a round chambered `chamberTicks`, an internal feed's rounds `roundTicks` each, a
+  jam gone `UnjamTicks`, the fire mode `ModeTicks`. Taking things out, mounting a part and another
+  item lock nothing beyond the lowering (server `Weapons/WeaponActions.changed`, client
+  `Player/AimRules.handChanged`), so a gun loaded in the inventory screen fires no sooner than one
+  loaded with R.
+
 - **Ballistics**: a shot's flight, hitscan along a gravity arc lifted by the gun's zero, in
   `SegmentSeconds` chords through `World/VoxelRaycast` on `Blocks/Shapes.sight`'s collision boxes
   (no wall stepped over at any speed; an unloaded cell ends the flight), glass shattered through
   (at most `MAX_PANES` 8, `GlassShare` of the damage kept each) when the shooter may build, leaves
-  passed, mob and player boxes with their heads (the first box entered counts; beside the head is
-  the head's), a mob's box where the shooter's client last saw it (lag compensation), damage with
+  passed, mob and player boxes with their heads (a mob's where it is drawn, `Shared/Entities/
+  MobShape`: a standing zombie's torso to its drawn neck and its drawn head above it, a crawler's
+  and an animal's head in front of their box, each head `HEAD_MARGIN` 0.1 round the drawing; the
+  first box entered counts, so a ray into a crawler's back hits the back; beside a player's head,
+  in their body box, is the head's), a mob's box where the shooter's client last saw it (lag
+  compensation), damage with
   falloff past the round's range and head factors, pellets in their cone, and the bounds of a
   flight (one `Mobs.targets` call a shot).
 - **Loading**: DayZ's combine through `Inventory/Menu`'s PICKUP hook (`click`, before
@@ -6384,9 +6401,10 @@ inventory prediction, and draws its own shot at once. Everything that decides is
   hand, clear a jam, the fire mode, the light, detach a part; `combines` and `kind` give the
   screens' outlines and sounds. Deterministic, so the prediction and the server agree action by
   action.
-- **Melee**: the melee rework's numbers (`Config.Weapons.Melee`): `heavy` (a heavy flag counts
-  only with a listed weapon), `heavyHold`, `heavyDamage`, `knockback`, `exhaustion`,
-  `guardShare` (the weapon's share from a 120 degree front cone) and `finisher`.
+- **Melee**: the melee rework's numbers (`Config.Weapons.Melee`): `mayAttack` (no Attack while
+  guarding or with a gun raised), `heavy` (a heavy flag counts only with a listed weapon),
+  `heavyHold`, `heavyDamage`, `knockback`, `exhaustion`, `guardShare` (the weapon's share from a
+  120 degree front cone) and `finisher`.
 - **Describe**: a weapon's tooltip lines (`Items/Tooltip` requires it): the stack's state under
   its name and the item's stat block.
 
@@ -6408,13 +6426,14 @@ alone as a refused record with no pellets, its jam flag set when the reason is "
 ### On the server (`server/Weapons/`)
 
 - **`FireRules`** (pure): the checks in order, the first failing one the reason: rate (silent),
-  disabled, spectator, dead, slot, item, weapon, raise (`RaiseTicks`, a tick of slack), busy (a
-  weapon action's lock), cadence, origin (the claimed eyes within `OriginSlack` of the server's,
-  no block between, a unit aim), ruined, jammed, empty; the flight's numbers, targets (mobs with
-  their helmets and last-seen boxes, players at their pose-aware eyes), damage summed per target
-  (a head's share apart: through no armour on a mob, the helmet alone on a player), knockback, the
-  impact's noise, the Shots record (each pellet's last impact: never glass, which a pellet always
-  passes or stops at as a block), who hears it, and bolt recovery.
+  disabled, spectator, dead, slot, item, weapon, raise (in this hotbar slot with this item,
+  `RaiseTicks` ago, a tick of slack), busy (a weapon action's lock), cadence, origin (the claimed
+  eyes within `OriginSlack` of the server's, no block between, a unit aim), ruined, jammed, empty;
+  the flight's numbers, targets (mobs with their helmets and last-seen boxes, players at their
+  pose-aware eyes), damage summed per target (a head's share apart: through no armour on a mob, the
+  helmet alone on a player), knockback, the impact's noise, the Shots record (each pellet's last
+  impact: never glass, which a pellet always passes or stops at as a block), who hears it, and bolt
+  recovery.
 - **`Firing`**: a Fire message played out on the world it is handed: acknowledged, checked, the
   jam rolled (`Handling.jamChance`; never in creative), the round fired (`Inventories.fire`),
   every pellet traced, mobs hurt (`Mobs.weaponDamage`) and players (`Characters.weaponHurt`:
@@ -6426,32 +6445,41 @@ alone as a refused record with no pellets, its jam flag set when the reason is "
   `Types.AIM_ATTRIBUTE` ("raised", "guard"), dropped when the hand or slot changes, the player
   dies or becomes a spectator, or a character comes or goes; the inventory's weapon actions pass
   its `allow` (ops 1..4 refused while a lock runs) and `applied` (`effect`: the lock of
-  `Handling.actionLock`, and the predicted sounds for the others: reload, chamber, load_round).
+  `Handling.actionLock`, and the predicted sounds for the others: reload, chamber, load_round);
+  every other inventory action its `changed` (the hotbar slot in hand before and after it):
+  `Handling.changeLock` lowers a gun changed there and starts the op's lock after any running,
+  and the aim is looked over at once (another slot or item drops it before any shot of the frame).
 - **`init`**: the glue that hands them the real modules (`Players/Inventories` with
   `setWeaponHooks`, `Players/Characters`, `Mobs/Mobs`, `Apocalypse/NoiseBus`, `Entities/Entities`,
   the world), every Heartbeat the aims' `tick` and the Shots' `flush`.
-- Elsewhere: `Mobs/Mobs`' Attack handler gates the client's heavy flag with `Melee.heavy` (with
-  the held item) before building MobWorld's Attacker and before the food it costs, so a sword
-  never gets a heavy hit's knockback; MobWorld lands heavy hits and finishers; a zombie's hit on a
-  guarding player is cut by `Melee.guardShare` (`item.melee.block`). `Players/Inventories` holds
-  the weapon hooks, sets `HELD_LOOK_ATTRIBUTE` with each snapshot, and never wears a firearm or a
-  magazine as a tool. `Generation/ScavengeLoot` rolls worn guns (an entry's fifth field) into
-  police stations, bunker armories and houses; `Entities/MobList` gives police and soldier zombies
-  rounds and magazines.
+- Elsewhere: `Mobs/Mobs`' Attack handler refuses an Attack while the player guards or holds a gun
+  raised (`Melee.mayAttack` of the aim attribute), and gates the client's heavy flag with
+  `Melee.heavy` (with the held item) before building MobWorld's Attacker and before the food it
+  costs, so a sword never gets a heavy hit's knockback; MobWorld lands heavy hits and finishers; a
+  zombie's hit on a guarding player is cut by `Melee.guardShare` (`item.melee.block`).
+  `Players/Inventories` holds the weapon hooks (`changed` after every action but a weapon action),
+  sets `HELD_LOOK_ATTRIBUTE` with each snapshot, and never wears a firearm or a magazine as a tool.
+  `Generation/ScavengeLoot` rolls worn guns (an entry's fifth field) into police stations, bunker
+  armories and houses; `Entities/MobList` gives police and soldier zombies rounds and magazines.
 
 ### On the client
 
-- **`Interaction/Firearms`** reads the input and runs `Player/AimRules`' state machine every
-  frame (raise with the use button, the sights in first person or with V, lowered by anything that
+- **`Interaction/Firearms`** reads the input and runs `Player/AimRules`' state machine every frame
+  (raise with the use button, the sights in first person or with V, lowered by anything that
   blocks), tells the server raise and lower, fires on the attack button once `AimRules.settled`
-  (RaiseTicks and a tick of margin) at the cadence of `Handling`: each shot aims from the hull's
-  eyes at what the camera's centre ray hits, is predicted (`ClientInventory.fire`), sent (Fire)
-  and drawn at once (`ShotView.ownShot`), and kicks the camera (`Player/AimCamera`) and the
-  first-person model (`Player/HeldItems.kick`). R, F and L are inventory weapon ops (predicted
-  and sent); `Handling.actionLock` of the prediction's before and after starts the same lock the
-  server starts. The server's refused or jammed record of a shot of the press held now
-  (`AimRules.thisPress`: shot counters, wrapping) stops automatic fire; a jam clicks.
-- **`Player/AimRules`** (pure): posture, trigger and cadence, timed actions and their progress,
+  (RaiseTicks and a tick of margin) at the cadence of `Handling` (a press is latched,
+  `AimRules.press`, so a click, a FIRE tap or an R2 flick shorter than a frame fires once): each
+  shot aims from the hull's eyes at what the camera's centre ray hits, is predicted
+  (`ClientInventory.fire`), sent (Fire) and drawn at once (`ShotView.ownShot`), and kicks the camera
+  (`Player/AimCamera`) and the first-person model (`Player/HeldItems.kick`). R, F and L are
+  inventory weapon ops (predicted and sent); `Handling.actionLock` of the prediction's before and
+  after starts the same lock the server starts. Any other predicted action that changed the gun in
+  hand (`ClientInventory.onHand`) lowers it and starts `Handling.changeLock`'s lock
+  (`AimRules.handChanged`), as the server does. The server's refused or jammed record of a shot of
+  the press held now (`AimRules.thisPress`: shot counters, wrapping) stops automatic fire; a jam
+  clicks.
+- **`Player/AimRules`** (pure): posture, trigger and cadence (a press latched until the next
+  pull), timed actions and their progress (`addBusy` queues a click's lock after one running),
   round-by-round loading, speed (`setAimSlow`'s factor: raised, sights, a melee guard), zoom and
   field of view, recoil and its recovery, the model's kick, the sway's growing in, the
   first-person hip pose, the third-person arms and gun, the melee guard's and wind-up's poses
@@ -6477,7 +6505,10 @@ alone as a refused record with no pellets, its jam flag set when the reason is "
   under the held item's box (`Ui/Hud.weaponAnchor`); **`Ui/WeaponButtons`**: the touch AIM, FIRE
   and RELOAD buttons.
 - **`Interaction/MeleeInput`**: a listed melee weapon's press lands on release (heavy after
-  `HeavyHold`), the guard's Weapon ops, `guarding` and `charge` for the poses and the slowness.
+  `HeavyHold`), the guard's Weapon ops, `guarding` and `charge` for the poses and the slowness,
+  `pressing` (a press waiting or the guard up) for **`Interaction/AttackRules`** (pure): the attack
+  button breaks no block meanwhile (`breaking`: never with a firearm either), and a tap on a mob
+  with a firearm does nothing (`tap`: no bash, and not the door behind it).
 - **The inventory**: `Ui/InventoryScreen`'s HANDS chips (op 6, detach), `Ui/ItemIcon`'s rounds in
   the count box, `Ui/Screens.feedbackAt` asking `Loading.combines` first, and the load, attach and
   unload sounds played from the screen.

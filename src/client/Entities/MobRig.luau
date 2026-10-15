@@ -99,6 +99,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local MobList = require(Shared.Entities.MobList)
+local MobShape = require(Shared.Entities.MobShape)
 
 local MobModel = require(script.Parent.MobModel)
 
@@ -108,10 +109,11 @@ local cos, sin = math.cos, math.sin
 
 local MobRig = {}
 
--- Studs from an R15 rig's feet to the top of its head, at scale 1.
-MobRig.R15_HEIGHT = 5.2
+-- Studs from an R15 rig's feet to the top of its head, at scale 1 (Shared/Entities/MobShape's, as
+-- every proportion and stance the bullets' boxes are sized by).
+MobRig.R15_HEIGHT = MobShape.R15_HEIGHT
 -- The rig's width when a kind's rig gives none (times the 4 stud R15 width).
-MobRig.DEFAULT_WIDTH = 0.8
+MobRig.DEFAULT_WIDTH = MobShape.DEFAULT_WIDTH
 
 -- Tiers (Entities/MobRigPool).
 MobRig.FULL = 1
@@ -155,9 +157,9 @@ MobRig.FIRE_SLOT = table.freeze({ 2, 1, 1 })
 
 -- Crawling: the pitch of the whole rig (radians, forward), the hips' height above the floor
 -- (blocks) and how far back (blocks) the body slides to lie over its box.
-MobRig.CRAWL_PITCH = math.rad(88)
-MobRig.CRAWL_HEIGHT = 0.22
-MobRig.CRAWL_BACK = 0.3
+MobRig.CRAWL_PITCH = MobShape.CRAWL_PITCH
+MobRig.CRAWL_HEIGHT = MobShape.CRAWL_HEIGHT
+MobRig.CRAWL_BACK = MobShape.CRAWL_BACK
 -- Seconds an attack swing takes (MobModel's), and a lurching zombie's twitch.
 MobRig.SWING = MobModel.SWING
 MobRig.TWITCH = 0.3
@@ -181,7 +183,10 @@ type PartSpec = {
 	joint: number,
 }
 
-local ROOT_PIVOT = { 0, 2.2, 0 }
+local ROOT_PIVOT = { 0, MobShape.ROOT, 0 }
+local HEAD = MobShape.HEAD
+local NECK_PIVOT = { 0, MobShape.NECK, 0 }
+local HEAD_CENTRE = { 0, MobShape.NECK + HEAD / 2, 0 }
 
 local function limb(
 	name: string,
@@ -196,8 +201,15 @@ end
 
 local FULL_PARTS: { PartSpec } = {
 	limb("LowerTorso", { 2, 0.4, 1 }, { 0, 2.2, 0 }, 0, { 0, 2.2, 0 }, NONE),
-	limb("UpperTorso", { 2, 1.6, 1 }, { 0, 3.2, 0 }, 1, { 0, 2.4, 0 }, WAIST),
-	limb("Head", { 1.2, 1.2, 1.2 }, { 0, 4.6, 0 }, 2, { 0, 4.0, 0 }, NECK),
+	limb(
+		"UpperTorso",
+		{ MobShape.TORSO_WIDTH, 1.6, MobShape.TORSO_DEPTH },
+		{ 0, 3.2, 0 },
+		1,
+		{ 0, MobShape.WAIST, 0 },
+		WAIST
+	),
+	limb("Head", { HEAD, HEAD, HEAD }, HEAD_CENTRE, 2, NECK_PIVOT, NECK),
 	limb("LeftUpperArm", { 1, 1, 1 }, { 1.5, 3.5, 0 }, 2, { 1.5, 3.65, 0 }, L_SHOULDER),
 	limb("LeftLowerArm", { 1, 0.7, 1 }, { 1.5, 2.65, 0 }, 4, { 1.5, 3.0, 0 }, L_ELBOW),
 	limb("LeftHand", { 1, 0.3, 1 }, { 1.5, 2.15, 0 }, 5, { 1.5, 2.3, 0 }, NONE),
@@ -214,7 +226,7 @@ local FULL_PARTS: { PartSpec } = {
 
 local REDUCED_PARTS: { PartSpec } = {
 	limb("Torso", { 2, 2, 1 }, { 0, 3.0, 0 }, 0, { 0, 2.4, 0 }, WAIST),
-	limb("Head", { 1.2, 1.2, 1.2 }, { 0, 4.6, 0 }, 1, { 0, 4.0, 0 }, NECK),
+	limb("Head", { HEAD, HEAD, HEAD }, HEAD_CENTRE, 1, NECK_PIVOT, NECK),
 	limb("LeftArm", { 1, 2, 1 }, { 1.5, 3.0, 0 }, 1, { 1.5, 3.65, 0 }, L_SHOULDER),
 	limb("RightArm", { 1, 2, 1 }, { -1.5, 3.0, 0 }, 1, { -1.5, 3.65, 0 }, R_SHOULDER),
 	limb("LeftLeg", { 1, 2, 1 }, { 0.5, 1.0, 0 }, 0, { 0.5, 2.0, 0 }, L_HIP),
@@ -266,45 +278,50 @@ local GAITS: { [number]: Gait } = {
 		legs = 1.4,
 		knees = 0.5,
 		splay = 0,
-		lean = 0.06,
+		lean = MobShape.GAITS.shamble.lean,
 		sway = 0.06,
 		arms = PI / 2.25,
 		aggressive = PI / 1.9,
 		elbows = 0.2,
 		bob = 1,
 		pump = 0,
-		droop = 0.12,
+		droop = MobShape.GAITS.shamble.droop,
 	},
 	[RUN] = {
 		frequency = 0.7,
 		legs = 0.6,
 		knees = 0.9,
 		splay = 0,
-		lean = 0.25,
+		lean = MobShape.GAITS.run.lean,
 		sway = 0.04,
 		arms = PI / 3,
 		aggressive = PI / 3,
 		elbows = 1.2,
 		bob = 0.5,
 		pump = 0.8,
-		droop = 0,
+		droop = MobShape.GAITS.run.droop,
 	},
 	[BRUTE] = {
 		frequency = 0.8,
 		legs = 1.4 * 0.8,
 		knees = 0.4,
 		splay = 0.08,
-		lean = 0.1,
+		lean = MobShape.GAITS.brute.lean,
 		sway = 0.1,
 		arms = PI / 2.6,
 		aggressive = PI / 2.1,
 		elbows = 0.25,
 		bob = 2,
 		pump = 0,
-		droop = 0.15,
+		droop = MobShape.GAITS.brute.droop,
 	},
 }
 GAITS[LURCH] = GAITS[SHAMBLE]
+assert(
+	MobShape.GAITS.lurch.lean == MobShape.GAITS.shamble.lean
+		and MobShape.GAITS.lurch.droop == MobShape.GAITS.shamble.droop,
+	"the lurch stands as the shamble"
+)
 -- (The crawl has its own code; its numbers are the constants below.)
 GAITS[CRAWL] = GAITS[SHAMBLE]
 -- Crawling arms reach (pitch) and claw (+-, at walk 0.7 and above), the legs' drag and splay,
@@ -313,7 +330,7 @@ MobRig.CRAWL_REACH = -PI / 1.1
 MobRig.CRAWL_CLAW = 0.35
 MobRig.CRAWL_DRAG = 0.15
 MobRig.CRAWL_SPLAY = 0.12
-MobRig.CRAWL_LOOK = 0.4
+MobRig.CRAWL_LOOK = MobShape.CRAWL_LOOK
 -- A crawler's attack lifts its arms this much, a scream its head this much more (radians).
 MobRig.CRAWL_LIFT = 0.3
 MobRig.CRAWL_SHRIEK = 0.15

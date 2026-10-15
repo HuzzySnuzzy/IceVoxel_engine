@@ -8,6 +8,10 @@
 
 	  spec         the weapon's numbers (Weapons.melee), nil for anything else and while the rework
 	               is off
+	  mayAttack    may a player attack at all (an Attack message, server Mobs/Mobs) holding their
+	               weapon as the aim attribute says (Inventory/Types.AIM_ATTRIBUTE): never while
+	               guarding (no attacks from behind the guard) nor with a gun raised (its attack
+	               button fires it; only a lowered gun bashes). The client sends none then.
 	  heavy        does an Attack's heavy flag count: only with a listed weapon (a client that sends
 	               the flag with a sword gets a light hit)
 	  heavyHold    is a press held this long a heavy attack (the client's call on release): a
@@ -40,6 +44,7 @@
 
 local Combat = require(script.Parent.Parent.Entities.Combat)
 local Config = require(script.Parent.Parent.Config)
+local Types = require(script.Parent.Parent.Inventory.Types)
 local Weapons = require(script.Parent)
 
 local Melee = {}
@@ -54,6 +59,11 @@ function Melee.spec(item: number?): Weapons.MeleeSpec?
 		return nil
 	end
 	return Weapons.melee(item)
+end
+
+-- May a player whose aim attribute is `aim` attack (see the header)?
+function Melee.mayAttack(aim: unknown): boolean
+	return aim ~= Types.AIM_GUARD and aim ~= Types.AIM_RAISED
 end
 
 -- Does an Attack's heavy flag count with `item` in hand (see the header)?

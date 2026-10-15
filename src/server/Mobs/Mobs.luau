@@ -39,8 +39,10 @@
 	             else its own break sound (those are noises too: Audio/Sounds.play; a door, whose
 	             zombie sound is none, makes Noise.Break's 10 through Apocalypse/NoiseBus). A
 	             screamer's shriek goes to Apocalypse/NoiseBus, heard next tick.
-	  Attacks    Protocol Attack (mob id), at most Config.Mobs.AttacksPerSecond a player:
-	             MobWorld.attack checks the player (alive, not a spectator), the reach from their
+	  Attacks    Protocol Attack (mob id), at most Config.Mobs.AttacksPerSecond a player, none
+	             while the player guards or holds a gun raised (Types.AIM_ATTRIBUTE:
+	             Shared/Weapons/Melee.mayAttack): MobWorld.attack checks the player (alive, not a
+	             spectator), the reach from their
 	             eyes (Shared/Entities/Combat: 3 blocks, 6 in creative, plus a block of leeway) and
 	             the line of sight, then hits with the held item at its attack strength (ticks
 	             since the player's last attack or change of held item; Feral Claws' attack speed
@@ -418,6 +420,10 @@ local function onAttack(player: Player, payload: buffer)
 		return
 	end
 	bucket.tokens -= 1
+	-- (No attack from behind a guard, nor with a gun raised: its attack button fires it.)
+	if not Melee.mayAttack(player:GetAttribute(Types.AIM_ATTRIBUTE)) then
+		return
+	end
 	local fx, fy, fz = feetOf(player)
 	if fx == nil then
 		return

@@ -28,7 +28,10 @@
 	mode). Adventure plays like survival here; its limits are on blocks (BlockInteraction).
 
 	`changed` fires (deferred, once per change) after the prediction changes: a snapshot, a local
-	action or a game mode switch.
+	action or a game mode switch. `onHand`'s callback (Interaction/Firearms) hears of every local
+	action but a weapon action, with the stack in the hotbar slot in hand before it and that same
+	slot's after (a gun loaded or swapped in hand by a click comes down and takes the action's
+	time, as the server's Weapons/WeaponActions.changed has it).
 ]]
 
 local Players = game:GetService("Players")
@@ -48,6 +51,7 @@ local player = Players.LocalPlayer
 local prediction = Prediction.new()
 local changedEvent = Instance.new("BindableEvent")
 local started = false
+local handHook: ((before: Types.Stack?, after: Types.Stack?) -> ())? = nil
 
 local ClientInventory = {}
 
@@ -152,9 +156,23 @@ function ClientInventory.apply(action: Types.Action)
 	if not Menu.allows(action, current) then
 		return
 	end
+	local hook = if action.kind ~= "weapon" then handHook else nil
+	local slot = prediction:window().inventory.selected
+	local before = if hook then Items.copyStack(prediction:window().inventory.slots[slot]) else nil
 	local seq = prediction:push(action, current)
 	ClientNet.send(Protocol.ClientMessage.Inventory, Protocol.encodeInventoryAction(seq, action))
+	if hook then
+		hook(before, prediction:window().inventory.slots[slot])
+	end
 	notify()
+end
+
+--[[
+	Hears of every local action but a weapon action (see the header): `hook(before, after)`, the
+	stack in the hotbar slot in hand before it (a copy) and that slot's after. One hook (nil: none).
+]]
+function ClientInventory.onHand(hook: ((before: Types.Stack?, after: Types.Stack?) -> ())?)
+	handHook = hook
 end
 
 -- Selects hotbar slot 1..9.

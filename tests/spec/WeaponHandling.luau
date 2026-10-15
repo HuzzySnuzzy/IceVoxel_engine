@@ -2,8 +2,9 @@
 	Weapon handling (Shared/Weapons/Handling): the cadence both sides keep (slack and credit, and
 	no run of shots faster than the rate), spread, recoil (deterministic, recovering), sway and
 	holding breath, the condition levels against the survival look's (Ui/Theme), jam chances,
-	noise with suppressors, reload times and zoom, and how long a weapon action locks the gun
-	(`actionLock`, the one rule of server Weapons/WeaponActions and client Interaction/Firearms).
+	noise with suppressors, reload times and zoom, how long a weapon action locks the gun
+	(`actionLock`, the one rule of server Weapons/WeaponActions and client Interaction/Firearms),
+	and what a gun changed in hand by anything else costs (`changeLock`, theirs too).
 ]]
 
 return function(t, shared, require, _server, client)
@@ -283,5 +284,81 @@ return function(t, shared, require, _server, client)
 		local own = table.clone(s)
 		own.UnjamTicks = 7
 		t.eq(select(2, Handling.actionLock(3, loaded(3, { jam = true }), loaded(2), own)), 7)
+	end)
+
+	t.test("handling: a gun changed in hand by no weapon op comes down and locks as the ops would", function()
+		local function gun(name: string, data: { [string]: any }?): Items.Stack
+			local stack: Items.Stack = { item = I[name], count = 1 }
+			return if data then Items.withData(stack, data) else stack
+		end
+		local s = Config.Weapons
+		local pistol, revolver = spec("Pistol"), spec("Revolver")
+		local mag, nine, r357 = I.PistolMagazine, I.Rounds9mm, I.Rounds357
+		local function loaded(n: number, extra: { [string]: any }?): Items.Stack
+			local data: { [string]: any } = { mag = mag, n = n, ammo = nine, ch = nine }
+			for k, v in extra or {} do
+				data[k] = v
+			end
+			return gun("Pistol", data)
+		end
+		local function change(before: Items.Stack?, after: Items.Stack?): (boolean, string?, number)
+			return Handling.changeLock(before, after)
+		end
+		-- Nothing changed, or no firearm: nothing.
+		t.eq((change(nil, nil)), false)
+		t.eq((change(loaded(5), loaded(5))), false, "the same gun")
+		t.eq((change(gun("Machete"), gun("Machete", nil))), false, "no firearm")
+		t.eq((change({ item = I.Stone, count = 3 }, { item = I.Stone, count = 2 })), false, "no firearm")
+		-- Another stack in its place, or none: down, no lock beyond the raise.
+		local lowers, kind, ticks = change(loaded(5), nil)
+		t.ok(lowers and kind == nil and ticks == 0, "thrown or taken away")
+		lowers, kind, ticks = change(nil, loaded(5))
+		t.ok(lowers and kind == nil and ticks == 0, "put in hand")
+		lowers, kind, ticks = change(loaded(5), gun("Smg", { ch = nine }))
+		t.ok(lowers and kind == nil and ticks == 0, "another gun")
+		lowers, kind, ticks = change(gun("Machete"), loaded(5))
+		t.ok(lowers and ticks == 0, "a gun for a knife")
+		-- A detachable feed: a magazine in, a round chambered by hand, both.
+		local full = gun("Pistol", { mag = mag, n = 15, ammo = nine })
+		lowers, kind, ticks = change(gun("Pistol", { mag = mag }), full)
+		t.ok(lowers and kind == "reload" and ticks == pistol.reloadTicks, "a magazine clicked in")
+		lowers, kind, ticks = change(full, loaded(15))
+		t.ok(lowers and kind == "chamber" and ticks == pistol.chamberTicks, "a round chambered by hand")
+		lowers, kind, ticks = change(gun("Pistol"), loaded(15))
+		t.eq(ticks, pistol.reloadTicks + pistol.chamberTicks, "another gun of the kind, loaded: R's both")
+		t.eq(kind, "reload")
+		lowers, kind, ticks = change(loaded(2, { magD = 0 }), loaded(2, { magD = 30 }))
+		t.ok(kind == "reload" and ticks == pistol.reloadTicks, "as full, in another condition")
+		-- An internal feed: a round's ticks each, as R round by round.
+		lowers, kind, ticks = change(gun("Revolver"), gun("Revolver", { ch = r357, n = 5, ammo = r357 }))
+		t.ok(lowers and kind == "round", "rounds clicked in")
+		t.eq(ticks, 6 * revolver.roundTicks, "six rounds' ticks")
+		lowers, kind, ticks = change(
+			gun("Revolver", { ch = r357, n = 2, ammo = r357 }),
+			gun("Revolver", { ch = r357, n = 3, ammo = r357 })
+		)
+		t.eq(ticks, revolver.roundTicks, "one more")
+		-- Taken out, mounted, lit: down, no lock.
+		lowers, kind, ticks = change(loaded(5), gun("Pistol", { ch = nine }))
+		t.ok(lowers and kind == nil and ticks == 0, "the magazine out")
+		lowers, kind, ticks = change(gun("Revolver", { ch = r357, n = 3, ammo = r357 }), gun("Revolver"))
+		t.ok(lowers and ticks == 0, "unloaded")
+		lowers, kind, ticks = change(loaded(5), loaded(5, { optic = I.RedDotSight }))
+		t.ok(lowers and ticks == 0, "a sight mounted")
+		lowers, kind, ticks =
+			change(loaded(5, { light = I.WeaponFlashlight }), loaded(5, { light = I.WeaponFlashlight, lit = true }))
+		t.ok(lowers and ticks == 0, "lit")
+		-- A jam gone and the fire mode changed: the ops' locks, added up.
+		lowers, kind, ticks = change(loaded(3, { jam = true }), loaded(14))
+		t.ok(lowers and kind == "reload", "a jammed gun swapped for a loaded one")
+		t.eq(ticks, s.UnjamTicks + pistol.reloadTicks, "clearing the jam and a magazine in")
+		lowers, kind, ticks = change(loaded(3, { jam = true }), loaded(3))
+		t.ok(kind == "unjam" and ticks == s.UnjamTicks, "only the jam gone")
+		lowers, kind, ticks = change(gun("Smg"), gun("Smg", { mode = 2 }))
+		t.ok(kind == "mode" and ticks == s.ModeTicks, "the fire mode")
+		-- The settings given (the server's) rather than Config's.
+		local own = table.clone(s)
+		own.UnjamTicks = 7
+		t.eq(select(3, Handling.changeLock(loaded(3, { jam = true }), loaded(3), own)), 7)
 	end)
 end

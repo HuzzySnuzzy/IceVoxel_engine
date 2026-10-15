@@ -338,6 +338,10 @@ function methods.SetAttribute(self, name, value)
 end
 function methods.TweenSize() end
 function methods.TweenPosition() end
+-- A BindableEvent's Fire: its Event's listeners, at once.
+function methods.Fire(self, ...: any)
+	(self :: any).Event:Fire(...)
+end
 
 meta.__index = function(self, key: string): any
 	local m = methods[key]

@@ -600,10 +600,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   - **Loading by combining:** as in DayZ, in the inventory. Drop rounds on a magazine (left
     click: all that fit, right click: one) or on a gun with an internal magazine (the chamber
     first), one on a magazine gun with an empty chamber to chamber it by hand; drop a magazine on
-    its gun (the one in it comes back onto the cursor) and an attachment on a gun it fits. Where it
-    would combine the outline is orange, where it can't (another calibre, full) red. A right
-    click with nothing carried takes one thing out of a gun: the magazine, else its rounds and the
-    chambered one, else the muzzle device, the optic, the light; out of a magazine its rounds.
+    its gun (the one in it comes back onto the cursor) and an attachment on a gun it fits. Loading
+    the gun in your hand this way lowers it and takes as long as `R` would (a magazine's time, a
+    round chambered, a round at a time into a tube) before it fires. Where it would combine the
+    outline is orange, where it can't (another calibre, full) red. A right click with nothing
+    carried takes one thing out of a gun: the magazine, else its rounds and the chambered one,
+    else the muzzle device, the optic, the light; out of a magazine its rounds.
     HANDS shows the held gun's parts as chips beside it (MAG and OPTIC left, MUZZLE and LIGHT
     right); a click on one takes it off.
   - **Raising and firing:** hold right click with a gun to raise it (a block with a menu still
@@ -632,9 +634,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   - **Hits:** a head shot does three times the damage to a zombie (1.8 times through a helmet,
     hard hat or fire helmet) and through no armour, twice to any other mob or player; one head
     shot kills an ordinary zombie with any gun but the SMG and the .22 (two), three 9mm rounds in
-    its body. Damage falls off beyond each round's range; buckshot's pellets add up; glass
-    shatters and the bullet goes on with 70 % (only for players who may build), leaves let it by,
-    and every other block stops it.
+    its body. A head is hit where it is drawn (a brute's up at its 2.3 blocks, a crawler's and an
+    animal's in front of them); a shot into the back hits the back. Damage falls off beyond each
+    round's range; buckshot's pellets add up; glass shatters and the bullet goes on with 70 %
+    (only for players who may build), leaves let it by, and every other block stops it.
   - **Noise:** every shot is a noise the infected hear and come to: the pistol 48 blocks, the
     shotguns 72, the assault rifle 80, the hunting and bolt-action rifles 96 (a quarter more at
     night, less in the rain), the .22 24 and the crossbow 6; a suppressor cuts it to a quarter (an
@@ -1657,7 +1660,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Action        | Mouse / keyboard            | Gamepad | Touch      |
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once; adventure and spectator break nothing) | R2 | Hold |
-| Attack a mob  | Left click a mob in reach (3 blocks, creative 6; it hides the block behind it): one hit a click, with the held weapon (a melee weapon of the Weapons: the hit lands when you let go; a lowered firearm bashes) | R2 | Tap the mob |
+| Attack a mob  | Left click a mob in reach (3 blocks, creative 6; it hides the block behind it): one hit a click, with the held weapon (a melee weapon of the Weapons: the hit lands when you let go; a lowered firearm bashes) | R2 | Tap the mob (a firearm's tap does nothing) |
 | Heavy attack (melee weapon) | Hold left click on a mob 0.45 s or more, then let go: a heavy attack (twice the knockback, three times the food) | Hold R2 | Hold still on the mob (about 0.75 s) |
 | Guard (melee weapon) | Hold right click with a melee weapon (not on a block with a menu, unless sneaking): a zombie's hit from the front is cut by the weapon's share; half speed, no sprint, no attacks | Hold L2 | |
 | Raise a firearm | Hold right click with a firearm (not on a block with a menu, unless sneaking): over the right shoulder in third person, down the sights in first person; let go to lower | Hold L2 | AIM (toggles) |
@@ -1667,7 +1670,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Reload / clear a jam | `R` (the Reload / Clear Jam key binding): the fullest magazine you carry and a round chambered, or a round at a time into an internal magazine; a jammed gun's stuck round out | X | RELOAD |
 | Fire mode     | `F` (Fire Mode): single shots or automatic (the SMG, the Assault Rifle) | D-pad right | |
 | Weapon light  | `L` (Weapon Light): the mounted Weapon Flashlight on or off | D-pad left | |
-| Load a weapon (inventory) | Drop rounds on a magazine or a gun (left click all that fit, right click one), a magazine or an attachment on its gun; right click a gun or a magazine with nothing carried to take one thing out; click a chip beside HANDS to take that part off | A / X | tap / long press |
+| Load a weapon (inventory) | Drop rounds on a magazine or a gun (left click all that fit, right click one), a magazine or an attachment on its gun; right click a gun or a magazine with nothing carried to take one thing out; click a chip beside HANDS to take that part off (the gun in hand comes down, and loading it takes as long as `R`) | A / X | tap / long press |
 | Eat / use medicine | Hold right click with food or medicine (meat and tins 1.6 s, crackers and the chocolate bar 1.2 s, the Bandage 2 s, the Medkit 4 s, pills 1.2-1.6 s, the ration 2.4 s) when it would do something: food while the food bar isn't full (hurt, with hunger off), medicine when hurt, bleeding or infected (the Chocolate Bar any time; creative: any time); letting go stops | L2 | Tap |
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
 | Open a door   | Right click either half (and a double door's other door opens with it); `Shift` + right click with an item places instead | L2 | Tap |
@@ -1974,6 +1977,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Entities/MobList          mob kinds: the farm animals and the ten zombie kinds (Minecraft's
                             boxes, health, speeds, loot, spawn weights in the wild, in cities and
                             in hordes, sounds, the zombies' abilities, their R15 rigs and looks);
+                            MobShape (where a kind is drawn: the R15 proportions and stances the
+                            rigs are drawn and bullets' head boxes sized by);
                             MobPhysics (a mob's movement tick: walking, jumping, fluids, ladders
                             and walls, cobwebs, falls);
                             Combat (players hitting mobs: weapon damage, attack strength, reach,
@@ -2391,7 +2396,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Rendering/StructureBoxes  structure blocks' outlines, names and air markers
   Interaction/Firearms      a firearm in hand: raising, the sights, the trigger, reloading, the
                             fire mode, the light; MeleeInput (the melee rework's light and heavy
-                            attacks and the guard)
+                            attacks and the guard); AttackRules (what the attack button breaks
+                            and a tap does with a weapon in hand; pure)
   Player/AimRules           the aim's pure rules (posture, trigger, timed actions, recoil, zoom,
                             poses); AimCamera (the shoulder, the locked mouse, zoom, sway,
                             recoil); WeaponPoses (every character's arms for a gun, a guard, a
@@ -3250,7 +3256,8 @@ table.insert(list, zombie({
   `hardhat`, `firehelmet` or `beanie`), and the `torn` and `blood` odds. Up to 31 looks a kind fit
   the variant byte with the skin tones, and every client dresses a zombie the same from its
   variant and id, so nothing more is sent. A new gait is a profile in client `Entities/MobRig`
-  (`GAITS`); a new kind of motion is code in its `angles`.
+  (`GAITS`) and a stance in `Shared/Entities/MobShape.GAITS` (its lean and droop: where bullets
+  find its head); a new kind of motion is code in its `angles`.
 - **Its voice:** the zombie's, or one of its own: a line in SoundList's `MOB_VOICES` (`{ kind =
   "zombie_miner", hurt = 0.9, death = 0.85 }` makes `entity.zombie_miner.hurt` and `.death`, which
   `sounds = { hurt = ..., death = ... }` names; swap them like any sound). Its knowledge goes in

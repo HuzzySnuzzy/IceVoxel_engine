@@ -80,7 +80,11 @@
 	           mode, the light, detaching) pass the weapon hooks (`setWeaponHooks`, server
 	           Weapons/' locks and sounds): `allow` may refuse one (acknowledged unchanged, so the
 	           client's prediction is undone), `applied` hears of each one handled with the stack it
-	           acted on before and after. A firearm's bash and anything else never wears a gun
+	           acted on before and after; `changed` hears of every other action handled (a click,
+	           a drag, a key, a creative slot, a throw, a selection) with the stack in the hotbar
+	           slot that was in hand before it and that slot's after, so a gun loaded, emptied or
+	           swapped in hand without a weapon action comes down and takes the action's time
+	           (Weapons/WeaponActions.changed). A firearm's bash and anything else never wears a gun
 	           (`wearTool` skips firearms and magazines: they wear only by firing). Beside
 	           Types.HELD_ATTRIBUTE every snapshot sets Types.HELD_LOOK_ATTRIBUTE, what dresses the
 	           held gun (WeaponState.lookKey: "" for anything else), when it changed.
@@ -121,11 +125,13 @@ type Stack = Types.Stack
 	Server Weapons/' say over the inventory's `weapon` actions (`setWeaponHooks`): `allow` (nil:
 	all) may refuse one before it runs; `applied` (nil: none) hears of one that ran, with the stack
 	it acted on before and after (the held stack for slot -1, else the window slot's; copies, nil
-	for none).
+	for none). `changed` (nil: none) hears of every other action that ran, with the stack in the
+	hotbar slot in hand before it (a copy) and that same slot's stack after it.
 ]]
 export type WeaponHooks = {
 	allow: ((player: Player, action: Types.Action) -> boolean)?,
 	applied: ((player: Player, action: Types.Action, before: Stack?, after: Stack?) -> ())?,
+	changed: ((player: Player, before: Stack?, after: Stack?) -> ())?,
 }
 
 local HEIGHT = Config.WorldHeight
@@ -552,8 +558,10 @@ local function onInventory(player: Player, payload: buffer)
 	if seq == nil or action == nil then
 		return
 	end
-	-- A weapon action: server Weapons/ may refuse it (its locks), and hears of it after.
+	-- A weapon action: server Weapons/ may refuse it (its locks), and hears of it after; any other
+	-- action, with the hotbar slot in hand before and after (a gun changed in hand comes down).
 	local hooks = if action.kind == "weapon" then weaponHooks else nil
+	local others = if action.kind ~= "weapon" then weaponHooks else nil
 	local before: Stack? = nil
 	if hooks then
 		local allow = hooks.allow
@@ -566,6 +574,9 @@ local function onInventory(player: Player, payload: buffer)
 	-- An action in a furnace window may give it something to cook or burn.
 	local window = state:window(player)
 	local container = window and window.container
+	-- (Any other action: the stack in the hotbar slot in hand, to hear what it did to a gun there.)
+	local handSlot = if others and window then window.inventory.selected else nil
+	local hand = if window and handSlot then Items.copyStack(window.inventory.slots[handSlot]) else nil
 	local fx, fy, fz = state:openPosition(player)
 	-- (The armor and the equipment as they were, to hear what the action put on.)
 	local armor: { [number]: Stack? } = {}
@@ -584,6 +595,10 @@ local function onInventory(player: Player, payload: buffer)
 	throw(player, thrown, false)
 	if hooks and hooks.applied then
 		hooks.applied(player, action, before, weaponTarget(player, action))
+	end
+	if others and others.changed and window and handSlot then
+		-- (A window's inventory is the player's own for good: opening and closing keep it.)
+		others.changed(player, hand, window.inventory.slots[handSlot])
 	end
 	if fx ~= nil and container and container.kind == "furnace" then
 		Containers.default:markActive(fx, fy, fz)

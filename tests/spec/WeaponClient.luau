@@ -13,6 +13,7 @@
 ]]
 
 local fs = require("@lune/fs")
+local FakeClient = require("../lib/FakeClient")
 
 return function(t, shared, require, server, client)
 	local Config = require(shared.Config)
@@ -174,6 +175,205 @@ return function(t, shared, require, server, client)
 		-- Lowered never fires.
 		AimRules.step(aim, input(true, false), now + 7)
 		t.eq(AimRules.pull(aim, now + 8, true, true, 2, true, nil), nil, "lowered")
+	end)
+
+	t.test("weapon client: a press let go within a frame still fires, once", function()
+		local ticks = Handling.shotTicks(spec("Pistol"), 1)
+		local aim = raised()
+		local now = SETTLE + 1
+		-- Down and up between two frames: the next pull sees the press.
+		AimRules.press(aim)
+		t.eq(AimRules.pull(aim, now, false, false, ticks, true, nil), "fire", "a quick click fires")
+		t.eq(AimRules.pull(aim, now + 0.5, false, false, ticks, true, nil), nil, "once")
+		-- Held over frames: the press and the hold are one press.
+		AimRules.press(aim)
+		t.eq(AimRules.pull(aim, now + 1, true, false, ticks, true, nil), "fire")
+		t.eq(AimRules.pull(aim, now + 1.5, true, false, ticks, true, nil), nil, "held: once a press")
+		-- Let go and pressed again within one frame (no frame saw it up): a new press.
+		AimRules.press(aim)
+		t.eq(AimRules.pull(aim, now + 2, true, false, ticks, true, nil), "fire", "a new press fires")
+		-- An automatic tapped: one shot; an empty gun tapped: one dry click.
+		local auto = raised()
+		AimRules.press(auto)
+		t.eq(AimRules.pull(auto, now, false, true, 2, true, nil), "fire")
+		t.eq(AimRules.pull(auto, now + 1, false, true, 2, true, nil), nil)
+		AimRules.press(aim)
+		t.eq(AimRules.pull(aim, now + 3, false, false, ticks, false, WeaponState.EMPTY), "dry")
+		t.eq(AimRules.pull(aim, now + 3.5, false, false, ticks, false, WeaponState.EMPTY), nil)
+		-- A tap the gun can't take yet is over (only a held press waits its turn).
+		local early = raised()
+		AimRules.press(early)
+		t.eq(AimRules.pull(early, SETTLE / 2, false, false, ticks, true, nil), nil, "not settled")
+		t.eq(AimRules.pull(early, SETTLE, false, false, ticks, true, nil), nil, "that tap is gone")
+		AimRules.press(early)
+		AimRules.startBusy(early, "reload", SETTLE, 20)
+		t.eq(AimRules.pull(early, SETTLE + 0.5, false, false, ticks, true, nil), nil, "reloading")
+		t.eq(AimRules.pull(early, SETTLE + 1.5, false, false, ticks, true, nil), nil, "gone too")
+		-- Lowering forgets a press not pulled.
+		AimRules.press(early)
+		AimRules.step(early, input(true, false), SETTLE + 2)
+		AimRules.step(early, input(true, true), SETTLE + 2.1)
+		t.eq(AimRules.pull(early, SETTLE + 2.1 + SETTLE, false, false, ticks, true, nil), nil, "from before")
+		-- Every source latches its press: the mouse and R2 (attackPress) and the touch FIRE button.
+		local firearms = fs.readFile("src/client/Interaction/Firearms.luau")
+		local _, presses = string.gsub(firearms, "AimRules.press%(aim%)", "")
+		t.eq(presses, 2, "attackPress and the touch FIRE button's press")
+	end)
+
+	t.test("weapon client: a gun changed in hand by clicks comes down and locks as the server's", function()
+		local Menu = require(shared.Inventory.Menu)
+		local Types = require(shared.Inventory.Types)
+		local GameMode = require(shared.GameMode)
+		local WeaponActions = require(server.Weapons.WeaponActions)
+		local InventoryState = require(server.Players.InventoryState)
+		local Prediction = require(client.Inventory.Prediction)
+		local SURVIVAL = GameMode.SURVIVAL
+		local pistol, revolver = spec("Pistol"), spec("Revolver")
+		local T = 100
+		-- The server: an inventory and its weapon actions (Players/Inventories' hooks played out).
+		local state = InventoryState.new()
+		state:join("p")
+		local attribute: string? = nil
+		local actions = WeaponActions.new({
+			settings = W,
+			now = function(): number
+				return T
+			end,
+			held = function(): Items.Stack?
+				return state:heldStack("p")
+			end,
+			selected = function(): number?
+				return (state:window("p") :: any).inventory.selected
+			end,
+			alive = function(): boolean
+				return true
+			end,
+			mode = function(): string
+				return SURVIVAL
+			end,
+			setAim = function(_, aim: string?)
+				attribute = aim
+			end,
+			play = function() end,
+			later = function() end,
+		})
+		-- The client: Inventory/ClientInventory on its prediction, its hand hook as Firearms sets it.
+		local prediction = Prediction.new()
+		local sent = 0
+		local load = FakeClient.loader(shared, require, {
+			["src/client/Net/ClientNet.luau"] = {
+				send = function()
+					sent += 1
+				end,
+				on = function() end,
+			},
+			["src/client/Inventory/Prediction.luau"] = {
+				new = function()
+					return prediction
+				end,
+			},
+		}, {
+			Players = {
+				LocalPlayer = {
+					GetAttribute = function(): any
+						return nil
+					end,
+					GetAttributeChangedSignal = function(): any
+						return FakeClient.signal()
+					end,
+				},
+			},
+		})
+		local ClientInventory = load("src/client/Inventory/ClientInventory.luau")
+		local aim = raised()
+		local heard = 0
+		local down = false
+		ClientInventory.onHand(function(before: Items.Stack?, after: Items.Stack?)
+			heard += 1
+			if AimRules.handChanged(aim, before, after, T) then
+				down = true
+			end
+		end)
+		-- The same inventory on both sides; the pistol raised on both.
+		local inventory = Types.newInventory()
+		inventory.slots[1] = stack("Pistol", { mag = I.PistolMagazine })
+		inventory.slots[2] = stack("Revolver")
+		inventory.slots[10] = stack("PistolMagazine", { n = 15, ammo = I.Rounds9mm })
+		inventory.slots[11] = { item = I.Rounds9mm, count = 10 }
+		inventory.slots[12] = { item = I.Rounds357, count = 10 }
+		local window = state:window("p") :: Types.Window
+		window.inventory = Menu.copyWindow(Types.newWindow(inventory)).inventory
+		prediction:receive(
+			{ ack = 0, inventory = inventory, window = 0, container = Types.newCrafting("inventory") },
+			SURVIVAL
+		)
+		t.ok(actions:weapon("p", WeaponSync.Op.Raise))
+		local seq = 0
+		-- An action on both sides, as each plays it.
+		local function both(action: any)
+			seq += 1
+			local slot = window.inventory.selected
+			local before = Items.copyStack(window.inventory.slots[slot])
+			state:applyAs("p", seq, action, SURVIVAL)
+			if action.kind == "weapon" then
+				actions:applied("p", action, before, Items.copyStack(state:heldStack("p")))
+			else
+				actions:changed("p", before, window.inventory.slots[slot])
+			end
+			ClientInventory.apply(action)
+		end
+		local function click(slot: number, button: number)
+			both({
+				kind = "click",
+				window = 0,
+				slot = Menu.windowIndex(window, "inventory", slot),
+				clickType = Menu.ClickType.Pickup,
+				button = button,
+			})
+		end
+		local function agree(label: string, ticks: number)
+			t.eq(down, attribute == nil, `{label}: down on both sides`)
+			local server = actions:busyUntil("p")
+			t.near(server or T, T + ticks * TICK, 1e-9, `{label}: the server's lock`)
+			local ends = if AimRules.busy(aim, T) then aim.busyEnds else T
+			t.near(ends, T + ticks * TICK, 1e-9, `{label}: the client's lock`)
+		end
+		click(10, 0)
+		agree("a magazine picked up", 0)
+		t.eq(down, false, "the gun as it was: still up")
+		click(1, 0)
+		agree("swapped onto the raised gun", pistol.reloadTicks)
+		t.eq(down, true, "down")
+		click(10, 0)
+		click(11, 0)
+		click(1, 1)
+		agree("a round chambered by hand after it", pistol.reloadTicks + pistol.chamberTicks)
+		click(11, 0)
+		-- The client lets go of the raise (Firearms), so the step says lower: the server is down.
+		t.eq(AimRules.step(aim, input(true, false), T), "lower")
+		t.eq(attribute, nil)
+		-- The revolver in slot 2, filled by a click: its rounds' ticks after the pistol's lock.
+		both({ kind = "select", slot = 2 })
+		click(12, 0)
+		click(2, 0)
+		click(12, 0)
+		agree("six rounds after it", pistol.reloadTicks + pistol.chamberTicks + 6 * revolver.roundTicks)
+		-- Weapon ops never come this way (they lock by their own rule, once).
+		local before = heard
+		both({ kind = "weapon", op = 5, slot = -1, part = 0 })
+		t.eq(heard, before, "a weapon op isn't heard here")
+		t.ok(sent >= seq, "every action sent")
+		-- What the two sides hold agrees, stack by stack.
+		local client = ClientInventory.inventory()
+		for slot = 1, 36 do
+			local a, b = client.slots[slot], window.inventory.slots[slot]
+			t.ok((a == nil) == (b == nil) and (a == nil or Items.stacksMatch(a, b :: any)), `slot {slot} agrees`)
+		end
+		-- One rule: both sides call it.
+		local actionsSource = fs.readFile("src/server/Weapons/WeaponActions.luau")
+		local aimSource = fs.readFile("src/client/Player/AimRules.luau")
+		t.ok(string.find(actionsSource, "Handling.changeLock(", 1, true) ~= nil, "the server locks by it")
+		t.ok(string.find(aimSource, "Handling.changeLock(", 1, true) ~= nil, "the client times by it")
 	end)
 
 	--[[ Timed actions ]]

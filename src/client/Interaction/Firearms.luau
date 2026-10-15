@@ -14,26 +14,28 @@
 	            Weapon message; it sets Types.AIM_ATTRIBUTE for everyone's poses and refuses shots
 	            from a gun not raised for RaiseTicks). Config.Weapons.Enabled false: nothing raises,
 	            guns only bash.
-	  Firing    the attack button (left mouse button; R2; FIRE on a touch screen) fires only a raised
-	            gun, once it has been up RaiseTicks (AimRules.settled); a lowered one bashes a mob in
-	            reach (BlockInteraction's attack) and never mines. A semi-automatic fires once a
-	            press, an automatic at its rate while held (Handling.shotTicks, AimRules.pull),
-	            empty clicks dry, jammed or Ruined with the jam click. Each shot, after the camera,
-	            the view bob and the sway moved the view (Camera + 6): the aim from the eyes (the
-	            hull's, PlayerPhysics.eyeHeight) towards what the camera's centre ray hits within
-	            Config.Weapons.MaxRange (blocks by their collision boxes, Shapes.sight; the mobs as
-	            drawn; other players' hulls; what lies between the camera and the eyes is skipped),
-	            or along the ray when that point isn't ahead (AimRules.aimFrom); the shot predicted
-	            (ClientInventory.fire: the chamber empties, the next round feeds, the gun wears)
-	            and its number sent in the Fire message (Net/WeaponSync: the shot counter, the
-	            hotbar slot, the item, sights / moving / crouching / holding breath, the eyes, the
-	            aim); drawn at once (Rendering/ShotView.ownShot: the class shot or the suppressed
-	            one, the flash unless suppressed, a tracer to the aim, a pump's or bolt's rack);
-	            the camera kicked (Handling.recoil, seeded by the player's UserId and the shot
-	            counter: Player/AimCamera), the first-person gun too (Player/HeldItems.kick). The
-	            server's record of the shot (ShotView) stops automatic fire when it refused it or
-	            the gun jammed (a record of an earlier press's shot, arriving late, doesn't stop
-	            the press held now; a jam clicks either way).
+	  Firing    the attack button (left mouse button; R2; FIRE on a touch screen) fires only a
+	            raised gun, once it has been up RaiseTicks (AimRules.settled); a lowered one bashes
+	            a mob in reach (BlockInteraction's attack) and never mines. A semi-automatic fires
+	            once a press, even one let go within the frame (AimRules.press: a quick click, a tap
+	            of FIRE, a flick of R2), an automatic at its rate while held (Handling.shotTicks,
+	            AimRules.pull), empty clicks dry, jammed or Ruined with the jam click. Each shot,
+	            after the camera, the view bob and the sway moved the view (Camera + 6): the aim
+	            from the eyes (the hull's, PlayerPhysics.eyeHeight) towards what the camera's centre
+	            ray hits within Config.Weapons.MaxRange (blocks by their collision boxes,
+	            Shapes.sight; the mobs as drawn; other players' hulls; what lies between the camera
+	            and the eyes is skipped), or along the ray when that point isn't ahead
+	            (AimRules.aimFrom); the shot predicted (ClientInventory.fire: the chamber empties,
+	            the next round feeds, the gun wears) and its number sent in the Fire message
+	            (Net/WeaponSync: the shot counter, the hotbar slot, the item, sights / moving /
+	            crouching / holding breath, the eyes, the aim); drawn at once
+	            (Rendering/ShotView.ownShot: the class shot or the suppressed one, the flash unless
+	            suppressed, a tracer to the aim, a pump's or bolt's rack); the camera kicked
+	            (Handling.recoil, seeded by the player's UserId and the shot counter:
+	            Player/AimCamera), the first-person gun too (Player/HeldItems.kick). The server's
+	            record of the shot (ShotView) stops automatic fire when it refused it or the gun
+	            jammed (a record of an earlier press's shot, arriving late, doesn't stop the press
+	            held now; a jam clicks either way).
 	  R         (X on a gamepad, RELOAD on a touch screen) on a jammed gun clears the jam (Inventory
 	            action "weapon" op 3, UnjamTicks); else reloads (op 1): a detachable magazine gun
 	            swaps in the fullest magazine and chambers (Handling.reloadTicks), an internal
@@ -45,6 +47,12 @@
 	            stayed but had no round chambered only chambers (chamberTicks). While an action runs
 	            the gun doesn't fire and takes no other op; item.firearm.reload, load_round and
 	            chamber play at once (predicted: the server plays them for the others).
+	  Clicks    any other predicted inventory action that changed the gun in hand (a magazine or
+	            rounds clicked onto it, a part mounted or taken off, another gun clicked into its
+	            place: ClientInventory.onHand) lowers it, as the server lowers it, and locks it as
+	            long as the weapon ops that do the same (AimRules.handChanged, by
+	            Handling.changeLock, the rule the server's Weapons/WeaponActions.changed locks by),
+	            so a gun loaded in the inventory screen fires no sooner than one loaded with R.
 	  F, L      (DPad right, left) the next fire mode (op 4, ModeTicks) of a gun with more than one;
 	            the weapon light on or off (op 5) when one is mounted.
 	  Breath    the sprint key (L3) held in the sights holds breath (Handling: steadier, then out of
@@ -463,6 +471,7 @@ local function stateStep()
 		table.clear(triggerHeld)
 		touchRaise = false
 		aim.loading = false
+		aim.pressed = false
 	end
 	local armed = spec ~= nil and enabled()
 	WeaponButtons.setShown(armed)
@@ -596,6 +605,8 @@ function Firearms.start(world: ClientWorld.ClientWorld)
 		fire = function(down: boolean)
 			if down and aim.posture ~= "lowered" then
 				triggerHeld.touch = true
+				AimRules.press(aim)
+				pressFirst = nil
 				aim.loading = false
 			else
 				triggerHeld.touch = nil
@@ -606,6 +617,14 @@ function Firearms.start(world: ClientWorld.ClientWorld)
 		end,
 		reload = reload,
 	})
+	-- A gun changed in hand by a click (not a weapon op) comes down and takes the op's time.
+	ClientInventory.onHand(function(before: Items.Stack?, after: Items.Stack?)
+		if AimRules.handChanged(aim, before, after, os.clock()) then
+			table.clear(raiseHeld)
+			table.clear(triggerHeld)
+			touchRaise = false
+		end
+	end)
 	-- The server's record of an own shot that stops automatic fire (refused, or a jam).
 	ShotView.onOwnShot(function(shot: WeaponSync.Shot)
 		if AimRules.thisPress(pressFirst, shot.shot) then
@@ -645,6 +664,9 @@ function Firearms.attackPress(source: string, _mob: MobRenderer.MobView?, _attac
 		return false
 	end
 	triggerHeld[source] = true
+	AimRules.press(aim)
+	-- (A new press: a late record of the last one's shots stops nothing now.)
+	pressFirst = nil
 	return true
 end
 

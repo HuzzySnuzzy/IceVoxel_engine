@@ -158,13 +158,15 @@
 	            ItemList `attack`). The use button, unless it is on a block that opens a menu (a
 	            chest, a door, the hatch) and the player doesn't sneak, goes to Firearms.usePress
 	            (raising), with a free mouse too (no camera drag then); one it doesn't take uses as
-	            before. Touch: holds and taps with a firearm only use blocks (its buttons are
-	            Firearms'). Minecraft's crosshair hides while Firearms.hidesCrosshair or
-	            `setCrosshairHidden` says so.
+	            before. Touch: holds and taps with a firearm only use blocks, and a tap on a mob
+	            does nothing (its buttons are Firearms': Interaction/AttackRules.tap). Minecraft's
+	            crosshair hides while Firearms.hidesCrosshair or `setCrosshairHidden` says so.
 	  Melee     a press on a mob in reach goes to Interaction/MeleeInput.press (a light attack at
 	            once, or later on release, or a heavy one: `attack(mob, heavy)`), its release to
 	            MeleeInput.release; the use button with a listed melee weapon (Weapons.melee), on
-	            the same terms as a firearm's, to MeleeInput.guardPress (guarding).
+	            the same terms as a firearm's, to MeleeInput.guardPress (guarding). While a press
+	            waits for its release or the guard is up the attack button breaks no block
+	            (MeleeInput.pressing, AttackRules.breaking), even when the mob walks off.
 	Firearms and MeleeInput never require this module (it requires them).
 ]]
 
@@ -216,6 +218,7 @@ local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRe
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local CrackOverlay = require(script.Parent.CrackOverlay)
 local TankUse = require(script.Parent.TankUse)
+local AttackRules = require(script.Parent.AttackRules)
 local Drinking = require(script.Parent.Drinking)
 local Eating = require(script.Parent.Eating)
 local Casting = require(script.Parent.Casting)
@@ -1398,11 +1401,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			-- Adventure: the arm swings, nothing breaks (blockActionRestricted).
 			swing()
 			return
-		elseif GameMode.instabuild(mode) then
+		end
+		-- (Nothing while a melee weapon guards: Interaction/AttackRules.)
+		local breaking = AttackRules.breaking(mode, false, MeleeInput.pressing())
+		if breaking == "instant" then
 			-- A press breaks at once (Minecraft's startDestroyBlock in creative).
 			lastCreativeBreak = -math.huge
 			creativeBreak(os.clock())
-		else
+		elseif breaking == "mine" then
 			-- Start on this frame rather than the next tick.
 			tickClock = 0
 			pressedAt = os.clock()
@@ -1627,17 +1633,19 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				releaseAll()
 			end
 		else
-			-- Breaking: at once with instabuild, over time in survival, never without mayBuild, and
-			-- never with a firearm in hand (it raises, fires and bashes: Interaction/Firearms).
+			-- Breaking: at once with instabuild, over time in survival, never without mayBuild, never
+			-- with a firearm in hand (it raises, fires and bashes: Interaction/Firearms), and never
+			-- while a melee press waits for its release or the guard is up (Interaction/AttackRules).
 			local firearm = isFirearm(ClientInventory.selectedStack())
-			if GameMode.instabuild(mode) and not firearm then
+			local breaking = AttackRules.breaking(mode, firearm, MeleeInput.pressing())
+			if breaking == "instant" then
 				if mining then
 					stopMining()
 				end
 				if anyHeld(attackHeld) then
 					creativeBreak(now)
 				end
-			elseif firearm or not GameMode.mayBuild(mode) then
+			elseif breaking == nil then
 				if mining then
 					stopMining()
 				end
@@ -1787,15 +1795,15 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 					if ray then
 						mob, distance = mobOn(ray)
 					end
-					-- (A firearm's tap never bashes: it only uses blocks.)
-					if
-						mob
-						and (hit == nil or distance < hit.distance)
-						and not GameMode.isSpectator(ClientInventory.mode())
-						and not isFirearm(ClientInventory.selectedStack())
-					then
+					-- (A firearm's tap on a mob does nothing: no bash, no door behind it.)
+					local tap = AttackRules.tap(
+						mob ~= nil and (hit == nil or distance < hit.distance),
+						ClientInventory.mode(),
+						isFirearm(ClientInventory.selectedStack())
+					)
+					if tap == "attack" and mob then
 						attack(mob)
-					else
+					elseif tap == "use" then
 						useOnce(hit, ray)
 					end
 				end

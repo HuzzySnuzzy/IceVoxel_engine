@@ -8,14 +8,17 @@
 	client's heavy flag with Melee.heavy before anything uses it. The client's
 	Interaction/MeleeInput on a fake client (tests/lib/FakeClient; stand-ins for the inventory, the
 	network and the sounds): a click lands a light hit on release, a hold of HeavyHold a heavy one,
-	other items hit at once, the guard sends its Weapon ops and ends with the hand's change.
+	other items hit at once, the guard sends its Weapon ops and ends with the hand's change; while
+	a press waits or the guard is up no block breaks behind the mob (Interaction/AttackRules), and
+	a firearm's tap on a mob does nothing. (No attack while guarding or raised on the server:
+	tests/spec/WeaponFiring.)
 ]]
 
 local fs = require("@lune/fs")
 local LuneTask = require("@lune/task")
 local FakeClient = require("../lib/FakeClient")
 
-return function(t, shared, require, server)
+return function(t, shared, require, server, client)
 	local Items = require(shared.Items)
 	local Config = require(shared.Config)
 	local Combat = require(shared.Entities.Combat)
@@ -349,9 +352,12 @@ return function(t, shared, require, server)
 		end
 		local zombie, other = { id = 7 }, { id = 8 }
 		-- A click: nothing on the press, a light hit at the mob in reach on the release.
+		t.eq(MeleeInput.pressing(), false)
 		MeleeInput.press("mouse", zombie, held, attack)
 		t.eq(#hits, 0, "nothing on the press")
+		t.eq(MeleeInput.pressing(), true, "a press waiting: no block breaks meanwhile")
 		MeleeInput.release("mouse", other, attack)
+		t.eq(MeleeInput.pressing(), false)
 		t.eq(#hits, 1)
 		t.eq(hits[1].id, 8, "the mob in reach at the release")
 		t.eq(hits[1].heavy, false)
@@ -393,6 +399,7 @@ return function(t, shared, require, server)
 		-- The guard: its op, no attacks while it lasts, its own source's release ends it.
 		t.eq(MeleeInput.guardPress("mouse"), true)
 		t.eq(MeleeInput.guarding(), true)
+		t.eq(MeleeInput.pressing(), true, "guarding: no block breaks either")
 		t.eq(ops[#ops], WeaponSync.Op.Guard)
 		MeleeInput.press("mouse", zombie, held, attack)
 		MeleeInput.release("mouse", zombie, attack)
@@ -420,5 +427,41 @@ return function(t, shared, require, server)
 			t.eq(hits[6].heavy, false)
 		end)
 		t.eq(#ops, 4, "nothing more sent")
+	end)
+
+	t.test("melee input: no block breaks behind a mob while a press waits; a gun's tap does nothing", function()
+		local AttackRules = require(client.Interaction.AttackRules)
+		local SURVIVAL, CREATIVE = GameMode.SURVIVAL, GameMode.CREATIVE
+		local ADVENTURE, SPECTATOR = GameMode.ADVENTURE, GameMode.SPECTATOR
+		t.eq(AttackRules.breaking(SURVIVAL, false, false), "mine", "survival mines")
+		t.eq(AttackRules.breaking(CREATIVE, false, false), "instant", "creative breaks at once")
+		t.eq(AttackRules.breaking(ADVENTURE, false, false), nil, "adventure breaks nothing")
+		t.eq(AttackRules.breaking(SPECTATOR, false, false), nil)
+		for _, mode in { SURVIVAL, CREATIVE, ADVENTURE, SPECTATOR } do
+			t.eq(AttackRules.breaking(mode, true, false), nil, `{mode}: never with a firearm`)
+			t.eq(AttackRules.breaking(mode, false, true), nil, `{mode}: never while a melee press or guard holds`)
+		end
+		t.eq(AttackRules.tap(true, SURVIVAL, false), "attack", "a tap on a mob hits it")
+		t.eq(AttackRules.tap(true, SURVIVAL, true), nil, "with a gun: nothing, not the door behind it")
+		t.eq(AttackRules.tap(false, SURVIVAL, true), "use", "a gun's tap on a block uses it")
+		t.eq(AttackRules.tap(false, SURVIVAL, false), "use")
+		t.eq(AttackRules.tap(true, SPECTATOR, false), "use", "a spectator hits nothing")
+		-- Interaction/BlockInteraction asks them wherever the attack button breaks and a tap lands.
+		local source = fs.readFile("src/client/Interaction/BlockInteraction.luau")
+		local function count(text: string): number
+			local n, at = 0, 1
+			while true do
+				local found = string.find(source, text, at, true)
+				if found == nil then
+					return n
+				end
+				n += 1
+				at = found + #text
+			end
+		end
+		t.eq(count("AttackRules.breaking("), 2, "the press and every frame")
+		t.eq(count("MeleeInput.pressing()"), 2, "both with the melee press and guard")
+		t.eq(count("AttackRules.tap("), 1, "the tap")
+		t.eq(count("creativeBreak(") - 1, 2, "creative breaks only where breaking says so")
 	end)
 end

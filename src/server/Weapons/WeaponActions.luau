@@ -9,11 +9,23 @@
 	           The aim lives in the player attribute Inventory/Types.AIM_ATTRIBUTE (AIM_RAISED or
 	           AIM_GUARD: every client's poses, Mobs/Mobs' guard), and here with when the gun was
 	           raised (Weapons/FireRules' "raise": no shot before Config.Weapons.RaiseTicks) and
-	           the hotbar slot and item it was raised with. `tick` (every frame, only over the
-	           players aiming) drops an aim whose player died, became a spectator, changed slot or
-	           whose hand holds another item (whatever the client says), so a raise or a guard
-	           never carries over to the next weapon or the next life; `lower` drops it at once
-	           (Weapons/init: a character coming or going).
+	           the hotbar slot and item it was raised with (FireRules refuses a shot from another
+	           slot or item). `tick` (every frame, only over the players aiming) drops an aim whose
+	           player died, became a spectator, changed slot or whose hand holds another item
+	           (whatever the client says), so a raise or a guard never carries over to the next
+	           weapon or the next life; `lower` drops it at once (Weapons/init: a character coming
+	           or going).
+	  Hands    every other inventory action (a click, a drag, a key, a creative slot, a throw, a
+	           selection: Players/Inventories through Inventories.setWeaponHooks' `changed`, with
+	           the stack in the hotbar slot that was in hand before and after it) is looked at at
+	           once: a change to a firearm there (Shared/Weapons/Handling.changeLock: its magazine,
+	           chamber, rounds, jam, fire mode, parts, or another stack in its place) lowers the
+	           aim, so the gun is raised again for RaiseTicks, and locks the gun as long as the
+	           weapon ops that do the same would (a magazine clicked in reloadTicks, a round
+	           chambered by hand chamberTicks, an internal feed's rounds roundTicks each, a jam
+	           gone UnjamTicks), after any lock running; and the aim is checked as `tick` checks
+	           it. A loaded gun clicked into a raised one's place fires no sooner than one loaded
+	           with R. (Weapon actions lock by their own rule below, never by this one too.)
 	  Locks    the inventory's weapon actions (Inventory action "weapon", Shared/Weapons/Loading,
 	           through Players/Inventories.setWeaponHooks): `allow` refuses ops 1..4 (reload, load
 	           a round, clear a jam, fire mode) while a lock runs (one tick of slack), and so does
@@ -89,7 +101,8 @@ export type WeaponActions = {
 	applied: (self: WeaponActions, player: any, action: Types.Action, before: Stack?, after: Stack?) -> (),
 	tick: (self: WeaponActions) -> (),
 	lower: (self: WeaponActions, player: any) -> (),
-	raised: (self: WeaponActions, player: any) -> (string?, number?),
+	changed: (self: WeaponActions, player: any, before: Stack?, after: Stack?) -> (),
+	raised: (self: WeaponActions, player: any) -> (string?, number?, number?, number?),
 	busyUntil: (self: WeaponActions, player: any) -> number?,
 	forget: (self: WeaponActions, player: any) -> (),
 }
@@ -199,36 +212,68 @@ function WeaponActions.weapon(self: WeaponActions, player: any, op: number): boo
 	return false
 end
 
+-- Drops the player's aim when it no longer holds (see the header's Aim).
+local function check(self: WeaponActions, player: any, state: PlayerState)
+	local env = self.env
+	local held = env.held(player)
+	local item = if held and held.count > 0 then held.item else nil
+	local still = mayAim(env, player) and item ~= nil and item == state.item and env.selected(player) == state.slot
+	if still and state.aim == Types.AIM_RAISED then
+		still = env.settings.Enabled and Weapons.firearm(item) ~= nil
+	elseif still then
+		still = env.settings.Melee.Enabled and Weapons.melee(item) ~= nil
+	end
+	if not still then
+		setAim(self, player, state, nil)
+	end
+end
+
 -- Drops every aim that no longer holds (see the header's Aim).
 function WeaponActions.tick(self: WeaponActions)
-	local env = self.env
 	for player in self.aiming do
 		local state = self.states[player]
 		if state == nil then
 			self.aiming[player] = nil
 			continue
 		end
-		local held = env.held(player)
-		local item = if held and held.count > 0 then held.item else nil
-		local still = mayAim(env, player) and item ~= nil and item == state.item and env.selected(player) == state.slot
-		if still and state.aim == Types.AIM_RAISED then
-			still = env.settings.Enabled and Weapons.firearm(item) ~= nil
-		elseif still then
-			still = env.settings.Melee.Enabled and Weapons.melee(item) ~= nil
-		end
-		if not still then
-			setAim(self, player, state, nil)
-		end
+		check(self, player, state)
 	end
 end
 
--- The player's aim (Types.AIM_RAISED, AIM_GUARD or nil) and when the gun went up (raised only).
-function WeaponActions.raised(self: WeaponActions, player: any): (string?, number?)
+--[[
+	An inventory action other than a weapon action ran (see the header's Hands): `before` the stack
+	in the hotbar slot in hand before it (a copy), `after` that slot's stack now.
+]]
+function WeaponActions.changed(self: WeaponActions, player: any, before: Stack?, after: Stack?)
+	local env = self.env
+	local lowers, _, ticks = Handling.changeLock(before, after, env.settings)
+	local state = self.states[player]
+	if lowers then
+		state = stateOf(self, player)
+		if state.aim ~= nil then
+			setAim(self, player, state, nil)
+		end
+		if ticks > 0 then
+			local now = env.now()
+			local busy = state.busyUntil
+			state.busyUntil = (if busy and busy > now then busy else now) + ticks * TICK
+		end
+	end
+	if state ~= nil and state.aim ~= nil then
+		check(self, player, state)
+	end
+end
+
+--[[
+	The player's aim (Types.AIM_RAISED, AIM_GUARD or nil), when the gun went up (raised only), and
+	the hotbar slot and item it was raised or guarded with.
+]]
+function WeaponActions.raised(self: WeaponActions, player: any): (string?, number?, number?, number?)
 	local state = self.states[player]
 	if state == nil then
-		return nil, nil
+		return nil, nil, nil, nil
 	end
-	return state.aim, if state.aim == Types.AIM_RAISED then state.raisedAt else nil
+	return state.aim, if state.aim == Types.AIM_RAISED then state.raisedAt else nil, state.slot, state.item
 end
 
 -- When the player's weapon action lock ends (nil: none).

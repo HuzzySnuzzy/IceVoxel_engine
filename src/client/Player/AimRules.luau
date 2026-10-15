@@ -18,10 +18,13 @@
 	            timed action runs (`busy`), it may fire (WeaponState.canFire) and its cadence
 	            allows (Handling.shotTicks, no slack on the client; a shot counts from when it was
 	            due, Handling.after, so automatic fire keeps its rate over uneven frames); a
-	            semi-automatic fires once a press (a press made too early waits for its turn), an
-	            automatic one while held. An empty gun clicks dry, a jammed or Ruined one with the
-	            jam click, once a press. `stop` ends automatic fire until the trigger is let go (the
-	            server refused a shot of this press, or said the gun jammed after one: `thisPress`).
+	            semi-automatic fires once a press (a press made too early waits for its turn while
+	            held), an automatic one while held. A press (`press`) counts at the next pull even
+	            when it was let go within the frame (a click, a tap or a trigger pulled quicker
+	            than a frame fires once), and only then. An empty gun clicks dry, a jammed or Ruined
+	            one with the jam click, once a press. `stop` ends automatic fire until the trigger
+	            is let go (the server refused a shot of this press, or said the gun jammed after
+	            one: `thisPress`).
 	  Busy      a timed weapon action (Inventory action "weapon", the server locks the gun as
 	            long): its kind and length are Shared/Weapons/Handling.actionLock's, the one rule
 	            the server's Weapons/WeaponActions locks by (a magazine swap Handling.reloadTicks,
@@ -29,7 +32,11 @@
 	            by hand roundTicks; clearing a jam UnjamTicks; the fire mode ModeTicks; the light
 	            and anything that changed nothing none), `startBusy` / `busy` / `progress` follow
 	            it. An internal magazine loads round by round while `loading` (`wantsRound`: until
-	            it holds its rounds and the chambered one).
+	            it holds its rounds and the chambered one). A gun changed in hand by anything but a
+	            weapon op (an inventory click, drag, key or creative slot: `handChanged`, by
+	            Handling.changeLock as the server's Weapons/WeaponActions.changed) comes down (it is
+	            raised again for RaiseTicks) and is busy as long as the weapon ops that do the same
+	            would be, after any action running (`addBusy`).
 	  Speed     `speed`: RaisedSpeed raised, SightsSpeed in the sights, no sprinting in either
 	            (Player/MovementController.setAimSlow); GuardSpeed for a melee guard.
 	  View      `zoom`: 1 unless in the sights, then Handling.zoom (a built-in scope's, an
@@ -96,6 +103,8 @@ export type Aim = {
 	lastShot: number?,
 	-- The trigger did its thing this press (a semi-automatic shot, a click, or `stop`).
 	spent: boolean,
+	-- A press of the trigger not pulled yet (it counts even when let go within the frame).
+	pressed: boolean,
 	-- A timed weapon action: what, from when, until when (busyKind nil: none).
 	busyKind: BusyKind?,
 	busyFrom: number,
@@ -145,6 +154,7 @@ function AimRules.new(): Aim
 		sights = false,
 		lastShot = nil,
 		spent = false,
+		pressed = false,
 		busyKind = nil,
 		busyFrom = 0,
 		busyEnds = 0,
@@ -166,6 +176,7 @@ function AimRules.step(aim: Aim, input: Input, now: number): ("raise" | "lower")
 		aim.raisedAt = nil
 		aim.sights = false
 		aim.spent = false
+		aim.pressed = false
 		return "lower"
 	end
 	local op: ("raise" | "lower")? = nil
@@ -210,10 +221,16 @@ function AimRules.ready(aim: Aim, now: number, ticks: number): boolean
 	return last == nil or now - last >= ticks * AimRules.TICK - 1e-9
 end
 
+-- The trigger went down (see the header): a new press, counted at the next pull.
+function AimRules.press(aim: Aim)
+	aim.pressed = true
+	aim.spent = false
+end
+
 --[[
-	What the trigger does this frame (see the header): `held` the trigger is down, `auto` the fire
-	mode is automatic, `ticks` its shot time, `canFire` / `reason` WeaponState.canFire's answer.
-	"fire" records the shot.
+	What the trigger does this frame (see the header): `held` the trigger is down (or a press came
+	since the last pull), `auto` the fire mode is automatic, `ticks` its shot time, `canFire` /
+	`reason` WeaponState.canFire's answer. "fire" records the shot.
 ]]
 function AimRules.pull(
 	aim: Aim,
@@ -224,7 +241,9 @@ function AimRules.pull(
 	canFire: boolean,
 	reason: string?
 ): Pull?
-	if not held then
+	local down = held or aim.pressed
+	aim.pressed = false
+	if not down then
 		aim.spent = false
 		return nil
 	end
@@ -274,6 +293,37 @@ end
 -- Is a timed action running at `now`?
 function AimRules.busy(aim: Aim, now: number): boolean
 	return aim.busyKind ~= nil and now < aim.busyEnds
+end
+
+-- A timed action of `ticks` at `now`, after the one running if any (which keeps its kind).
+function AimRules.addBusy(aim: Aim, kind: BusyKind, now: number, ticks: number)
+	if ticks <= 0 then
+		return
+	elseif AimRules.busy(aim, now) then
+		aim.busyEnds += ticks * AimRules.TICK
+	else
+		AimRules.startBusy(aim, kind, now, ticks)
+	end
+end
+
+--[[
+	The stack in the hotbar slot in hand went from `before` to `after` (nil: none) by anything but
+	a weapon op, at `now` (see the header's Busy): true when that brings the gun down, as the
+	server brought it down (the caller lets go of the raise control, so the next `step` lowers it).
+	Its lock starts (after any running), and loading round by round and a press not pulled yet
+	end.
+]]
+function AimRules.handChanged(aim: Aim, before: Items.Stack?, after: Items.Stack?, now: number): boolean
+	local lowers, kind, ticks = Handling.changeLock(before, after)
+	if not lowers then
+		return false
+	end
+	aim.loading = false
+	aim.pressed = false
+	if kind ~= nil then
+		AimRules.addBusy(aim, kind :: BusyKind, now, ticks)
+	end
+	return true
 end
 
 --[[

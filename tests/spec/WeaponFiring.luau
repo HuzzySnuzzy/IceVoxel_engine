@@ -1,12 +1,16 @@
 --[[
 	Firing on the server (server Weapons/FireRules, Weapons/Firing, Weapons/WeaponActions) on fake
 	players, mobs and blocks over a real Players/InventoryState: every check and its order, the
-	exploits (too fast, not raised, the wrong item, an origin through a wall, empty, jammed,
-	Ruined), every Fire acknowledged and the refused ones told, damage summed per target with
-	head factors and helmets, PvP, noise, who is sent a shot, crossbow bolts, raising and the
-	weapon actions' locks and sounds; then the loot (Generation/ScavengeLoot's worn entries and
-	new pools) and the police, soldier and construction zombies' drops (Entities/MobList).
+	exploits (too fast, not raised, raised with another gun, the wrong item, an origin through a
+	wall, empty, jammed, Ruined), every Fire acknowledged and the refused ones told, damage summed
+	per target with head factors and helmets, PvP, noise, who is sent a shot, crossbow bolts,
+	raising and the weapon actions' locks and sounds, a gun changed in hand by clicks (down, and
+	locked as R would lock it), no melee attack while guarding or raised; then the loot
+	(Generation/ScavengeLoot's worn entries and new pools) and the police, soldier and
+	construction zombies' drops (Entities/MobList).
 ]]
+
+local fs = require("@lune/fs")
 
 return function(t, shared, require, server)
 	local Items = require(shared.Items)
@@ -26,6 +30,8 @@ return function(t, shared, require, server)
 	local Firing = require(server.Weapons.Firing)
 	local WeaponActions = require(server.Weapons.WeaponActions)
 	local InventoryState = require(server.Players.InventoryState)
+	local Menu = require(shared.Inventory.Menu)
+	local Melee = require(shared.Weapons.Melee)
 
 	local I = Items.id
 	local AIR = Blocks.AIR
@@ -162,7 +168,7 @@ return function(t, shared, require, server)
 			shooter = function(key: any): FireRules.Shooter
 				local p = w.info[key]
 				local window = w.state:window(key)
-				local aim, raisedAt = w.actions:raised(key)
+				local aim, raisedAt, raisedSlot, raisedItem = w.actions:raised(key)
 				return {
 					now = 0,
 					mode = p.mode,
@@ -171,6 +177,8 @@ return function(t, shared, require, server)
 					held = w.state:heldStack(key),
 					aim = aim,
 					raisedAt = raisedAt,
+					raisedSlot = raisedSlot,
+					raisedItem = raisedItem,
 					busyUntil = w.actions:busyUntil(key),
 					lastShot = nil,
 					eyeX = p.x,
@@ -327,6 +335,42 @@ return function(t, shared, require, server)
 		return mob
 	end
 
+	--[[
+		An inventory action of `key`'s as Players/Inventories plays it: a weapon action through the
+		weapon hooks (`allow`, then `applied` with the stack it acted on), any other with the stack
+		in the hotbar slot in hand before it and that slot's after (`changed`).
+	]]
+	local function act(w: any, key: any, action: any)
+		w.seq += 1
+		local window = w.state:window(key)
+		if action.kind == "weapon" then
+			if not w.actions:allow(key, action) then
+				w.state:acknowledge(key, w.seq)
+				return
+			end
+			local before = Items.copyStack(w.state:heldStack(key))
+			w.state:applyAs(key, w.seq, action, w.info[key].mode)
+			w.actions:applied(key, action, before, Items.copyStack(w.state:heldStack(key)))
+			return
+		end
+		local slot = window.inventory.selected
+		local before = Items.copyStack(window.inventory.slots[slot])
+		w.state:applyAs(key, w.seq, action, w.info[key].mode)
+		w.actions:changed(key, before, window.inventory.slots[slot])
+	end
+
+	-- A left (0) or right (1) click on inventory slot `slot` (1..36; 1..9 the hotbar).
+	local function click(w: any, key: any, slot: number, button: number)
+		local window = w.state:window(key)
+		act(w, key, {
+			kind = "click",
+			window = window.id,
+			slot = Menu.windowIndex(window, "inventory", slot),
+			clickType = Menu.ClickType.Pickup,
+			button = button,
+		})
+	end
+
 	--[[ The checks ]]
 
 	t.test("weapon firing: every check refuses in its order", function()
@@ -339,6 +383,8 @@ return function(t, shared, require, server)
 				held = pistol(5),
 				aim = Types.AIM_RAISED,
 				raisedAt = 9,
+				raisedSlot = 1,
+				raisedItem = I.Pistol,
 				busyUntil = nil,
 				lastShot = nil,
 				eyeX = 0.5,
@@ -454,6 +500,9 @@ return function(t, shared, require, server)
 			for k, v in changes or {} do
 				shooter[k] = v
 			end
+			-- (Raised in the slot and with the item in hand, unless told otherwise.)
+			shooter.raisedSlot = shooter.raisedSlot or shooter.selected
+			shooter.raisedItem = shooter.raisedItem or shooter.held.item
 			return shooter
 		end
 		local fire = {
@@ -487,6 +536,9 @@ return function(t, shared, require, server)
 		local never = shooterOf()
 		never.raisedAt = nil
 		t.eq(check(never), "raise", "raised, but never told when")
+		-- A raise never carries over to another slot or item, even before the aims are looked over.
+		t.eq(check(shooterOf({ raisedSlot = 2 })), "raise", "raised in another slot")
+		t.eq(check(shooterOf({ raisedItem = I.Smg })), "raise", "raised with another gun")
 		-- A lock ends a tick early for the clocks.
 		t.eq(check(shooterOf({ busyUntil = 10 + 0.5 * TICK })), nil, "within a tick of its end")
 		t.eq(check(shooterOf({ busyUntil = 10 + 2 * TICK })), "busy")
@@ -664,7 +716,7 @@ return function(t, shared, require, server)
 		t.eq(w.noises[1].radius, 48, "a pistol's")
 		t.near(w.noises[1].x, 0.5, 1e-12)
 		t.eq(w.noises[2].radius, Config.Weapons.ImpactNoise)
-		t.near(w.noises[2].x, 10.2, 1e-9, "at the impact")
+		t.near(w.noises[2].x, 10.22, 1e-9, "at the impact (the drawn head's side, 0.1 out)")
 		-- The record: the shooter and the listener 100 blocks off, not the one at 300.
 		local mine = received(w, "a")
 		t.eq(#mine, 1)
@@ -676,7 +728,7 @@ return function(t, shared, require, server)
 		t.eq(mine[1].jammed, false)
 		t.eq(#mine[1].pellets, 1)
 		t.eq(mine[1].pellets[1].hit, Hit.MobHead)
-		t.near(mine[1].pellets[1].x, 10.2, 1e-4)
+		t.near(mine[1].pellets[1].x, 10.22, 1e-4)
 		t.eq(#received(w, "near"), 1, "within ShotBroadcast")
 		t.eq(#received(w, "far"), 0, "beyond it")
 		-- A body shot at the chest: 7, through its armour (Mobs' affair).
@@ -1199,6 +1251,205 @@ return function(t, shared, require, server)
 		t.eq(w.actions:busyUntil("a"), nil)
 		t.eq(#w.sounds, 3)
 		t.ok(w.actions:allow("a", reload), "free to try again")
+	end)
+
+	t.test("weapon actions: a gun loaded in hand by clicks comes down and takes R's time", function()
+		local pistolSpec = Weapons.firearm(I.Pistol) :: Weapons.FirearmSpec
+		local raiseSeconds = (Config.Weapons.RaiseTicks + 1) * TICK
+		-- A raised pistol, its magazine empty and nothing chambered; a full magazine and rounds by.
+		local w = newWorld()
+		join(w, "a", stack(I.Pistol, { mag = I.PistolMagazine }), 0.5, 70, 0.5)
+		local inv = w.state:window("a").inventory
+		inv.slots[10] = stack(I.PistolMagazine, { n = 15, ammo = I.Rounds9mm })
+		inv.slots[11] = { item = I.Rounds9mm, count = 10 }
+		raise(w, "a")
+		t.eq((shoot(w, "a")), "empty")
+		local t0 = w.time
+		click(w, "a", 10, 0) -- the full magazine onto the cursor: the gun as it was
+		t.eq(w.info.a.attribute, Types.AIM_RAISED, "nothing done to the gun yet")
+		t.eq(w.actions:busyUntil("a"), nil)
+		click(w, "a", 1, 0) -- onto the gun: swapped in
+		t.eq((WeaponState.rounds(w.state:heldStack("a") :: any)), 15, "the magazine went in")
+		t.eq(w.info.a.attribute, nil, "the gun came down")
+		t.near(w.actions:busyUntil("a") :: number, t0 + pistolSpec.reloadTicks * TICK, 1e-9, "a magazine's ticks")
+		click(w, "a", 10, 0) -- the empty one down
+		click(w, "a", 11, 0) -- rounds onto the cursor
+		click(w, "a", 1, 1) -- one chambered by hand
+		t.eq(WeaponState.chamber(w.state:heldStack("a") :: any), I.Rounds9mm, "chambered by hand")
+		local ends = t0 + (pistolSpec.reloadTicks + pistolSpec.chamberTicks) * TICK
+		t.near(w.actions:busyUntil("a") :: number, ends, 1e-9, "and chambering's after it: R's 50 ticks")
+		t.eq((shoot(w, "a")), "raise", "no shot from a gun brought down")
+		t.ok(w.actions:weapon("a", Op.Raise), "raised again")
+		w.time += raiseSeconds
+		t.eq((shoot(w, "a")), "busy", "raised, but still loading")
+		w.time = ends
+		t.eq((shoot(w, "a")), nil, "R's time later it fires")
+
+		-- A pump shotgun filled by clicks: a round's ticks each, as R round by round.
+		local pump = Weapons.firearm(I.PumpShotgun) :: Weapons.FirearmSpec
+		local p = newWorld()
+		join(p, "a", stack(I.PumpShotgun, nil), 0.5, 70, 0.5)
+		p.state:window("a").inventory.slots[11] = { item = I.Buckshot, count = 30 }
+		raise(p, "a")
+		local p0 = p.time
+		click(p, "a", 11, 0)
+		click(p, "a", 1, 0)
+		click(p, "a", 11, 0)
+		local loaded = (WeaponState.rounds(p.state:heldStack("a") :: any)) + 1
+		t.eq(loaded, pump.internal + 1, "five in the tube and one chambered")
+		t.near(p.actions:busyUntil("a") :: number, p0 + loaded * pump.roundTicks * TICK, 1e-9, "84 ticks, as by R")
+		t.eq(p.info.a.attribute, nil)
+		-- Right clicks one round at a time add up the same.
+		local q = newWorld()
+		join(q, "a", stack(I.PumpShotgun, nil), 0.5, 70, 0.5)
+		q.state:window("a").inventory.slots[11] = { item = I.Buckshot, count = 30 }
+		local q0 = q.time
+		click(q, "a", 11, 0)
+		for _ = 1, 3 do
+			click(q, "a", 1, 1)
+		end
+		t.near(q.actions:busyUntil("a") :: number, q0 + 3 * pump.roundTicks * TICK, 1e-9, "three rounds, one by one")
+
+		-- A jammed raised pistol swapped for a loaded one: down, and R's unjam and reload.
+		local j = newWorld()
+		join(j, "a", pistol(3, { jam = true }), 0.5, 70, 0.5)
+		j.state:window("a").inventory.slots[10] = pistol(14)
+		raise(j, "a")
+		t.eq((shoot(j, "a")), "jammed")
+		local j0 = j.time
+		click(j, "a", 10, 0)
+		click(j, "a", 1, 0)
+		click(j, "a", 10, 0)
+		j.actions:tick()
+		t.eq((j.actions:raised("a")), nil, "down")
+		t.near(
+			j.actions:busyUntil("a") :: number,
+			j0 + (j.s.UnjamTicks + pistolSpec.reloadTicks) * TICK,
+			1e-9,
+			"as long as clearing the jam and putting a magazine in"
+		)
+		t.eq((shoot(j, "a")), "raise")
+
+		-- A Ruined magazine never jams a round chambered by hand, but each round takes its time.
+		local r = newWorld()
+		join(r, "a", pistol(0, { magD = durability(I.PistolMagazine) }), 0.5, 70, 0.5)
+		r.state:window("a").inventory.slots[11] = { item = I.Rounds9mm, count = 20 }
+		raise(r, "a")
+		t.eq((shoot(r, "a")), nil, "the chambered round")
+		local r0 = r.time
+		click(r, "a", 11, 0)
+		click(r, "a", 1, 1)
+		click(r, "a", 11, 0)
+		t.eq(r.info.a.attribute, nil, "down to chamber by hand")
+		t.near(r.actions:busyUntil("a") :: number, r0 + pistolSpec.chamberTicks * TICK, 1e-9, "chambering's ticks")
+		t.eq((shoot(r, "a")), "raise")
+	end)
+
+	t.test("weapon actions: what else changes the gun in hand, and what doesn't", function()
+		local pistolSpec = Weapons.firearm(I.Pistol) :: Weapons.FirearmSpec
+		-- A raise never carries over to another slot, even within the frame (before `tick`).
+		local w = newWorld()
+		join(w, "a", pistol(5), 0.5, 70, 0.5)
+		local inv = w.state:window("a").inventory
+		inv.slots[2] = stack(I.HuntingRifle, { ch = I.Rounds308, mag = I.HuntingMagazine, n = 4, ammo = I.Rounds308 })
+		raise(w, "a")
+		act(w, "a", { kind = "select", slot = 2 })
+		t.eq(w.info.a.attribute, nil, "another slot: down at once")
+		t.eq((shoot(w, "a", { slot = 2, item = I.HuntingRifle })), "raise", "the rifle was never raised")
+		t.eq(w.actions:busyUntil("a"), nil, "a selection takes no time but the raise")
+		-- Clicks elsewhere leave a raised gun alone: rounds into a magazine, stacks moved about.
+		act(w, "a", { kind = "select", slot = 1 })
+		raise(w, "a")
+		inv.slots[10] = stack(I.PistolMagazine, nil)
+		inv.slots[11] = { item = I.Rounds9mm, count = 10 }
+		click(w, "a", 11, 0)
+		click(w, "a", 10, 0)
+		click(w, "a", 20, 0)
+		t.eq((WeaponState.rounds(inv.slots[10] :: any)), 10, "a magazine loaded in the inventory")
+		t.eq(w.info.a.attribute, Types.AIM_RAISED, "still raised")
+		t.eq(w.actions:busyUntil("a"), nil, "nothing locked")
+		t.eq((shoot(w, "a")), nil, "and it fires")
+		-- Taken apart by a right click: down, and no lock (detaching takes none).
+		click(w, "a", 1, 1)
+		t.eq(WeaponState.magazine(inv.slots[1] :: any), nil, "the magazine out")
+		t.eq(w.info.a.attribute, nil, "down")
+		t.eq(w.actions:busyUntil("a"), nil, "no lock")
+		click(w, "a", 25, 0)
+		-- Another item clicked into its place: down, nothing to time.
+		raise(w, "a")
+		inv.slots[12] = stack(I.Machete, nil)
+		click(w, "a", 12, 0)
+		click(w, "a", 1, 0)
+		t.eq(inv.slots[1] and inv.slots[1].item, I.Machete)
+		t.eq(w.info.a.attribute, nil)
+		t.eq(w.actions:busyUntil("a"), nil)
+
+		-- The inventory screen open (the client lowered the gun): loading works, and is timed.
+		local o = newWorld()
+		join(o, "a", stack(I.Pistol, { mag = I.PistolMagazine }), 0.5, 70, 0.5)
+		local oinv = o.state:window("a").inventory
+		oinv.slots[10] = stack(I.PistolMagazine, { n = 15, ammo = I.Rounds9mm })
+		local o0 = o.time
+		click(o, "a", 10, 0)
+		click(o, "a", 1, 0)
+		click(o, "a", 10, 0)
+		t.eq((WeaponState.rounds(oinv.slots[1] :: any)), 15, "loaded by the screen")
+		t.near(o.actions:busyUntil("a") :: number, o0 + pistolSpec.reloadTicks * TICK, 1e-9)
+		-- R then chambers after it (the lock's tick of slack lets it in at the end) and locks once.
+		local reload = { kind = "weapon", op = WeaponActions.RELOAD, slot = -1, part = 0 }
+		t.eq(o.actions:allow("a", reload), false, "R waits for the magazine")
+		o.time = o0 + pistolSpec.reloadTicks * TICK
+		local o1 = o.time
+		act(o, "a", reload)
+		t.eq(WeaponState.chamber(oinv.slots[1] :: any), I.Rounds9mm, "chambered by R")
+		t.near(o.actions:busyUntil("a") :: number, o1 + pistolSpec.chamberTicks * TICK, 1e-9, "R's own lock, once")
+		-- A click during a lock comes after it.
+		oinv.slots[11] = stack(I.SmgMagazine, nil)
+		oinv.slots[12] = pistol(15, { mag = I.PistolMagazine })
+		click(o, "a", 12, 0)
+		click(o, "a", 1, 0)
+		t.near(
+			o.actions:busyUntil("a") :: number,
+			o1 + pistolSpec.chamberTicks * TICK + pistolSpec.reloadTicks * TICK,
+			1e-9,
+			"after the chambering still running"
+		)
+		-- Creative slots and drops change the hand too.
+		local c = newWorld()
+		join(c, "a", pistol(2), 0.5, 70, 0.5, CREATIVE)
+		raise(c, "a")
+		act(c, "a", { kind = "drop", all = true })
+		t.eq(c.info.a.attribute, nil, "thrown: down at once")
+	end)
+
+	t.test("weapon actions: no attack while guarding or raised; a guard goes with the hand at once", function()
+		t.ok(Melee.mayAttack(nil), "a hand held as ever")
+		t.eq(Melee.mayAttack(Types.AIM_GUARD), false, "guarding")
+		t.eq(Melee.mayAttack(Types.AIM_RAISED), false, "a gun raised fires; it never bashes")
+		local w = newWorld()
+		join(w, "a", stack(I.Machete, nil), 0.5, 70, 0.5)
+		w.state:window("a").inventory.slots[2] = stack(I.Pistol, nil)
+		w.state:window("a").inventory.slots[3] = stack(I.BaseballBat, nil)
+		t.ok(Melee.mayAttack(w.info.a.attribute))
+		t.ok(w.actions:weapon("a", Op.Guard))
+		t.eq(Melee.mayAttack(w.info.a.attribute), false, "the server refuses its Attack")
+		t.ok(w.actions:weapon("a", Op.Unguard))
+		t.ok(Melee.mayAttack(w.info.a.attribute), "guard down: attacks again")
+		-- Switching to the bat drops the guard as the selection arrives, so an attack sent right
+		-- after it (the client's next message) lands.
+		t.ok(w.actions:weapon("a", Op.Guard))
+		act(w, "a", { kind = "select", slot = 3 })
+		t.ok(Melee.mayAttack(w.info.a.attribute), "another weapon in hand: no guard")
+		act(w, "a", { kind = "select", slot = 2 })
+		t.ok(w.actions:weapon("a", Op.Raise))
+		t.eq(Melee.mayAttack(w.info.a.attribute), false, "raised")
+		t.ok(w.actions:weapon("a", Op.Lower))
+		t.ok(Melee.mayAttack(w.info.a.attribute), "lowered: a bash")
+		-- The server's Attack handler asks it before anything else is done.
+		local mobs = fs.readFile("src/server/Mobs/Mobs.luau")
+		local at = string.find(mobs, "Melee.mayAttack(player:GetAttribute(Types.AIM_ATTRIBUTE))", 1, true)
+		local attack = string.find(mobs, "mobs:attack(id,", 1, true)
+		t.ok(at ~= nil and attack ~= nil and at < attack, "Mobs' Attack handler refuses before MobWorld.attack")
 	end)
 
 	--[[ Loot and drops ]]

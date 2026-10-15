@@ -552,7 +552,8 @@ table.insert(
 			},
 			{ name = "Shirtless", weight = 6, pants = { 50, 60, 80 }, shoes = { 60, 44, 30 } },
 		}),
-		parts = standing(1.0, 1.99, { 230, 120, 40 }),
+		-- (Its stand-in as tall as its rig is drawn.)
+		parts = standing(1.0, 2.3, { 230, 120, 40 }),
 	})
 )
 table.insert(

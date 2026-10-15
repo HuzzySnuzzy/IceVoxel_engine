@@ -26,9 +26,10 @@
 	           the path wins, block or box; the bullet stops in the first target it meets (a target
 	           is hit once a pellet). The shooter (`shot.shooter`, a Target's `key`) is never one.
 	  Heads    a ray that meets the head box counts as a head hit when the head is the first of
-	           the two boxes it enters, or when it enters the body box at the head's height or
-	           above (beside the head, where the box is only air). A ray that goes in through the
-	           chest and on up into the head hits the chest.
+	           the two boxes it enters (a ray that goes in through the chest, or the back of a
+	           crawler or an animal, and on into the head hits the body). A player's body box
+	           rises beside the head (a Target's `crown`): there a ray that enters it at the
+	           head's height or above and goes on into the head is a head hit too.
 	  Damage   the round's damage x the gun's scale (`shot.damage`) x `share` (1 out to the round's
 	           range, then linearly down to its falloffMin at maxRange) x GlassShare per pane
 	           passed; a head hit times `headFactor`: ZombieHead for zombie kinds (HelmetShare of
@@ -40,12 +41,17 @@
 	  Bounds   `bounds`: the box a flight stays in (every segment's end), so the server asks for
 	           the mobs near a shot once (Mobs/Mobs.targets) however long or bent its path.
 
-	Boxes are { minX, minY, minZ, maxX, maxY, maxZ } in blocks. Heads (`mobBoxes`): a standing kind
-	(1 block tall or more) x/z +- min(width / 2, 0.3), y from eye - 0.22 to max(height, eye + 0.2)
-	above the feet (an ordinary zombie's 1.52..1.95); a low kind (the crawler) a 0.5 x 0.4 x 0.5
-	head 0.25 blocks forward along its yaw (facing (sin yaw, cos yaw)), 0.2..0.6 up. A player's
-	(`playerBoxes`): the body 0.6 wide from the feet to the eyes + 0.2, the head x/z +- 0.25 from
-	the eyes - 0.22 to + 0.2 (the pose-aware eyes, server Players/PlayerPositions.eye).
+	Boxes are { minX, minY, minZ, maxX, maxY, maxZ } in blocks. A mob's (`mobBoxes`) are where it
+	is drawn (Shared/Entities/MobShape): its head is the drawn head grown HEAD_MARGIN all round
+	(the rig's sway and hats inside it), turned with the mob (facing (sin yaw, cos yaw)); a
+	standing zombie's body is its torso as drawn (as wide as its box at least) from the feet up
+	to the neck, and its head starts there, so the two never overlap (an ordinary zombie's body
+	0.6 wide to 1.5, its head 1.5..2.05; a brute's, drawn 2.3 tall, 0.97 wide to 1.77, its head
+	1.77..2.4); every other kind's body is its box (MobList width x height), its head in front of
+	it where it is drawn (the crawler's, lying low, 0.56 forward and 0.34 up; an animal's second
+	part). A player's (`playerBoxes`): the body 0.6 wide from the feet to the eyes + 0.2, the
+	head x/z +- 0.25 from the eyes - 0.22 to + 0.2 (the pose-aware eyes, server
+	Players/PlayerPositions.eye).
 
 	`trace` keeps what its block callbacks need at module level (it never yields), so a shot
 	allocates only its impacts.
@@ -55,6 +61,8 @@ local Config = require(script.Parent.Parent.Config)
 local Blocks = require(script.Parent.Parent.Blocks)
 local Shapes = require(script.Parent.Parent.Blocks.Shapes)
 local VoxelRaycast = require(script.Parent.Parent.World.VoxelRaycast)
+local MobList = require(script.Parent.Parent.Entities.MobList)
+local MobShape = require(script.Parent.Parent.Entities.MobShape)
 local Weapons = require(script.Parent)
 
 -- A point or a direction (blocks).
@@ -62,9 +70,6 @@ export type Vec = { x: number, y: number, z: number }
 
 -- { minX, minY, minZ, maxX, maxY, maxZ } (blocks).
 export type Box = { number }
-
--- What `mobBoxes` reads of a mob kind (Shared/Entities/MobList.Kind has it).
-export type BoxKind = { width: number, height: number, eye: number }
 
 -- One projectile's flight (a bullet, a pellet or a bolt).
 export type ShotSpec = {
@@ -97,6 +102,9 @@ export type Target = {
 	-- (Mobs) a zombie kind, and whether its look wears a helmet, hard hat or fire helmet.
 	zombie: boolean?,
 	helmet: boolean?,
+	-- (Players) the body box rises beside the head: entering it at the head's height counts as the
+	-- head when the ray goes on into it (see the header's Heads).
+	crown: boolean?,
 }
 
 -- What blocks do to a shot (the server builds it from Config.Weapons and the shooter).
@@ -146,19 +154,65 @@ local Ballistics = {}
 Ballistics.MAX_PANES = 8
 -- Segments of one flight at most (a guard: the slowest round, the crossbow's bolt, needs 50).
 Ballistics.MAX_SEGMENTS = 1024
+-- Blocks a mob's head box reaches beyond its drawn head (but below a standing zombie's neck).
+Ballistics.HEAD_MARGIN = 0.1
 
 --[[ Boxes ]]
 
--- A mob's body and head boxes at (x, y, z) (its feet) facing `yaw` (see the header).
-function Ballistics.mobBoxes(kind: BoxKind, x: number, y: number, z: number, yaw: number): (Box, Box)
-	local half = kind.width / 2
-	local body = { x - half, y, z - half, x + half, y + kind.height, z + half }
-	if kind.height >= 1 then
-		local h = math.min(half, 0.3)
-		return body, { x - h, y + kind.eye - 0.22, z - h, x + h, y + math.max(kind.height, kind.eye + 0.2), z + h }
+-- A kind's body and head boxes in its own frame (x across, y up from the feet, z forward).
+export type KindBoxes = { body: Box, head: Box }
+local kindBoxes: { [MobList.Kind]: KindBoxes } = {}
+
+-- The kind's boxes where it is drawn (see the header), worked out once a kind.
+function Ballistics.kindBoxes(kind: MobList.Kind): KindBoxes
+	local known = kindBoxes[kind]
+	if known then
+		return known
 	end
-	local cx, cz = x + math.sin(yaw) * 0.25, z + math.cos(yaw) * 0.25
-	return body, { cx - 0.25, y + 0.2, cz - 0.25, cx + 0.25, y + 0.6, cz + 0.25 }
+	local half = kind.width / 2
+	local body = { -half, 0, -half, half, kind.height, half }
+	local drawn = MobShape.head(kind)
+	local head: Box
+	if drawn then
+		local m = Ballistics.HEAD_MARGIN
+		head = { drawn[1] - m, drawn[2] - m, drawn[3] - m, drawn[4] + m, drawn[5] + m, drawn[6] + m }
+		local neck = MobShape.neck(kind)
+		local _, sx = MobShape.scale(kind)
+		if neck then
+			-- A standing rig: the torso to the neck, the head above it.
+			local torso = math.max(half, MobShape.TORSO_WIDTH / 2 * sx)
+			body = { -torso, 0, -torso, torso, neck, torso }
+			head[2] = neck
+		end
+	else
+		-- (A kind drawn without a head: about its eyes, as wide as it, at most 0.6.)
+		local h = math.min(half, 0.3)
+		head = { -h, kind.eye - 0.22, -h, h, math.max(kind.height, kind.eye + 0.2), h }
+	end
+	local boxes = table.freeze({ body = table.freeze(body), head = table.freeze(head) })
+	kindBoxes[kind] = boxes
+	return boxes
+end
+
+-- A mob's body and head boxes at (x, y, z) (its feet) facing `yaw` (see the header).
+function Ballistics.mobBoxes(kind: MobList.Kind, x: number, y: number, z: number, yaw: number): (Box, Box)
+	local boxes = Ballistics.kindBoxes(kind)
+	local b, h = boxes.body, boxes.head
+	-- (The body is square about the feet; the head turns with the mob: its centre along the yaw,
+	-- its bounds those of the turned box.)
+	local c, s = math.cos(yaw), math.sin(yaw)
+	local lx, lz = (h[1] + h[4]) / 2, (h[3] + h[6]) / 2
+	local hx, hz = (h[4] - h[1]) / 2, (h[6] - h[3]) / 2
+	local cx, cz = x + c * lx + s * lz, z - s * lx + c * lz
+	local ex, ez = math.abs(c) * hx + math.abs(s) * hz, math.abs(s) * hx + math.abs(c) * hz
+	return { x + b[1], y + b[2], z + b[3], x + b[4], y + b[5], z + b[6] }, {
+		cx - ex,
+		y + h[2],
+		cz - ez,
+		cx + ex,
+		y + h[5],
+		cz + ez,
+	}
 end
 
 -- A player's body and head boxes from their feet and their eyes' height `eyeY` (world blocks).
@@ -255,11 +309,12 @@ function Ballistics.enter(
 	return near
 end
 
--- Where a ray meets a body and head pair within `limit` (see the header's Heads): the distance and
--- whether it is a head hit; nil when it meets neither.
+-- Where a ray meets a body and head pair within `limit` (see the header's Heads; `crown`: a
+-- player's): the distance and whether it is a head hit; nil when it meets neither.
 local function boxesHit(
 	body: Box,
 	head: Box,
+	crown: boolean,
 	ox: number,
 	oy: number,
 	oz: number,
@@ -271,7 +326,7 @@ local function boxesHit(
 	local enter = Ballistics.enter
 	local tb = enter(body, ox, oy, oz, ux, uy, uz, limit)
 	local th = enter(head, ox, oy, oz, ux, uy, uz, limit)
-	if th ~= nil and (tb == nil or th <= tb or oy + uy * tb >= head[2]) then
+	if th ~= nil and (tb == nil or th <= tb or (crown and oy + uy * tb >= head[2])) then
 		return th, true
 	end
 	return tb, false
@@ -292,10 +347,11 @@ function Ballistics.hit(
 	uz: number,
 	limit: number
 ): (number?, boolean)
-	local t, head = boxesHit(target.body, target.head, ox, oy, oz, ux, uy, uz, limit)
+	local crown = target.crown == true
+	local t, head = boxesHit(target.body, target.head, crown, ox, oy, oz, ux, uy, uz, limit)
 	local seenBody, seenHead = target.seenBody, target.seenHead
 	if seenBody and seenHead then
-		local st, sh = boxesHit(seenBody, seenHead, ox, oy, oz, ux, uy, uz, if t then t else limit)
+		local st, sh = boxesHit(seenBody, seenHead, crown, ox, oy, oz, ux, uy, uz, if t then t else limit)
 		if st ~= nil and (t == nil or st < t) then
 			return st, sh
 		end

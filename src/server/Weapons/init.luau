@@ -19,9 +19,10 @@
 	  Weapons/WeaponActions  Weapon messages (raise, lower, guard, unguard: the player attribute
 	                         Inventory/Types.AIM_ATTRIBUTE, dropped when the hand or the slot
 	                         changes, and when a character dies, comes or goes), and the
-	                         inventory's weapon actions through
-	                         Inventories.setWeaponHooks: their locks (reload, a round, a jam, the
-	                         fire mode) and their predicted sounds for the others
+	                         inventory's actions through Inventories.setWeaponHooks: the weapon
+	                         actions' locks (reload, a round, a jam, the fire mode) and their
+	                         predicted sounds for the others; any other action that changed the
+	                         gun in hand lowers it and locks it as the weapon action would
 	Every frame (Heartbeat) the aims are looked over and the queued Shots go out; a player who
 	leaves is forgotten. The server script starts it after Mobs/Mobs.
 ]]
@@ -138,6 +139,9 @@ function Weapons.start(net: Net, world: WorldServer.World)
 		applied = function(player: Player, action: Types.Action, before: Items.Stack?, after: Items.Stack?)
 			weaponActions:applied(player, action, before, after)
 		end,
+		changed = function(player: Player, before: Items.Stack?, after: Items.Stack?)
+			weaponActions:changed(player, before, after)
+		end,
 	})
 
 	local shots = Firing.new({
@@ -147,7 +151,7 @@ function Weapons.start(net: Net, world: WorldServer.World)
 		getBlock = getBlock,
 		shooter = function(player: Player): FireRules.Shooter
 			local window = Inventories.get(player)
-			local aim, raisedAt = weaponActions:raised(player)
+			local aim, raisedAt, raisedSlot, raisedItem = weaponActions:raised(player)
 			local ex, ey, ez = PlayerPositions.eye(player)
 			return {
 				now = 0,
@@ -157,6 +161,8 @@ function Weapons.start(net: Net, world: WorldServer.World)
 				held = Inventories.heldStack(player),
 				aim = aim,
 				raisedAt = raisedAt,
+				raisedSlot = raisedSlot,
+				raisedItem = raisedItem,
 				busyUntil = weaponActions:busyUntil(player),
 				lastShot = nil,
 				eyeX = ex,

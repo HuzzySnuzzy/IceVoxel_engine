@@ -42,6 +42,18 @@
 	             op 3 that cleared a jam "unjam", UnjamTicks; op 4 that changed the fire mode
 	             "mode", ModeTicks. Anything else (the light, detaching, an op Loading refused,
 	             which hands the stack back as it was, another item or none) locks nothing.
+	  Changes    what a change to the gun in hand that came through no weapon op costs (an
+	             inventory click, drag, key or creative slot on the hotbar slot in hand: server
+	             Players/Inventories through Weapons/WeaponActions, client Interaction/Firearms after
+	             predicting it: `changeLock`, the one rule both time it by): any change to a firearm
+	             there (its magazine, chamber, rounds, jam, fire mode, parts or wear, or another
+	             stack in its place) lowers it, and the same gun locks as long as the weapon ops
+	             that do the same would, added up: a jam gone UnjamTicks (op 3), the fire mode
+	             changed ModeTicks (op 4), a detachable feed's magazine in (another, or the same
+	             with other rounds or wear) reloadTicks, a round chambered chamberTicks (op 1's
+	             numbers), an internal feed's rounds in roundTicks a round (op 2, one a time).
+	             Rounds, magazines and parts taken out, parts mounted and another item lock nothing
+	             beyond the lowering.
 	  Zoom       field of view divided by this in the sights: a built-in scope's, else the
 	             optic's, else IronSightsZoom.
 
@@ -358,6 +370,66 @@ function Handling.actionLock(
 		end
 	end
 	return nil, 0, false
+end
+
+-- (A firearm with a count: in hand.)
+local function gun(stack: Items.Stack?): boolean
+	return stack ~= nil and stack.count > 0 and Weapons.firearm(stack.item) ~= nil
+end
+
+--[[
+	What a change of the stack in the hotbar slot in hand from `before` to `after` (nil: none) that
+	came through no weapon op costs (see the header's Changes): whether it lowers the gun (a
+	firearm before or after, and the two differ), the kind of lock for the HUD (the feed's, else
+	"unjam", else "mode"; nil: none) and its ticks. `s` is Config.Weapons unless given.
+]]
+function Handling.changeLock(
+	before: Items.Stack?,
+	after: Items.Stack?,
+	s: typeof(Config.Weapons)?
+): (boolean, ActionKind?, number)
+	local was, is = gun(before), gun(after)
+	if not was and not is then
+		return false, nil, 0
+	end
+	if before and after and before.count == after.count and Items.stacksMatch(before, after) then
+		return false, nil, 0
+	end
+	if not (was and is) or (before :: Items.Stack).item ~= (after :: Items.Stack).item then
+		return true, nil, 0
+	end
+	local old, new = WeaponState.sane(before :: Items.Stack), WeaponState.sane(after :: Items.Stack)
+	local spec = Weapons.firearm(old.item) :: Weapons.FirearmSpec
+	local w = s or settings()
+	local kind: ActionKind?, ticks = nil, 0
+	if spec.magazine ~= nil then
+		-- (A click never feeds the chamber from the magazine: its rounds change only with it.)
+		local magBefore, wearBefore = WeaponState.magazine(old)
+		local magAfter, wearAfter = WeaponState.magazine(new)
+		local magIn = magAfter ~= nil
+			and (magBefore ~= magAfter or wearBefore ~= wearAfter or WeaponState.rounds(old) ~= WeaponState.rounds(new))
+		local chambered = WeaponState.chamber(old) == nil and WeaponState.chamber(new) ~= nil
+		if magIn then
+			kind, ticks = "reload", Handling.reloadTicks(spec, chambered)
+		elseif chambered then
+			kind, ticks = "chamber", spec.chamberTicks
+		end
+	else
+		local function held(stack: Items.Stack): number
+			return WeaponState.rounds(stack) + (if WeaponState.chamber(stack) ~= nil then 1 else 0)
+		end
+		local loaded = held(new) - held(old)
+		if loaded > 0 then
+			kind, ticks = "round", loaded * spec.roundTicks
+		end
+	end
+	if WeaponState.jammed(old) and not WeaponState.jammed(new) then
+		kind, ticks = kind or "unjam", ticks + w.UnjamTicks
+	end
+	if WeaponState.modeIndex(old) ~= WeaponState.modeIndex(new) then
+		kind, ticks = kind or "mode", ticks + w.ModeTicks
+	end
+	return true, kind, ticks
 end
 
 -- The sights' zoom: a built-in scope's, else the optic's (`optic` an item; nil: none), else iron

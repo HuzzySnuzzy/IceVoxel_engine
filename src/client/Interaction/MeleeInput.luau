@@ -28,9 +28,11 @@
 
 	One press and one guard at a time: a second source's press while one is held is ignored. The
 	server checks every hit (reach, sight, the attack strength) and every guard (only with a
-	listed weapon in hand); this module only decides what to send. `guarding()` and `charge()`
-	(0..1 of a heavy wind-up) let the client's poses and HUD (Player/WeaponPoses, Ui/WeaponHud)
-	show them.
+	listed weapon in hand; no attack while guarding); this module only decides what to send.
+	`guarding()` and `charge()` (0..1 of a heavy wind-up) let the client's poses and HUD
+	(Player/WeaponPoses, Ui/WeaponHud) show them; `pressing()` (a press held for its release, or
+	the guard) keeps BlockInteraction from breaking the block behind the mob meanwhile
+	(Interaction/AttackRules.breaking).
 
 	Interaction/BlockInteraction calls in (and requires this module, so nothing this module
 	requires may require BlockInteraction):
@@ -179,6 +181,11 @@ end
 -- Is the local player guarding with a melee weapon now?
 function MeleeInput.guarding(): boolean
 	return guard ~= nil
+end
+
+-- Is a press held for its release, or the guard up (no block is broken meanwhile)?
+function MeleeInput.pressing(): boolean
+	return pressed ~= nil or guard ~= nil
 end
 
 -- How far a held press has wound up to a heavy attack: 0 (none, or not a heavy weapon) .. 1 (a

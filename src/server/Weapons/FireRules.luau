@@ -16,8 +16,10 @@
 	             item       the hand doesn't hold the item the message names
 	             weapon     that item is no firearm (Shared/Weapons)
 	             raise      not raised (Inventory/Types.AIM_ATTRIBUTE, set by Weapons/WeaponActions
-	                        from the client's Weapon messages), or raised less than
-	                        Config.Weapons.RaiseTicks ago (one tick of slack for the two clocks)
+	                        from the client's Weapon messages), raised in another hotbar slot or
+	                        with another item (a raise never carries over, not even before
+	                        WeaponActions' next look), or raised less than Config.Weapons.RaiseTicks
+	                        ago (one tick of slack for the two clocks)
 	             busy       a reload, a round, a jam or a fire mode being seen to (WeaponActions'
 	                        lock; one tick of slack)
 	             cadence    sooner after the last than the fire mode's shot time (Shared/Weapons/
@@ -32,10 +34,11 @@
 	           shot's spread (Handling.spread of the message's stance and the muzzle device) and
 	           each pellet's cone (Shared/Weapons/Ballistics.pellets); `round`: the round fired (the
 	           chambered one; creative with none: the calibre's first round).
-	  Targets  `mobTarget`: a mob's boxes (Ballistics.mobBoxes), whether it is a zombie and wears a
-	           helmet, hard hat or fire helmet (its look: Shared/Entities/MobList.look), and where
-	           the shooter's client last saw it (lag compensation) when that is within LagCompMax of
-	           where it is; `playerTarget`: a player's boxes at their pose-aware eyes. `blockRules`:
+	  Targets  `mobTarget`: a mob's boxes (Ballistics.mobBoxes: where it is drawn), whether it is a
+	           zombie and wears a helmet, hard hat or fire helmet (its look: Shared/Entities/
+	           MobList.look), and where the shooter's client last saw it (lag compensation) when
+	           that is within LagCompMax of where it is; `playerTarget`: a player's boxes at their
+	           pose-aware eyes (the body box rising beside the head: `crown`). `blockRules`:
 	           glass (ShatterBlocks by name, shattered only when ShatterGlass and the shooter may
 	           build), leaves (names ending "Leaves", passed with PassLeaves).
 	  Damage   `tally`: each pellet's last impact; every pellet on one target summed, the head's
@@ -92,9 +95,12 @@ export type Shooter = {
 	-- The selected hotbar slot (1..9) and the stack in it (nil: an empty hand).
 	selected: number,
 	held: Stack?,
-	-- Inventory/Types.AIM_ATTRIBUTE's value, and when the gun in hand was raised.
+	-- Inventory/Types.AIM_ATTRIBUTE's value, when the gun was raised, and the hotbar slot and item it
+	-- was raised with (Weapons/WeaponActions.raised).
 	aim: string?,
 	raisedAt: number?,
+	raisedSlot: number?,
+	raisedItem: number?,
 	-- When a weapon action's lock ends (nil: none).
 	busyUntil: number?,
 	-- When the last shot counts from (Handling.after; nil: none yet).
@@ -264,6 +270,8 @@ function FireRules.check(shooter: Shooter, fire: WeaponSync.Fire, getBlock: GetB
 	if
 		shooter.aim ~= Types.AIM_RAISED
 		or raisedAt == nil
+		or shooter.raisedSlot ~= shooter.selected
+		or shooter.raisedItem ~= held.item
 		or now - raisedAt < (s.RaiseTicks - Handling.SLACK_TICKS) * TICK - 1e-9
 	then
 		return "raise"
@@ -381,7 +389,7 @@ end
 -- A player as a shot's target: their feet and pose-aware eyes' height.
 function FireRules.playerTarget(key: any, fx: number, fy: number, fz: number, eyeY: number): Ballistics.Target
 	local body, head = Ballistics.playerBoxes(fx, fy, fz, eyeY)
-	return { kind = "player", key = key, body = body, head = head }
+	return { kind = "player", key = key, body = body, head = head, crown = true }
 end
 
 -- (Block lookups: 1 per block id.)
