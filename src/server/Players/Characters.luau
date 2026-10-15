@@ -75,6 +75,13 @@
 	  * magic hurts from elsewhere (`magicHurt`: the apocalypse's infection, server
 	    Apocalypse/Infection): as the effects' own, through the cooldown without armor, then
 	    Resistance; not lethal unless asked (it then stops at 1 half heart).
+	  * bullets, pellets and bolts (`weaponHurt`: server Weapons/, with Config.Weapons.PvP): like
+	    any other hurt but with their own immunity (the cooldown is cleared first, so every round
+	    of automatic fire lands, as on mobs), softened by all the armor worn (accessories too) on
+	    the body and by the helmet's points alone on the head, then by Resistance; a hit that
+	    lands opens Bleeding at Config.Weapons.BleedChance on survival and adventure players
+	    (Apocalypse/SurvivalRules.bleeding and Players/Effects, as a zombie's wound; only with
+	    Config.Apocalypse and its Bleeding enabled).
 	  * Terraria's accessories (Players/Inventories.accessories: Items/Accessories' sums of what
 	    is worn): their defense joins the armor's wherever armor softens a hurt (lava, fire,
 	    blasts, mobs: Accessories.armorPoints); a Lucky Horseshoe takes fall damage away
@@ -110,6 +117,8 @@ local Effects = require(script.Parent.Effects)
 local GameModeRules = require(script.Parent.GameModeRules)
 local Inventories = require(script.Parent.Inventories)
 local Accessories = require(Shared.Items.Accessories)
+local Items = require(Shared.Items)
+local SurvivalRules = require(script.Parent.Parent.Apocalypse.SurvivalRules)
 
 -- Minecraft players have 20 health points (half hearts).
 local MINECRAFT_HEALTH = GameModeRules.MINECRAFT_HEALTH
@@ -560,6 +569,74 @@ function Characters.magicHurt(player: Player, amount: number, lethal: boolean): 
 	if landed > 0 then
 		-- (TakeDamage respects the ForceField of players who can't be hurt.)
 		humanoid:TakeDamage(math.min(landed / MINECRAFT_HEALTH * humanoid.MaxHealth, humanoid.Health))
+	end
+	return landed
+end
+
+-- The armor points and toughness of the helmet worn (armor slot 1, Head), the head's only armor.
+local function helmetPoints(player: Player): (number, number)
+	local window = Inventories.get(player)
+	local stack = if window then window.inventory.armor[1] else nil
+	local def = if stack then Items.get(stack.item) else nil
+	local armor = if def then def.armor else nil
+	if armor and armor.slot == 1 then
+		return armor.defense, armor.toughness
+	end
+	return 0, 0
+end
+
+-- (Bleeding rolls of weapon hits.)
+local bleedRandom = Random.new()
+
+--[[
+	A bullet's, a pellet's or a bolt's hurt on a living player (server Weapons/: every pellet of a
+	shot on the body summed, the head's apart): `amount` half hearts with the shot's own immunity
+	(the hurt cooldown cleared first), through the armor worn (all of it on the body; the
+	helmet's only on the `head`), then Resistance; never in creative or spectator. A hit that
+	lands opens Bleeding at Config.Weapons.BleedChance when `bleed` is not false (see the header).
+	Returns the half hearts that landed.
+]]
+function Characters.weaponHurt(player: Player, amount: number, head: boolean, bleed: boolean?): number
+	local character = player.Character
+	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+	if humanoid == nil or humanoid.Health <= 0 or not (amount > 0) then
+		return 0
+	end
+	local state = burning[player]
+	if state == nil then
+		state = Burning.newPlayer()
+		burning[player] = state
+	end
+	-- (Its own immunity: as Mobs/MobWorld's `ownImmunity`.)
+	state.cooldown = 0
+	state.lastHurt = 0
+	local armor, toughness = 0, 0
+	if head then
+		armor, toughness = helmetPoints(player)
+	else
+		local window = Inventories.get(player)
+		if window then
+			armor, toughness = Accessories.armorPoints(window.inventory)
+		end
+	end
+	local mode = GameMode.of(player)
+	local landed = Effects.incomingDamage(player, Burning.hurtPlayer(state, mode, amount, armor, toughness))
+	if landed <= 0 then
+		return 0
+	end
+	-- (TakeDamage respects the ForceField of players who can't be hurt.)
+	humanoid:TakeDamage(landed / MINECRAFT_HEALTH * humanoid.MaxHealth)
+	local wounds = Config.Apocalypse.Bleeding
+	if
+		bleed ~= false
+		and Config.Apocalypse.Enabled
+		and wounds.Enabled
+		and GameMode.isSurvivalLike(mode)
+		and bleedRandom:NextNumber() < Config.Weapons.BleedChance
+	then
+		local ticks, amplifier =
+			SurvivalRules.bleeding(Effects.ticks(player, "Bleeding"), Effects.amplifier(player, "Bleeding"), wounds)
+		Effects.give(player, "Bleeding", ticks, amplifier)
 	end
 	return landed
 end

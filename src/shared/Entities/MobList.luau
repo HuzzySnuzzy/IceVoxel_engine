@@ -23,12 +23,14 @@
 	                                                       the box fits an open door's 13/16)
 	  Screamer           0.6 x 1.9    1.7   16      0.25   shrieks when it spots a player: every
 	                                                       zombie within 48 blocks comes to look
-	  Soldier Zombie     0.6 x 1.95   1.74  30      0.23   armoured (10), hits 4; gunpowder
-	  Police Zombie      0.6 x 1.95   1.74  24      0.23   armoured (6); city streets
+	  Soldier Zombie     0.6 x 1.95   1.74  30      0.23   armoured (10), hits 4; gunpowder, 5.56
+	                                                       rounds, now and then a rifle magazine
+	  Police Zombie      0.6 x 1.95   1.74  24      0.23   armoured (6); city streets; 9mm rounds,
+	                                                       now and then a pistol magazine
 	  Firefighter Zombie 0.6 x 1.95   1.74  26      0.22   armoured (6), fire can't hurt it; breaks
 	                                                       blocks 1.5 times as fast
 	  Construction Zombie 0.6 x 1.95  1.74  24      0.23   hits 4, breaks blocks twice as fast;
-	                                                       nails and scrap
+	                                                       nails and scrap, rarely a pipe wrench
 	  Doctor Zombie      0.6 x 1.95   1.74  18      0.23   carries bandages, pills, antibiotics
 
 	Fields (blocks, ticks, half hearts):
@@ -663,6 +665,9 @@ do
 				BONE,
 				{ item = "Gunpowder", min = 0, max = 2 },
 				{ item = "MilitaryRation", min = 1, max = 1, chance = 0.1, byPlayer = true },
+				-- (Its rifle's rounds and now and then a magazine: Shared/Weapons.)
+				{ item = "Rounds556", min = 3, max = 10, chance = 0.2, byPlayer = true },
+				{ item = "RifleMagazine", min = 1, max = 1, chance = 0.04, byPlayer = true },
 			},
 			spawn = { weight = 3, cityWeight = 1, hordeWeight = 4, group = { 1, 3 } },
 			rig = { kind = "R15", gait = "shamble", width = 0.85 },
@@ -692,6 +697,9 @@ table.insert(
 			BONE,
 			{ item = "IronNugget", min = 1, max = 3, chance = 0.3 },
 			{ item = "Bandage", min = 1, max = 1, chance = 0.08 },
+			-- (Its sidearm's rounds and now and then a magazine: Shared/Weapons.)
+			{ item = "Rounds9mm", min = 2, max = 6, chance = 0.15, byPlayer = true },
+			{ item = "PistolMagazine", min = 1, max = 1, chance = 0.03, byPlayer = true },
 		},
 		spawn = { weight = 0, cityWeight = 12, hordeWeight = 6, group = { 1, 2 } },
 		rig = { kind = "R15", gait = "shamble", width = 0.82 },
@@ -780,6 +788,7 @@ do
 				BONE,
 				{ item = "Nails", min = 1, max = 4, chance = 0.5 },
 				{ item = "ScrapMetal", min = 1, max = 2, chance = 0.3 },
+				{ item = "PipeWrench", min = 1, max = 1, chance = 0.02, byPlayer = true },
 			},
 			spawn = { weight = 4, cityWeight = 8, hordeWeight = 4, group = { 1, 3 } },
 			rig = { kind = "R15", gait = "shamble", width = 0.85 },
