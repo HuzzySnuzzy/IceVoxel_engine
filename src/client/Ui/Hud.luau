@@ -1,65 +1,65 @@
 --!strict
 --[[
-	The in-game HUD, Minecraft's:
+	The in-game HUD in the survival look: a survival game's quickbar at the bottom centre, its
+	status icons at the bottom right, and Minecraft's controls behind them.
 
-	  hotbar     9 slots at the bottom centre with the selection frame, item icons, counts and the
-	             durability bars of worn tools.
-	             Click or tap a slot to select it; the Hotbar Slot key bindings (1-9: Settings/
-	             Keybinds), the mouse wheel (down = next slot, with the Scroll Wheel setting on
-	             Hotbar: `setWheelSelects`, by default Config.Interaction.ScrollWheelHotbar) and
-	             gamepad L1 / R1 select too. The wheel is bound through ContextActionService at
-	             High priority and sunk, so the camera does not zoom; its turns add up as
-	             Minecraft's MouseHandler.onScroll does (Scroll Sensitivity, Discrete Scrolling:
-	             `setScrolling`, PlayerSettings.scroll), one slot a whole step, and open screens
-	             get the scaled turn. The attack indicator's square sits right of the hotbar
-	             (`setAttackIndicator`, Ui/AttackIndicator).
-	  item name  the held item's name above the hotbar for 2 s after the selection changes,
-	             fading over the last half second
-	  hearts     survival and adventure only (GameMode.isSurvivalLike, Minecraft's canHurtPlayer):
-	             10 hearts (the Humanoid's health as 20 half hearts) and, above them, 10 armor icons
-	             when armor is worn (Items/Accessories.armorPoints: accessories' defense too). Drawn
-	             as pixel art from Frames. Low health makes them shake; damage makes their outline
-	             blink.
-	  knowledge  survival and adventure only (Minecraft's hasExperience), with Config.Progression on:
-	             Minecraft's experience bar, 182 x 5 just above the hotbar (KNOWLEDGE_Y, where
-	             Minecraft's layout already leaves it room: no row moved for it), filling green with
-	             the progress into the level (Shared/Progression/Knowledge.progress), and the level
-	             in green with a black outline over its middle, between the hearts and the
-	             droplets (shown from level 1, Minecraft's). From Player/ProgressionState.
-	  survival   Minecraft's hunger and Tough As Nails (Ui/SurvivalHud, survival and adventure only
-	             too): the hunger shanks on the right level with the hearts (with Config.Hunger
-	             on), the thirst droplets a row above them (level with the hearts without hunger),
-	             the temperature thermometer above the droplets, Climate Clemency's time left and
-	             the warmth and chill effects a row above the item name's (a long centred name
-	             reaches the right side, where they are), the numbers a held Thermometer reads
-	             above those, and frost or heat closing in from the screen's edges. With hunger
-	             on, the item name and everything over the droplets sit a row higher and the
-	             canvas is a row taller (Ui/HudLayout.rows, which places every row).
-	  mana       Terraria's mana (Ui/ManaHud, survival and adventure only): a row of stars on the
-	             left in the armor's row (over the armor icons when they show; a second row above
-	             past 200 mana) while a magic weapon is held, mana isn't full or just changed; the
-	             held item's name and the status row move up (`manaRaise`) when the stars reach
-	             the name's row, and the corner keeps clear of them while one is drawn
-	             (UiScale.setHudRaise: the name for its 2.5 s, a Thermometer's reading).
-	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
-	             the spectator menu's middle click), a gear at its start the Options menu, a
-	             skill tree button over the gear the skill tree (Ui/SkillTreeScreen; with
-	             Config.Progression on), and a speech bubble over the "..." the chat (Ui/Chat,
-	             while it runs)
+	  canvas     HudLayout.CANVAS (182 x 46 GUI pixels; the touch buttons beside the bar make it
+	             230 wide on touch screens), centred at the bottom of the safe area, one pixel and
+	             HudLayout.lift (5 % of the screen's height on a PC, none on touch) above it, at the
+	             GUI scale fitted to the screen. Marked for the survival look (Style.Dayz.mark), so
+	             the touch buttons' tooltips come in the dark box.
+	  quickbar   Ui/Quickbar at HudLayout.QUICK.bar: nine cells, the selected one olive under its
+	             item with a white outline, the key numbers, the items in the survival look; it
+	             never fades unless Config.Ui.QuickbarFadeAfter says so. Click or tap a slot to
+	             select it (the Slot1..9 buttons on HudLayout.quickHit, which the creative screen
+	             clicks and hovers as its hotbar row); the Hotbar Slot key bindings (1-9:
+	             Settings/Keybinds), the mouse wheel (down = next slot, with the Scroll Wheel
+	             setting on Hotbar: `setWheelSelects`, by default
+	             Config.Interaction.ScrollWheelHotbar) and gamepad L1 / R1 select too. The wheel is
+	             bound through ContextActionService at High priority and sunk, so the camera does not
+	             zoom; its turns add up as Minecraft's MouseHandler.onScroll does (Scroll
+	             Sensitivity, Discrete Scrolling: `setScrolling`, PlayerSettings.scroll), one slot a
+	             whole step, and open screens get the scaled turn.
+	  in hands   the held item's box over the bar (HudLayout.QUICK.name, Theme.Size.NAME_H tall,
+	             StripBody grey, centred, as wide as its text): its condition's dot and its name
+	             (Theme.handsLines, made only when the held stack changes) for Theme.Time.NAME
+	             seconds after the selection or the item in it changes, fading over
+	             Theme.Time.NAME_FADE; held while a Thermometer is the held item (with Tough As
+	             Nails' temperature on, survival and adventure), with its reading after the name:
+	             the body temperature and its target, each in its zone's colour (Theme.Zone), an
+	             arrow between them in the way it is going (warming orange, cooling blue, white on
+	             target). The text has a faint dark outline for bright skies.
+	  attack     the attack indicator's square (Ui/AttackIndicator, the Hotbar setting): a quickbar
+	             cell beside the bar (HudLayout.attackX: right of the "..." button on touch screens,
+	             left of the bar otherwise, as the bottom right is the status icons') filling white
+	             from the bottom as the weapon recovers (`setAttackIndicator`).
+	  status     Ui/StatusCluster (built here, in this ScreenGui): the survival notifiers, badges and
+	             knowledge bar where HudLayout puts them, or in the open inventory's band (Ui/
+	             StatusDock); drawn every frame before the open-screen check, so they show while an
+	             inventory is open. The frost and heat at the screen's edges (Ui/SurvivalHud) are
+	             drawn every frame too.
+	  touch      a "..." button at the end of the bar opens the inventory (for spectators it is the
+	             spectator menu's middle click), a gear at its start the Options menu, a skill tree
+	             button over the gear the skill tree (Ui/SkillTreeScreen; with Config.Progression
+	             on), and a speech bubble over the "..." the chat (Ui/Chat, while it runs): quickbar
+	             cells with white glyphs.
 
-	Game modes (Shared/GameMode): creative has no hearts and its item name sits lower. Spectators
-	(no showsHud) get neither the hotbar nor its item name, hearts or armor: their number keys,
-	middle click (Interaction/BlockInteraction), gamepad L1 / R1 / DPad up and the "..." button
-	open the spectator menu in the hotbar's place instead (Ui/SpectatorGui), and their wheel moves
-	its selection, or the flying speed while it is closed.
+	Game modes (Shared/GameMode): spectators (no showsHud) get neither the quickbar nor the item
+	box: their number keys, middle click (Interaction/BlockInteraction), gamepad L1 / R1 / DPad up
+	and the "..." button open the spectator menu in the quickbar's place instead (Ui/SpectatorGui,
+	drawn with Quickbar.drawBar and drawSelection), and their wheel moves its selection, or the
+	flying speed while it is closed. The status icons show in survival and adventure only.
 
 	Roblox's own health bar and backpack are turned off.
 
 	The screens (Ui/Screens) set the mode: "play" (input above), "creative" (the creative screen is
-	open: the hotbar stays, it is that screen's hotbar row, and the screens handle its clicks and
-	hover) or "hidden" (the survival inventory has its own hotbar row). While the game mode switcher
-	is open (Ui/GameModeSwitcher, `setInputTaken`) the keys and the wheel do nothing here, as no
-	key mapping works while a Minecraft Screen is open; the hotbar stays drawn.
+	open: the quickbar stays, it is that screen's hotbar row, and the screens handle its clicks and
+	hover) or "hidden" (the survival inventory has its own quickbar band; the status icons dock in
+	it). While the game mode switcher is open (Ui/GameModeSwitcher, `setInputTaken`) the keys and
+	the wheel do nothing here, as no key mapping works while a Minecraft Screen is open; the
+	quickbar stays drawn.
+
+	Nothing is made per frame: every frame compares what it would draw with what is drawn.
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -72,64 +72,66 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
-local Hunger = require(Shared.Hunger)
 local Items = require(Shared.Items)
-local Accessories = require(Shared.Items.Accessories)
-local Knowledge = require(Shared.Progression.Knowledge)
 local PlayerSettings = require(Shared.PlayerSettings)
+local Temperature = require(Shared.ToughAsNails.Temperature)
 local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
+local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local HoverTip = require(script.Parent.HoverTip)
-local ItemIcon = require(script.Parent.ItemIcon)
-local SpectatorGui = require(script.Parent.SpectatorGui)
-local SurvivalHud = require(script.Parent.SurvivalHud)
 local HudLayout = require(script.Parent.HudLayout)
-local ManaHud = require(script.Parent.ManaHud)
+local Quickbar = require(script.Parent.Quickbar)
+local SpectatorGui = require(script.Parent.SpectatorGui)
+local StatusCluster = require(script.Parent.StatusCluster)
+local StatusLayout = require(script.Parent.StatusLayout)
 local Style = require(script.Parent.Style)
+local SurvivalHud = require(script.Parent.SurvivalHud)
+local Theme = require(script.Parent.Theme)
 local UiScale = require(script.Parent.UiScale)
 
 export type Mode = "play" | "creative" | "hidden"
 
 local HOTBAR = Types.HOTBAR_SIZE
--- Layout (GUI pixels): Minecraft's hotbar is 182 x 22, hearts 17 px above its top, armor 10
--- above them, the item name 37 above (23 without hearts); a row higher, the canvas a row taller,
--- with the hunger shanks (Ui/HudLayout.rows).
-local ROWS = HudLayout.rows(Hunger.on())
-local WIDTH = 182
+-- Layout (GUI pixels, Ui/HudLayout): the canvas, the quickbar's top and the item box's.
+local WIDTH = HudLayout.CANVAS.width
+local HEIGHT = HudLayout.CANVAS.height
+local BAR_Y = HudLayout.QUICK.bar
+local NAME_Y = HudLayout.QUICK.name
 local TOUCH_BUTTON = 22
-local HEIGHT = ROWS.height
-local BAR_Y = ROWS.bar
-local HEARTS_Y = ROWS.hearts
-local ARMOR_Y = ROWS.armor
-local NAME_Y_SURVIVAL = ROWS.name
-local NAME_Y_CREATIVE = ROWS.nameCreative
--- Minecraft's experience bar: 182 x 5, 7 above the hotbar's top (its y is height - 29); the level
--- 13 above it (height - 35), centred, over the gap between the hearts and the droplets.
-local KNOWLEDGE_Y = BAR_Y - 7
-local KNOWLEDGE_H = 5
-local LEVEL_Y = BAR_Y - 13
-local LEVEL_GREEN = Color3.fromRGB(128, 255, 32)
-local KNOWLEDGE_EMPTY = Color3.fromRGB(30, 42, 20)
-local KNOWLEDGE_FILL = Color3.fromRGB(110, 220, 40)
-local KNOWLEDGE_SHINE = Color3.fromRGB(170, 255, 90)
--- The touch skill tree button's art (11 x 10): three nodes joined, G the nodes, # the lines.
+-- The spectator menu's label: in the item box's row (SpectatorGui.renderTooltip).
+local SPECTATOR_LABEL_Y = NAME_Y
+-- The item box: its padding, the gap after the condition dot, the gaps around the reading's arrow.
+local NAME_PAD = 3
+local DOT_GAP = 3
+local READING_GAP = 5
+local ARROW_GAP = 2
+-- The text's faint outline (readable over a bright sky).
+local NAME_STROKE_T = 0.75
+-- The attack square's rising fill (white, a little see-through).
+local ATTACK_FILL_T = 0.35
+-- The item that reads the temperature out.
+local THERMOMETER = Items.id.Thermometer
+
+-- The touch "..." button's dots, and the skill tree's and chat's glyphs (one colour: white).
+local MORE_ART = { "##.##.##", "##.##.##" }
+-- The skill tree: three nodes joined.
 local SKILLS_ART = {
-	"....GGG....",
-	"....GGG....",
+	"....###....",
+	"....###....",
 	".....#.....",
 	".#########.",
 	".#.......#.",
-	"GGG.....GGG",
-	"GGG.....GGG",
+	"###.....###",
+	"###.....###",
 	".#.......#.",
 	".#.......#.",
-	"GGG.....GGG",
+	"###.....###",
 }
--- The touch chat button's art (11 x 9): a speech bubble, # its outline and dots.
+-- The chat: a speech bubble.
 local CHAT_ART = {
 	".#########.",
 	"#.........#",
@@ -141,52 +143,8 @@ local CHAT_ART = {
 	".#.#.......",
 	".##........",
 }
--- The spectator menu's label: 35 pixels above the screen's bottom (SpectatorGui.renderTooltip).
-local SPECTATOR_LABEL_Y = HEIGHT - 35
--- The name shows this long (Minecraft: 40 ticks), fading over the last part (10 ticks).
-local NAME_TIME = 2
-local NAME_FADE = 0.5
--- Hearts blink this long after damage, and shake at this many half hearts or less.
-local BLINK_TIME = 1
-local SHAKE_AT = 4
-local TICK = 0.05
-
---[[
-	9 x 8 pixel art. K outline, L / R the left / right half of the fill, H a highlight (left half).
-	The half sprites show the left half filled, like Minecraft's.
-]]
-local HEART = {
-	".KK...KK.",
-	"KHLK.KRRK",
-	"KHLLKRRRK",
-	"KLLLLRRRK",
-	".KLLLRRK.",
-	"..KLLRK..",
-	"...KLK...",
-	"....K....",
-}
-local ARMOR = {
-	".KK...KK.",
-	"KHLK.KRRK",
-	"KHLLKRRRK",
-	".KLLLRRK.",
-	".KLLLRRK.",
-	".KLLLRRK.",
-	".KLLLRRK.",
-	".KKKKKKK.",
-}
-
-local HEART_RED = Color3.fromRGB(219, 21, 21)
-local HEART_SHINE = Color3.fromRGB(255, 170, 170)
-local HEART_EMPTY = Color3.fromRGB(46, 30, 30)
-local HEART_EMPTY_SHINE = Color3.fromRGB(70, 52, 52)
-local ARMOR_FULL = Color3.fromRGB(200, 200, 205)
-local ARMOR_SHINE = Color3.fromRGB(255, 255, 255)
-local ARMOR_EMPTY = Color3.fromRGB(50, 50, 52)
-local OUTLINE = Color3.fromRGB(16, 16, 16)
-local BLINK_OUTLINE = Color3.fromRGB(255, 255, 255)
-
-type Icon = { frame: Frame, parts: { [string]: { Frame } }, state: number }
+-- The reading's arrow (3 x 5, pointing right: value to target).
+local ARROW_ART = { "#..", "##.", "###", "##.", "#.." }
 
 local Hud = {}
 
@@ -209,33 +167,30 @@ local wheelSelects = Config.Interaction.ScrollWheelHotbar
 -- wheel's turns not yet a whole step.
 local scrollValues: PlayerSettings.Values? = nil
 local scrolled = 0
--- The attack indicator beside the hotbar (Ui/AttackIndicator): its frame, fill and progress.
+-- The attack indicator beside the bar (Ui/AttackIndicator): its cell, fill and progress.
 local attackSlot: Frame? = nil
 local attackFill: Frame? = nil
 local attackProgress: number? = nil
 local previewWindow: Types.Window? = nil
-local dirty = true
 
 local cells: { TextButton } = {}
--- The hotbar and the touch button (for Hud.covers).
+-- The quickbar's bar and the touch buttons (for Hud.covers).
 local coverage: { GuiObject } = {}
-local icons: { ItemIcon.ItemIcon } = {}
-local hovers: { Frame } = {}
+local quickbar: Quickbar.Quickbar? = nil
 
 -- What the screens show while open in creative ("creative") or survival ("hidden"); "play" else.
 function Hud.setMode(value: Mode)
 	if value ~= mode then
 		mode = value
-		dirty = true
-		-- Gamepads can reach the hotbar from the creative grid.
+		-- Gamepads can reach the quickbar from the creative grid.
 		for _, cell in cells do
 			cell.Selectable = value == "creative"
 		end
 	end
 end
 
--- While true, the hotbar's (or the spectator menu's) keys and the wheel do nothing: the game mode
--- switcher (Ui/GameModeSwitcher, which Screens and so this can't require) is open.
+-- While true, the quickbar's (or the spectator menu's) keys and the wheel do nothing: the game
+-- mode switcher (Ui/GameModeSwitcher, which Screens and so this can't require) is open.
 function Hud.setInputTaken(value: boolean)
 	inputTaken = value
 end
@@ -290,11 +245,11 @@ function Hud.setScrolling(values: PlayerSettings.Values)
 end
 
 --[[
-	The hotbar attack indicator (Ui/AttackIndicator): the weapon's recovery 0..1 fills an 18 x 18
-	square right of the hotbar from the bottom (Minecraft's hotbar_attack_indicator); nil hides it.
+	The hotbar attack indicator (Ui/AttackIndicator): the weapon's recovery 0..1 fills the square
+	beside the bar from the bottom (Minecraft's hotbar_attack_indicator); nil hides it.
 ]]
 function Hud.setAttackIndicator(progress: number?)
-	-- (Filled pixels of the 16 inside the outline.)
+	-- (Filled pixels of the 16 inside the cell.)
 	local shown = if progress then math.clamp(math.floor(progress * 16), 0, 16) else nil
 	if shown == attackProgress then
 		return
@@ -315,7 +270,7 @@ function Hud.hotbarCell(slot: number): GuiObject
 	return cells[slot]
 end
 
--- Is `point` (screen pixels) on the hotbar or the touch inventory button?
+-- Is `point` (screen pixels) on the quickbar or a touch button?
 function Hud.covers(point: Vector2): boolean
 	for _, object in coverage do
 		if Style.contains(object, point) and Style.shown(object) then
@@ -325,20 +280,17 @@ function Hud.covers(point: Vector2): boolean
 	return false
 end
 
--- The hover overlay of hotbar slot 1..9 (nil: none).
+-- The hover outline of hotbar slot 1..9 (nil: none).
 function Hud.setHover(slot: number?)
-	for i, hover in hovers do
-		local on = i == slot
-		if hover.Visible ~= on then
-			hover.Visible = on
-		end
+	local bar = quickbar
+	if bar then
+		bar:setHover(slot)
 	end
 end
 
--- Draws the hotbar from this window (a drag preview) instead of the inventory; nil = the inventory.
+-- Draws the quickbar from this window (a drag preview) instead of the inventory; nil = the inventory.
 function Hud.setPreview(window: Types.Window?)
 	previewWindow = window
-	dirty = true
 end
 
 local function disableCoreGui()
@@ -356,56 +308,154 @@ local function disableCoreGui()
 	end)
 end
 
--- The hotbar's bar at (x, y): translucent black, a dark outline, and each cell's light and dark rim.
-local function drawBar(parent: Instance, x: number, y: number): Frame
-	local bar = Style.frame(parent, x, y, WIDTH, 22, Color3.new(0, 0, 0), 1)
-	bar.BackgroundTransparency = 0.55
-	Style.border(bar, 0, 0, WIDTH, 22, 1, Color3.fromRGB(20, 20, 20), 2)
-	for i = 1, HOTBAR do
-		local cellX = 1 + (i - 1) * 20
-		-- Each cell has a light rim top-left and a darker one bottom-right.
-		local rim = Style.border(bar, cellX, 1, 20, 20, 2, Color3.fromRGB(150, 150, 150), 3)
-		rim[2].BackgroundColor3 = Color3.fromRGB(96, 96, 96)
-		rim[4].BackgroundColor3 = Color3.fromRGB(96, 96, 96)
-		for _, frame in rim do
-			frame.BackgroundTransparency = 0.15
-		end
+--[[
+	A touch button (a quickbar cell's look, 22 x 22) at (x, y) with `art` in white centred, calling
+	`pressed`; its frame and its button (the caller attaches the tooltip).
+]]
+local function touchButton(
+	canvas: Frame,
+	name: string,
+	x: number,
+	y: number,
+	art: { string },
+	pressed: () -> ()
+): (Frame, TextButton)
+	local Dayz = Style.Dayz
+	local frame = Style.frame(canvas, x, y, TOUCH_BUTTON, TOUCH_BUTTON, Dayz.Colour.QuickCell, 3)
+	frame.Name = name
+	frame.BackgroundTransparency = Dayz.Alpha.QuickCell
+	local w, h = #art[1], #art
+	Dayz.glyph(frame, (TOUCH_BUTTON - w) // 2, (TOUCH_BUTTON - h) // 2, art, Dayz.Colour.Text, 2)
+	local button = Instance.new("TextButton")
+	button.Text = ""
+	button.BackgroundTransparency = 1
+	button.Size = UDim2.fromScale(1, 1)
+	button.ZIndex = 6
+	button.Parent = frame
+	button.Activated:Connect(pressed)
+	table.insert(coverage, frame)
+	return frame, button
+end
+
+-- The held item's box (see the header): its parts.
+type NameBox = {
+	root: Frame,
+	dot: Frame,
+	name: TextLabel,
+	value: TextLabel,
+	arrow: Frame,
+	target: TextLabel,
+	-- (The texts and the arrow's frames, for the fade.)
+	labels: { TextLabel },
+	arrowParts: { Frame },
+}
+
+local function nameLabel(parent: Instance, scaled: Style.Scaled): TextLabel
+	local label = Style.Dayz.label(parent, "", 0, 0, 0, 0, "body", Style.Dayz.Colour.Text, 3, nil, scaled)
+	label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	label.TextStrokeTransparency = NAME_STROKE_T
+	label.TextTruncate = Enum.TextTruncate.AtEnd
+	return label
+end
+
+local function buildNameBox(hotbar: Frame, scaled: Style.Scaled): NameBox
+	local Dayz = Style.Dayz
+	local NAME_H = Theme.Size.NAME_H
+	local root = Style.frame(hotbar, 0, NAME_Y, WIDTH, NAME_H, Dayz.Colour.StripBody, 8)
+	root.Name = "InHands"
+	root.BackgroundTransparency = Dayz.Alpha.StripBody
+	root.Visible = false
+	local DOT = Theme.Size.DOT
+	local dot = Dayz.dot(root, NAME_PAD, (NAME_H - DOT) / 2, DOT, 2)
+	local arrow = Instance.new("Frame")
+	arrow.Name = "Trend"
+	arrow.BackgroundTransparency = 1
+	arrow.Size = UDim2.fromOffset(3, 5)
+	arrow.ZIndex = 3
+	arrow.Parent = root
+	local arrowParts = Dayz.glyph(arrow, 0, 0, ARROW_ART, Dayz.Colour.Text, 1)
+	local name, value, target = nameLabel(root, scaled), nameLabel(root, scaled), nameLabel(root, scaled)
+	return {
+		root = root,
+		dot = dot,
+		name = name,
+		value = value,
+		arrow = arrow,
+		target = target,
+		labels = { name, value, target },
+		arrowParts = arrowParts,
+	}
+end
+
+-- The text's width in the box (Roboto, body size).
+local function measure(text: string): number
+	return math.ceil(Style.textWidth(text, Style.Dayz.Text.body, Style.Dayz.FONT))
+end
+
+local function place(object: GuiObject, x: number, w: number, h: number)
+	object.Position = UDim2.fromOffset(x, (Theme.Size.NAME_H - h) / 2)
+	object.Size = UDim2.fromOffset(w, h)
+end
+
+--[[
+	Lays the item box out for `lines` (Theme.handsLines; nil: nothing held) and a Thermometer's
+	reading (`reading`: the body temperature and its target, rounded; nil: none).
+]]
+local function layoutNameBox(box: NameBox, lines: Theme.HandsLines?, reading: { number }?)
+	local NAME_H = Theme.Size.NAME_H
+	local x = NAME_PAD
+	local condition = lines and lines.condition
+	box.dot.Visible = condition ~= nil
+	if condition then
+		box.dot.BackgroundColor3 = Style.Dayz.Condition[condition.name]
+		x += Theme.Size.DOT + DOT_GAP
 	end
-	return bar
-end
-
--- The selection frame, 24 x 24 around a cell (placed by the caller).
-local function drawSelection(parent: Instance): Frame
-	local selection = Instance.new("Frame")
-	selection.BackgroundTransparency = 1
-	selection.Size = UDim2.fromOffset(24, 24)
-	selection.ZIndex = 6
-	selection.Parent = parent
-	Style.border(selection, 0, 0, 24, 24, 1, Color3.new(0, 0, 0), 1)
-	Style.border(selection, 1, 1, 22, 22, 2, Color3.new(1, 1, 1), 2)
-	Style.border(selection, 3, 3, 18, 18, 1, Color3.fromRGB(40, 40, 40), 2)
-	return selection
-end
-
-local function newIcon(parent: Instance, x: number, art: { string }): Icon
-	local frame = Instance.new("Frame")
-	frame.BackgroundTransparency = 1
-	frame.Size = UDim2.fromOffset(9, 9)
-	frame.Position = UDim2.fromOffset(x, 0)
-	frame.Parent = parent
-	local parts = Style.pixelArt(frame, 0, 0, art, { K = OUTLINE, L = OUTLINE, R = OUTLINE, H = OUTLINE }, 1)
-	return { frame = frame, parts = parts, state = -1 }
-end
-
--- state: 0 empty, 1 half, 2 full.
-local function paintIcon(icon: Icon, state: number, fill: Color3, shine: Color3, empty: Color3, emptyShine: Color3)
-	if icon.state == state then
-		return
+	local text = if lines then lines.name else ""
+	box.name.Text = text
+	local nameW = math.min(measure(text), WIDTH - 2 * NAME_PAD)
+	place(box.name, x, nameW + 1, NAME_H)
+	x += nameW
+	box.value.Visible = reading ~= nil
+	box.arrow.Visible = reading ~= nil
+	box.target.Visible = reading ~= nil
+	if reading then
+		local value, target = reading[1], reading[2]
+		local valueText = StatusLayout.valueText("temperature", value)
+		local targetText = StatusLayout.valueText("temperature", target)
+		x += READING_GAP
+		local w = measure(valueText)
+		box.value.Text = valueText
+		box.value.TextColor3 = Style.Dayz.Zone[Temperature.zone(value)]
+		place(box.value, x, w + 1, NAME_H)
+		x += w + ARROW_GAP
+		box.arrow.Position = UDim2.fromOffset(x, (NAME_H - 5) / 2)
+		local trend = if target > value then Style.Dayz.Zone[1] elseif target < value then Style.Dayz.Zone[-1] else nil
+		Style.Dayz.tint(box.arrow, trend or Style.Dayz.Colour.Text)
+		x += 3 + ARROW_GAP
+		w = measure(targetText)
+		box.target.Text = targetText
+		box.target.TextColor3 = Style.Dayz.Zone[Temperature.zone(target)]
+		place(box.target, x, w + 1, NAME_H)
+		x += w
 	end
-	icon.state = state
-	Style.paint(icon.parts.L, if state >= 1 then fill else empty)
-	Style.paint(icon.parts.H, if state >= 1 then shine else emptyShine)
-	Style.paint(icon.parts.R, if state >= 2 then fill else empty)
+	local width = math.min(x + NAME_PAD, WIDTH)
+	box.root.Size = UDim2.fromOffset(width, NAME_H)
+	box.root.Position = UDim2.fromOffset((WIDTH - width) / 2, NAME_Y)
+end
+
+-- Fades the item box (alpha 1 shown .. 0 gone).
+local function fadeNameBox(box: NameBox, alpha: number)
+	local Dayz = Style.Dayz
+	local gone = 1 - alpha
+	box.root.BackgroundTransparency = 1 - (1 - Dayz.Alpha.StripBody) * alpha
+	box.dot.BackgroundTransparency = 1 - (1 - Theme.DOT_T) * alpha
+	for _, label in box.labels do
+		label.TextTransparency = gone
+		label.TextStrokeTransparency = 1 - (1 - NAME_STROKE_T) * alpha
+	end
+	for _, part in box.arrowParts do
+		part.BackgroundTransparency = gone
+	end
 end
 
 function Hud.start()
@@ -427,27 +477,31 @@ function Hud.start()
 	canvas.Position = UDim2.new(0.5, 0, 1, -1)
 	canvas.Size = UDim2.fromOffset(WIDTH, HEIGHT)
 	canvas.Parent = gui
+	Style.Dayz.mark(canvas)
 	local scale = Instance.new("UIScale")
 	scale.Parent = canvas
+	-- (Strokes, text weights and count boxes follow the canvas' scale.)
+	local scaled = Style.Dayz.scaled()
 
-	--[[ Hotbar (hidden for spectators, who get the spectator menu in its place) ]]
+	--[[ The quickbar (hidden for spectators, who get the spectator menu in its place) ]]
 
 	local hotbar = Instance.new("Frame")
 	hotbar.Name = "Hotbar"
 	hotbar.BackgroundTransparency = 1
 	hotbar.Size = UDim2.fromScale(1, 1)
 	hotbar.Parent = canvas
-	local bar = drawBar(hotbar, 0, BAR_Y)
-	table.insert(coverage, bar)
+	local bar = Quickbar.build(hotbar, BAR_Y, scaled)
+	quickbar = bar
+	table.insert(coverage, bar.bar)
 	for i = 1, HOTBAR do
-		local x = 1 + (i - 1) * 20
+		local hit = HudLayout.quickHit(i, BAR_Y)
 		local cell = Instance.new("TextButton")
 		cell.Name = `Slot{i}`
 		cell.Text = ""
 		cell.BackgroundTransparency = 1
 		cell.AutoButtonColor = false
-		cell.Position = UDim2.fromOffset(x, BAR_Y + 1)
-		cell.Size = UDim2.fromOffset(20, 20)
+		cell.Position = UDim2.fromOffset(hit.x, hit.y)
+		cell.Size = UDim2.fromOffset(hit.w, hit.h)
 		cell.ZIndex = 4
 		cell.Selectable = false
 		cell.Parent = hotbar
@@ -457,43 +511,28 @@ function Hud.start()
 			end
 		end)
 		cells[i] = cell
-		icons[i] = ItemIcon.new(hotbar, x + 2, BAR_Y + 3, 5)
-		hovers[i] = Style.hover(hotbar, x + 2, BAR_Y + 3, 7)
 	end
 
-	-- The selection frame, 24 x 24 around the selected cell.
-	local selection = drawSelection(hotbar)
+	-- The attack indicator's square beside the bar (placed by updateScale), hidden while the
+	-- weapon is ready.
+	local attack = Style.Dayz.quickCell(hotbar, HudLayout.attackX(false), BAR_Y + 2, 3, scaled)
+	attack.base.Name = "AttackIndicator"
+	attack.base.Visible = false
+	local fill = Style.frame(attack.base, 1, 17, 16, 0, Style.Dayz.Colour.Quantity, 4)
+	fill.BackgroundTransparency = ATTACK_FILL_T
+	attackSlot, attackFill = attack.base, fill
 
-	-- The attack indicator's square right of the hotbar (Ui/AttackIndicator; placed by
-	-- updateScale: beside the touch button on touch screens), hidden while the weapon is ready.
-	local attack = Style.frame(hotbar, WIDTH + 6, BAR_Y + 2, 18, 18, Color3.new(0, 0, 0), 1)
-	attack.Name = "AttackIndicator"
-	attack.BackgroundTransparency = 0.55
-	attack.Visible = false
-	Style.border(attack, 0, 0, 18, 18, 1, Color3.fromRGB(20, 20, 20), 2)
-	attackFill = Style.frame(attack, 1, 17, 16, 0, Color3.fromRGB(200, 200, 200), 3)
-	attackSlot = attack
+	-- The spectator menu, in the quickbar's place.
+	SpectatorGui.build(canvas, 0, BAR_Y, SPECTATOR_LABEL_Y, function(parent: Instance, x: number, y: number)
+		return Quickbar.drawBar(parent, x, y, scaled)
+	end, function(parent: Instance): Frame
+		return Quickbar.drawSelection(parent, scaled)
+	end)
 
-	-- The spectator menu, in the hotbar's place.
-	SpectatorGui.build(canvas, 0, BAR_Y, SPECTATOR_LABEL_Y, drawBar, drawSelection)
+	--[[ Touch buttons ]]
 
-	-- The touch "..." button opens the inventory.
-	local more = Style.frame(canvas, WIDTH + 2, BAR_Y, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
-	more.BackgroundTransparency = 0.55
-	table.insert(coverage, more)
-	Style.border(more, 0, 0, TOUCH_BUTTON, 22, 1, Color3.fromRGB(20, 20, 20), 2)
-	Style.border(more, 1, 1, TOUCH_BUTTON - 2, 20, 2, Color3.fromRGB(150, 150, 150), 3)
-	for dot = 0, 2 do
-		Style.frame(more, 5 + dot * 5, 10, 2, 2, Color3.new(1, 1, 1), 4)
-	end
-	local moreButton = Instance.new("TextButton")
-	moreButton.Text = ""
-	moreButton.BackgroundTransparency = 1
-	moreButton.Size = UDim2.fromScale(1, 1)
-	moreButton.ZIndex = 5
-	moreButton.Parent = more
-	HoverTip.attach(moreButton, "hud.inventory")
-	moreButton.Activated:Connect(function()
+	-- The "..." button opens the inventory (for spectators it is the middle click).
+	local more, moreButton = touchButton(canvas, "More", WIDTH + 2, BAR_Y, MORE_ART, function()
 		if mode == "play" and GameMode.isSpectator(ClientInventory.mode()) then
 			-- (Spectators have no inventory: the button is their middle click.)
 			SpectatorGui.middleClick()
@@ -502,144 +541,40 @@ function Hud.start()
 			inventoryHandler()
 		end
 	end)
-
-	-- The touch gear at the hotbar's other end opens the Options menu (the space both buttons
-	-- take is kept free on touch screens, so the hotbar stays centred).
-	local gear = Style.frame(canvas, -(TOUCH_BUTTON + 2), BAR_Y, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
-	gear.BackgroundTransparency = 0.55
-	table.insert(coverage, gear)
-	Style.border(gear, 0, 0, TOUCH_BUTTON, 22, 1, Color3.fromRGB(20, 20, 20), 2)
-	Style.border(gear, 1, 1, TOUCH_BUTTON - 2, 20, 2, Color3.fromRGB(150, 150, 150), 3)
-	Style.gear(gear, 5, 5, 4)
-	local gearButton = Instance.new("TextButton")
-	gearButton.Text = ""
-	gearButton.BackgroundTransparency = 1
-	gearButton.Size = UDim2.fromScale(1, 1)
-	gearButton.ZIndex = 6
-	gearButton.Parent = gear
-	HoverTip.attach(gearButton, "hud.options")
-	gearButton.Activated:Connect(function()
+	HoverTip.attach(moreButton, "hud.inventory")
+	-- The gear at the bar's other end opens the Options menu (the space both buttons take is kept
+	-- free on touch screens, so the quickbar stays centred).
+	local gear, gearButton = touchButton(canvas, "Options", -(TOUCH_BUTTON + 2), BAR_Y, Style.GEAR_ART, function()
 		if settingsHandler then
 			SoundPlayer.click()
 			settingsHandler()
 		end
 	end)
-
-	-- The touch skill tree button over the gear (progression on).
-	local skills = Style.frame(canvas, -(TOUCH_BUTTON + 2), BAR_Y - 24, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
-	skills.BackgroundTransparency = 0.55
-	table.insert(coverage, skills)
-	Style.border(skills, 0, 0, TOUCH_BUTTON, 22, 1, Color3.fromRGB(20, 20, 20), 2)
-	Style.border(skills, 1, 1, TOUCH_BUTTON - 2, 20, 2, Color3.fromRGB(150, 150, 150), 3)
-	Style.pixelArt(skills, 6, 6, SKILLS_ART, { G = LEVEL_GREEN, ["#"] = Style.Colour.Text }, 4)
-	local skillsButton = Instance.new("TextButton")
-	skillsButton.Text = ""
-	skillsButton.BackgroundTransparency = 1
-	skillsButton.Size = UDim2.fromScale(1, 1)
-	skillsButton.ZIndex = 6
-	skillsButton.Parent = skills
-	HoverTip.attach(skillsButton, "hud.skills")
-	skillsButton.Activated:Connect(function()
+	HoverTip.attach(gearButton, "hud.options")
+	-- The skill tree over the gear (progression on).
+	local skills, skillsButton = touchButton(canvas, "Skills", -(TOUCH_BUTTON + 2), BAR_Y - 24, SKILLS_ART, function()
 		if skillsHandler then
 			SoundPlayer.click()
 			skillsHandler()
 		end
 	end)
-
-	-- The touch chat button over the "..." button (Ui/Chat).
-	local chat = Style.frame(canvas, WIDTH + 2, BAR_Y - 24, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
-	chat.BackgroundTransparency = 0.55
-	table.insert(coverage, chat)
-	Style.border(chat, 0, 0, TOUCH_BUTTON, 22, 1, Color3.fromRGB(20, 20, 20), 2)
-	Style.border(chat, 1, 1, TOUCH_BUTTON - 2, 20, 2, Color3.fromRGB(150, 150, 150), 3)
-	Style.pixelArt(chat, 5, 6, CHAT_ART, { ["#"] = Style.Colour.Text }, 4)
-	local chatButton = Instance.new("TextButton")
-	chatButton.Text = ""
-	chatButton.BackgroundTransparency = 1
-	chatButton.Size = UDim2.fromScale(1, 1)
-	chatButton.ZIndex = 6
-	chatButton.Parent = chat
-	HoverTip.attach(chatButton, "hud.chat")
-	chatButton.Activated:Connect(function()
+	HoverTip.attach(skillsButton, "hud.skills")
+	-- The chat over the "..." button (Ui/Chat).
+	local chat, chatButton = touchButton(canvas, "Chat", WIDTH + 2, BAR_Y - 24, CHAT_ART, function()
 		if chatHandler then
 			SoundPlayer.click()
 			chatHandler()
 		end
 	end)
+	HoverTip.attach(chatButton, "hud.chat")
 
-	--[[ Knowledge (Minecraft's experience bar) ]]
+	--[[ The held item's box, the status icons, the frost and heat ]]
 
-	local knowledge = Instance.new("Frame")
-	knowledge.Name = "Knowledge"
-	knowledge.BackgroundTransparency = 1
-	knowledge.Size = UDim2.fromScale(1, 1)
-	knowledge.Visible = false
-	knowledge.Parent = canvas
-	local knowledgeBar = Style.frame(knowledge, 0, KNOWLEDGE_Y, WIDTH, KNOWLEDGE_H, Color3.new(0, 0, 0), 2)
-	Style.frame(knowledgeBar, 1, 1, WIDTH - 2, KNOWLEDGE_H - 2, KNOWLEDGE_EMPTY, 3)
-	local knowledgeFill = Style.frame(knowledgeBar, 1, 1, 0, KNOWLEDGE_H - 2, KNOWLEDGE_FILL, 4)
-	Style.frame(knowledgeFill, 0, 0, WIDTH, 1, KNOWLEDGE_SHINE, 5)
-	knowledgeFill.ClipsDescendants = true
-	-- The level: green over a black outline (Minecraft draws it four times offset in black first).
-	local levelOutline: { TextLabel } = {}
-	for _, offset in { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } } do
-		local label = Style.text(
-			knowledge,
-			"",
-			offset[1],
-			LEVEL_Y + offset[2],
-			WIDTH,
-			8,
-			Color3.new(0, 0, 0),
-			6,
-			Enum.TextXAlignment.Center
-		)
-		table.insert(levelOutline, label)
-	end
-	local levelLabel = Style.text(knowledge, "", 0, LEVEL_Y, WIDTH, 8, LEVEL_GREEN, 7, Enum.TextXAlignment.Center)
-	local knowledgeDirty = true
-	ProgressionState.changed:Connect(function()
-		knowledgeDirty = true
-	end)
-
-	--[[ Hearts and armor ]]
-
-	local hearts: { Icon } = {}
-	local armor: { Icon } = {}
-	local heartRow = Instance.new("Frame")
-	heartRow.BackgroundTransparency = 1
-	heartRow.Position = UDim2.fromOffset(0, HEARTS_Y)
-	heartRow.Size = UDim2.fromOffset(81, 9)
-	heartRow.ZIndex = 2
-	heartRow.Parent = canvas
-	local armorRow = Instance.new("Frame")
-	armorRow.BackgroundTransparency = 1
-	armorRow.Position = UDim2.fromOffset(0, ARMOR_Y)
-	armorRow.Size = UDim2.fromOffset(81, 9)
-	armorRow.ZIndex = 2
-	armorRow.Parent = canvas
-	for i = 1, 10 do
-		hearts[i] = newIcon(heartRow, (i - 1) * 8, HEART)
-		armor[i] = newIcon(armorRow, (i - 1) * 8, ARMOR)
-	end
-	-- Hunger, thirst and temperature (the shanks level with the hearts, the droplets above them,
-	-- the thermometer above those, the clemency and effects above the item name's row, which long
-	-- names fill across, all on the right: HudLayout.rows).
-	SurvivalHud.build(canvas, {
-		width = WIDTH,
-		foodY = ROWS.food,
-		rowY = ROWS.thirst,
-		gaugeY = ROWS.gauge,
-		statusY = ROWS.status,
-		readingY = ROWS.reading,
-	})
-	-- Terraria's mana: stars on the left in the armor's row, or the row above it (Ui/ManaHud).
-	ManaHud.build(canvas, { armorY = ARMOR_Y, nameY = NAME_Y_SURVIVAL })
-
-	--[[ Held item name ]]
-
-	local name, nameShadow =
-		Style.shadowText(hotbar, "", 0, NAME_Y_SURVIVAL, WIDTH, 8, Style.Colour.Text, 8, Enum.TextXAlignment.Center)
+	local nameBox = buildNameBox(hotbar, scaled)
+	StatusCluster.build(gui)
+	SurvivalHud.buildEdges()
+	-- (Nothing reaches above the canvas any more.)
+	UiScale.setHudRaise(0)
 
 	local function updateScale()
 		-- (Ui/UiScale's touch flag: a touch screen played by touch, not with a mouse or a gamepad.)
@@ -648,10 +583,14 @@ function Hud.start()
 		gear.Visible = touch
 		skills.Visible = touch and ProgressionState.enabled()
 		chat.Visible = touch and chatHandler ~= nil
-		local width = if touch then WIDTH + 2 * (TOUCH_BUTTON + 2) else WIDTH
-		-- (The GUI scale, shrunk to fit this GUI's own area: the device's safe area.)
-		scale.Scale = UiScale.fit(width, HEIGHT, gui.AbsoluteSize)
-		attack.Position = UDim2.fromOffset(WIDTH + 6 + (if touch then TOUCH_BUTTON + 2 else 0), BAR_Y + 2)
+		local width = if touch then HudLayout.CANVAS.touchWidth else WIDTH
+		local lift = HudLayout.lift(UiScale.viewport().Y, touch)
+		canvas.Position = UDim2.new(0.5, 0, 1, -1 - lift)
+		-- (The GUI scale, shrunk to fit this GUI's own area above the lift: the device's safe area.)
+		local area = gui.AbsoluteSize
+		scale.Scale = UiScale.fit(width, HEIGHT, Vector2.new(area.X, math.max(area.Y - lift, 2)))
+		scaled:setScale(scale.Scale)
+		attack.base.Position = UDim2.fromOffset(HudLayout.attackX(touch), BAR_Y + 2)
 	end
 	refreshButtons = updateScale
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScale)
@@ -659,31 +598,35 @@ function Hud.start()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	updateScale()
 
-	ClientInventory.changed:Connect(function()
-		dirty = true
-	end)
-
 	--[[ Every frame ]]
 
 	local lastSlot, lastItem = 0, -1
 	local nameUntil = 0
-	local lastHalves = -1
-	local blinkUntil = 0
-	local blinking = false
-	local nextShake = 0
-	local lastPoints = -1
+	local shownAlpha = -1
+	-- The held stack the box was laid out for, and the reading shown (-99: none).
+	local boxItem: number? = nil
+	local boxCount, boxDamage = -1, -1
+	local boxData: Items.Data? = nil
+	local boxValue, boxTarget = -99, -99
+	local reading = { 0, 0 }
+	local lines: Theme.HandsLines? = nil
 	local shown = true
-	-- GUI px the held item's name and the status row are moved up over the mana stars (Ui/ManaHud).
-	local manaRaise = 0
 
 	RunService.RenderStepped:Connect(function()
 		local now = os.clock()
+		local gameMode = ClientInventory.mode()
+		local survival = GameMode.isSurvivalLike(gameMode)
+		-- (Before the open-screen check: the status icons dock in the open inventory, and the
+		-- edges keep up.)
+		StatusCluster.render(now, mode)
+		local status = if survival then SurvivalState.get() else nil
+		SurvivalHud.renderEdges(status)
+
 		local visible = mode ~= "hidden"
 		if visible ~= shown then
 			shown = visible
 			canvas.Visible = visible
 		end
-		local gameMode = ClientInventory.mode()
 		SpectatorGui.render(now, visible and mode == "play" and GameMode.isSpectator(gameMode))
 		if not visible then
 			return
@@ -693,116 +636,53 @@ function Hud.start()
 			hotbar.Visible = showsHud
 		end
 		local window = previewWindow or ClientInventory.window()
-		local inventory = window.inventory
-		-- Hearts, armor and the higher item name: Minecraft's canHurtPlayer (survival, adventure).
-		local survival = GameMode.isSurvivalLike(gameMode)
+		bar:render(now, mode, window, window.inventory.selected, attackProgress ~= nil)
 
-		if dirty then
-			dirty = false
-			for i = 1, HOTBAR do
-				local stack = inventory.slots[i]
-				icons[i]:set(stack and stack.item, stack and stack.count, stack and stack.damage, stack and stack.data)
-			end
-			selection.Position = UDim2.fromOffset(-1 + (inventory.selected - 1) * 20, BAR_Y - 1)
-		end
-
-		-- The held item's name, shown when the selection or the item in it changes.
+		-- The held item's box: laid out again when the held stack or the reading changes.
 		local held = ClientInventory.selectedStack()
-		local item = if held then held.item else 0
-		if ClientInventory.selected() ~= lastSlot or item ~= lastItem then
-			lastSlot, lastItem = ClientInventory.selected(), item
-			if held then
-				name.Text = Items.displayName(item)
-				nameShadow.Text = name.Text
-				nameUntil = now + NAME_TIME
-			else
-				nameUntil = 0
+		local item = if held then held.item else nil
+		local count = if held then held.count else 0
+		local damage = if held then held.damage or 0 else 0
+		local data = if held then held.data else nil
+		local thermometer = item == THERMOMETER and status ~= nil and status.temperatureOn
+		local value, target = -99, -99
+		if thermometer and status then
+			value = math.round(math.clamp(status.temperature, Temperature.MIN, Temperature.MAX))
+			target = math.round(math.clamp(status.target, Temperature.MIN, Temperature.MAX))
+		end
+		if
+			item ~= boxItem
+			or count ~= boxCount
+			or damage ~= boxDamage
+			or data ~= boxData
+			or value ~= boxValue
+			or target ~= boxTarget
+		then
+			if item ~= boxItem or count ~= boxCount or damage ~= boxDamage or data ~= boxData then
+				lines = Theme.handsLines(held)
 			end
+			boxItem, boxCount, boxDamage, boxData = item, count, damage, data
+			boxValue, boxTarget = value, target
+			reading[1], reading[2] = value, target
+			layoutNameBox(nameBox, lines, if thermometer then reading else nil)
+			shownAlpha = -1
 		end
-		local remaining = nameUntil - now
-		-- (Not over an open screen.)
-		local alpha = if mode == "play" then math.clamp(remaining / NAME_FADE, 0, 1) else 0
-		name.Visible = alpha > 0
-		nameShadow.Visible = alpha > 0
-		if alpha > 0 then
-			name.TextTransparency = 1 - alpha
-			nameShadow.TextTransparency = 1 - alpha
-			-- (Above the mana stars when they reach its row: Ui/ManaHud's raise, from the last frame.)
-			local y = if survival then NAME_Y_SURVIVAL - manaRaise else NAME_Y_CREATIVE
-			name.Position = UDim2.fromOffset(0, y)
-			nameShadow.Position = UDim2.fromOffset(1, y + 1)
+		-- Shown for a while when the selection or the item in it changes; held with a Thermometer.
+		local slot = ClientInventory.selected()
+		local itemKey = item or 0
+		if slot ~= lastSlot or itemKey ~= lastItem then
+			lastSlot, lastItem = slot, itemKey
+			nameUntil = if held then now + Theme.Time.NAME else 0
 		end
-
-		-- Hearts and armor (survival).
-		local points = if survival then Accessories.armorPoints(inventory) else 0
-		if heartRow.Visible ~= survival then
-			heartRow.Visible = survival
+		local alpha = 0
+		if mode == "play" and held then
+			alpha = if thermometer then 1 else math.clamp((nameUntil - now) / Theme.Time.NAME_FADE, 0, 1)
 		end
-		if armorRow.Visible ~= (points > 0) then
-			armorRow.Visible = points > 0
-		end
-		-- Terraria's mana stars (Ui/ManaHud): in the armor's row, or over the armor when it shows;
-		-- the held item's name and Tough As Nails' status row move up as far as they need.
-		manaRaise = ManaHud.render(now, survival, held ~= nil and Items.magic(held.item) ~= nil, points > 0)
-		local rowsShown = SurvivalHud.render(now, survival, if held then held.item else nil, manaRaise)
-		-- (The corner keeps clear of the raised rows while one is drawn, the name or Tough As Nails'
-		-- rows: Ui/HudLayout's hudRaise; only a change counts.)
-		local raisedShown = (survival and alpha > 0) or rowsShown
-		UiScale.setHudRaise(if raisedShown then manaRaise else 0)
-
-		-- Knowledge (survival and adventure, once the server sent it).
-		local status = ProgressionState.get()
-		local knows = survival and status ~= nil
-		if knowledge.Visible ~= knows then
-			knowledge.Visible = knows
-		end
-		if knows and status and knowledgeDirty then
-			knowledgeDirty = false
-			local level, into, needed = Knowledge.progress(status.points)
-			knowledgeFill.Size = UDim2.fromOffset(math.floor(into / math.max(needed, 1) * (WIDTH - 2)), KNOWLEDGE_H - 2)
-			local text = if level > 0 then tostring(level) else ""
-			levelLabel.Text = text
-			for _, label in levelOutline do
-				label.Text = text
-			end
-		end
-		if not survival then
-			return
-		end
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		local halves = 0
-		if humanoid and humanoid.MaxHealth > 0 then
-			halves = math.clamp(math.ceil(humanoid.Health / humanoid.MaxHealth * 20 - 1e-6), 0, 20)
-		end
-		if halves < lastHalves then
-			blinkUntil = now + BLINK_TIME
-		end
-		lastHalves = halves
-		local blink = now < blinkUntil and math.floor((blinkUntil - now) / 0.15) % 2 == 0
-		local shake = halves <= SHAKE_AT and now >= nextShake
-		if shake then
-			nextShake = now + TICK
-		end
-		local repaintOutline = blink ~= blinking
-		blinking = blink
-		for i, heart in hearts do
-			local state = math.clamp(halves - (i - 1) * 2, 0, 2)
-			paintIcon(heart, state, HEART_RED, HEART_SHINE, HEART_EMPTY, HEART_EMPTY_SHINE)
-			if repaintOutline then
-				Style.paint(heart.parts.K, if blink then BLINK_OUTLINE else OUTLINE)
-			end
-			if shake then
-				heart.frame.Position = UDim2.fromOffset((i - 1) * 8, math.random(0, 1))
-			elseif halves > SHAKE_AT and heart.frame.Position.Y.Offset ~= 0 then
-				heart.frame.Position = UDim2.fromOffset((i - 1) * 8, 0)
-			end
-		end
-		if points ~= lastPoints then
-			lastPoints = points
-			for i, icon in armor do
-				local state = math.clamp(points - (i - 1) * 2, 0, 2)
-				paintIcon(icon, state, ARMOR_FULL, ARMOR_SHINE, ARMOR_EMPTY, ARMOR_EMPTY)
+		if alpha ~= shownAlpha then
+			shownAlpha = alpha
+			nameBox.root.Visible = alpha > 0
+			if alpha > 0 then
+				fadeNameBox(nameBox, alpha)
 			end
 		end
 	end)
@@ -822,18 +702,21 @@ function Hud.start()
 		local slot = Keybinds.hotbarSlot(input)
 		local spectator = GameMode.isSpectator(ClientInventory.mode())
 		if slot then
+			bar:wake(os.clock())
 			if spectator then
 				SpectatorGui.hotbarKey(slot)
 			else
 				ClientInventory.select(slot)
 			end
 		elseif input.KeyCode == Enum.KeyCode.ButtonR1 then
+			bar:wake(os.clock())
 			if spectator then
 				SpectatorGui.step(1)
 			else
 				step(1)
 			end
 		elseif input.KeyCode == Enum.KeyCode.ButtonL1 then
+			bar:wake(os.clock())
 			if spectator then
 				SpectatorGui.step(-1)
 			else
@@ -879,6 +762,7 @@ function Hud.start()
 		if steps == 0 then
 			return Enum.ContextActionResult.Sink
 		end
+		bar:wake(os.clock())
 		if spectator then
 			-- The spectator menu's selection, or the flying speed (MouseHandler.onScroll).
 			SpectatorGui.wheel(steps)

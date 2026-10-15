@@ -9,8 +9,8 @@
 	           toast slot under the minimap while no toast shows, under the toasts while they do,
 	           beside the minimap column when that would reach the bottom of the screen or Roblox's
 	           jump button, drawn smaller as a last resort), Minecraft's 24 x 24 GUI pixel squares:
-	           the effect's glyph (Ui/EffectIcons) in its colour on the light grey effect
-	           background (an ambient effect's has a pale blue rim). Beneficial effects in the top
+	           the effect's glyph (Ui/EffectIcons) in its colours on a dark square (see Look; an
+	           ambient effect's outline is pale blue). Beneficial effects in the top
 	           row, the rest (harmful, neutral) in the row below, each row from the right, longest
 	           first (Effects.hudOrder); the block's size goes to Ui/UiScale (`setEffects`). In its
 	           last 10 s an icon fades and blinks out, faster at the end (Effects.iconAlpha).
@@ -30,8 +30,15 @@
 	           form: Screens.panelOpen) hides both, as Minecraft's menus show no effects.
 	At the GUI scale (Ui/UiScale), hidden with the HUD (the world map hides it) and with
 	Config.Effects.Hud off. Built again only when the server's effects come in another set or order
-	(a refresh only takes the new times); a frame only fades the icons in their last 10 s and
-	rewrites times that changed.
+	(a refresh only takes the new times), or when the status icons start or stop showing their
+	badges; a frame only fades the icons in their last 10 s and rewrites times that changed.
+
+	Look: the survival look's flat dark squares (Panel, a Hairline outline) with the effect's glyph
+	in its colours, and in the list flat dark panels with the name in white and the time in grey
+	(Roboto: Style.Dayz.label). While the status icons show their badges in the HUD
+	(StatusCluster.badgesShown: Bleeding, Infection, Poison, Wither, Hunger, Thirst, Nausea:
+	StatusLayout.BADGES) the icons leave those effects out, and the block's size given to UiScale
+	is the size without them; the inventory's list shows every effect.
 ]]
 
 local Players = game:GetService("Players")
@@ -47,6 +54,8 @@ local EffectState = require(script.Parent.Parent.Player.EffectState)
 local EffectIcons = require(script.Parent.EffectIcons)
 local HudLayout = require(script.Parent.HudLayout)
 local Screens = require(script.Parent.Screens)
+local StatusCluster = require(script.Parent.StatusCluster)
+local StatusLayout = require(script.Parent.StatusLayout)
 local Style = require(script.Parent.Style)
 local UiScale = require(script.Parent.UiScale)
 
@@ -70,12 +79,18 @@ local LIST_ROOM = 132
 local LIST_MARGIN = 8
 local LIST_TOP = 40
 
-local OUTLINE = Color3.fromRGB(16, 16, 16)
-local BACKGROUND = Color3.fromRGB(198, 198, 198)
-local LIGHT = Color3.fromRGB(255, 255, 255)
-local SHADE = Color3.fromRGB(110, 110, 110)
+-- An ambient effect's (a beacon's, a fluid's) square has a pale blue outline instead of the
+-- hairline.
 local AMBIENT_RIM = Color3.fromRGB(150, 200, 230)
-local TIME = Color3.fromRGB(127, 127, 127)
+local AMBIENT_RIM_T = 0.4
+-- The hovered icon's line: a faint dark outline round its text.
+local TIP_STROKE_T = 0.4
+
+-- The effects the status icons show as badges (left out of the icons while they do).
+local BADGE_IDS: { [number]: boolean } = {}
+for _, name in StatusLayout.BADGES do
+	BADGE_IDS[Effects.id[name]] = true
+end
 
 -- One drawn effect: its entry as of `builtAt`, its icon (a CanvasGroup, for fading it whole) and
 -- the time label in the list (nil on the icons).
@@ -83,7 +98,6 @@ type Shown = {
 	entry: Effects.Entry,
 	group: CanvasGroup?,
 	time: TextLabel?,
-	timeShadow: TextLabel?,
 	seconds: number,
 	alpha: number,
 }
@@ -100,17 +114,32 @@ local function ticksLeft(entry: Effects.Entry, now: number): number
 	return Effects.remaining(entry.ticks, math.floor((now - builtAt) * Effects.TICKS_PER_SECOND), entry.paused)
 end
 
--- The background square and the glyph of `entry` at (x, y) of `parent`.
-local function drawIcon(parent: Instance, x: number, y: number, entry: Effects.Entry, z: number)
+-- The dark square and the glyph of `entry` at (x, y) of `parent`, its outline following `scaled`.
+local function drawIcon(parent: Instance, x: number, y: number, entry: Effects.Entry, z: number, scaled: Style.Scaled)
 	local effect = Effects.get(entry.effect)
 	if effect == nil then
 		return
 	end
-	Style.frame(parent, x, y, ICON, ICON, OUTLINE, z)
-	Style.frame(parent, x + 1, y + 1, ICON - 2, ICON - 2, if entry.ambient then AMBIENT_RIM else LIGHT, z)
-	Style.frame(parent, x + 2, y + 2, ICON - 3, ICON - 3, SHADE, z)
-	Style.frame(parent, x + 2, y + 2, ICON - 4, ICON - 4, BACKGROUND, z)
-	Style.pixelArt(parent, x + 3, y + 3, EffectIcons.glyph(effect.icon), EffectIcons.palette(effect.color), z + 1, 2)
+	local Dayz = Style.Dayz
+	local square = Style.frame(parent, x, y, ICON, ICON, Dayz.Colour.Panel, z)
+	square.BackgroundTransparency = Dayz.Alpha.Panel
+	if entry.ambient then
+		Dayz.outline(square, AMBIENT_RIM, AMBIENT_RIM_T, scaled)
+	else
+		Dayz.outline(square, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, scaled)
+	end
+	Style.pixelArt(square, 3, 3, EffectIcons.glyph(effect.icon), EffectIcons.palette(effect.color), 2, 2)
+end
+
+-- `list` without the effects the status icons show as badges (a new table).
+local function withoutBadges(list: { Effects.Entry }): { Effects.Entry }
+	local kept = table.create(#list)
+	for _, entry in list do
+		if not BADGE_IDS[entry.effect] then
+			table.insert(kept, entry)
+		end
+	end
+	return kept
 end
 
 function EffectHud.start()
@@ -132,10 +161,26 @@ function EffectHud.start()
 	holder.Parent = gui
 	local scale = Instance.new("UIScale")
 	scale.Parent = holder
+	Style.Dayz.mark(holder)
+	-- (Outlines and text weights follow each part's scale.)
+	local iconsScaled = Style.Dayz.scaled()
 	-- The icons' block (GUI pixels: HudLayout.effectsSize), set by `build`.
 	local blockWidth = ICON
-	local tip, tipShadow =
-		Style.shadowText(holder, "", 0, ICON + 2, ICON, 8, Style.Colour.Text, 8, Enum.TextXAlignment.Right)
+	local tip = Style.Dayz.label(
+		holder,
+		"",
+		0,
+		ICON + 2,
+		ICON,
+		8,
+		"small",
+		Style.Dayz.Colour.Text,
+		8,
+		Enum.TextXAlignment.Right,
+		iconsScaled
+	)
+	tip.TextStrokeColor3 = Color3.new(0, 0, 0)
+	tip.TextStrokeTransparency = TIP_STROKE_T
 
 	local list = Instance.new("Frame")
 	list.Name = "List"
@@ -143,8 +188,10 @@ function EffectHud.start()
 	list.BackgroundTransparency = 1
 	list.Visible = false
 	list.Parent = gui
+	Style.Dayz.mark(list)
 	local listScale = Instance.new("UIScale")
 	listScale.Parent = list
+	local listScaled = Style.Dayz.scaled()
 
 	-- Where Ui/HudLayout puts the icons (hidden when it finds no room), at its scale; the list at
 	-- the GUI scale, below the top bar.
@@ -158,22 +205,31 @@ function EffectHud.start()
 			if scale.Scale ~= corner.effectsScale then
 				scale.Scale = corner.effectsScale
 			end
+			iconsScaled:setScale(corner.effectsScale)
 		end
 		if listScale.Scale ~= corner.scale then
 			listScale.Scale = corner.scale
 		end
+		listScaled:setScale(corner.scale)
 		local insets = UiScale.insets()
 		list.Position = UDim2.fromOffset(insets.left + LIST_MARGIN, insets.bar + LIST_TOP)
 	end
 
 	-- Draws the icons and the list again from the effects the server sent (`compact`: the list
-	-- with the glyphs alone).
+	-- with the glyphs alone; `badges`: the status icons show their badges, which the icons leave
+	-- out).
 	local lastLayout = ""
 	local compact = false
+	local badges = false
 	local function build()
 		local now = os.clock()
 		local entries = EffectState.list(now)
 		local good, rest = Effects.hudOrder(entries)
+		-- (The icons without the badges' effects while the status icons show them.)
+		local iconGood, iconRest = good, rest
+		if badges then
+			iconGood, iconRest = withoutBadges(good), withoutBadges(rest)
+		end
 		-- (The same effects in the same places, only their times refreshed (a fluid's effects,
 		-- once a second): keep the icons, take the new times.)
 		local parts = table.create(#good + #rest + 1)
@@ -185,6 +241,7 @@ function EffectHud.start()
 			table.insert(parts, `{entry.effect}:{entry.amplifier}:{entry.ambient}`)
 		end
 		table.insert(parts, if compact then "c" else "f")
+		table.insert(parts, if badges then "b" else "-")
 		local key = table.concat(parts, " ")
 		if key == lastLayout then
 			local byEffect: { [number]: Effects.Entry } = {}
@@ -218,16 +275,16 @@ function EffectHud.start()
 		hovered, pinned = nil, nil
 		-- The block: beneficial effects in the top row, the rest in the second (Minecraft's rows,
 		-- the top one left empty without beneficial effects).
-		local columns = math.max(#good, #rest)
-		local rowCount = if #rest > 0 then 2 elseif #good > 0 then 1 else 0
+		local columns = math.max(#iconGood, #iconRest)
+		local rowCount = if #iconRest > 0 then 2 elseif #iconGood > 0 then 1 else 0
 		local size = HudLayout.effectsSize(columns, rowCount)
 		blockWidth = if size then size.w else ICON
 		holder.Size = UDim2.fromOffset(blockWidth, if size then size.h else ICON)
 		local tipY = math.max(rowCount - 1, 0) * ROW + ICON + 2
-		tip.Position, tipShadow.Position = UDim2.fromOffset(0, tipY), UDim2.fromOffset(1, tipY + 1)
-		tip.Size, tipShadow.Size = UDim2.fromOffset(blockWidth, 8), UDim2.fromOffset(blockWidth, 8)
+		tip.Position = UDim2.fromOffset(0, tipY)
+		tip.Size = UDim2.fromOffset(blockWidth, 8)
 		UiScale.setEffects(columns, rowCount)
-		for row, group in { good, rest } do
+		for row, group in { iconGood, iconRest } do
 			for i, entry in group do
 				local canvas = Instance.new("CanvasGroup")
 				canvas.Name = Effects.levelName(entry.effect, entry.amplifier)
@@ -235,7 +292,7 @@ function EffectHud.start()
 				canvas.Position = UDim2.fromOffset(blockWidth + 1 - STEP * i, (row - 1) * ROW)
 				canvas.Size = UDim2.fromOffset(ICON, ICON)
 				canvas.Parent = holder
-				drawIcon(canvas, 0, 0, entry, 1)
+				drawIcon(canvas, 0, 0, entry, 1, iconsScaled)
 				local button = Instance.new("TextButton")
 				button.Text = ""
 				button.BackgroundTransparency = 1
@@ -265,29 +322,35 @@ function EffectHud.start()
 		local step = if #all > 5 then math.min(LIST_STEP, LIST_ROOM // (#all - 1)) else LIST_STEP
 		local width = if compact then COMPACT_WIDTH else LIST_WIDTH
 		list.Size = UDim2.fromOffset(width, step * math.max(#all - 1, 0) + LIST_HEIGHT)
+		local Dayz = Style.Dayz
 		for i, entry in all do
 			local y = (i - 1) * step
-			local panel = Style.panel(list, 0, y, width, LIST_HEIGHT)
-			panel.ZIndex = i * 10
+			local panel = Style.frame(list, 0, y, width, LIST_HEIGHT, Dayz.Colour.Panel, i * 10)
+			panel.BackgroundTransparency = Dayz.Alpha.Panel
+			Dayz.outline(panel, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, listScaled)
 			-- (The list never takes the screen's clicks.)
 			panel.Active = false
-			drawIcon(panel, 4, 4, entry, 4)
+			drawIcon(panel, 4, 4, entry, 4, listScaled)
 			if compact then
 				table.insert(rows, { entry = entry, seconds = -1, alpha = 1 })
 				continue
 			end
-			Style.shadowText(
+			Dayz.label(
 				panel,
 				Effects.levelName(entry.effect, entry.amplifier),
 				32,
-				7,
+				5,
 				LIST_WIDTH - 36,
-				8,
-				Style.Colour.Text,
-				6
+				10,
+				"body",
+				Dayz.Colour.Text,
+				6,
+				Enum.TextXAlignment.Left,
+				listScaled
 			)
-			local time, timeShadow = Style.shadowText(panel, "", 32, 18, LIST_WIDTH - 36, 8, TIME, 6)
-			table.insert(rows, { entry = entry, time = time, timeShadow = timeShadow, seconds = -1, alpha = 1 })
+			local time =
+				Dayz.label(panel, "", 32, 17, LIST_WIDTH - 36, 9, "small", Dayz.Colour.TextMuted, 6, nil, listScaled)
+			table.insert(rows, { entry = entry, time = time, seconds = -1, alpha = 1 })
 		end
 	end
 
@@ -298,6 +361,12 @@ function EffectHud.start()
 
 	local lastTipEffect, lastTipSeconds = 0, -1
 	RunService.RenderStepped:Connect(function()
+		-- (The status icons started or stopped showing their badges: the icons change.)
+		local withBadges = StatusCluster.badgesShown()
+		if withBadges ~= badges then
+			badges = withBadges
+			build()
+		end
 		local on = Config.Effects.Hud == true and UiScale.hudShown() and #icons + #rows > 0 and not Screens.panelOpen()
 		local screen = Screens.isOpen()
 		if gui.Enabled ~= on then
@@ -331,10 +400,10 @@ function EffectHud.start()
 		if screen then
 			for _, shown in rows do
 				local seconds = ticksLeft(shown.entry, now) // Effects.TICKS_PER_SECOND
-				if seconds ~= shown.seconds and shown.time and shown.timeShadow then
+				local time = shown.time
+				if seconds ~= shown.seconds and time then
 					shown.seconds = seconds
-					local text = Effects.formatTicks(ticksLeft(shown.entry, now))
-					shown.time.Text, shown.timeShadow.Text = text, text
+					time.Text = Effects.formatTicks(ticksLeft(shown.entry, now))
 				end
 			end
 			return
@@ -366,7 +435,7 @@ function EffectHud.start()
 				local name = Effects.levelName(entry.effect, entry.amplifier)
 				text = `{name} {Effects.formatTicks(ticksLeft(entry, now))}`
 			end
-			tip.Text, tipShadow.Text = text, text
+			tip.Text = text
 		end
 	end)
 end

@@ -1,33 +1,41 @@
 --[[
-	The HUD's shared corner (client Ui/HudLayout): over phones (568 x 320, 667 x 375, a notched
-	844 x 390), tablets (1024 x 768), Studio's 1280 x 660, desktops (1366 x 768, 1920 x 1080,
-	2560 x 1440) and 4K, times every GUI Scale choice the screen offers, the minimap on and off,
-	touch on and off, the toasts and the saving icon showing or not and a few sets of effect icons:
-	everything placed stays inside the safe area below the top bar; the minimap, its coordinates
-	line, the zombie apocalypse's day line (in its three places: under the coordinates line, under
-	the Map button, in the corner; its real texts, a blood moon's warning wrapped onto a second
-	row where one row doesn't fit, and always placed) and its notice toasts (as wide as their
-	texts), the Map button, the toasts, the effect icons, the saving icon, the touch buttons and
-	the HUD's canvas never overlap (also while its rows are raised over the mana stars); WAILA's
-	reserve covers the minimap column and the day line; the toasts start under the minimap's
-	scaled bottom (under the day line when it shows). Named regressions: on a 667 x 375 phone the
-	effect icons ran past the bottom of the screen and the saving icon sat on the minimap (the
-	corner was pinned to a 192 pixel minimap and raised by a fixed 150 GUI pixels); on an iPad and
-	a 1024 x 768 window at their Auto GUI scale the day line vanished the day before a blood moon
-	and on its day until it rose (one row of 360 GUI pixels didn't fit and nothing took its place),
-	and the blood moon's toasts ran past the screen's edge (a 160 pixel toast for 208 and 216
-	pixels of text). The canvas' own rows (`rows`: the hotbar, the knowledge bar, the hearts and
-	armor, Minecraft's hunger shanks, Tough As Nails' droplets and thermometer, the item name, the
-	status row and the Thermometer's reading) never overlap, with the shanks and without (then
-	exactly where they were before the food bar), and the mana stars' raise clears them either way.
+	The HUD's layout (client Ui/HudLayout): over phones (568 x 320, 667 x 375, a notched 844 x 390),
+	tablets (1024 x 768), Studio's 1280 x 660, desktops (1366 x 768, 1920 x 1080, 2560 x 1440) and
+	4K, times every GUI Scale choice the screen offers, the minimap on and off, touch on and off,
+	the toasts and the saving icon showing or not, a few sets of effect icons and the status icons
+	(none, or with 0, 5 and 10 badges): everything placed stays inside the safe area below the top
+	bar; the minimap, its coordinates line, the zombie apocalypse's day line (in its three places:
+	under the coordinates line, under the Map button, in the corner; its real texts, a blood moon's
+	warning wrapped onto a second row where one row doesn't fit, and always placed) and its notice
+	toasts (as wide as their texts), the Map button, the toasts, the effect icons, the saving icon,
+	the status icons, the touch buttons, the HUD's canvas and its attack square never overlap (also
+	with the canvas raised); the status icons are always placed, at a readable scale, out of the
+	thumbstick's zone on touch, and on a 1920 x 1080 desktop sit full at the bottom right on the
+	quickbar's base line, the lift (5 % of the height) in from the edges; WAILA's reserve covers
+	the minimap column and the day line; the toasts start under the minimap's scaled bottom (under
+	the day line when it shows). Named regressions: on a 667 x 375 phone the effect icons ran past
+	the bottom of the screen and the saving icon sat on the minimap (the corner was pinned to a 192
+	pixel minimap and raised by a fixed 150 GUI pixels); on an iPad and a 1024 x 768 window at their
+	Auto GUI scale the day line vanished the day before a blood moon and on its day until it rose
+	(one row of 360 GUI pixels didn't fit and nothing took its place), and the blood moon's toasts
+	ran past the screen's edge (a 160 pixel toast for 208 and 216 pixels of text). The quickbar's
+	canvas: the bar at its bottom, the item-in-hands box over it, room for the touch buttons, nine
+	cells on Minecraft's hotbar math (the spectator menu's icons), the key names its number boxes
+	show. The chat's lines and its overlay message (Ui/Chat's heights over Minecraft's hotbar, read
+	from its source) go up with the lifted canvas and stay over it on every screen and GUI Scale
+	choice; named regression: at GUI Scale 1 on a 1920 x 1080 desktop the unlifted overlay message
+	("Chat disabled in client options.", 64 to 72 screen pixels up) sat on the lifted quickbar (55 to
+	77). The old canvas rows (`rows`, which the Hunger spec pins) are still exactly where they were.
 ]]
+
+local fs = require("@lune/fs")
 
 return function(t, shared, require, _server, client)
 	local GuiScale = require(client.Ui.GuiScale)
 	local HudLayout = require(client.Ui.HudLayout)
-	local ManaStars = require(client.Ui.ManaStars)
-	local Hunger = require(shared.Hunger)
+	local StatusLayout = require(client.Ui.StatusLayout)
 	local SurvivorLine = require(client.Ui.SurvivorLine)
+	local _ = shared
 
 	type Insets = HudLayout.Insets
 	type Rect = HudLayout.Rect
@@ -60,11 +68,21 @@ return function(t, shared, require, _server, client)
 	}
 	-- "World saved": none, Minecraft's width, a long line.
 	local SAVES: { number | false } = { false, 160, 240 }
+	-- The status icons: none, and Ui/StatusCluster's sizes with 0, 5 and 10 badges (values off and
+	-- on: the tallest full variant with 10).
+	local function statusSizes(badges: number, values: boolean): HudLayout.StatusSizes
+		local fw, fh = StatusLayout.size("full", values, badges)
+		local lw, lh = StatusLayout.size("lean", values, badges)
+		return { full = { w = fw, h = fh }, lean = { w = lw, h = lh } }
+	end
+	local STATUS: { HudLayout.StatusSizes | false } =
+		{ false, statusSizes(0, false), statusSizes(5, false), statusSizes(10, true) }
 
 	local function describe(input: HudLayout.Input): string
+		local status = input.status
 		return `{input.width} x {input.height} bar {input.insets.bar} scale {input.scale} touch {input.touch} minimap {input.minimap} coords {input.coordsWidth} music {input.music} save {input.save} under {input.saveUnder} saving {input.saving} effects {if input.effects
 			then `{input.effects.w}x{input.effects.h}`
-			else "none"}`
+			else "none"} status {if status then `{status.full.w}x{status.full.h}` else "none"}`
 	end
 
 	-- Every combination, `check(input, layout)` returning a problem or nil; at most a few reported.
@@ -83,26 +101,29 @@ return function(t, shared, require, _server, client)
 									for _, under in { false, true } do
 										for _, saving in { false, true } do
 											for _, effects in EFFECTS do
-												local input: HudLayout.Input = {
-													width = w,
-													height = h,
-													insets = inset,
-													scale = scale,
-													touch = touch,
-													minimap = minimap,
-													coordsWidth = coords,
-													music = music,
-													save = if save then save else nil,
-													saveUnder = under,
-													effects = effects,
-													saving = saving,
-													debugRight = nil,
-													buttons = nil,
-												}
-												count += 1
-												local problem = check(input, HudLayout.compute(input))
-												if problem and #problems < 5 then
-													table.insert(problems, `{describe(input)}: {problem}`)
+												for _, status in STATUS do
+													local input: HudLayout.Input = {
+														width = w,
+														height = h,
+														insets = inset,
+														scale = scale,
+														touch = touch,
+														minimap = minimap,
+														coordsWidth = coords,
+														music = music,
+														save = if save then save else nil,
+														saveUnder = under,
+														effects = effects,
+														saving = saving,
+														debugRight = nil,
+														buttons = nil,
+														status = if status then status else nil,
+													}
+													count += 1
+													local problem = check(input, HudLayout.compute(input))
+													if problem and #problems < 5 then
+														table.insert(problems, `{describe(input)}: {problem}`)
+													end
 												end
 											end
 										end
@@ -129,6 +150,7 @@ return function(t, shared, require, _server, client)
 		list.save = layout.save :: any
 		list.effects = layout.effects :: any
 		list.saving = layout.saving :: any
+		list.status = layout.status :: any
 		return list
 	end
 
@@ -155,11 +177,137 @@ return function(t, shared, require, _server, client)
 				if HudLayout.overlaps(r, layout.hud) then
 					return `{name} covers the HUD`
 				end
+				if HudLayout.overlaps(r, layout.attack) then
+					return `{name} covers the attack square`
+				end
 			end
 			return nil
 		end)
-		t.ok(count > 10000, `the sweep ran ({count})`)
+		t.ok(count > 40000, `the sweep ran ({count})`)
 		t.ok(#problems == 0, table.concat(problems, "\n         "))
+	end)
+
+	t.test("hud layout: the status icons always placed, readable, clear of the thumbstick", function()
+		local placed = { full = 0, lean = 0, smaller = 0, raised = 0 }
+		local count, problems = sweep(function(input, layout)
+			local status = layout.status
+			if input.status == nil then
+				return if status ~= nil then "status icons nobody asked for" else nil
+			end
+			if status == nil then
+				return "the status icons were dropped"
+			end
+			local s = input.scale
+			local es = layout.statusScale
+			local variant = layout.statusVariant
+			-- (Never under half the GUI scale, nor under 8 / 7 unless the GUI scale itself is.)
+			local floor = math.min(s, math.max(s / 2, HudLayout.STATUS_MIN_SCALE))
+			if es < floor - 1e-9 or es > s then
+				return `drawn at {es} (GUI scale {s})`
+			end
+			local size = (input.status :: HudLayout.StatusSizes)[variant :: string]
+			if variant == nil or size == nil then
+				return "no variant"
+			end
+			if math.abs(status.w - size.w * es) > 1e-9 or math.abs(status.h - size.h * es) > 1e-9 then
+				return `{variant} at {es} is {status.w} x {status.h}`
+			end
+			if variant == "full" and es ~= s then
+				return "the full variant smaller than the GUI scale"
+			end
+			if input.touch and HudLayout.overlaps(status, HudLayout.thumbstick(input.width, input.height)) then
+				return "in the thumbstick's zone"
+			end
+			for _, piece in { layout.minimap, layout.coords, layout.mapButton, layout.day } do
+				if piece and HudLayout.overlaps(status, piece) then
+					return "on the minimap column"
+				end
+			end
+			if variant == "full" then
+				placed.full += 1
+			elseif es == s then
+				placed.lean += 1
+			else
+				placed.smaller += 1
+			end
+			if status.y + status.h < layout.hud.y + layout.hud.h - 0.5 then
+				placed.raised += 1
+			end
+			return nil
+		end)
+		t.ok(count > 40000, `the sweep ran ({count})`)
+		t.ok(#problems == 0, table.concat(problems, "\n         "))
+		print(
+			`         (status icons: {placed.full} full, {placed.lean} lean, {placed.smaller} lean and smaller, {placed.raised} off the base line)`
+		)
+	end)
+
+	t.test("hud layout: the status icons on a 1920 x 1080 desktop, and on a phone", function()
+		local function input(overrides: { [string]: any }): HudLayout.Input
+			local base: HudLayout.Input = {
+				width = 1920,
+				height = 1080,
+				insets = insets(0, 0, 0, 0, 58),
+				scale = 4,
+				touch = false,
+				minimap = true,
+				coordsWidth = 160,
+				music = false,
+				save = nil,
+				saveUnder = false,
+				effects = HudLayout.effectsSize(3, 2),
+				saving = true,
+				debugRight = nil,
+				buttons = nil,
+				status = statusSizes(0, false),
+			}
+			for key, value in overrides do
+				(base :: any)[key] = value
+			end
+			return base
+		end
+		for _, badges in { 0, 5, 10 } do
+			local layout = HudLayout.compute(input({ status = statusSizes(badges, badges == 10) }))
+			local status, hud = layout.status :: Rect, layout.hud
+			t.eq(layout.statusVariant, "full", `{badges} badges: the full variant`)
+			t.eq(layout.statusScale, 4, `{badges} badges: at the GUI scale`)
+			t.eq(status.y + status.h, hud.y + hud.h, `{badges} badges: on the quickbar's base line`)
+			t.eq(status.x + status.w, 1920 - 54, `{badges} badges: the lift in from the right`)
+			t.eq(hud.y + hud.h, 1080 - 1 - 54, "the canvas lifted 5 % of the height")
+			local saving = layout.saving
+			t.ok(saving ~= nil and saving.y + saving.h <= status.y, `{badges} badges: the saving icon above them`)
+		end
+		-- A phone: no lift; the jump button owns the bottom right, so the icons sit on the quickbar's
+		-- end, never on the canvas, the jump button or the thumbstick.
+		local w, h = 667, 375
+		local phone = HudLayout.compute(input({
+			width = w,
+			height = h,
+			scale = GuiScale.base(w, h, true, 0),
+			touch = true,
+			effects = nil,
+			saving = false,
+		}))
+		local status = phone.status :: Rect
+		t.ok(status ~= nil, "placed on the phone")
+		local jump = HudLayout.jumpButton(w, h, insets(0, 0, 0, 0, 58))
+		t.ok(not HudLayout.overlaps(status, jump), "off the jump button")
+		t.ok(status.y + status.h <= phone.hud.y, "over the canvas")
+		t.ok(math.abs(status.x + status.w - (phone.hud.x + phone.hud.w)) <= 1, "at its right end")
+		t.eq(phone.hud.y + phone.hud.h, h - 1, "no lift on touch")
+		-- The game saving does not move them (their place keeps clear of the saving icon's).
+		local saving = HudLayout.compute(input({
+			width = w,
+			height = h,
+			scale = GuiScale.base(w, h, true, 0),
+			touch = true,
+			effects = nil,
+			saving = true,
+		}))
+		local still = saving.status :: Rect
+		t.ok(still.x == status.x and still.y == status.y, "the same place while saving")
+		t.ok(not HudLayout.overlaps(status, phone.hud), "off the canvas")
+		t.ok(not HudLayout.overlaps(status, HudLayout.thumbstick(w, h)), "out of the thumbstick's zone")
 	end)
 
 	t.test(
@@ -222,21 +370,26 @@ return function(t, shared, require, _server, client)
 				then
 					return "the effect icons are in the thumbstick's zone"
 				end
-				-- The HUD's rows raised over the mana stars (10 or 20 GUI pixels) drop a toast only
-				-- where it would sit on them (it then waits for room: Ui/MusicToast, SaveIndicator).
+				-- A canvas raised 10 or 20 GUI pixels (`hudRaise`, kept for its callers) drops a toast only
+				-- where it would sit on it, or on the status icons over it, which move up with it (it
+				-- then waits for room: Ui/MusicToast, SaveIndicator).
 				for _, raise in { 10, 20 } do
 					local raisedInput = table.clone(input)
 					raisedInput.hudRaise = raise
 					local raised = HudLayout.compute(raisedInput)
+					local function inTheWay(r: Rect): boolean
+						local moved = raised.status
+						return HudLayout.overlaps(r, raised.hud) or (moved ~= nil and HudLayout.overlaps(r, moved))
+					end
 					if input.music and raised.music == nil then
 						local music = layout.music
-						if music == nil or not HudLayout.overlaps(music, raised.hud) then
+						if music == nil or not inTheWay(music) then
 							return `raised {raise}: Now Playing was dropped with room for it`
 						end
 					end
 					if effects and effects.w <= 3 * HudLayout.EFFECT_STEP and raised.effects == nil then
 						local icons2 = layout.effects
-						if icons2 == nil or not HudLayout.overlaps(icons2, raised.hud) then
+						if icons2 == nil or not inTheWay(icons2) then
 							return `raised {raise}: the effect icons were dropped with room for them`
 						end
 					end
@@ -570,10 +723,14 @@ return function(t, shared, require, _server, client)
 		local both = HudLayout.compute(input({ save = 160, notice = 160 }))
 		local save, notice = both.save :: Rect, both.notice :: Rect
 		t.eq(notice.y, save.y + save.h + 8, "under World saved")
-		local three = HudLayout.compute(input({ music = true, save = 160, notice = 160 }))
+		-- (The status icons with ten badges and their values reach up to where a third toast goes.)
+		local three =
+			HudLayout.compute(input({ music = true, save = 160, notice = 160, status = statusSizes(10, true) }))
 		local beside = three.notice :: Rect
-		t.eq(beside.y, (three.music :: Rect).y, "a third toast would reach the HUD: beside slot 1")
+		t.eq(beside.y, (three.music :: Rect).y, "a third toast would reach the status icons: beside slot 1")
 		t.ok(beside.x + beside.w <= (three.music :: Rect).x, "left of it")
+		local roomy = HudLayout.compute(input({ music = true, save = 160, notice = 160 }))
+		t.eq((roomy.notice :: Rect).y, (roomy.save :: Rect).y + 128 + 8, "without them: under World saved")
 		local first = HudLayout.compute(input({ notice = 200 }))
 		t.eq((first.notice :: Rect).y, (first.music :: Rect).y, "slot 1 when no toast shows")
 		t.eq((first.notice :: Rect).w, 800, "as wide as its text")
@@ -659,9 +816,9 @@ return function(t, shared, require, _server, client)
 		t.ok(raised ~= nil and raised.y + raised.h <= 200, "above a big live button")
 	end)
 
-	t.test("hud layout: the corner keeps clear of the HUD's rows raised over the mana stars", function()
-		-- (Ui/Hud moves the held item's name and the status row up to 20 GUI pixels over its canvas
-		-- while Terraria's mana stars show: Ui/ManaStars.layout, UiScale.setHudRaise.)
+	t.test("hud layout: the corner keeps clear of a raised canvas", function()
+		-- (`hudRaise`, UiScale.setHudRaise: GUI pixels the HUD reaches over its canvas; nothing raises
+		-- it since the status icons replaced the mana stars, but the corner still honours it.)
 		local checked = 0
 		for _, screen in SCREENS do
 			local w, h, inset = screen[1], screen[2], screen[3]
@@ -694,7 +851,137 @@ return function(t, shared, require, _server, client)
 		t.eq(plain.hud.h, HudLayout.HUD_HEIGHT * plain.scale)
 	end)
 
-	t.test("hud layout: the canvas' rows, with the hunger shanks and without, never overlap", function()
+	t.test("hud layout: the quickbar's canvas, its cells and key names", function()
+		local canvas, quick = HudLayout.CANVAS, HudLayout.QUICK
+		t.eq(HudLayout.HUD_HEIGHT, canvas.height, "the corner keeps clear of the whole canvas")
+		t.eq(HudLayout.HUD_WIDTH, canvas.width)
+		t.eq(HudLayout.HUD_TOUCH_WIDTH, canvas.touchWidth)
+		t.eq(canvas.height - quick.bar, 22, "the quickbar at the bottom, Minecraft's 22 tall")
+		t.ok(quick.name >= 0 and quick.name + 11 <= quick.bar, "the item-in-hands box (11 tall) over the bar")
+		t.ok(quick.bar - 24 >= 0, 'room for a touch button (22 and a gap) over the gear and the "..."')
+		t.eq(canvas.touchWidth, canvas.width + 2 * HudLayout.TOUCH_SHIFT, "a touch button beside each end")
+		local bar: Rect = { x = 0, y = quick.bar, w = canvas.width, h = 22 }
+		local hits, cells, icons = {}, {}, {}
+		for i = 1, 9 do
+			local hit, cell, icon =
+				HudLayout.quickHit(i, quick.bar), HudLayout.quickCell(i, quick.bar), HudLayout.quickIcon(i, quick.bar)
+			t.ok(
+				HudLayout.inside(hit, bar) and HudLayout.inside(cell, hit) and HudLayout.inside(icon, cell),
+				`cell {i} nested in the bar`
+			)
+			t.eq(cell.w, 18)
+			t.eq(icon.w, 16)
+			-- (Ui/SpectatorGui's icons: x + 1 + 20(i - 1) + 2, y + 3 with the bar at (0, y).)
+			t.eq(icon.x, 1 + 20 * (i - 1) + 2, `cell {i}: the spectator menu's icon x`)
+			t.eq(icon.y, quick.bar + 3)
+			for j = 1, i - 1 do
+				t.ok(not HudLayout.overlaps(hit, hits[j]), `hits {j} and {i} disjoint`)
+				t.eq(cell.x - (cells[j].x + 18), 2 + 20 * (i - j - 1), `cells {j} and {i} 2 apart`)
+				t.ok(not HudLayout.overlaps(icon, icons[j]), `icons {j} and {i} disjoint`)
+			end
+			hits[i], cells[i], icons[i] = hit, cell, icon
+		end
+		t.eq(cells[1].x, 2, "2 in from the bar's left")
+		t.eq(canvas.width - (cells[9].x + 18), 2, "and its right")
+		-- The key names in the number boxes.
+		t.eq(HudLayout.quickKey("1"), "1")
+		t.eq(HudLayout.quickKey("F1"), "F1")
+		t.eq(HudLayout.quickKey("Left Shift"), "", "too long for the box")
+		t.eq(HudLayout.quickKey("Not Bound"), "")
+		t.eq(HudLayout.quickKey(""), "")
+		-- The lift, and the canvas it moves.
+		t.eq(HudLayout.lift(1080, false), 54, "5 % of 1080")
+		t.eq(HudLayout.lift(768, false), 38)
+		t.eq(HudLayout.lift(1080, true), 0, "none on touch")
+		local none = insets(0, 0, 0, 0, 58)
+		local hud = HudLayout.hud(1920, 1080, none, 4, false)
+		t.eq(hud.w, canvas.width * 4)
+		t.eq(hud.h, canvas.height * 4)
+		t.eq(hud.y + hud.h, 1080 - 1 - 54, "lifted")
+		t.eq(hud.x + hud.w / 2, 960, "centred")
+		local other = HudLayout.hud(1920, 1080, none, 4, true, nil, { width = 100, touchWidth = 150, height = 30 })
+		t.ok(other.w == 600 and other.h == 120 and other.y + other.h == 1079, "the canvas given, on touch: no lift")
+		-- The attack square: inside the canvas' height; on touch right of the "..." button, else left
+		-- of the bar (the bottom right is the status icons').
+		for _, touch in { false, true } do
+			local rect = HudLayout.hud(1920, 1080, none, 4, touch)
+			local attack = HudLayout.attack(rect, 4, touch)
+			local barLeft, barRight = 960 - canvas.width * 4 / 2, 960 + canvas.width * 4 / 2
+			t.ok(
+				attack.y >= rect.y and attack.y + attack.h <= rect.y + rect.h,
+				`touch {touch}: inside the canvas' height`
+			)
+			t.eq(attack.w, HudLayout.ATTACK_SIZE * 4)
+			if touch then
+				t.ok(attack.x >= barRight + (HudLayout.TOUCH_SHIFT - 2) * 4, 'right of the "..." button')
+			else
+				t.ok(attack.x + attack.w <= barLeft - 4, "left of the bar")
+			end
+		end
+	end)
+
+	t.test("hud layout: the chat's lines and overlay message stay over the lifted canvas", function()
+		-- Ui/Chat's heights (read from its source, so this follows them) and its use of `lifted`.
+		local source = fs.readFile("src/client/Ui/Chat/init.luau")
+		local function constant(name: string): number
+			local value = tonumber(string.match(source, `\nlocal {name} = (%d+)\n`))
+			assert(value ~= nil, `Ui/Chat's {name}`)
+			return value
+		end
+		local chatBottom, overlayY = constant("CHAT_BOTTOM"), constant("OVERLAY_Y")
+		local hudW, hudH = string.match(source, "\nlocal HUD_W, HUD_H = (%d+), (%d+)\n")
+		t.ok(hudW ~= nil and hudH ~= nil, "Ui/Chat's HUD_W, HUD_H (the content its scale fits)")
+		local chatW, chatH = tonumber(hudW) :: number, tonumber(hudH) :: number
+		t.ok(string.find(source, "HudLayout.lifted(CHAT_BOTTOM, scale,", 1, true) ~= nil, "Ui/Chat lifts its lines")
+		t.ok(
+			string.find(source, "HudLayout.lifted(OVERLAY_Y - 4, scale,", 1, true) ~= nil,
+			"and its overlay message (8 tall, its bottom 4 under OVERLAY_Y)"
+		)
+		local overlayBottom = overlayY - 4
+		t.eq(HudLayout.lifted(40, 2, 1080, false), 80 + 54, "the GUI height times the scale, plus the lift")
+		t.eq(HudLayout.lifted(40, 2, 1080, true), 80, "no lift on touch")
+		-- Named regression: the overlay message unlifted, on the lifted quickbar.
+		local bar = { 1 + HudLayout.lift(1080, false), 1 + HudLayout.lift(1080, false) + 22 }
+		t.ok(overlayBottom < bar[2] and overlayBottom + 8 > bar[1], "unlifted, it sat on the bar at GUI Scale 1")
+		local canvas, quick = HudLayout.CANVAS, HudLayout.QUICK
+		local count, problems = 0, {}
+		for _, screen in SCREENS do
+			local w, h, inset = screen[1], screen[2], screen[3]
+			-- (Both GUIs cover the safe area: their scales fit it, their bottoms are its bottom.)
+			local areaW, areaH = w - inset.left - inset.right, h - inset.top - inset.bottom
+			for _, touch in { false, true } do
+				local lift = HudLayout.lift(h, touch)
+				for _, choice in GuiScale.choices(w, h, touch) do
+					local base = GuiScale.base(w, h, touch, choice)
+					-- Ui/Hud's scale (its canvas fitted above the lift) and Ui/Chat's.
+					local width = if touch then canvas.touchWidth else canvas.width
+					local hudScale = GuiScale.fit(base, width, canvas.height, areaW, math.max(areaH - lift, 2), touch)
+					local chatScale = GuiScale.fit(base, chatW, chatH, areaW, areaH, touch)
+					-- Heights above the safe area's bottom (screen pixels): the canvas' top, the item
+					-- box's top (the canvas' top band over it is empty), the lines', the message's.
+					local canvasTop = 1 + lift + canvas.height * hudScale
+					local nameTop = 1 + lift + (canvas.height - quick.name) * hudScale
+					local lines = HudLayout.lifted(chatBottom, chatScale, h, touch)
+					local message = HudLayout.lifted(overlayBottom, chatScale, h, touch)
+					count += 1
+					local where = `{w} x {h} touch {touch} choice {choice} (hud {hudScale}, chat {chatScale})`
+					if lines < nameTop and #problems < 5 then
+						table.insert(problems, `{where}: the lines' bottom {lines} under the item box's top {nameTop}`)
+					end
+					if message < canvasTop and #problems < 5 then
+						table.insert(
+							problems,
+							`{where}: the message's bottom {message} under the canvas' top {canvasTop}`
+						)
+					end
+				end
+			end
+		end
+		t.ok(count > 50, `screens x choices checked ({count})`)
+		t.eq(#problems, 0, table.concat(problems, "; "))
+	end)
+
+	t.test("hud layout: the old canvas rows (the Hunger spec's), with the shanks and without", function()
 		local WIDTH = HudLayout.HUD_WIDTH
 		local ROW = HudLayout.ROW_WIDTH
 		for _, hunger in { false, true } do
@@ -733,15 +1020,6 @@ return function(t, shared, require, _server, client)
 			t.eq(rows.reading, rows.status - 10, "the reading a row above the status row")
 			t.eq(rows.height - rows.bar, 22, "the hotbar at the bottom")
 			t.eq(rows.bar - rows.hearts, 17, "the hearts 17 above it (Minecraft's)")
-			-- Terraria's mana stars (left, in or over the armor's row) push the name and the rows
-			-- over it up just clear of their top row, never into the canvas' other rows.
-			for _, case in { { 20, false }, { 20, true }, { 400, false }, { 400, true } } do
-				local bottom, raise = ManaStars.layout(rows.armor, case[1], case[2], rows.name)
-				local top = bottom - ManaStars.ROW * (ManaStars.rows(case[1]) - 1)
-				local name = `hunger {hunger}, mana {case[1]}, armored {case[2]}`
-				t.ok(rows.name - raise + ManaStars.ROW <= top, `{name}: the name over the stars`)
-				t.ok(bottom + 9 <= rows.hearts, `{name}: the stars over the hearts`)
-			end
 		end
 		-- Without the shanks: exactly the rows before the food bar.
 		local off = HudLayout.rows(false)
@@ -768,7 +1046,6 @@ return function(t, shared, require, _server, client)
 		for _, key in { "gauge", "name", "status", "reading" } do
 			t.eq(on.height - (on :: any)[key], off.height - (off :: any)[key] + 10, `{key} a row up`)
 		end
-		t.eq(HudLayout.HUD_HEIGHT, HudLayout.rows(Hunger.on()).height, "the corner keeps clear of the whole canvas")
 	end)
 
 	t.test("hud layout: the toasts' slots, the Map button and WAILA's edges", function()

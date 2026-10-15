@@ -6,9 +6,10 @@
 	full, as Minecraft's Gui.renderCrosshair / renderHotbar do.
 
 	  Crosshair  a 16 x 4 bar 9 GUI pixels under where the player aims (the screen centre, or the
-	             mouse while it is free: Interaction/BlockInteraction's aim), its light part
-	             (strength x 17) growing to the right, scaled like the HUD.
-	  Hotbar     an 18 x 18 square right of the hotbar filling from the bottom (Ui/Hud.
+	             mouse while it is free: Interaction/BlockInteraction's aim), its white part
+	             (strength x 17) growing to the right on a dark track (the survival look's bar
+	             colours: Style.Dayz BarTrack and Quantity), scaled like the HUD.
+	  Hotbar     a quickbar cell beside the quickbar filling white from the bottom (Ui/Hud.
 	             setAttackIndicator).
 
 	The recovery starts over as the server's does (server Mobs: a hit that lands, a change of the
@@ -31,6 +32,7 @@ local Accessories = require(Shared.Items.Accessories)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Hud = require(script.Parent.Hud)
 local Screens = require(script.Parent.Screens)
+local Style = require(script.Parent.Style)
 local UiScale = require(script.Parent.UiScale)
 
 local AttackIndicator = {}
@@ -41,8 +43,6 @@ local TICKS_PER_SECOND = 20
 -- Minecraft's crosshair indicator: 16 x 4, its top 9 GUI pixels under the aim (height / 2 - 7 +
 -- 16 from the screen's top, the crosshair being 15 tall), filled (strength x 17) pixels.
 local BAR_W, BAR_H, BAR_BELOW = 16, 4, 9
-local BACKGROUND = Color3.fromRGB(60, 60, 60)
-local FILL = Color3.fromRGB(230, 230, 230)
 
 local mode = AttackIndicator.CROSSHAIR
 local started = false
@@ -89,14 +89,15 @@ function AttackIndicator.start()
 	local bar = Instance.new("Frame")
 	bar.Name = "Bar"
 	bar.BorderSizePixel = 0
-	bar.BackgroundColor3 = BACKGROUND
-	bar.BackgroundTransparency = 0.2
+	bar.BackgroundColor3 = Style.Dayz.Colour.BarTrack
+	bar.BackgroundTransparency = Style.Dayz.Alpha.BarTrack
 	bar.Visible = false
 	bar.Parent = gui
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
 	fill.BorderSizePixel = 0
-	fill.BackgroundColor3 = FILL
+	fill.BackgroundColor3 = Style.Dayz.Colour.Quantity
+	fill.BackgroundTransparency = Style.Dayz.Alpha.Quantity
 	fill.Parent = bar
 	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 

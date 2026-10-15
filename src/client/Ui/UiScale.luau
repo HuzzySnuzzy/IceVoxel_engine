@@ -30,11 +30,14 @@
 	             follows the base) or "screen" (screen-relative by design: the first-person hand,
 	             the fire and frost overlays, the Nuke's flash, the world map's backdrop).
 	  corner     what shows in the HUD's corner (`setMinimap`, `setDayLine`, `setToast`,
-	             `setEffects`, `setSaving`, `setDebugRight`, `setHudRaise`) and Roblox's touch
-	             buttons (the live JumpButton and ContextActionService buttons, measured again
-	             when PlayerGui's children change and every BUTTON_CHECK seconds on touch screens)
-	             go into HudLayout.compute; `hud()` is the result (screen pixels) and `hudChanged`
-	             fires when anything in it may have moved.
+	             `setEffects`, `setSaving`, `setDebugRight`, `setHudRaise`), the status icons'
+	             sizes (`setStatus`, Ui/StatusCluster: placed at the bottom right before the rest
+	             of the corner, which keeps clear of them) and Roblox's touch buttons (the live
+	             JumpButton and ContextActionService buttons, measured again when PlayerGui's
+	             children change and every BUTTON_CHECK seconds on touch screens) go into
+	             HudLayout.compute, which also lifts the HUD's canvas off a PC screen's bottom;
+	             `hud()` is the result (screen pixels) and `hudChanged` fires when anything in it
+	             may have moved.
 
 	Ui/Style's guiScale, setScaleOverride and scaleChanged forward here for older callers.
 ]]
@@ -145,6 +148,7 @@ local corner = {
 	dayWidth = HudLayout.MINIMAP,
 	dayWrap = nil :: number?,
 	notice = nil :: number?,
+	status = nil :: HudLayout.StatusSizes?,
 }
 -- Roblox's touch buttons as last measured (nil: none found), and the corner's layout.
 local buttons: { HudLayout.Rect }? = nil
@@ -273,6 +277,7 @@ local function layoutCorner()
 		dayWrap = corner.dayWrap,
 		notice = corner.notice,
 		buttons = buttons,
+		status = corner.status,
 	})
 end
 
@@ -573,12 +578,33 @@ function UiScale.setDebugRight(x: number?)
 	end
 end
 
--- GUI pixels Ui/Hud's name and status row reach above its canvas (over the mana stars; 0: none).
+-- GUI pixels Ui/Hud reaches above its canvas (0: none; nothing raises it now).
 function UiScale.setHudRaise(raise: number)
 	if raise ~= corner.hudRaise then
 		corner.hudRaise = raise
 		cornerChanged()
 	end
+end
+
+local function sameSize(a: { w: number, h: number }, b: { w: number, h: number }): boolean
+	return a.w == b.w and a.h == b.h
+end
+
+--[[
+	The status icons' sizes (GUI pixels: Ui/StatusLayout.size's full and lean variants), nil while
+	none show (Ui/StatusCluster: outside survival and adventure). Kept as given (do not change it
+	afterwards); nothing is laid out again when the sizes are the same.
+]]
+function UiScale.setStatus(sizes: HudLayout.StatusSizes?)
+	local old = corner.status
+	if sizes == nil and old == nil then
+		return
+	end
+	if sizes and old and sameSize(sizes.full, old.full) and sameSize(sizes.lean, old.lean) then
+		return
+	end
+	corner.status = sizes
+	cornerChanged()
 end
 
 return UiScale

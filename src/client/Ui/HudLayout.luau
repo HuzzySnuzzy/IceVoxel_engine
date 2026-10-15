@@ -1,12 +1,14 @@
 --!strict
 --[[
-	Where the HUD's shared corner goes (pure: numbers in, rectangles out, so the tests place every
-	screen and every GUI Scale choice): the top right corner holds the minimap with its
-	coordinates line (or the touch "Map" button while the minimap is off) and the zombie
-	apocalypse's day line under them, the toasts under that (Minecraft's ToastComponent: the Now
-	Playing toast in the first slot, the "World saved" toast in it or under it, the blood moon's
-	notices under those), the status effect icons (Minecraft's Gui.renderEffects: the top right)
-	and the saving icon at the bottom right; WAILA keeps out of them, and right of the F3 text.
+	Where the HUD's pieces go (pure: numbers in, rectangles out, so the tests place every screen
+	and every GUI Scale choice): the quickbar's canvas at the bottom centre and its cells, the
+	status icons (Ui/StatusCluster) at the bottom right on the quickbar's base line, and the shared
+	top right corner: the minimap with its coordinates line (or the touch "Map" button while the
+	minimap is off) and the zombie apocalypse's day line under them, the toasts under that
+	(Minecraft's ToastComponent: the Now Playing toast in the first slot, the "World saved" toast
+	in it or under it, the blood moon's notices under those), the status effect icons (Minecraft's
+	Gui.renderEffects: the top right) and the saving icon at the bottom right; WAILA keeps out of
+	them, and right of the F3 text.
 
 	Everything is in screen pixels: (0, 0) the screen's top left, `width` x `height` the camera's
 	viewport. Sizes are GUI pixels (below) times the GUI scale, so the corner grows and shrinks
@@ -16,7 +18,37 @@
 	  area      the device's safe area (notches: `insets`), below Roblox's top bar (`insets.bar`,
 	            from the screen's top), MARGIN GUI pixels inside it; everything placed stays in it
 	            or is dropped (nil) when it cannot fit.
-	  minimap   MINIMAP (Config.UiScale.Minimap, 56) GUI pixels square in the area's top right
+	  lift      on a PC the bottom of the HUD sits `lift` (LIFT, 5 % of the screen's height) above
+	            the safe area's bottom, as a survival game's 90 % safe frame keeps its quickbar and
+	            status icons off the screen's edge, and the status icons keep as far from the right
+	            edge. Touch screens keep the bottom (the thumbs are there): no lift. What Minecraft
+	            places a fixed height over its hotbar (Ui/Chat's lines at 40 GUI pixels and its
+	            overlay message at 64 to 72) goes up by the same lift (`lifted`), or the lifted
+	            quickbar and item-in-hands box would run into it at the smaller GUI scales (a
+	            1920 x 1080 screen at GUI Scale 1: the bar 55 to 77 screen pixels up, the overlay
+	            message 64 to 72).
+	  canvas    Ui/Hud's canvas (CANVAS: 182 x 46 GUI pixels, 230 wide with the touch buttons
+	            beside the quickbar; `hud`: centred at the bottom, one pixel and the lift above the
+	            safe area's bottom, at the scale given, which is at most the HUD's own): the
+	            quickbar at QUICK.bar (its bottom 22 pixels), the item-in-hands box at QUICK.name
+	            above it, and room above the bar for the touch buttons stacked over the gear and
+	            the "..." button. Its cells (`quickHit`, `quickCell`, `quickIcon`) are Minecraft's
+	            hotbar's, nine 20 pixel steps, so the spectator menu (Ui/SpectatorGui) and the
+	            inventory's quickbar band share them; `quickKey` is the key name a cell's number
+	            box shows. The attack indicator's square right of the bar (`attack`) is kept clear
+	            too. `hudRaise` makes the canvas taller on top (nothing raises it now; kept for its
+	            callers).
+	  status    the status icons' block (Ui/StatusLayout's sizes, `status`: a full variant with the
+	            knowledge bar, a lean one without), placed after the minimap column and the day
+	            line and before everything else: at the bottom right on the canvas' base line (its
+	            right edge the lift in, at least the margin), else right-aligned and raised over
+	            whatever it hits there (the canvas, the touch buttons), else left of the touch
+	            buttons in the bottom right corner, else above the canvas, right-aligned with it;
+	            the full variant first, then the lean one, then the lean one smaller in eighths
+	            down to half the scale but never under 8 / 7 (its 7 pixel text stays 8 screen
+	            pixels tall). On a touch screen it never goes into the thumbstick's zone. The
+	            saving icon, the toasts and the effect icons keep clear of it.
+	  minimap  MINIMAP (Config.UiScale.Minimap, 56) GUI pixels square in the area's top right
 	            corner, the coordinates line (the pixel font, COORDS_HEIGHT tall, as wide as its
 	            text: `coordsWidth`, right aligned) GAP under it. Off on a touch screen, the MAP
 	            button takes the corner (the only way to the world map there), never smaller than
@@ -35,13 +67,11 @@
 	  in the way  Roblox's touch controls (the live JumpButton and ContextActionService buttons,
 	            `buttons`; on a touch screen without them PlayerModule's jump button rule:
 	            `jumpButton`), which never scale with the GUI scale, so they are measured, not
-	            guessed in GUI pixels; and the HUD's canvas (Ui/Hud: 182 x 70 GUI pixels, 80 with
-	            Minecraft's hunger on (its shanks' row: `rows`), 230 wide with the touch buttons, at
-	            the bottom centre; `hudRaise` taller while its name and status row sit higher over
-	            the mana stars). Nothing of the corner covers them.
+	            guessed in GUI pixels; the HUD's canvas and its attack square; the status icons.
+	            Nothing of the corner covers them.
 	  saving    while it shows: the bottom right, raised above every button in its way (by the
-	            buttons' real size, not a fixed raise times the scale); dropped if that reaches the
-	            minimap column.
+	            buttons' real size, not a fixed raise times the scale) and over the status icons;
+	            dropped if that reaches the minimap column.
 	  toasts    slot 1 starts GAP under the column (the day line, the coordinates line, the Map
 	            button, or the area's top): the Now Playing toast's place, shown or not (it slides
 	            in there).
@@ -66,21 +96,17 @@
 	            (`wailaLow.y`, with F3's extended lines), left of `wailaLow.right` too; with F3
 	            open, right of `wailaAvoid` (`debugRight`, the F3 text's right edge, plus GAP).
 
-	The canvas' own rows (`rows`, Ui/Hud and Ui/SurvivalHud place by it): the hotbar at the bottom,
-	the hearts 17 above its top and the armor a row (10) above them on the left; on the right,
-	level with the hearts, Minecraft's hunger shanks (with Config.Hunger on), then Tough As Nails'
-	thirst droplets (level with the hearts without hunger, a row up with it: TAN's place, over the
-	food bar), the thermometer a row above the droplets, the held item's name (centred, so a long
-	one reaches the right side) a row above that, the status row above the name and a held
-	Thermometer's reading above that. Each row is 9 pixels in a 10 pixel step; with hunger on
-	everything from the droplets up moves a row up and the canvas is a row taller, so the corner
-	keeps clear of all of it; with hunger off the rows are exactly as before the food bar.
+	`rows` are the old Minecraft canvas' rows (the hearts and armor on the left; Minecraft's hunger
+	shanks, Tough As Nails' droplets and thermometer on the right; the item name, the status row
+	and the Thermometer's reading above them: 70 GUI pixels, 80 with the shanks), kept as they were
+	for the Hunger spec, which pins where the food bar went. Nothing draws them any more: the status
+	icons took their place.
 
 	Every rectangle that shows is disjoint from every other, from the buttons and from the HUD
 	(tested over phones, tablets, desktops and 4K, every GUI Scale choice, the minimap on and off,
-	touch on and off, toasts and the saving icon showing or not). Client Ui/UiScale feeds it the
-	screen, the scale and what shows, and hands the result to Map/Minimap, MusicToast,
-	SaveIndicator, EffectHud and Waila.
+	touch on and off, toasts, the saving icon and the status icons showing or not). Client
+	Ui/UiScale feeds it the screen, the scale and what shows, and hands the result to Map/Minimap,
+	MusicToast, SaveIndicator, EffectHud, StatusCluster and Waila.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -114,22 +140,38 @@ HudLayout.SAVING_HEIGHT = 16
 HudLayout.EFFECT_STEP = 25
 HudLayout.EFFECT_ROW = 26
 HudLayout.EFFECT_TIP = 12
--- Ui/Hud's canvas: the hotbar, hearts, armour and item name (wider with the touch buttons beside
--- the hotbar), one pixel above the safe area's bottom, a row taller with the hunger shanks
--- (`rows`); `hudRaise` more on top while the name and the status row are moved up over
--- Terraria's mana stars.
-HudLayout.HUD_WIDTH = 182
-HudLayout.HUD_TOUCH_WIDTH = 230
--- A row of the canvas (hearts, droplets...: 9 pixels and a gap) and the side rows' width.
+-- The bottom lift on a PC: this share of the screen's height (see the header).
+HudLayout.LIFT = 0.05
+
+-- Ui/Hud's canvas (GUI pixels): the quickbar's width (230 with the touch buttons beside it) and
+-- the canvas' height; the quickbar's top and the item-in-hands box's top in it (see the header).
+export type Canvas = { width: number, touchWidth: number, height: number }
+HudLayout.CANVAS = table.freeze({ width = 182, touchWidth = 230, height = 46 }) :: Canvas
+HudLayout.QUICK = table.freeze({ bar = 24, name = 11 })
+HudLayout.HUD_WIDTH = HudLayout.CANVAS.width
+HudLayout.HUD_TOUCH_WIDTH = HudLayout.CANVAS.touchWidth
+HudLayout.HUD_HEIGHT = HudLayout.CANVAS.height
+-- The quickbar's step: nine cells 20 GUI pixels apart (Minecraft's hotbar).
+HudLayout.QUICK_STEP = 20
+-- The attack indicator's square beside the quickbar (Ui/Hud, `attackX`): on a touch screen right
+-- of the "..." button, otherwise left of the bar (the bottom right is the status icons'); its
+-- side, its top 2 under the bar's; the touch buttons' step beside the bar.
+HudLayout.ATTACK_X = 188
+HudLayout.ATTACK_SIZE = 18
+HudLayout.TOUCH_SHIFT = 24
+
+-- Minecraft's old canvas rows (`rows`, see the header): a row, the side rows' width, the canvas
+-- without the shanks' row and the row they add (Config.Hunger on).
 HudLayout.ROW = 10
 HudLayout.ROW_WIDTH = 81
--- The canvas without the shanks' row, and the row they add (Config.Hunger on).
 HudLayout.HUD_BASE_HEIGHT = 70
 HudLayout.HUNGER_ROW = if Hunger.on() then HudLayout.ROW else 0
-HudLayout.HUD_HEIGHT = HudLayout.HUD_BASE_HEIGHT + HudLayout.HUNGER_ROW
 
 -- A rectangle in screen pixels.
 export type Rect = { x: number, y: number, w: number, h: number }
+
+-- The status icons' sizes (GUI pixels, Ui/StatusLayout.size): with the knowledge bar and without.
+export type StatusSizes = { full: { w: number, h: number }, lean: { w: number, h: number } }
 
 -- The tops of the canvas' rows (GUI pixels from its top; see the header).
 export type Rows = {
@@ -182,11 +224,12 @@ export type Input = {
 	dayWrap: number?,
 	-- A notice toast shows (its width, GUI pixels; Ui/SurvivorHud's blood moon notices).
 	notice: number?,
-	-- GUI pixels the HUD's held item name and status row reach above its canvas (Ui/Hud: they
-	-- move up over Terraria's mana stars, Ui/ManaStars.layout; 0 or nil without).
+	-- GUI pixels the HUD reaches above its canvas (0 or nil: none; nothing raises it now).
 	hudRaise: number?,
 	-- Roblox's touch controls (screen pixels); nil: `jumpButton`'s rule on a touch screen.
 	buttons: { Rect }?,
+	-- The status icons' sizes (Ui/StatusCluster through UiScale.setStatus); nil: none shown.
+	status: StatusSizes?,
 }
 
 export type Layout = {
@@ -212,9 +255,15 @@ export type Layout = {
 	effectsScale: number,
 	effectsAside: boolean,
 	saving: Rect?,
-	-- What the corner keeps clear of: the touch controls, and the HUD's canvas.
+	-- The status icons (nil: none, or no room), the scale they are drawn at and their variant
+	-- ("full" or "lean"; nil with no icons).
+	status: Rect?,
+	statusScale: number,
+	statusVariant: string?,
+	-- What the corner keeps clear of: the touch controls, the HUD's canvas and its attack square.
 	buttons: { Rect },
 	hud: Rect,
+	attack: Rect,
 	-- WAILA keeps left of `wailaRight`, left of `wailaLow.right` when it reaches down to
 	-- `wailaLow.y`, and right of `wailaAvoid` (screen pixels).
 	wailaRight: number,
@@ -309,20 +358,93 @@ function HudLayout.rows(hunger: boolean): Rows
 	}
 end
 
--- Ui/Hud's canvas at `scale` (at most: the HUD shrinks to fit narrower screens), `raise` GUI
--- pixels taller on top (the text moved up over the mana stars).
+-- Screen pixels the HUD's bottom sits above the safe area's (see the header): 0 on touch screens.
+function HudLayout.lift(height: number, touch: boolean): number
+	if touch then
+		return 0
+	end
+	return math.floor(HudLayout.LIFT * height)
+end
+
+--[[
+	Screen pixels above the safe area's bottom for what Minecraft draws `offset` GUI pixels above
+	the screen's bottom, over its hotbar (Ui/Chat's lines and overlay message), at `scale` on a
+	screen `height` tall: lifted with the HUD's canvas (see the header).
+]]
+function HudLayout.lifted(offset: number, scale: number, height: number, touch: boolean): number
+	return offset * scale + HudLayout.lift(height, touch)
+end
+
+--[[
+	Ui/Hud's canvas (`canvas`, default CANVAS) at `scale` (at most: the HUD shrinks to fit narrower
+	screens), `raise` GUI pixels taller on top, centred in the safe area, its bottom one pixel and
+	the lift above the safe area's.
+]]
 function HudLayout.hud(
 	width: number,
 	height: number,
 	insets: Insets,
 	scale: number,
 	touch: boolean,
-	raise: number?
+	raise: number?,
+	canvas: Canvas?
 ): Rect
-	local w = (if touch then HudLayout.HUD_TOUCH_WIDTH else HudLayout.HUD_WIDTH) * scale
-	local h = (HudLayout.HUD_HEIGHT + math.max(raise or 0, 0)) * scale
+	local shape = canvas or HudLayout.CANVAS
+	local w = (if touch then shape.touchWidth else shape.width) * scale
+	local h = (shape.height + math.max(raise or 0, 0)) * scale
 	local safeWidth = width - insets.left - insets.right
-	return rect(insets.left + (safeWidth - w) / 2, height - insets.bottom - 1 - h, w, h)
+	local bottom = height - insets.bottom - 1 - HudLayout.lift(height, touch)
+	return rect(insets.left + (safeWidth - w) / 2, bottom - h, w, h)
+end
+
+--[[
+	The attack indicator's square's x (GUI pixels from the quickbar's left; its top is 2 under the
+	bar's): right of the "..." button on a touch screen (Minecraft's right of the hotbar), else left
+	of the bar, Minecraft's left-handed place, as the status icons take the right.
+]]
+function HudLayout.attackX(touch: boolean): number
+	if touch then
+		return HudLayout.ATTACK_X + HudLayout.TOUCH_SHIFT
+	end
+	return -(HudLayout.ATTACK_SIZE + 6)
+end
+
+-- The attack indicator's square (screen pixels) of the canvas `hud` (HudLayout.hud's) at `scale`.
+function HudLayout.attack(hud: Rect, scale: number, touch: boolean, canvas: Canvas?): Rect
+	local shape = canvas or HudLayout.CANVAS
+	-- (The quickbar is centred in the canvas; the canvas' bottom is the bar's.)
+	local barLeft = hud.x + (hud.w - shape.width * scale) / 2
+	local top = hud.y + hud.h - (shape.height - HudLayout.QUICK.bar - 2) * scale
+	local side = HudLayout.ATTACK_SIZE * scale
+	return rect(barLeft + HudLayout.attackX(touch) * scale, top, side, side)
+end
+
+-- Quickbar cell `i`'s hit area (GUI pixels) with the bar's top at `bar`: its 20 pixel step.
+function HudLayout.quickHit(i: number, bar: number): Rect
+	return rect(1 + HudLayout.QUICK_STEP * (i - 1), bar + 1, 20, 20)
+end
+
+-- Quickbar cell `i`'s 18 x 18 face (GUI pixels) with the bar's top at `bar`.
+function HudLayout.quickCell(i: number, bar: number): Rect
+	return rect(2 + HudLayout.QUICK_STEP * (i - 1), bar + 2, 18, 18)
+end
+
+-- Quickbar cell `i`'s 16 x 16 item (GUI pixels) with the bar's top at `bar`.
+function HudLayout.quickIcon(i: number, bar: number): Rect
+	return rect(3 + HudLayout.QUICK_STEP * (i - 1), bar + 3, 16, 16)
+end
+
+--[[
+	What a quickbar cell's number box shows for a key named `text` (Settings/Keybinds.name): the
+	name itself when it is one or two characters ("1", "F1"), else nothing (the box is six GUI
+	pixels wide: "Left Shift" or "Not Bound" would not fit).
+]]
+function HudLayout.quickKey(text: string): string
+	local length = utf8.len(text)
+	if length == nil or length < 1 or length > 2 then
+		return ""
+	end
+	return text
 end
 
 --[[
@@ -409,6 +531,111 @@ local function effectScales(scale: number): { number }
 	return list
 end
 
+-- The status icons' smallest scale: their 7 pixel text stays 8 screen pixels tall.
+HudLayout.STATUS_MIN_SCALE = 8 / 7
+
+--[[
+	Where the status icons go (see the header): their rectangle, scale and variant, or nil when no
+	try finds room. `hud` is the canvas, `buttons` Roblox's touch controls.
+]]
+local function placeStatus(
+	input: Input,
+	space: Space,
+	hud: Rect,
+	buttons: { Rect },
+	sizes: StatusSizes
+): (Rect?, number, string?)
+	local s = input.scale
+	local safe, gap = space.safe, space.gap
+	local edge = safe.x + safe.w - math.max(HudLayout.lift(input.height, input.touch), HudLayout.MARGIN * s)
+	local base = hud.y + hud.h
+	local kept = space.placed
+	if input.touch then
+		-- (Never in the thumbstick's zone: see the header.)
+		kept = table.clone(kept)
+		table.insert(kept, HudLayout.thumbstick(input.width, input.height))
+	end
+	-- (The leftmost touch button in the bottom right quarter.)
+	local leftButton: number? = nil
+	for _, button in buttons do
+		if button.x + button.w > input.width / 2 and button.y + button.h > input.height / 2 then
+			leftButton = math.min(leftButton or math.huge, button.x)
+		end
+	end
+	local function fits(r: Rect): boolean
+		return HudLayout.inside(r, safe) and hit(r, kept) == nil
+	end
+	-- Right-aligned on the base line, raised over whatever it hits there.
+	local function raised(w: number, h: number): Rect?
+		local r = snap(rect(edge - w, base - h, w, h))
+		for _ = 1, #kept + 1 do
+			local other = hit(r, kept)
+			if other == nil then
+				return if HudLayout.inside(r, safe) then r else nil
+			end
+			r = snap(rect(r.x, other.y - gap - h, w, h))
+			if r.y < safe.y then
+				return nil
+			end
+		end
+		return nil
+	end
+	-- Left of the touch buttons in the bottom right corner, on the base line.
+	local function besideButtons(w: number, h: number): Rect?
+		if leftButton == nil then
+			return nil
+		end
+		local r = snap(rect(leftButton - gap - w, base - h, w, h))
+		return if fits(r) then r else nil
+	end
+	-- Above the canvas, right-aligned with it, slid left past whatever is in the way there.
+	local function aboveCanvas(w: number, h: number): Rect?
+		local y = hud.y - gap - h
+		local x = hud.x + hud.w - w
+		for _ = 1, #kept + 1 do
+			local r = snap(rect(x, y, w, h))
+			local other = hit(r, kept)
+			if other == nil then
+				return if HudLayout.inside(r, safe) then r else nil
+			end
+			x = other.x - gap - w
+			if x < safe.x then
+				return nil
+			end
+		end
+		return nil
+	end
+	local function try(w: number, h: number): Rect?
+		local first = snap(rect(edge - w, base - h, w, h))
+		if fits(first) then
+			return first
+		end
+		if input.touch then
+			-- (Roblox's jump button owns the bottom right of a touch screen: rather than climb the
+			-- right edge over it, where the saving icon, the toasts and the effect icons come down,
+			-- the icons sit by the buttons or on the quickbar's end.)
+			return besideButtons(w, h) or aboveCanvas(w, h) or raised(w, h)
+		end
+		return raised(w, h) or besideButtons(w, h) or aboveCanvas(w, h)
+	end
+	local full, lean = sizes.full, sizes.lean
+	local whole = try(full.w * s, full.h * s)
+	if whole then
+		return whole, s, "full"
+	end
+	-- (The lean variant at the scale, then smaller.)
+	local floor = math.max(s / 2, HudLayout.STATUS_MIN_SCALE)
+	local es = s
+	while es == s or es >= floor do
+		local r = try(lean.w * es, lean.h * es)
+		if r then
+			return r, es, "lean"
+		end
+		es -= 1 / 8
+	end
+	return nil, s, nil
+end
+
 function HudLayout.compute(input: Input): Layout
 	local s = input.scale
 	local margin, gap = HudLayout.MARGIN * s, HudLayout.GAP * s
@@ -420,10 +647,12 @@ function HudLayout.compute(input: Input): Layout
 
 	local buttons: { Rect } = input.buttons
 		or (if input.touch then { HudLayout.jumpButton(input.width, input.height, insets) } else {})
-	local hud = HudLayout.hud(input.width, input.height, insets, s, input.touch, input.hudRaise)
+	local hud = HudLayout.hud(input.width, input.height, insets, s, input.touch, input.hudRaise, HudLayout.CANVAS)
+	local attack = HudLayout.attack(hud, s, input.touch, HudLayout.CANVAS)
 	-- Everything placed so far that later pieces keep clear of (the buttons and the HUD first).
 	local placed: { Rect } = table.clone(buttons)
 	table.insert(placed, hud)
+	table.insert(placed, attack)
 	local space: Space = { safe = safe, area = area, placed = placed, gap = gap }
 
 	local layout: Layout = {
@@ -441,8 +670,12 @@ function HudLayout.compute(input: Input): Layout
 		effectsScale = s,
 		effectsAside = false,
 		saving = nil,
+		status = nil,
+		statusScale = s,
+		statusVariant = nil,
 		buttons = buttons,
 		hud = hud,
+		attack = attack,
 		wailaRight = right,
 		wailaLow = nil,
 		wailaAvoid = nil,
@@ -494,12 +727,11 @@ function HudLayout.compute(input: Input): Layout
 	end
 	local slotTop = columnBottom + gap
 
-	--[[ The saving icon: bottom right, above the buttons in its way ]]
-
-	if input.saving then
+	-- The saving icon's place with what is placed so far: bottom right, raised above the buttons,
+	-- the HUD and the status icons in its way; nil when that reaches the column.
+	local function savingPlace(): Rect?
 		local w, h = HudLayout.SAVING_WIDTH * s, HudLayout.SAVING_HEIGHT * s
 		local icon = snap(rect(right - w, bottom - h, w, h))
-		-- (Raised above the buttons and the HUD in its way; reaching the column, it is dropped.)
 		for _ = 1, #placed + 1 do
 			local under = hit(icon, placed)
 			if under == nil or under.y >= icon.y + icon.h or under.y < slotTop then
@@ -507,7 +739,34 @@ function HudLayout.compute(input: Input): Layout
 			end
 			icon = snap(rect(icon.x, under.y - gap - h, w, h))
 		end
-		if HudLayout.inside(icon, safe) and hit(icon, placed) == nil then
+		return if HudLayout.inside(icon, safe) and hit(icon, placed) == nil then icon else nil
+	end
+
+	--[[ The status icons: bottom right on the canvas' base line, or the next best place ]]
+
+	local status = input.status
+	if status then
+		-- (On a touch screen the icons keep out of the saving icon's place over the jump button
+		-- whether it shows or not, so they never move when the game saves.)
+		local reserved = if input.touch then savingPlace() else nil
+		local statusSpace = space
+		if reserved then
+			local kept = table.clone(placed)
+			table.insert(kept, reserved)
+			statusSpace = { safe = safe, area = area, placed = kept, gap = gap }
+		end
+		local placedStatus, statusScale, variant = placeStatus(input, statusSpace, hud, buttons, status)
+		if placedStatus then
+			layout.status, layout.statusScale, layout.statusVariant = placedStatus, statusScale, variant
+			table.insert(placed, placedStatus)
+		end
+	end
+
+	--[[ The saving icon: bottom right, above the buttons in its way ]]
+
+	if input.saving then
+		local icon = savingPlace()
+		if icon then
 			layout.saving = icon
 			table.insert(placed, icon)
 		end

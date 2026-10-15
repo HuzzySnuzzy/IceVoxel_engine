@@ -15,9 +15,11 @@
 	            Chat GUI is turned off, which Roblox's newer Here / Global / Friends window follows). With the Chat setting on Hidden it
 	            does not open: "Chat disabled in client options." shows above the hotbar instead
 	            (Minecraft's overlay message, 3 s).
-	  Lines     bottom left, their bottom 40 GUI pixels above the screen's bottom, newest at the
-	            bottom (Ui/Chat/ChatLog: 100 kept, wrapped to the Width setting, fading 10 s after
-	            arriving, all shown while the box is open, scrolled with the wheel: 7 lines a notch,
+	  Lines     bottom left, their bottom 40 GUI pixels above the screen's bottom (on a PC plus
+	            the lift the HUD's quickbar sits on, HudLayout.lifted, so they stay over it, as
+	            the overlay message does), newest at the bottom (Ui/Chat/ChatLog: 100 kept,
+	            wrapped to the Width setting, fading 10 s after arriving, all shown while the box
+	            is open, scrolled with the wheel: 7 lines a notch,
 	            Shift 1, Page Up / Down). Each line has Minecraft's black background (Text
 	            Background) and shadowed text in the pixel font (Ui/Chat/ChatFormat's colours:
 	            players white "<Name> message", joins yellow, errors red...). "[+N pending lines]"
@@ -84,6 +86,7 @@ local Notices = require(script.Parent.Parent.Net.Notices)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local GameModeSwitcher = require(script.Parent.GameModeSwitcher)
 local Hud = require(script.Parent.Hud)
+local HudLayout = require(script.Parent.HudLayout)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
 local UiScale = require(script.Parent.UiScale)
@@ -95,7 +98,8 @@ type Message = ChatFormat.Message
 
 -- Layout (GUI pixels): the lines' bottom above the screen's bottom (ChatComponent: height - 40),
 -- the box's strip (ChatScreen: a 12 pixel background 2 above the bottom, text 4 into it), the
--- suggestions' rows (12 high, 3 above the box), the overlay message (height - 68).
+-- suggestions' rows (12 high, 3 above the box), the overlay message (height - 68). The lines and
+-- the overlay message go up by the HUD's lift on a PC (HudLayout.lifted).
 local CHAT_BOTTOM = 40
 local BOX_STRIP = 14
 local BOX_BACK_H = 12
@@ -723,11 +727,13 @@ function Chat.start()
 		-- (The HUD's scale: the GUI scale fitted to this GUI's own area, the device's safe area.)
 		local scale = UiScale.fit(HUD_W, HUD_H, viewport)
 		local inset = if open then keyboardInset else 0
+		-- (Minecraft's heights over its hotbar, lifted with the HUD's quickbar on a PC.)
+		local screenHeight, touchScreen = UiScale.viewport().Y, UiScale.touch()
 		local size = metrics.scale
 		lines.Visible = size > 0 and metrics.visibility < ChatFormat.HIDDEN
 		local unit = scale * math.max(size, 0.01)
 		linesScale.Scale = unit
-		lines.Position = UDim2.new(0, 0, 1, -(CHAT_BOTTOM * scale + inset))
+		lines.Position = UDim2.new(0, 0, 1, -(HudLayout.lifted(CHAT_BOTTOM, scale, screenHeight, touchScreen) + inset))
 		backWidth = math.ceil(metrics.width / math.max(size, 0.01)) + 12
 		local wrap = ChatLog.wrapWidth(metrics)
 		if wrap ~= log.width then
@@ -744,7 +750,7 @@ function Chat.start()
 		box.Size = UDim2.fromOffset(stripWidth - 8, Style.TEXT_SIZE)
 		overlayScale.Scale = scale
 		-- (Minecraft draws it 4 above that line.)
-		overlay.Position = UDim2.new(0.5, 0, 1, -(OVERLAY_Y - 4) * scale)
+		overlay.Position = UDim2.new(0.5, 0, 1, -HudLayout.lifted(OVERLAY_Y - 4, scale, screenHeight, touchScreen))
 		dirty = true
 		drawSuggestions()
 	end
