@@ -49,7 +49,11 @@
 	    icons' room at its right (wide), else at the left; the status icons' place at the band's
 	    right when they fit beside the bar; the effect icons' place (`effects`, as tall as the
 	    bar) in the wider free stretch beside the bar: its left while the bar is centred, else
-	    between the bar and the status icons, BAND_GAP from each.
+	    between the bar and the status icons, BAND_GAP from each. While the recipe view is open
+	    (over the centre and right columns, which hide with the bar) the effect icons take the
+	    band's row under the left column instead (`viewEffects`, LEFT_W wide, on the bar's line):
+	    the view, centred at `viewCentre` and never wider than JeiLayout.VIEW_WIDTH there, starts
+	    right of it in both modes.
 	  * Slots keep the 18 px pitch of MenuLayout (whose coordinates and the CraftingUi spec stay):
 	    a slot's (x, y) is its item's top left, its 18 x 18 frame one pixel up and left (a large
 	    result's 26 x 26 frame five), and its grid lines at x - 1 and x + 17 (big: x - 5, x + 20),
@@ -140,14 +144,16 @@ export type Arrangement = {
 	-- The sections by kind (a Kind string).
 	byKind: { [string]: Section },
 	-- ITEMS' body (nil while collapsed), the GROUND strip (the throw target), the band, the
-	-- quickbar in it, the status icons' place (nil when they do not fit beside the bar) and the
-	-- effect icons' (nil when not one fits).
+	-- quickbar in it, the status icons' place (nil when they do not fit beside the bar), the
+	-- effect icons' (nil when not one fits) and theirs while the recipe view is open (`viewEffects`:
+	-- the band's row under the left column, which stays beside the view; the bar hides).
 	jei: Rect?,
 	drop: Rect,
 	band: Rect,
 	quickbar: Rect,
 	status: Rect?,
 	effects: Rect?,
+	viewEffects: Rect,
 }
 
 -- The screens GUI as `place` sees it (screen pixels: its AbsoluteSize, Roblox's top bar).
@@ -414,6 +420,7 @@ function InventoryColumns.arrange(input: Input): Arrangement
 		quickbar = rect(quickX, height - QUICK_H, QUICK_W, QUICK_H),
 		status = status,
 		effects = effects,
+		viewEffects = rect(0, height - QUICK_H, LEFT_W, QUICK_H),
 	}
 end
 

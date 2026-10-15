@@ -18,24 +18,25 @@
 	           writes its name, level and time under the rows ("Speed II 1:23", "**:**" for one
 	           that never ends).
 	  Band     while the survival inventory is open (window 0, a chest, a block: Ui/Screens.
-	           effectsDock, the free stretch of its quickbar band beside the bar) the icons give
-	           way to a row of every running effect there, at the bar's height: harmful and
-	           neutral ones first from the right end, then the beneficial ones, 25 apart and closer
-	           when they need the room (HudLayout.effectRow), the glyphs alone. That inventory is
-	           as wide as the screen, so nothing would fit beside it; the status icons beside the
-	           row show no badges.
+	           effectsDock, the free stretch of its quickbar band beside the bar, or while the
+	           recipe view hides the bar the band's row under the VICINITY column, left of the
+	           view) the icons give way to a row of every running effect there, at the bar's
+	           height: harmful and neutral ones first from the right end, then the beneficial
+	           ones, 25 apart and closer when they need the room (HudLayout.effectRow), the glyphs
+	           alone. That inventory is as wide as the screen, so nothing would fit beside it; the
+	           status icons beside the row show no badges.
 	  List     while another inventory screen is open (the creative picker, or the inventory when
-	           its band has no room or the recipe view covers it: Ui/Screens) the icons give way to
-	           Minecraft's inventory list, on the left of the
-	           screen (where JEI moves it, its item list taking the right): a 120 x 32 panel per
-	           effect with the glyph, the name and level in white and the time in grey, 33 apart
-	           (closer when more than five need the room, as Minecraft squeezes them). It draws
-	           over the screens' darkened backdrop (DisplayOrder 10 while shown, above Screens' 9,
-	           under the cursor's 20), as Minecraft draws it over renderBackground, and never takes
-	           clicks. When it would reach the screen's panels (Screens.screenLeft) it shrinks to
-	           Minecraft's compact list, the glyphs alone in 32 wide panels, and hides when even
-	           that doesn't fit. A panel screen (the Options menu, the skill tree, a structure
-	           form: Screens.panelOpen) hides both, as Minecraft's menus show no effects.
+	           its band has no room: Ui/Screens) the icons give way to Minecraft's inventory
+	           list, on the left of the screen (where JEI moves it, its item list taking the
+	           right): a 120 x 32 panel per effect with the glyph, the name and level in white and
+	           the time in grey, 33 apart (closer when more than five need the room, as Minecraft
+	           squeezes them). It draws over the screens' darkened backdrop (DisplayOrder 10 while
+	           shown, above Screens' 9, under the cursor's 20), as Minecraft draws it over
+	           renderBackground, and never takes clicks. When it would reach the screen's panels
+	           (Screens.screenLeft) it shrinks to Minecraft's compact list, the glyphs alone in 32
+	           wide panels, and hides when even that doesn't fit. A panel screen (the Options menu,
+	           the skill tree, a structure form: Screens.panelOpen) hides both, as Minecraft's
+	           menus show no effects.
 	At the GUI scale (Ui/UiScale), hidden with the HUD (the world map hides it) and with
 	Config.Effects.Hud off. Built again only when the server's effects come in another set or order
 	(a refresh only takes the new times), or when the status icons start or stop showing their

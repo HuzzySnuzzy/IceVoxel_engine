@@ -538,7 +538,9 @@ A fast, Minecraft-style voxel engine for Roblox.
     player. VANITY starts folded on touch screens; the rest is remembered for the session.
   - **The recipe view** (`R` or `U` over an item) shows over the middle and right columns; VICINITY
     stays beside it, still live (a furnace keeps cooking on screen, the GROUND strip keeps
-    updating) but taking no clicks or gamepad selection until the view closes.
+    updating) but taking no clicks or gamepad selection until the view closes (its bars and
+    buttons show no tooltip meanwhile). The running effects stay in sight in a row under
+    VICINITY while the view hides the quickbar.
   - **Throwing:** drag a stack onto the GROUND strip (outlined in white while you carry one, "Drop
     here" while it is empty) or let go of it outside the screen to throw it; anywhere else in the
     screen (headers, gaps, the player, the band) nothing happens. On touch a tap on the strip with
@@ -2738,7 +2740,8 @@ rules and layers, not how it looks): at 1920 × 1080, 1366 × 768, 667 × 375 to
   the band beside the quickbar (every effect, squeezed when many); the Thermometer reading in the
   item-in-hands box; the frost and heat edges; the effect icons leaving the badges' effects out.
 - **The recipe view:** VICINITY beside it keeps updating (a furnace's gauges, the GROUND strip)
-  and takes no click or gamepad selection (its bars, the creative "items" button, its slots).
+  and takes no click, gamepad selection or tooltip (its bars, the creative "items" button, its
+  slots); the effect icons' row moves under VICINITY, clear of the view, on each screen.
 - **The look:** the tooltip's delay, picture, liquid pill and a count changing under the pointer;
   the drag outlines' colours; Roboto's weights (does Light exist?); UIStroke thickness under
   UIScale (`Theme.STROKE_FOLLOWS_UISCALE`); the silhouettes drawn through EditableImages and the
@@ -3707,9 +3710,11 @@ fake worker pool, renderer and network (checking every frame that no ground goes
 two levels overlap and no tunnel opens onto the void, through loading, edits, teleports, caves
 and hidden terrain). `tests/spec/SurvivalLookGlue` runs the real inventory screen, Style and
 HoverTip on a fake Roblox client (`tests/lib/FakeClient`: instances with events, Destroying and
-UIScale-aware absolute positions), for what only glue does: the recipe view's live but inert
-VICINITY column, the effects' place in the band, tooltip entries freed with their objects,
-outlines following their screen's scale and masks drawn within a frame's budget.
+UIScale-aware absolute positions, and a `task` whose delays run when a test says), for what only
+glue does: the recipe view's live but inert VICINITY column (no clicks, no tooltips through
+HoverTip's real mouse path), the effects' place in the band and under the view, tooltip entries
+freed with their objects, outlines following their screen's scale and masks drawn within a
+frame's budget.
 
 Formatting, linting and type checking:
 

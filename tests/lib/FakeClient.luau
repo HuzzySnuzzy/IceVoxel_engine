@@ -6,7 +6,8 @@
 	Size, AnchorPoint and UIScale (Roblox's rules: a UIScale scales its object around its anchor
 	point and every descendant's offsets) on a VIEW-sized screen. `loader` loads src/client modules
 	with given stand-ins (by path) and services; everything else is the real module. Roblox's own
-	data types (UDim2, Color3, Vector2, Enum...) are Lune's.
+	data types (UDim2, Color3, Vector2, Enum...) are Lune's; Roblox's `task` is a stand-in whose
+	delayed functions run when a test calls `runTasks`.
 ]]
 
 local fs = require("@lune/fs")
@@ -19,7 +20,7 @@ local UDim2, UDim, Vector2, Color3, Enum, Font =
 local FakeClient = {}
 
 local GLOBALS =
-	"script, require, game, Instance, Color3, UDim2, UDim, Vector2, Enum, Font, ColorSequence, NumberSequence, ColorSequenceKeypoint, NumberSequenceKeypoint, Rect, Content, Vector3, CFrame"
+	"script, require, game, Instance, Color3, UDim2, UDim, Vector2, Enum, Font, ColorSequence, NumberSequence, ColorSequenceKeypoint, NumberSequenceKeypoint, Rect, Content, Vector3, CFrame, task"
 
 local function withHeader(source: string): string
 	local lines = string.split(source, "\n")
@@ -65,6 +66,41 @@ local function newSignal(): any
 	return s
 end
 FakeClient.signal = newSignal
+
+--[[
+	Roblox's task library for the loaded modules: `delay` and `defer` queue their function until
+	`runTasks` (a test's way of letting the time pass), `spawn` runs it at once, `wait` returns at
+	once.
+]]
+type Job = { fn: (...any) -> ...any, args: { n: number, [number]: any } }
+local queued: { Job } = {}
+FakeClient.task = {
+	delay = function(_seconds: number?, fn: (...any) -> ...any, ...: any)
+		table.insert(queued, { fn = fn, args = table.pack(...) })
+	end,
+	defer = function(fn: (...any) -> ...any, ...: any)
+		table.insert(queued, { fn = fn, args = table.pack(...) })
+	end,
+	spawn = function(fn: (...any) -> ...any, ...: any)
+		fn(...)
+	end,
+	wait = function(): number
+		return 0
+	end,
+}
+-- Runs every queued `delay` and `defer` (and those they queue); returns how many ran.
+function FakeClient.runTasks(): number
+	local ran = 0
+	while #queued > 0 do
+		local jobs = queued
+		queued = {}
+		for _, job in jobs do
+			job.fn(table.unpack(job.args, 1, job.args.n))
+			ran += 1
+		end
+	end
+	return ran
+end
 
 local GUI_OBJECT = {
 	Frame = true,
@@ -502,7 +538,8 @@ function FakeClient.loader(
 			roblox.Rect,
 			nil,
 			roblox.Vector3,
-			roblox.CFrame
+			roblox.CFrame,
+			FakeClient.task
 		)
 		cache[path] = result
 		return result

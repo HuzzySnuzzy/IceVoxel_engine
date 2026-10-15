@@ -68,12 +68,15 @@
 	  statusRect  the band's status place (absolute screen pixels) and the scale.
 	  effectsRect the band's effect icons' place (absolute screen pixels) and the scale: Ui/EffectHud
 	              draws every running effect there while the inventory shows (Ui/Screens.
-	              effectsDock), as a side list would not fit beside the screen.
+	              effectsDock), as a side list would not fit beside the screen. Under the recipe
+	              view it is the band's row under the VICINITY column (InventoryColumns'
+	              viewEffects), left of the view, so the effects stay in sight while browsing.
 	  setViewing  the recipe view opened: the centre, the right column, the band and the strips
 	              hide; the VICINITY column stays, drawn every frame (Screens keeps calling
 	              `render`, with no hover) but inert: Screens routes no clicks under the view, and
 	              its section bars, "items" button, GROUND strip and slots take no click of their
-	              own and no gamepad selection.
+	              own and no gamepad selection (and, not Active, the bars and the button show no
+	              Ui/HoverTip tooltip).
 	  setFeedback the drag feedback for the hovered slot (every frame while carrying, nil after).
 	  inDropZone  over the GROUND strip (a touch tap there does not close the screen).
 ]]
@@ -259,6 +262,7 @@ type Self = InventoryScreen & {
 	viewX: number?,
 	status: Rect?,
 	effects: Rect?,
+	viewEffects: Rect?,
 	width: number,
 	height: number,
 	lastPoint: Vector2?,
@@ -504,6 +508,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			viewX = nil,
 			status = nil,
 			effects = nil,
+			viewEffects = nil,
 			width = InventoryColumns.LEFT_W,
 			height = InventoryColumns.MAX_HEIGHT,
 			lastPoint = nil,
@@ -692,8 +697,8 @@ end
 --[[
 	Shows what the arrangement has (and, while the recipe view is open, only the VICINITY column,
 	inert: its section bars, the "items" button and the GROUND strip take no click and no gamepad
-	selection, and its slots are not Selectable (refreshLive), since Ui/Screens routes nothing
-	under the view).
+	selection, nor show a tooltip (Ui/HoverTip says nothing for a button that is not Active), and
+	its slots are not Selectable (refreshLive), since Ui/Screens routes nothing under the view).
 ]]
 local function refreshVisibility(self: Self)
 	local a = self.arrangement
@@ -853,6 +858,7 @@ local function apply(
 	end
 	self.status = onScreen(a.status)
 	self.effects = onScreen(a.effects)
+	self.viewEffects = onScreen(a.viewEffects)
 
 	refreshVisibility(self)
 	refreshLive(self)
@@ -924,10 +930,11 @@ function InventoryScreen.statusRect(self: Self): (Rect?, number)
 	return self.status, self.scale
 end
 
--- The band's effect icons' place (absolute screen pixels) and the scale, while the band shows.
+-- The effect icons' place (absolute screen pixels) and the scale: beside the band's quickbar, or
+-- under the recipe view (which hides the bar) the band's row under the VICINITY column.
 function InventoryScreen.effectsRect(self: Self): (Rect?, number)
 	if self.viewing then
-		return nil, self.scale
+		return self.viewEffects, self.scale
 	end
 	return self.effects, self.scale
 end

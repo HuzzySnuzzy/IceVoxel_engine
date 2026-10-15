@@ -11,7 +11,11 @@
 	              section bars ignore clicks and are not Selectable, the GROUND strip and every
 	              shown slot are not Selectable; all of it comes back when the view closes.
 	  effects     the open inventory offers the effect icons a place in its band (screen pixels,
-	              inside the root's band, beside the quickbar), none while the view covers it.
+	              inside the root's band, beside the quickbar), and under the recipe view one in
+	              the band's row under the VICINITY column, left of the view.
+	  inert tips  under the view the inert section bars and "items" button show no tooltip (the
+	              mouse resting on them, through Ui/HoverTip's real path), and one showing when the
+	              view opens goes on the next frame; they speak again when it closes.
 	  tooltips    a block section rebuilt (another block opened) leaves nothing attached in
 	              Ui/HoverTip: its bar's entry goes when the bar is destroyed, though the bar's
 	              "expand"/"collapse" function reaches the bar (Luau's weak keys are not
@@ -38,6 +42,7 @@ return function(t, shared, sharedRequire, _server, _client)
 
 	local device = { touch = false }
 	local clientWindow: any = nil
+	local guis: { [string]: any } = {}
 
 	local stubs: { [string]: any } = {}
 	stubs["src/client/Ui/UiScale.luau"] = {
@@ -54,6 +59,13 @@ return function(t, shared, sharedRequire, _server, _client)
 		end,
 		layerOf = function()
 			return 1
+		end,
+		-- (Ui/HoverTip's own ScreenGui, kept by name for the tests to look into.)
+		screenGui = function(name: string): any
+			local made = Instance.new("ScreenGui")
+			made.Name = name
+			guis[name] = made
+			return made
 		end,
 	}
 	stubs["src/client/Settings/Keybinds.luau"] = {
@@ -164,13 +176,32 @@ return function(t, shared, sharedRequire, _server, _client)
 				error("no EditableImage in Lune")
 			end,
 		},
-		Players = { LocalPlayer = { Character = nil, DisplayName = "Tester" } },
-		GuiService = { SelectedObject = nil },
+		Players = {
+			LocalPlayer = {
+				Character = nil,
+				DisplayName = "Tester",
+				WaitForChild = function()
+					return Instance.new("Folder")
+				end,
+			},
+		},
+		GuiService = {
+			SelectedObject = nil,
+			GetGuiInset = function()
+				return Vector2.zero
+			end,
+		},
 		UserInputService = {
 			TouchEnabled = false,
 			GetLastInputType = function()
 				return roblox.Enum.UserInputType.MouseMovement
 			end,
+			GetMouseLocation = function()
+				return Vector2.new(100, 100)
+			end,
+			InputBegan = FakeClient.signal(),
+			InputChanged = FakeClient.signal(),
+			InputEnded = FakeClient.signal(),
 		},
 	}
 
@@ -315,10 +346,89 @@ return function(t, shared, sharedRequire, _server, _client)
 			t.eq(rect.h, screen.arrangement.quickbar.h * scale, "as tall as the quickbar")
 			t.ok(rect.w >= 3 * rect.h, "room for three icons at least")
 		end
+		-- (Review finding: under the recipe view the inventory offered no place and the side list had
+		-- no room left of the root, so no effect showed while browsing recipes.)
+		local before = rect
 		setViewing(screen, true)
-		t.eq(screen:effectsRect(), nil, "none while the view covers the band")
+		local under, underScale = screen:effectsRect()
+		t.ok(under ~= nil, "a place under the recipe view too")
+		if under then
+			local a = screen.arrangement
+			local x, y = FakeClient.absRect(screen.root)
+			local left = a.columns[1]
+			t.ok(
+				under.x >= x + left.x * underScale - 1e-6
+					and under.x + under.w <= x + (left.x + left.w) * underScale + 1e-6,
+				"under the VICINITY column, which stays"
+			)
+			t.ok(under.y >= y + a.band.y * underScale - 1e-6, "in the band's row")
+			t.eq(under.h, a.quickbar.h * underScale, "as tall as the quickbar")
+			-- (The recipe view: centred on Ui/Screens' jeiViewX, at most VIEW_WIDTH at this scale.)
+			local viewX = screen:jeiViewX()
+			t.ok(viewX ~= nil, "the recipe view has its centre")
+			if viewX then
+				t.ok(under.x + under.w <= viewX - 176 / 2 * underScale + 1e-6, "left of the recipe view")
+			end
+			t.ok(under.w >= 3 * under.h, "room for three icons at least")
+		end
 		setViewing(screen, false)
-		t.ok(screen:effectsRect() ~= nil, "back when it closes")
+		local back = screen:effectsRect()
+		t.ok(back ~= nil, "back in the band when it closes")
+		if back and before then
+			t.ok(back.x == before.x and back.w == before.w, "at the band's place again")
+		end
+	end)
+
+	t.test("survival look glue: under the recipe view the inert bars say nothing", function()
+		-- (Review finding: under the view the section bars ignored clicks but resting the mouse on
+		-- one still said "Hides this section." / "Shows this section.")
+		local screen = build(nil, true)
+		local craft, jei = screen.sections.craft, screen.sections.jei
+		-- The tooltip's text while it shows (Ui/HoverTip's own ScreenGui), else nil.
+		local function shownTip(): string?
+			local tipGui = guis.IceVoxelHoverTip
+			local frame = if tipGui then tipGui:FindFirstChild("Tooltip") else nil
+			if frame == nil or not frame.Visible then
+				return nil
+			end
+			-- (Each row once: a label may draw its text twice, with its shadow.)
+			local rows, seen = {}, {}
+			for _, d in frame:GetDescendants() do
+				if d:IsA("TextLabel") and d.Text ~= "" and not seen[d.Text] then
+					seen[d.Text] = true
+					table.insert(rows, d.Text)
+				end
+			end
+			return table.concat(rows, " ")
+		end
+		-- The mouse rests on `object` for HoverTip's delay: what shows (nil: nothing); then leaves.
+		local function hover(object: any): string?
+			object.MouseEnter:Fire()
+			FakeClient.runTasks()
+			local text = shownTip()
+			object.MouseLeave:Fire()
+			return text
+		end
+		t.eq(hover(craft.header), "Hides this section.", "CRAFTING's bar says what a click does")
+		t.ok(hover(screen.itemsButton) ~= nil, "the items button says what it opens")
+		setViewing(screen, true)
+		for _, object in { craft.header, jei.header, screen.itemsButton } do
+			t.eq(HoverTip.textOf(object), nil, `{object.Name}: no text while it takes no click`)
+			t.eq(hover(object), nil, `{object.Name}: no tooltip under the view`)
+		end
+		-- A tooltip showing when the view opens goes on the next frame.
+		setViewing(screen, false)
+		craft.header.MouseEnter:Fire()
+		FakeClient.runTasks()
+		t.eq(shownTip(), "Hides this section.", "shown before the view opens")
+		setViewing(screen, true)
+		heartbeat:Fire(1 / 60)
+		t.eq(shownTip(), nil, "hidden once the view makes the bar inert")
+		craft.header.MouseLeave:Fire()
+		-- The view closes: the bars say what a click does again.
+		setViewing(screen, false)
+		t.eq(hover(jei.header), "Hides this section.", "ITEMS' bar speaks again")
+		t.ok(hover(screen.itemsButton) ~= nil, "the items button speaks again")
 	end)
 
 	t.test("survival look glue: a rebuilt block section leaves nothing in the button tooltips", function()

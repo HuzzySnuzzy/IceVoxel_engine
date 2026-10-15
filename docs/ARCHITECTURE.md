@@ -2558,7 +2558,10 @@ the structure and jigsaw screens. Items keep their own tooltips (`Ui/Screens`).
   Interactable until the finger lifts, and `HoverTip.consumed` keeps `FormWidgets`' buttons from
   firing), and it lingers `LINGER` (2.5 s); gamepad (or keyboard) selection: under or over the
   widget. It hides when the pointer leaves, the selection moves, the object or a parent hides,
-  or on `HoverTip.hide` (the Options menu's page changes). One tooltip, on its own ScreenGui on
+  or on `HoverTip.hide` (the Options menu's page changes). A button that takes no click now (a
+  GuiButton with `Active` off, whose `Activated` does not fire: the inventory's VICINITY bars and
+  "items" button under the recipe view) has no text (`textOf` is nil), so it shows none and one
+  showing goes on the next frame. One tooltip, on its own ScreenGui on
   `UiScale.Layer.Tip` (over the title screen), drawn at its object's scale (the UIScales over
   it, so a menu's tooltip reads at the menu's GUI scale; the base GUI scale for an object under
   none). `HoverTip.drawBox` draws Minecraft's box: the translucent dark back, a 1 pixel purple
@@ -3787,14 +3790,19 @@ hit-tests: `targetAt` (a live slot; the GROUND strip and anywhere outside the ro
 anything else inside the root: nothing), `tooltipAt` (a locked crafting result, a closed accessory
 slot, a machine's energy bar and tanks while its section is open, a ground item). It gives Screens
 `place`, `jeiDock`, `jeiViewX`, `statusRect`, `effectsRect` (the band's free stretch beside the
-quickbar, `InventoryColumns.arrange`'s `effects`, where `Ui/EffectHud` draws every running effect),
-`setViewing`, `setFeedback` and `inDropZone`. Under the recipe view (`setViewing`) the VICINITY
-column stays shown and Screens keeps drawing it (no hover, no drag), so a furnace's gauges and the
-GROUND strip stay live, but it is inert: its section bars and the creative "items" button ignore
-clicks and, with the GROUND strip and its slots (`SlotWidgets.assign`'s `inert`), are not
-Selectable. `tests/spec/SurvivalLookGlue` runs the real screen on a fake Roblox client
-(`tests/lib/FakeClient`) to check that, the effects' place, the tooltips' cleanup, the outlines'
-scale registries and the masks' frame budget.
+quickbar, `InventoryColumns.arrange`'s `effects`, where `Ui/EffectHud` draws every running effect;
+under the recipe view, which hides the quickbar, `viewEffects`: the band's row under the VICINITY
+column, `LEFT_W` wide, left of the view in both modes since the view is centred on the other
+columns and never wider than `JeiLayout.VIEW_WIDTH` there), `setViewing`, `setFeedback` and
+`inDropZone`. Under the recipe view (`setViewing`) the VICINITY column stays shown and Screens keeps
+drawing it (no hover, no drag), so a furnace's gauges and the GROUND strip stay live, but it is
+inert: its section bars and the creative "items" button ignore clicks and show no tooltip (not
+`Active`: `Ui/HoverTip` says nothing for them) and, with the GROUND strip and its slots
+(`SlotWidgets.assign`'s `inert`), are not Selectable. `tests/spec/SurvivalLookGlue` runs the real
+screen on a fake Roblox client (`tests/lib/FakeClient`) to check that (the tooltips through
+HoverTip's mouse path, with FakeClient's `task` stand-in), the effects' place in the band and
+under the view, the tooltips' cleanup, the outlines' scale registries and the masks' frame
+budget.
 
 `Ui/SlotWidgets` holds every slot widget (an `ItemIcon.slot` with its store, index and window slot,
 in a group per section): `assign` makes a folded or absent section's slots not live (window -1,
@@ -4634,10 +4642,11 @@ GroupTransparency for the last 10 s' blinking) where `Ui/HudLayout` puts them (t
 the toasts, or beside them on small screens; see "GUI scale"), the hovered or tapped one's name and
 time under them (Roboto, a faint dark outline), leaving out the effects the status icons show as
 badges while they do (`StatusCluster.badgesShown`: Bleeding, Infection, Poison, Wither, Hunger,
-Thirst, Nausea), a row of every effect in the open survival inventory's band beside the quickbar
-(`Screens.effectsDock`, from `InventoryScreen.effectsRect`; harmful first from the right end, as
-tall as the bar, squeezed by `HudLayout.effectRow`: that inventory reaches the screen's 5 % inset,
-so no list fits beside it), and otherwise Minecraft's 120 × 32 list (flat dark panels, every
+Thirst, Nausea), a row of every effect in the open survival inventory's band beside the quickbar,
+or under VICINITY while the recipe view hides the quickbar (`Screens.effectsDock`, from
+`InventoryScreen.effectsRect`; harmful first from the right end, as tall as the bar, squeezed by
+`HudLayout.effectRow`: that inventory reaches the screen's 5 % inset, so no list fits beside it),
+and otherwise Minecraft's 120 × 32 list (flat dark panels, every
 effect) on the left while an inventory screen is open: over the screens' darkened backdrop (DisplayOrder 10, above Screens' 9,
 under the cursor's 20), never taking clicks, Minecraft's 32 wide compact list (glyphs alone) when
 the full one would reach the screen's panels (`Screens.screenLeft`), none when even that wouldn't
@@ -4879,8 +4888,9 @@ the Campfire for boiling), also uses every entry of its categories, after its ow
   (`InventoryScreen.jeiViewX`; narrow: over the right one), which hide (`setViewing`), and over the
   creative panel's place; Screens makes no slot clicks under it while it is shown (the VICINITY
   column stays, drawn every frame and inert: its bars, buttons and slots take no click or gamepad
-  selection). It has category tabs, pages, and as many recipes as fit (two crafting
-  or smelting recipes, three fuels). Clicking its items navigates, Back or Backspace returns
+  selection, and its bars and buttons show no tooltip; the effect icons' row sits under it). It
+  has category tabs, pages, and as many recipes as fit (two crafting or smelting recipes, three
+  fuels). Clicking its items navigates, Back or Backspace returns
   through the history, and E, Escape or gamepad B go back to the inventory. Escape also opens
   Roblox's menu (MenuOpened): with the view open that only closes the view, so the menu shows
   over the inventory; the key and the menu are debounced so one press acts once. A gamepad

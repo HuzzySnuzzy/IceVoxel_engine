@@ -26,6 +26,9 @@
 	  Hiding     also when the object or a parent is hidden or gone (checked every frame while
 	             shown), and `hide` (a page change). A text that changes while shown (a variant
 	             function) is drawn again.
+	  Inert      a button that takes no click now (a GuiButton with Active off: its Activated
+	             does not fire) shows nothing, by mouse, touch or gamepad, and one showing goes
+	             when its button turns inert (`textOf` is nil for it).
 	  Scale      the tooltip takes the scale its object is drawn at (the UIScales over it: the
 	             menu's GUI scale from Ui/UiScale; the base GUI scale for an object under none),
 	             so it reads as the menu's own text. It is drawn on its own ScreenGui on the "Tip"
@@ -134,10 +137,18 @@ function HoverTip.drawBox(parent: Instance, rows: { string }): (number, number)
 	return w, h
 end
 
--- The text attached to `object` now (nil: none).
+--[[
+	The text attached to `object` now (nil: none). A button that takes no click now (a GuiButton
+	whose Active is off, whose Activated does not fire: Ui/InventoryScreen's VICINITY bars and
+	"items" button under the recipe view) has none, as there is no click to describe; one showing
+	when its button turns inert goes on the next frame.
+]]
 function HoverTip.textOf(object: GuiObject): string?
 	local info = attached[object]
 	if info == nil then
+		return nil
+	end
+	if object:IsA("GuiButton") and not object.Active then
 		return nil
 	end
 	local variant = info.variant

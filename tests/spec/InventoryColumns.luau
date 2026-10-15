@@ -5,8 +5,9 @@
 	sections sit inside their columns 2 apart (strips right under their header), the slots' frames
 	inside their section bodies and apart, the eyes clear of every other slot and of their own
 	slot's middle, the block's content cut by its title strip, ITEMS growing with the height, the
-	band at the bottom with the quickbar, the status icons and the effect icons apart (and room for
-	the effects on the review's four Studio screens); the least heights and the
+	band at the bottom with the quickbar, the status icons and the effect icons apart, and the
+	effect icons' place under the recipe view in the band under VICINITY, left of the view (room
+	for the effects on the review's four Studio screens either way); the least heights and the
 	placement table of the design (mode, scale, height, centre width per screen); the root inside
 	its area on every screen, GuiScale base, window and collapse (MARGIN off its bottom while that
 	fits); section counts read from the window, collapsed or not; grid lines that paint every frame
@@ -19,6 +20,7 @@ return function(t, shared, require, _server, client)
 	local Types = require(shared.Inventory.Types)
 	local HudLayout = require(client.Ui.HudLayout)
 	local InventoryColumns = require(client.Ui.InventoryColumns)
+	local JeiLayout = require(client.Ui.Jei.JeiLayout)
 	local MenuLayout = require(client.Ui.MenuLayout)
 	local Theme = require(client.Ui.Theme)
 
@@ -403,6 +405,20 @@ return function(t, shared, require, _server, client)
 		local right = a.columns[3]
 		local from = if wide then a.columns[2].x else right.x
 		t.eq(C.viewCentre(a), (from + right.x + right.w) / 2, `{what}: the recipe view's centre`)
+		-- Under the recipe view (the quickbar hidden): the band's stretch under VICINITY, left of
+		-- the view (at most VIEW_WIDTH wide around its centre in the root's pixels).
+		local viewEffects = a.viewEffects
+		t.ok(inside(viewEffects, a.band), `{what}: the effects under the view in the band`)
+		t.eq(viewEffects.y, a.quickbar.y, `{what}: the effects under the view on the bar's line`)
+		t.eq(viewEffects.h, a.quickbar.h, `{what}: the effects under the view as tall as the bar`)
+		t.ok(
+			viewEffects.x >= 0 and viewEffects.x + viewEffects.w <= a.columns[1].w,
+			`{what}: the effects under the view under VICINITY`
+		)
+		t.ok(
+			viewEffects.x + viewEffects.w <= C.viewCentre(a) - JeiLayout.VIEW_WIDTH / 2,
+			`{what}: the effects under the view left of it`
+		)
 		-- Every section's slots.
 		for _, section in a.sections do
 			checkSpots(section.kind, input, section, what, window)
@@ -756,6 +772,52 @@ return function(t, shared, require, _server, client)
 					t.ok(HudLayout.effectRow(8, width) >= 6, `{what}: six of eight squeezed in`)
 					local tall = effects.h * p.scale
 					t.ok(tall >= 16, `{what}: icons {tall} screen pixels tall`)
+				end
+				checked += 1
+			end
+		end
+		t.eq(checked, 4 * #windows)
+	end)
+
+	t.test("inventory columns: under the recipe view the effects keep a place on the Studio screens", function()
+		-- (Review finding: with the recipe view open over the E inventory the band hid and offered
+		-- no place, and the side list had no room left of the root (44, -8 and -14 screen pixels
+		-- at 1080p, 768p and 568 x 320), so no effect showed while browsing recipes.)
+		local screens = {
+			{ what = "1920 x 1080", w = 1920, h = 1080, base = 4, touch = false },
+			{ what = "1366 x 768", w = 1366, h = 768, base = 3, touch = false },
+			{ what = "667 x 375 touch", w = 667, h = 375, base = 1.5, touch = true },
+			{ what = "568 x 320 touch", w = 568, h = 320, base = 1.25, touch = true },
+		}
+		local checked = 0
+		for _, screen in screens do
+			for _, window in windows do
+				local collapsed = if screen.touch and window.container == nil then BIT.vanity else 0
+				local wide = inputOf(window, "wide", false, 0, collapsed)
+				local narrow = inputOf(window, "narrow", false, 0, collapsed)
+				local view = { w = screen.w, h = screen.h, top = 58, base = screen.base, touch = screen.touch }
+				local p = C.place(view, wide, narrow)
+				local input = if p.mode == "wide" then wide else narrow
+				input.height, input.centreW = p.height, p.centreW
+				local a = C.arrange(input)
+				local what = `{screen.what} {window.name} ({p.mode} at {p.scale})`
+				local effects = a.viewEffects
+				t.ok(effects ~= nil, `{what}: a place for the effects under the view`)
+				if effects then
+					-- In the band (its quickbar hidden), on the bar's line, under the VICINITY column
+					-- (which stays), left of the recipe view (centred at viewCentre, at most
+					-- VIEW_WIDTH wide in the root's pixels: its scale is never above the root's).
+					t.ok(inside(effects, a.band), `{what}: in the band {show(effects)}`)
+					t.eq(effects.y, a.quickbar.y, `{what}: on the bar's line`)
+					t.eq(effects.h, a.quickbar.h, `{what}: as tall as the bar`)
+					local left = a.columns[1]
+					t.ok(effects.x >= left.x and effects.x + effects.w <= left.x + left.w, `{what}: under VICINITY`)
+					local viewLeft = C.viewCentre(a) - JeiLayout.VIEW_WIDTH / 2
+					t.ok(effects.x + effects.w <= viewLeft, `{what}: left of the recipe view (from x {viewLeft})`)
+					local width = effects.w * 24 / effects.h
+					t.eq(HudLayout.effectRow(3, width), 3, `{what}: three effects side by side`)
+					t.ok(HudLayout.effectRow(8, width) >= 6, `{what}: six of eight squeezed in`)
+					t.ok(effects.h * p.scale >= 16, `{what}: icons at least 16 screen pixels tall`)
 				end
 				checked += 1
 			end

@@ -258,11 +258,12 @@ function Screens.screenLeft(): number?
 end
 
 --[[
-	Where the open inventory wants the effect icons (its band's free stretch beside the quickbar:
-	InventoryScreen.effectsRect, absolute screen pixels) and the GUI scale, as last laid out; nil
-	while it offers none (another screen, the recipe view over the band, no room). Ui/EffectHud
-	draws every running effect there rather than in its list beside the screen, which a survival
-	inventory as wide as the screen leaves no room for. The same table until the layout changes.
+	Where the open inventory wants the effect icons (its band's free stretch beside the quickbar,
+	or under the recipe view the band's row under the VICINITY column: InventoryScreen.effectsRect,
+	absolute screen pixels) and the GUI scale, as last laid out; nil while it offers none (another
+	screen, no room). Ui/EffectHud draws every running effect there rather than in its list beside
+	the screen, which a survival inventory as wide as the screen leaves no room for. The same table
+	until the layout changes.
 ]]
 local effectsDockRect: InventoryScreen.Rect? = nil
 local effectsDockScale = 1
