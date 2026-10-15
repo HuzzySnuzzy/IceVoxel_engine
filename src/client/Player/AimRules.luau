@@ -21,14 +21,15 @@
 	            semi-automatic fires once a press (a press made too early waits for its turn), an
 	            automatic one while held. An empty gun clicks dry, a jammed or Ruined one with the
 	            jam click, once a press. `stop` ends automatic fire until the trigger is let go (the
-	            server refused a shot, or said the gun jammed).
+	            server refused a shot of this press, or said the gun jammed after one: `thisPress`).
 	  Busy      a timed weapon action (Inventory action "weapon", the server locks the gun as
-	            long): `lockTicks` is its length as the server times it (a magazine swap
-	            Handling.reloadTicks, plus chambering when it chambered; a round loaded by hand
-	            its roundTicks; clearing a jam UnjamTicks; the fire mode ModeTicks; the light
-	            none), `startBusy` / `busy` / `progress` follow it. An internal magazine loads
-	            round by round while `loading` (`wantsRound`: until it holds its rounds and the
-	            chambered one).
+	            long): its kind and length are Shared/Weapons/Handling.actionLock's, the one rule
+	            the server's Weapons/WeaponActions locks by (a magazine swap Handling.reloadTicks,
+	            plus chambering when it chambered; only chambering chamberTicks; a round loaded
+	            by hand roundTicks; clearing a jam UnjamTicks; the fire mode ModeTicks; the light
+	            and anything that changed nothing none), `startBusy` / `busy` / `progress` follow
+	            it. An internal magazine loads round by round while `loading` (`wantsRound`: until
+	            it holds its rounds and the chambered one).
 	  Speed     `speed`: RaisedSpeed raised, SightsSpeed in the sights, no sprinting in either
 	            (Player/MovementController.setAimSlow); GuardSpeed for a melee guard.
 	  View      `zoom`: 1 unless in the sights, then Handling.zoom (a built-in scope's, an
@@ -82,7 +83,8 @@ export type Input = {
 	firstPerson: boolean,
 }
 
-export type BusyKind = "reload" | "round" | "unjam" | "mode"
+-- A timed weapon action's kind (Handling.actionLock).
+export type BusyKind = Handling.ActionKind
 
 export type Aim = {
 	posture: Posture,
@@ -248,39 +250,16 @@ function AimRules.stop(aim: Aim)
 	aim.spent = true
 end
 
---[[ Timed weapon actions ]]
-
 --[[
-	Ticks the server locks the gun for after weapon op `op` (Shared/Weapons/Loading: 1 reload, 2
-	load a round, 3 clear a jam, 4 fire mode, 5 light) that did something; `chambered`: a reload
-	that chambered a round.
+	Is shot number `shot` (Net/WeaponSync's u16 counter, wrapping at 65536) one of the trigger press
+	held now, whose first shot was `first` (nil: none yet)? Only the server's record of such a shot
+	stops the press (`stop`): one of an earlier press's, arriving late, leaves it alone.
 ]]
-function AimRules.lockTicks(spec: Weapons.FirearmSpec, op: number, chambered: boolean): number
-	if op == 1 then
-		return if spec.magazine ~= nil then Handling.reloadTicks(spec, chambered) else spec.roundTicks
-	elseif op == 2 then
-		return spec.roundTicks
-	elseif op == 3 then
-		return settings().UnjamTicks
-	elseif op == 4 then
-		return settings().ModeTicks
-	end
-	return 0
+function AimRules.thisPress(first: number?, shot: number): boolean
+	return first ~= nil and (shot - first) % 65536 < 32768
 end
 
--- What a weapon op did to the held stack: whether it changed at all, and whether it chambered a
--- round (the chamber was empty before and holds one after).
-function AimRules.outcome(before: Items.Stack?, after: Items.Stack?): (boolean, boolean)
-	if before == nil or after == nil then
-		return before ~= after, false
-	end
-	local changed = before.item ~= after.item
-		or before.count ~= after.count
-		or (before.damage or 0) ~= (after.damage or 0)
-		or not Items.sameData(before.data, after.data)
-	local chambered = WeaponState.chamber(before) == nil and WeaponState.chamber(after) ~= nil
-	return changed, chambered
-end
+--[[ Timed weapon actions ]]
 
 -- Starts a timed action of `ticks` at `now` (0 ticks: nothing).
 function AimRules.startBusy(aim: Aim, kind: BusyKind, now: number, ticks: number)

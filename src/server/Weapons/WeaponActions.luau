@@ -19,7 +19,8 @@
 	           a round, clear a jam, fire mode) while a lock runs (one tick of slack), and so does
 	           FireRules for shots (`busyUntil`); `applied` starts the lock of an action that
 	           changed the gun (`effect`; an action Loading refused, which hands back the stack as
-	           it was, locks nothing and sounds nothing):
+	           it was, locks nothing and sounds nothing), by Shared/Weapons/Handling.actionLock,
+	           the one rule the client's Interaction/Firearms times the same action by:
 	             reload (detachable)  reloadTicks when a magazine went in, plus chamberTicks when a
 	                                  round was chambered; chamberTicks when only that
 	             reload (internal),
@@ -42,7 +43,6 @@ local Items = require(Shared.Items)
 local Types = require(Shared.Inventory.Types)
 local WeaponSync = require(Shared.Net.WeaponSync)
 local Weapons = require(Shared.Weapons)
-local WeaponState = require(Shared.Weapons.WeaponState)
 local Handling = require(Shared.Weapons.Handling)
 
 local FireRules = require(script.Parent.FireRules)
@@ -253,8 +253,9 @@ end
 
 --[[
 	What a weapon action that turned `before` into `after` costs (see the header's Locks and
-	Sounds): the lock's ticks and the sounds for the others. Nothing for an action that changed
-	nothing or acted on anything but a firearm.
+	Sounds): the lock's ticks and the sounds for the others. The lock is Shared/Weapons/Handling
+	.actionLock's, the rule the client's Interaction/Firearms times its own by; nothing for an
+	action that changed nothing or acted on anything but a firearm.
 ]]
 function WeaponActions.effect(
 	action: Types.Action,
@@ -262,57 +263,23 @@ function WeaponActions.effect(
 	after: Stack?,
 	s: FireRules.Settings
 ): (number, { Cue })
-	if action.kind ~= "weapon" or before == nil or after == nil or before.item ~= after.item then
+	if action.kind ~= "weapon" then
 		return 0, NONE
 	end
-	-- (Refused or changing nothing: no lock for a no-op.)
-	if Items.stacksMatch(before, after) then
-		return 0, NONE
-	end
-	local spec = Weapons.firearm(before.item)
-	if spec == nil then
-		return 0, NONE
-	end
-	local op = action.op
-	local old, new = WeaponState.sane(before), WeaponState.sane(after)
-	local chamberedBefore = WeaponState.chamber(old) ~= nil
-	local chamberedAfter = WeaponState.chamber(new) ~= nil
-	local roundsBefore = WeaponState.rounds(old)
-	local roundsAfter = WeaponState.rounds(new)
-	local chambered = not chamberedBefore and chamberedAfter
-	if op == WeaponActions.UNJAM then
-		if WeaponState.jammed(old) and not WeaponState.jammed(new) then
-			return s.UnjamTicks, { { sound = CHAMBER_SOUND, delay = 0 } }
+	local kind, ticks, chambered = Handling.actionLock(action.op, before, after, s)
+	if kind == "reload" then
+		local spec = Weapons.firearm((before :: Stack).item) :: Weapons.FirearmSpec
+		local cues: { Cue } = { { sound = RELOAD_SOUND, delay = 0 } }
+		if chambered then
+			table.insert(cues, { sound = CHAMBER_SOUND, delay = spec.reloadTicks })
 		end
-		return 0, NONE
-	elseif op == WeaponActions.MODE then
-		if WeaponState.modeIndex(old) ~= WeaponState.modeIndex(new) then
-			return s.ModeTicks, NONE
-		end
-		return 0, NONE
-	elseif op == WeaponActions.RELOAD and spec.magazine ~= nil then
-		local magBefore, wearBefore = WeaponState.magazine(old)
-		local magAfter, wearAfter = WeaponState.magazine(new)
-		local swapped = magBefore ~= magAfter
-			or wearBefore ~= wearAfter
-			or roundsAfter ~= roundsBefore - (if chambered then 1 else 0)
-		if swapped and magAfter ~= nil then
-			local cues: { Cue } = { { sound = RELOAD_SOUND, delay = 0 } }
-			if chambered then
-				table.insert(cues, { sound = CHAMBER_SOUND, delay = spec.reloadTicks })
-			end
-			return Handling.reloadTicks(spec, chambered), cues
-		elseif chambered then
-			return spec.chamberTicks, { { sound = CHAMBER_SOUND, delay = 0 } }
-		end
-		return 0, NONE
-	elseif op == WeaponActions.RELOAD or op == WeaponActions.LOAD_ROUND then
-		local was = roundsBefore + (if chamberedBefore then 1 else 0)
-		local now = roundsAfter + (if chamberedAfter then 1 else 0)
-		if now > was then
-			return spec.roundTicks, { { sound = LOAD_SOUND, delay = 0 } }
-		end
-		return 0, NONE
+		return ticks, cues
+	elseif kind == "chamber" or kind == "unjam" then
+		return ticks, { { sound = CHAMBER_SOUND, delay = 0 } }
+	elseif kind == "round" then
+		return ticks, { { sound = LOAD_SOUND, delay = 0 } }
+	elseif kind == "mode" then
+		return ticks, NONE
 	end
 	return 0, NONE
 end

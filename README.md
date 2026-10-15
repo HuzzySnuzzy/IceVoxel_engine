@@ -312,7 +312,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   mutton and chicken 1.5, raw meat less) and the risk is Tough As Nails' Thirst effect. **Fighting:** a left click on a mob in reach (3 blocks, 6 in
   creative) hits it with Minecraft's weapon damage (the hand 1, swords 4-7, axes 7-9...; Strength
   adds 3 a level and Weakness takes 4) and 1.9's attack recovery (a sword hits at full strength
-  every 0.6 s), knocks it back and wears the weapon; WAILA names the mob and its health. A kill
+  every 0.6 s), knocks it back and wears the weapon (the melee weapons' light and heavy attacks,
+  guard and finishers, and firearms: see Weapons); WAILA names the mob and its health. A kill
   is knowledge: the first of each kind 10 points, then 2 an animal and 4-10 a zombie (a crawler
   4, a brute 10). Creatures spawn on grass in the light 24-44 blocks from players (10 at most
   around each), zombies as below; monsters vanish far from everyone (Minecraft's 128 and 32
@@ -422,7 +423,8 @@ A fast, Minecraft-style voxel engine for Roblox.
     over Nails make four; a zombie takes half again as long as on a plank) and **Reinforced
     Barricades** (a Barricade, two Scrap Metal and Nails: 150 seconds), and the scavenger's
     weapons: the **Baseball Bat**, the **Spiked Bat**, the **Machete**, the **Crowbar** and the
-    **Fire Axe** (found, never crafted: fire stations, bunker armories, firefighters).
+    **Fire Axe** (found, never crafted: fire stations, bunker armories, firefighters; heavy
+    attacks and a guard: see Weapons).
   - **Blood moons:** every third night (nights 3, 6, 9...) the sky turns red, the moon grows and
     the hordes come (see Zombies); the HUD warns the day before ("Blood Moon tomorrow", "Blood
     Moon tonight") and toasts its rise ("The Blood Moon rises", with a deep boom) and, for a
@@ -570,6 +572,100 @@ A fast, Minecraft-style voxel engine for Roblox.
     the icons, with their level from II (the infection its stage); the knowledge level and its bar
     sit under them. No numbers by default (`Config.Ui.StatusValues`). With the inventory open the
     six icons alone sit in its band.
+- **Weapons, in the manner of DayZ.** Firearms with magazines, chambers, attachments, condition
+  and jams, raised and aimed over the shoulder or down the sights, every shot traced and checked
+  by the server; and a melee rework with light and heavy attacks, a guard and knife finishers.
+  Nothing makes a gun, a magazine or a round (the ruins and bunkers hide them), but the crossbow's
+  bolts and the improvised suppressor are crafted.
+  - **Firearms:** the **9mm Pistol** (a 15-round magazine), the **Revolver** (.357, five in its
+    cylinder, never jams), the **SMG** (9mm, a 30-round magazine, single shots or automatic at 700
+    rounds a minute), the **Pump Shotgun** (12 gauge, five in the tube; it racks after every
+    shot), the **Double-Barrel Shotgun** (12 gauge, two shots, never jams), the **Bolt-Action
+    Rifle** (7.62, four in it, a bolt worked after every shot), the **Semi-Auto Rifle** (7.62, ten
+    in it), the **Assault Rifle** (5.56, a 30-round magazine, single or automatic at 700), the
+    **Hunting Rifle** (.308, a 5-round magazine and a built-in 4 x scope), the **Small-Bore
+    Rifle** (.22, a 10-round magazine, quiet) and the **Crossbow** (one bolt at a time, almost
+    silent, never jams; a bolt that hit a block is found again 70 % of the time, one that hit a
+    mob half as often). Every gun also holds a round in its chamber (a revolver 5 + 1).
+  - **Ammunition, magazines and attachments:** 9mm, .357, 12 Gauge Buckshot (eight pellets) and
+    Slugs, .22, 5.56, 7.62 and .308 rounds, Crossbow Bolts; the 9mm Pistol Magazine, the SMG
+    Magazine, the Assault Rifle Magazine (30), the Hunting Rifle Magazine (5) and the .22 Magazine
+    (10), each with its own condition; the **Red Dot Sight** (a red dot, 1.4 x), the **Rifle
+    Scope** (4 x: a scope's black circle and cross instead of the gun), the **Suppressor** (a
+    quarter of the noise, no muzzle flash, tracers without their glow), the **Improvised
+    Suppressor** (a Glass Bottle and Duct Tape: less quiet, Ruined and muffling nothing after 32
+    shots) and the **Weapon Flashlight** (a beam 24 blocks long from under the barrel, on and off
+    with `L`). Tooltips say what fits what; HANDS and the quickbar's count boxes show a gun's
+    rounds.
+  - **Loading by combining:** as in DayZ, in the inventory. Drop rounds on a magazine (left
+    click: all that fit, right click: one) or on a gun with an internal magazine (the chamber
+    first), one on a magazine gun with an empty chamber to chamber it by hand; drop a magazine on
+    its gun (the one in it comes back onto the cursor) and an attachment on a gun it fits. Where it
+    would combine the outline is orange, where it can't (another calibre, full) red. A right
+    click with nothing carried takes one thing out of a gun: the magazine, else its rounds and the
+    chambered one, else the muzzle device, the optic, the light; out of a magazine its rounds.
+    HANDS shows the held gun's parts as chips beside it (MAG and OPTIC left, MUZZLE and LIGHT
+    right); a click on one takes it off.
+  - **Raising and firing:** hold right click with a gun to raise it (a block with a menu still
+    opens unless you sneak): over the right shoulder in third person, with a small dot at the
+    centre, or down the sights in first person; `V` goes down the sights from third person and
+    back. A raised gun walks at 65 % (50 % in the sights), never sprints, and fires after 0.3 s up:
+    left click shoots (a semi-automatic once a click, an automatic while held), an empty gun clicks
+    dry. Shots leave from the eyes towards what the crosshair covers, with the gun's spread (wider
+    over the shoulder, moving, narrower crouching), recoil that kicks the view up and partly comes
+    back (automatic fire climbs), a sway that grows when moving or hurt, and bullet drop beyond
+    each gun's zero. Hold the sprint key in the sights to hold your breath: 3 s of a steady aim,
+    then 3 s out of breath. A lowered gun bashes a mob in reach (3 or 4 damage) and never mines.
+  - **Reloading and the fire mode:** `R` puts in the fullest magazine you carry (if it holds more
+    than the one in) and chambers a round (the assault rifle 2.5 s and 0.6 s), or only chambers when
+    there is no better magazine; a gun with an internal magazine loads a round at a time until it
+    is full, the rounds run out or you press the trigger. `F` switches single shots and automatic.
+    While a reload, a round, a jam or the fire mode is seen to, the gun doesn't fire (RELOADING,
+    LOADING or CLEARING over the held item's box, the progress in a thin bar under it; else a
+    two-mode gun's SEMI or AUTO, and JAMMED while it is jammed).
+  - **Condition and jams:** every shot wears the gun, its magazine and its muzzle device. A gun
+    goes Pristine, Worn, Damaged, Badly damaged and Ruined (a fifth of its durability left: it
+    never fires again, and nothing repairs it yet); the worse its condition and its magazine's,
+    the more often a round jams (0.2 % a shot when Worn, 1 % Damaged, 4 % Badly damaged, each
+    part's added). A jammed gun clicks; `R` clears it in 2 s and the stuck round is lost. The
+    revolver, the double-barrel and the crossbow never jam.
+  - **Hits:** a head shot does three times the damage to a zombie (1.8 times through a helmet,
+    hard hat or fire helmet) and through no armour, twice to any other mob or player; one head
+    shot kills an ordinary zombie with any gun but the SMG and the .22 (two), three 9mm rounds in
+    its body. Damage falls off beyond each round's range; buckshot's pellets add up; glass
+    shatters and the bullet goes on with 70 % (only for players who may build), leaves let it by,
+    and every other block stops it.
+  - **Noise:** every shot is a noise the infected hear and come to: the pistol 48 blocks, the
+    shotguns 72, the assault rifle 80, the hunting and bolt-action rifles 96 (a quarter more at
+    night, less in the rain), the .22 24 and the crossbow 6; a suppressor cuts it to a quarter (an
+    improvised one to under half), and a shot landing 8 blocks or more away is heard there too.
+    Others hear your shots within 256 blocks (far off as a low rumble), your reloads near you.
+  - **Players:** with `Config.Weapons.PvP` on (the default) bullets hurt players: twice as much
+    in the head (through the helmet's armour alone), all the armour worn on the body, and half
+    the hits open Bleeding. Off, bullets fly through them. Spectators can't fire; creative fires
+    without rounds or wear and never jams.
+  - **Melee weapons:** the **Kitchen Knife**, the **Hunting Knife**, the **Machete**, the
+    **Baseball Bat** and **Spiked Bat**, the **Crowbar**, the **Fire Axe**, the **Pipe Wrench**
+    and the **Sledgehammer**. A click lands a light attack when you let go (on the mob in reach
+    then); held 0.45 s and let go, a heavy attack: about twice the damage (a bat 10 for 5), twice
+    the knockback and three times the food. Hold right click to guard: a zombie's hit from the
+    front is cut by the weapon's share (a knife 30 %, the bats, crowbar, axe and wrench 60 %, the
+    sledgehammer 70 %), and you walk at half speed without sprinting. A knife from behind kills
+    a zombie that hasn't noticed anyone outright (30 health at most: never a brute). Swords, tools
+    and the hand hit on the click as before. On touch a tap is a light attack and a finger held
+    still on the mob for about 0.75 s a heavy one; there is no guard.
+  - **Where they are found:** police stations (pistols, revolvers, pump shotguns, 9mm, .357 and
+    12 gauge, pistol magazines, the weapon flashlight), bunker armories (assault rifles, SMGs, the
+    rifles, the hunting rifle, their magazines and rounds, suppressors, sights and scopes), now and
+    then a house (a double-barrel, a .22 rifle, a revolver or a crossbow, rounds, bolts, knives),
+    bunker storerooms and cars (rounds), hardware stores, fire stations and groceries (the
+    wrench, the sledgehammer, knives). Guns come worn and empty. Police zombies carry 9mm rounds
+    and now and then a pistol magazine, soldiers 5.56 rounds and a rifle magazine, construction
+    workers rarely a pipe wrench. Crossbow Bolts are crafted (an Iron Nugget over a Stick over a
+    Feather make four, in the Iron Age), the Improvised Suppressor from a Glass Bottle and Duct
+    Tape.
+  - **Off:** `Config.Weapons.Enabled = false` keeps guns as clubs that never fire;
+    `Config.Weapons.Melee.Enabled = false` puts melee back as it was.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -1561,7 +1657,17 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Action        | Mouse / keyboard            | Gamepad | Touch      |
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once; adventure and spectator break nothing) | R2 | Hold |
-| Attack a mob  | Left click a mob in reach (3 blocks, creative 6; it hides the block behind it): one hit a click, with the held weapon | R2 | Tap the mob |
+| Attack a mob  | Left click a mob in reach (3 blocks, creative 6; it hides the block behind it): one hit a click, with the held weapon (a melee weapon of the Weapons: the hit lands when you let go; a lowered firearm bashes) | R2 | Tap the mob |
+| Heavy attack (melee weapon) | Hold left click on a mob 0.45 s or more, then let go: a heavy attack (twice the knockback, three times the food) | Hold R2 | Hold still on the mob (about 0.75 s) |
+| Guard (melee weapon) | Hold right click with a melee weapon (not on a block with a menu, unless sneaking): a zombie's hit from the front is cut by the weapon's share; half speed, no sprint, no attacks | Hold L2 | |
+| Raise a firearm | Hold right click with a firearm (not on a block with a menu, unless sneaking): over the right shoulder in third person, down the sights in first person; let go to lower | Hold L2 | AIM (toggles) |
+| Fire          | Left click with a raised firearm, once it has been up about 0.3 s: a semi-automatic once a click, an automatic while held; empty: a dry click, jammed or Ruined: a jam click | R2 | FIRE (hold) |
+| Sights        | `V` (the Toggle Sights key binding) with a firearm raised in third person: down the sights and back | R3 | |
+| Hold breath   | Hold the sprint key in the sights: 3 s of a steady aim, then 3 s out of breath | L3 | |
+| Reload / clear a jam | `R` (the Reload / Clear Jam key binding): the fullest magazine you carry and a round chambered, or a round at a time into an internal magazine; a jammed gun's stuck round out | X | RELOAD |
+| Fire mode     | `F` (Fire Mode): single shots or automatic (the SMG, the Assault Rifle) | D-pad right | |
+| Weapon light  | `L` (Weapon Light): the mounted Weapon Flashlight on or off | D-pad left | |
+| Load a weapon (inventory) | Drop rounds on a magazine or a gun (left click all that fit, right click one), a magazine or an attachment on its gun; right click a gun or a magazine with nothing carried to take one thing out; click a chip beside HANDS to take that part off | A / X | tap / long press |
 | Eat / use medicine | Hold right click with food or medicine (meat and tins 1.6 s, crackers and the chocolate bar 1.2 s, the Bandage 2 s, the Medkit 4 s, pills 1.2-1.6 s, the ration 2.4 s) when it would do something: food while the food bar isn't full (hurt, with hunger off), medicine when hurt, bleeding or infected (the Chocolate Bar any time; creative: any time); letting go stops | L2 | Tap |
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
 | Open a door   | Right click either half (and a double door's other door opens with it); `Shift` + right click with an item places instead | L2 | Tap |
@@ -1662,7 +1768,7 @@ default).
 | Category | Key binding (default) |
 | -------- | --------------------- |
 | Movement | Jump (`Space`), Sneak (`Left Shift`), Sprint (`Left Control`), Strafe Left (`A`), Strafe Right (`D`), Walk Backwards (`S`), Walk Forwards (`W`) |
-| Gameplay | Attack/Destroy (left button), Pick Block (middle button), Use Item/Place Block (right button) |
+| Gameplay | Attack/Destroy (left button), Fire Mode (`F`), Pick Block (middle button), Reload / Clear Jam (`R`), Toggle Sights (`V`), Use Item/Place Block (right button), Weapon Light (`L`) |
 | Inventory | Drop Selected Item (`Q`), Hotbar Slot 1-9 (`1`-`9`), Open/Close Inventory (`E`) |
 | Multiplayer | Open Chat (`T`), Open Command (`/`) |
 | Miscellaneous | Debug Screen (`F3`; its combinations become that key + `N` / `Q` / `F4`), Options (`P`), Skill Tree (`K`) |
@@ -1903,6 +2009,14 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             spending, Mana Sickness), StarFall (when and where Fallen Stars fall)
   Magic/                    Projectiles (the spark, bolt and water kinds, the deterministic step
                             both sides fly), Casting (a HeldUse's checks and the cast cadence)
+  Weapons/                  firearms and the melee rework, pure: init (the registry: firearms,
+                            rounds, magazines, attachments and melee weapons by item id) with
+                            WeaponList (their numbers and looks), WeaponState (what a gun or a
+                            magazine holds in its item data; firing a round), Handling (cadence,
+                            spread, recoil, sway, breath, jams, noise, zoom, how long a weapon
+                            action locks the gun), Ballistics (a shot's flight), Loading
+                            (combining in the inventory, the weapon actions), Melee (heavy
+                            attacks, the guard, finishers), Describe (their tooltip lines)
   Progression/              knowledge, Ages and skills, pure: Knowledge (Minecraft's experience
                             curve, the sources and their numbers, fatigue and the budget), Ages
                             (what each opens and needs), Skills (the tree and its perks), init
@@ -1987,7 +2101,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
                             tick, spectators' flight through blocks), Rig (hull <-> cosmetic
                             character)
-  Net/                      Protocol (buffer encoding), Remotes
+  Net/                      Protocol (buffer encoding), Remotes, WeaponSync (the weapons' Fire,
+                            Weapon and Shots messages)
   Util/Hash                 deterministic hashing and RNG
 
 src/textures -> generated from the texture pack by tests/build_textures (never edit by hand)
@@ -2062,6 +2177,10 @@ src/server   -> ServerScriptService.IceVoxel
                             wounds, the survivor record, the blood moon watch, rising; pure),
                             Survival (bites, kills, deaths, rising, sprint noise, the Survivor
                             message)
+  Weapons/                  firearms on the server: FireRules (a shot's checks, flight, targets,
+                            damage, noise and record; pure), Firing (a Fire message played out),
+                            WeaponActions (raising and guarding; the weapon actions' locks and
+                            sounds), init (the glue)
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
                             pure), Transport (items in transporters), Fluids (every fluid in
                             pipes, machines' fluid tanks, the fluid ejector),
@@ -2270,6 +2389,17 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             chests, crafting tables, furnaces, Mekanism's machines, structure
                             blocks and jigsaws)
   Rendering/StructureBoxes  structure blocks' outlines, names and air markers
+  Interaction/Firearms      a firearm in hand: raising, the sights, the trigger, reloading, the
+                            fire mode, the light; MeleeInput (the melee rework's light and heavy
+                            attacks and the guard)
+  Player/AimRules           the aim's pure rules (posture, trigger, timed actions, recoil, zoom,
+                            poses); AimCamera (the shoulder, the locked mouse, zoom, sway,
+                            recoil); WeaponPoses (every character's arms for a gun, a guard, a
+                            wind-up)
+  Rendering/ShotView        shots seen and heard: flashes, tracers, impacts, fire sounds (by the
+                            pure ShotRules)
+  Ui/WeaponHud              the shoulder dot, the red dot, the scope, the held gun's word and bar;
+                            WeaponButtons (the touch AIM, FIRE and RELOAD)
   Debug/DebugOverlay        F3 stats, time of day and weather, the mobs and their rigs (also
                             WAILA's extended view); DebugKeys (Minecraft's debug keys: F3 when
                             let go, F3 + N, F3 + F4, F3 + Q)
@@ -2480,6 +2610,30 @@ for performance:
 | `Mana.SicknessSeconds` / `SicknessMax` / `SicknessDamage` | 5 / 10 / 0.05 | Mana Sickness: seconds each mana potion adds, the most, and the share of magic damage cut per second left. |
 | `Mana.HudLinger`          | 3       | Seconds the MANA status icon stays lit after mana changed (it is also lit while a magic weapon is held or mana isn't full; dimmed otherwise). |
 | `Mana.Stars`              | PerNight 5, 16..48 blocks, 40 high | Fallen Stars: about PerNight a night for each player, onto the top block of a column MinDistance..MaxDistance blocks away, from FallHeight above it, between NightStart 13000 and NightEnd 23000 (the ones on the ground vanish at NightEnd); `Enabled = false`: none. |
+| `Weapons.Enabled` | true | Firearms fire (Shared/Weapons); false: they bash like clubs and no shot is sent or taken. |
+| `Weapons.PvP` | true | Bullets, pellets and bolts hurt players (false: they fly through them). |
+| `Weapons.ZombieHead` / `MobHead` / `PlayerHead` / `HelmetShare` | 3 / 2 / 2 / 0.6 | A head hit's damage factor on zombies, other mobs and players; a zombie whose look wears a helmet, hard hat or fire helmet takes HelmetShare of its head factor. A mob's head takes no armour, a player's only the helmet's. |
+| `Weapons.Gravity` / `MaxRange` / `SegmentSeconds` | 9.8 / 256 / 0.05 | A shot's flight: gravity (blocks/s²), the longest flight (a round's range × 2.5, at most this), seconds of flight a traced segment. |
+| `Weapons.ShatterGlass` / `ShatterBlocks` / `GlassShare` / `PassLeaves` | true / { "Glass" } / 0.7 / true | Glass shatters under a shot (only for a shooter who may build) and the bullet goes on with GlassShare of its damage; leaves let it by. |
+| `Weapons.BulletKnockback` / `PelletKnockback` | 0.1 / 0.05 | Knockback of a bullet and of each pellet that hits (a shot's pellets 0.4 at most). |
+| `Weapons.BleedChance` | 0.5 | A firearm's hit on a player opens Bleeding this often (the apocalypse's Bleeding rules). |
+| `Weapons.ShoulderSpread` / `MovingSpread` / `CrouchSpread` | 1.8 / 2 / 0.8 | The gun's spread times these: raised over the shoulder (not in the sights), moving, crouching. |
+| `Weapons.MovingSway` / `CrouchSway` / `HurtSway` / `ShoulderSway` | 2.5 / 0.6 / 1.5 / 1.3 | The sway times these: moving, crouching, under half health, not in the sights. |
+| `Weapons.HoldBreathSeconds` / `OutOfBreathSeconds` / `HoldBreathSway` / `OutOfBreathSway` | 3 / 3 / 0.15 / 1.5 | Holding breath in the sights (the sprint key): how long it steadies the aim, how long the player is out of breath after, and the sway's factor in each. |
+| `Weapons.RecoilRecover` / `RecoilRecoverSeconds` / `CrouchRecoil` / `ShoulderRecoil` | 0.6 / 0.25 / 0.8 / 1.2 | The share of each kick that comes back and over how long; recoil times these crouching and over the shoulder. |
+| `Weapons.JamChance` | { 0, 0.002, 0.01, 0.04, 1 } | A shot's jam chance by condition (Pristine, Worn, Damaged, Badly damaged, Ruined), the gun's and its magazine's added. |
+| `Weapons.RaiseTicks` / `UnjamTicks` / `ModeTicks` | 6 / 40 / 4 | Ticks a raised gun waits before its first shot, clearing a jam takes and switching the fire mode takes (a reload's, a chambering's and a round's are each gun's own in Weapons/WeaponList). |
+| `Weapons.RaisedSpeed` / `SightsSpeed` / `GuardSpeed` | 0.65 / 0.5 / 0.5 | Walking speed raised, in the sights and guarding with a melee weapon (no sprinting in any). |
+| `Weapons.IronSightsZoom` | 1.15 | The field of view is divided by this in iron sights (an optic's or a built-in scope's own zoom instead). |
+| `Weapons.ShoulderOffset` / `ShoulderDot` | { 1.6, 0.4, 0 } / true | Raised in third person: the camera over the right shoulder (studs right, up, back) and the centre dot. |
+| `Weapons.ImpactNoise` / `SuppressedMinNoise` | 8 / 8 | The noise (blocks) where a shot lands this far or more from the shooter, and the least a suppressed shot makes (a gun's own noise is WeaponList's). |
+| `Weapons.OriginSlack` / `DirectionSlack` / `ShotsPerSecond` / `LagCompMax` | 2.5 / 0.01 / 20 / 2 | The server's checks: the claimed eyes' distance from its own, the aim's slack from a unit vector, shots a player may fire a second (bursts of twice that), and how far a mob's last-sent position may be from where it is to count for lag compensation. |
+| `Weapons.ShotBroadcast` / `FarSound` | 256 / 64 | Who is sent a shot (blocks from the muzzle, horizontally), and beyond what distance its far rumble plays instead. |
+| `Weapons.Tracers` / `TracerSeconds` | true / 0.06 | Tracers, and how long they show. |
+| `Weapons.BoltRecover` | 0.7 | A crossbow bolt that stopped in a block drops as an item this often, one that hit a mob or a player half as often. The one chance: WeaponList's `recover` only says which rounds may be found again. |
+| `Weapons.Melee.Enabled` | true | The melee rework (light attacks on release, heavy attacks, the guard, finishers); false: every attack as before. |
+| `Weapons.Melee.HeavyHold` / `HeavyKnockback` / `HeavyExhaustion` | 0.45 / 0.8 / 3 | Seconds held for a heavy attack, its knockback, and its food (times a light hit's exhaustion). |
+| `Weapons.Melee.GuardCone` / `FinisherCone` / `FinisherMaxHealth` | 0.5 / 0.5 / 30 | The guard's front cone and the finisher's back cone (cosines: 120 degrees each), and the most health a zombie may have to die to a finisher. |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
 | `Explosions.FlowingShare` | 1/16    | What a flowing fuel cell counts, times its fill (a source is a bucket). |
 | `Explosions.MaxCells` / `ClusterSize` / `MinBlastVolume` | 4096 / 4 / 0.5 | Fuel one ignition sets off at most; a blast per cube this wide; cubes with less fuel (buckets) just flash into fire. |
@@ -2748,6 +2902,44 @@ rules and layers, not how it looks): at 1920 × 1080, 1366 × 768, 667 × 375 to
   blocky fallback without them; the vignette and blur (and the blur without the vignette);
   gamepad selection order and Focus red; ViewportFrame cost on a low-end device; Options, WAILA
   and the skill tree unchanged.
+
+**Studio checklist for the weapons** (the Lune specs play the rules out: loading, every weapon
+op's lock on both sides, the server's checks and traces, the client's aim, recoil, poses and shot
+effects as pure rules; only Studio shows the camera, the models and the feel; two players on a
+local server):
+
+- **Loot and loading:** loot a city's police station and a bunker armory; load a 9mm magazine
+  by dropping rounds on it (the orange outline; red on a .357 round), attach it to the pistol,
+  take it off with a right click and with the MAG chip; the quickbar's and HANDS' round counts;
+  swaps, partial loads and the unload order; the chips' readability at GUI scales 2-4 and with a
+  gamepad; the tooltips' wrapping.
+- **Raising and shooting:** raise with right click (the shoulder offset, the mouse locked to the
+  centre with the default PlayerModule, the crosshair swapped for the dot), shoot a zombie in the
+  head (it dies) and in the body (3 shots); the sights in first person and with `V` in third
+  person, lined up at fields of view 30, 70 and 110 and with the sprint FOV; recoil through the
+  camera hook (and its fallback); the sway, holding breath; the poses of R15 and R6 characters,
+  the local player's and a remote one's raised and lowered, and the guns' size in the hand.
+- **Reloading and modes:** `R` swaps to the fullest magazine and chambers (the bar, RELOADING);
+  only chambering with no better magazine; empty the pistol (the dry click); the pump shotgun
+  loads round by round and stops when fired; the assault rifle's `F` to automatic and recoil
+  climbing; firing at 700 rpm costs little (tracers, flashes, the MicroProfiler).
+- **Attachments:** mount a suppressor (the sound changes, zombies come from nearer), wear an
+  improvised one out to Ruined (loud again); the Hunting Rifle's scope overlay; the red dot; the
+  weapon light at night (`L`), on the held model in first and third person.
+- **Condition and jams:** damage a gun to Badly damaged and see it jam (the jam click, JAMMED),
+  clear it with `R`; a Ruined gun never fires.
+- **Noise and others:** a shot heard from 100 blocks by the second client (the far rumble) and
+  zombies converging on it; the second client hears the first's reload and chambering; glass
+  shattered by a shot seen by both; a crossbow bolt found again and picked up.
+- **Players:** a PvP hit and the Bleeding it opens (head and body, with and without a helmet);
+  `Config.Weapons.PvP = false` lets bullets through; the aim dropped on death and respawn;
+  spectators can't fire; creative fires without rounds.
+- **Melee:** bash a zombie with a lowered rifle; a light hit on release, a heavy bat attack (the
+  wind-up drawn back in first and third person), the guard (the weapon across the chest, half
+  speed, no sprint; a zombie's hit from the front cut, item.melee.block heard), a knife finisher
+  from behind on an unaware zombie; the feel of light attacks landing on release.
+- **Touch and gamepad:** the AIM, FIRE and RELOAD buttons (their places beside the jump button,
+  AIM's toggle), L2 / R2 / X / D-pad / R3 / L3 on a controller; a touch heavy attack.
 
 `Seed = nil` gives every server a random world; set a number for a fixed one. With the title
 screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"void"`,
@@ -3741,8 +3933,9 @@ Natural next steps, roughly in order:
 - **More of Mekanism.** Machines on the machine framework, side configuration for machines, energy
   items and the Energy Cubes' charge slots, gases (Pressurized Tubes), heat (Thermodynamic
   Conductors) and the Logistical Sorter.
-- **More combat and mobs.** Players can't hurt each other yet (PvP), there are no bows, guns,
-  critical hits, sweeps or enchantments; more kinds (wolves, villagers, other survivors), breeding
+- **More combat and mobs.** Players hurt each other only with firearms (`Config.Weapons.PvP`),
+  there are no bows, grenades, critical hits, sweeps or enchantments, nothing repairs a gun, and
+  melee hits have no head zone; more kinds (wolves, villagers, other survivors), breeding
   and taming, mob light levels by biome, baby mobs, sheep shearing and dyes. Animals don't push
   each other apart (zombies do).
 - **Hordes that find their way.** Zombies and blood moon hordes steer straight at what they go

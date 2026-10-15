@@ -2,7 +2,8 @@
 	Weapon handling (Shared/Weapons/Handling): the cadence both sides keep (slack and credit, and
 	no run of shots faster than the rate), spread, recoil (deterministic, recovering), sway and
 	holding breath, the condition levels against the survival look's (Ui/Theme), jam chances,
-	noise with suppressors, reload times and zoom.
+	noise with suppressors, reload times and zoom, and how long a weapon action locks the gun
+	(`actionLock`, the one rule of server Weapons/WeaponActions and client Interaction/Firearms).
 ]]
 
 return function(t, shared, require, _server, client)
@@ -220,5 +221,67 @@ return function(t, shared, require, _server, client)
 		t.eq(Handling.zoom(spec("HuntingRifle"), nil), 4, "its own scope")
 		t.eq(Handling.zoom(spec("HuntingRifle"), I.RedDotSight), 4, "the built-in scope wins")
 		t.eq(Handling.zoom(pistol, I.Suppressor), s.IronSightsZoom, "no optic")
+	end)
+
+	t.test("handling: a weapon action's lock, from what it did to the gun", function()
+		local function gun(name: string, data: { [string]: any }?): Items.Stack
+			local stack: Items.Stack = { item = I[name], count = 1 }
+			return if data then Items.withData(stack, data) else stack
+		end
+		local s = Config.Weapons
+		local pistol, revolver = spec("Pistol"), spec("Revolver")
+		local mag, nine, r357 = I.PistolMagazine, I.Rounds9mm, I.Rounds357
+		local function loaded(n: number, extra: { [string]: any }?): Items.Stack
+			local data: { [string]: any } = { mag = mag, n = n, ammo = nine, ch = nine }
+			for k, v in extra or {} do
+				data[k] = v
+			end
+			return gun("Pistol", data)
+		end
+		-- Op 1, a detachable feed.
+		local kind, ticks, chambered = Handling.actionLock(1, gun("Pistol"), loaded(14))
+		t.eq(kind, "reload", "a magazine in")
+		t.eq(ticks, pistol.reloadTicks + pistol.chamberTicks, "and a round chambered")
+		t.eq(chambered, true)
+		kind, ticks, chambered = Handling.actionLock(1, loaded(2), loaded(15))
+		t.ok(kind == "reload" and ticks == pistol.reloadTicks and not chambered, "a fuller one, chambered already")
+		kind, ticks = Handling.actionLock(1, loaded(2, { magD = 0 }), loaded(2, { magD = 30 }))
+		t.ok(kind == "reload" and ticks == pistol.reloadTicks, "as full, in another condition")
+		local unchambered = gun("Pistol", { mag = mag, n = 5, ammo = nine })
+		kind, ticks, chambered = Handling.actionLock(1, unchambered, loaded(4))
+		t.eq(kind, "chamber", "the magazine stayed: only chambered")
+		t.eq(ticks, pistol.chamberTicks)
+		t.eq(chambered, true)
+		t.eq((Handling.actionLock(1, loaded(5), loaded(5))), nil, "nothing better: nothing")
+		-- Op 1 on an internal feed and op 2: a round in.
+		kind, ticks = Handling.actionLock(1, gun("Revolver"), gun("Revolver", { ch = r357 }))
+		t.ok(kind == "round" and ticks == revolver.roundTicks, "R on an internal magazine: a round")
+		kind, ticks = Handling.actionLock(
+			2,
+			gun("Revolver", { ch = r357, n = 2, ammo = r357 }),
+			gun("Revolver", { ch = r357, n = 3, ammo = r357 })
+		)
+		t.ok(kind == "round" and ticks == revolver.roundTicks, "a round by hand")
+		local jammedRevolver = gun("Revolver", { ch = r357, jam = true, n = 2, ammo = r357 })
+		t.eq((Handling.actionLock(2, jammedRevolver, table.clone(jammedRevolver))), nil, "refused: as it was")
+		-- Op 3, op 4, op 5, op 6.
+		kind, ticks = Handling.actionLock(3, loaded(3, { jam = true }), loaded(2))
+		t.ok(kind == "unjam" and ticks == s.UnjamTicks, "a jam cleared")
+		t.eq((Handling.actionLock(3, loaded(2), loaded(2))), nil, "nothing stuck")
+		kind, ticks = Handling.actionLock(4, gun("Smg"), gun("Smg", { mode = 2 }))
+		t.ok(kind == "mode" and ticks == s.ModeTicks, "the fire mode")
+		local lit = loaded(2, { light = I.WeaponFlashlight, lit = true })
+		t.eq((Handling.actionLock(5, loaded(2, { light = I.WeaponFlashlight }), lit)), nil, "the light: none")
+		t.eq((Handling.actionLock(6, loaded(2), gun("Pistol", { ch = nine }))), nil, "detaching: none")
+		-- Nothing in hand, another item, no firearm.
+		t.eq((Handling.actionLock(1, nil, loaded(2))), nil)
+		t.eq((Handling.actionLock(1, loaded(2), nil)), nil)
+		t.eq((Handling.actionLock(1, loaded(2), gun("Smg", { ch = nine }))), nil, "another item")
+		t.eq((Handling.actionLock(1, gun("Machete"), gun("Machete"))), nil, "no firearm")
+		t.eq(select(2, Handling.actionLock(1, loaded(5), loaded(5))), 0, "no ticks for nothing")
+		-- The settings given (the server's) rather than Config's.
+		local own = table.clone(s)
+		own.UnjamTicks = 7
+		t.eq(select(2, Handling.actionLock(3, loaded(3, { jam = true }), loaded(2), own)), 7)
 	end)
 end

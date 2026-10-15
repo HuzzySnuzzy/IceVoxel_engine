@@ -592,7 +592,7 @@ function FireRules.recovery(
 	roll: number,
 	s: Settings
 ): (number?, number, number)
-	if not (ammo.recover > 0) then
+	if not ammo.recover then
 		return nil, 0, 0
 	end
 	local kind = impact.kind

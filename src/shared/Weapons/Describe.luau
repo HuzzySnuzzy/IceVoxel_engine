@@ -25,8 +25,8 @@
 	                       and 1 chambered", the crossbow's "Holds 1 bolt"), its mounts or
 	                       built-in scope, and "Never jams" in gray
 	           ammunition  "As ammunition:" its damage (" 2.5 Damage x 8 pellets"), its calibre,
-	                       the range of full damage, a bolt's recovery chance, and the guns it
-	                       fits
+	                       the range of full damage, a bolt's recovery chance (Config.Weapons
+	                       .BoltRecover), and the guns it fits
 	           magazine    "As a magazine:" its calibre, capacity and the guns it fits
 	           attachment  "When mounted:" an optic's zoom, a muzzle device's noise and spread
 	                       (blue: less is better), "Suppressed", a light's reach, the guns it fits
@@ -43,6 +43,7 @@
 	data too; `state` reads them for weapons alone.
 ]]
 
+local Config = require(script.Parent.Parent.Config)
 local Items = require(script.Parent.Parent.Items)
 local Weapons = require(script.Parent)
 local WeaponState = require(script.Parent.WeaponState)
@@ -241,8 +242,8 @@ local function ammoStats(spec: Weapons.AmmoSpec): { Line }
 	damageLine(body, spec, 1, false)
 	add(body, `Calibre: {Describe.calibre(spec.calibre)}`)
 	add(body, `Full damage to {format(spec.range)} blocks`)
-	if spec.recover > 0 then
-		add(body, `Often found again after a shot ({percent(spec.recover)})`)
+	if spec.recover then
+		add(body, `Often found again after a shot ({percent(Config.Weapons.BoltRecover)})`)
 	end
 	local guns = gunsOf(spec.calibre)
 	if #guns > 0 then

@@ -50,8 +50,9 @@
 	             not in creative); one that hurt costs the player food exhaustion (Minecraft's
 	             EXHAUSTION_ATTACK: Players/ToughAsNails.attacked). The melee rework
 	             (Shared/Weapons/Melee): an Attack with the heavy flag is a heavy attack
-	             (MobWorld's Attacker.heavy), whose landed hit costs the exhaustion
-	             Melee.exhaustion(true) times; a zombie's hit on a player guarding (the
+	             (MobWorld's Attacker.heavy) only with a listed melee weapon in hand
+	             (Melee.heavy; with anything else a light one), whose landed hit costs the
+	             exhaustion Melee.exhaustion(true) times; a zombie's hit on a player guarding (the
 	             Types.AIM_ATTRIBUTE "guard") with a melee weapon facing it (their look,
 	             Players/PlayerPositions.look) is cut by Melee.guardShare, and item.melee.block
 	             sounds when it cut anything.
@@ -423,6 +424,9 @@ local function onAttack(player: Player, payload: buffer)
 	end
 	local mode = GameMode.of(player)
 	local held = Inventories.heldTool(player)
+	-- (The heavy flag counts only with a listed melee weapon in hand, whatever the client sends:
+	-- a sword's "heavy" hit is a light one, with a light hit's knockback and food. Weapons/Melee.)
+	heavy = Melee.heavy(held, heavy)
 	local swing: Swing = swings[player] or { swing = -math.huge, changed = -math.huge, item = held }
 	swings[player] = swing
 	if swing.item ~= held then

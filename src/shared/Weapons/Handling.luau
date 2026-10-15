@@ -31,6 +31,17 @@
 	             device's (a Ruined one muffles nothing), at least SuppressedMinNoise when
 	             suppressed.
 	  Reload     a magazine swap's ticks, plus chambering when it chambers.
+	  Actions    how long a weapon action (Inventory action "weapon", Weapons/Loading's ops) locks
+	             the gun, from what it did to the held stack (`actionLock`, the one rule both sides
+	             time it by: server Weapons/WeaponActions locks and sounds it, client
+	             Interaction/Firearms shows it and holds the trigger meanwhile): op 1 on a
+	             detachable feed with a magazine in that wasn't before (another one, or the same
+	             one fuller or in another condition) "reload", reloadTicks plus chamberTicks when it
+	             chambered; op 1 there that only chambered "chamber", chamberTicks; op 1 on an
+	             internal feed and op 2 (a round by hand) that put a round in "round", roundTicks;
+	             op 3 that cleared a jam "unjam", UnjamTicks; op 4 that changed the fire mode
+	             "mode", ModeTicks. Anything else (the light, detaching, an op Loading refused,
+	             which hands the stack back as it was, another item or none) locks nothing.
 	  Zoom       field of view divided by this in the sights: a built-in scope's, else the
 	             optic's, else IronSightsZoom.
 
@@ -39,7 +50,9 @@
 ]]
 
 local Config = require(script.Parent.Parent.Config)
+local Items = require(script.Parent.Parent.Items)
 local Hash = require(script.Parent.Parent.Util.Hash)
+local WeaponState = require(script.Parent.WeaponState)
 local Weapons = require(script.Parent)
 
 -- How the shooter stands for spread and recoil (each optional: false): in the sights, moving,
@@ -51,6 +64,9 @@ export type SwayStance = { sights: boolean?, moving: boolean?, crouching: boolea
 
 -- Holding breath: "normal", "holding" (steady) or "out" (out of breath), and seconds in it.
 export type Breath = { phase: "normal" | "holding" | "out", time: number }
+
+-- What a timed weapon action did (`actionLock`).
+export type ActionKind = "reload" | "chamber" | "round" | "unjam" | "mode"
 
 local Handling = {}
 
@@ -284,6 +300,64 @@ end
 -- Ticks of a magazine swap, plus chambering when `chambered` (it chambers a round).
 function Handling.reloadTicks(spec: Weapons.FirearmSpec, chambered: boolean): number
 	return spec.reloadTicks + (if chambered then spec.chamberTicks else 0)
+end
+
+--[[
+	What weapon op `op` (1 reload, 2 a round by hand, 3 clear a jam, 4 fire mode; Weapons/Loading's
+	Op) that turned the held stack `before` into `after` did, and the ticks it locks the gun for
+	(see the header's Actions): its kind (nil: nothing timed, 0 ticks) and whether it chambered a
+	round (the chamber empty before, a round in it after). `s` is Config.Weapons unless given (the
+	server hands its own settings).
+]]
+function Handling.actionLock(
+	op: number,
+	before: Items.Stack?,
+	after: Items.Stack?,
+	s: typeof(Config.Weapons)?
+): (ActionKind?, number, boolean)
+	if before == nil or after == nil or before.item ~= after.item or Items.stacksMatch(before, after) then
+		return nil, 0, false
+	end
+	local spec = Weapons.firearm(before.item)
+	if spec == nil then
+		return nil, 0, false
+	end
+	local w = s or settings()
+	local old, new = WeaponState.sane(before), WeaponState.sane(after)
+	local chamberedBefore = WeaponState.chamber(old) ~= nil
+	local chamberedAfter = WeaponState.chamber(new) ~= nil
+	local roundsBefore = WeaponState.rounds(old)
+	local roundsAfter = WeaponState.rounds(new)
+	local chambered = not chamberedBefore and chamberedAfter
+	if op == 3 then
+		if WeaponState.jammed(old) and not WeaponState.jammed(new) then
+			return "unjam", w.UnjamTicks, chambered
+		end
+	elseif op == 4 then
+		if WeaponState.modeIndex(old) ~= WeaponState.modeIndex(new) then
+			return "mode", w.ModeTicks, false
+		end
+	elseif op == 1 and spec.magazine ~= nil then
+		local magBefore, wearBefore = WeaponState.magazine(old)
+		local magAfter, wearAfter = WeaponState.magazine(new)
+		-- (Another magazine, the same one in another condition, or more rounds than chambering
+		-- alone leaves: a magazine went in.)
+		local swapped = magBefore ~= magAfter
+			or wearBefore ~= wearAfter
+			or roundsAfter ~= roundsBefore - (if chambered then 1 else 0)
+		if swapped and magAfter ~= nil then
+			return "reload", Handling.reloadTicks(spec, chambered), chambered
+		elseif chambered then
+			return "chamber", spec.chamberTicks, true
+		end
+	elseif op == 1 or op == 2 then
+		local was = roundsBefore + (if chamberedBefore then 1 else 0)
+		local now = roundsAfter + (if chamberedAfter then 1 else 0)
+		if now > was then
+			return "round", spec.roundTicks, chambered
+		end
+	end
+	return nil, 0, false
 end
 
 -- The sights' zoom: a built-in scope's, else the optic's (`optic` an item; nil: none), else iron

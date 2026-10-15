@@ -4,12 +4,14 @@
 	listed weapon, exhaustion counts, knockback, the guard's share by weapon and by the front cone,
 	the finisher's conditions (knives only, unaware, from behind, the health cap),
 	Config.Weapons.Melee.Enabled false turning all of it off, and server Mobs/MobWorld.attack with
-	heavy hits and finishers through a small fake world. The client's Interaction/MeleeInput on a
-	fake client (tests/lib/FakeClient; stand-ins for the inventory, the network and the sounds): a
-	click lands a light hit on release, a hold of HeavyHold a heavy one, other items hit at once,
-	the guard sends its Weapon ops and ends with the hand's change.
+	heavy hits and finishers through a small fake world; Mobs/Mobs' Attack handler gating the
+	client's heavy flag with Melee.heavy before anything uses it. The client's
+	Interaction/MeleeInput on a fake client (tests/lib/FakeClient; stand-ins for the inventory, the
+	network and the sounds): a click lands a light hit on release, a hold of HeavyHold a heavy one,
+	other items hit at once, the guard sends its Weapon ops and ends with the hand's change.
 ]]
 
+local fs = require("@lune/fs")
 local LuneTask = require("@lune/task")
 local FakeClient = require("../lib/FakeClient")
 
@@ -234,6 +236,32 @@ return function(t, shared, require, server)
 		local swordHeavy = world:attack(sword, attacker(0.5, 4.5, I.IronSword, true)) :: number
 		local swordPlain = world:attack(swordLight, attacker(0.5, 4.5, I.IronSword, false)) :: number
 		t.near(swordHeavy, swordPlain, 1e-6, "no heavy damage without a listed weapon")
+	end)
+
+	t.test("melee: the server's Attack counts the heavy flag only with a listed weapon in hand", function()
+		-- Mobs/Mobs' Attack handler (Roblox glue, read as text): the flag the client sent goes
+		-- through Melee.heavy with the held item before the Attacker and the exhaustion see it.
+		local source = fs.readFile("src/server/Mobs/Mobs.luau")
+		local start = string.find(source, "local function onAttack(", 1, true) :: number
+		t.ok(start ~= nil, "the Attack handler")
+		local stop = string.find(source, "\nend\n", start, true) :: number
+		local body = string.sub(source, start, stop)
+		local gate = string.find(body, "heavy = Melee.heavy(held, heavy)", 1, true)
+		local attack = string.find(body, "mobs:attack(", 1, true)
+		local food = string.find(body, "Melee.exhaustion(heavy)", 1, true)
+		t.ok(gate ~= nil and attack ~= nil and food ~= nil, "gate, attack and exhaustion in the handler")
+		t.ok((gate :: number) < (attack :: number), "gated before the Attacker is built")
+		t.ok((gate :: number) < (food :: number), "and before the food it costs")
+		-- What the gate makes of a sword's flag: a light hit's knockback and food.
+		local world = newWorld()
+		local zombie = MobList.find("Zombie") :: number
+		local swung = world:spawn(zombie, 2.5, FLOOR, 0.5)
+		local plain = world:spawn(zombie, 2.5, FLOOR, 8.5)
+		world:attack(swung, attacker(0.5, 0.5, I.IronSword, Melee.heavy(I.IronSword, true)))
+		world:attack(plain, attacker(0.5, 8.5, I.IronSword, false))
+		t.near(speed(world, swung), speed(world, plain), 1e-9, "a sword's flag: Minecraft's knockback")
+		t.eq(Melee.exhaustion(Melee.heavy(I.IronSword, true)), 1, "and a light hit's food")
+		t.eq(Melee.exhaustion(Melee.heavy(I.BaseballBat, true)), 3, "a bat's heavy hit costs three")
 	end)
 
 	t.test("melee: MobWorld's finisher kills an unaware small zombie from behind with a knife", function()

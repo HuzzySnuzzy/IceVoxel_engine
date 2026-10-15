@@ -344,6 +344,14 @@ return function(t, shared, require, _server, client)
 		)
 		t.ok(table.find(Tooltip.texts(id.Buckshot), " 2.5 Damage x 8 pellets") ~= nil)
 		t.ok(table.find(Tooltip.texts(id.CrossbowBolt), "Often found again after a shot (70%)") ~= nil)
+		-- (The chance is Config.Weapons.BoltRecover's alone: WeaponList's `recover` only switches it
+		-- on.)
+		local recover = Config.Weapons.BoltRecover
+		Config.Weapons.BoltRecover = 0.5
+		local half = table.find(Tooltip.texts(id.CrossbowBolt), "Often found again after a shot (50%)")
+		Config.Weapons.BoltRecover = recover
+		t.ok(half ~= nil, "BoltRecover's chance")
+		t.eq(table.find(Tooltip.texts(id.Rounds9mm), "Often found again after a shot (70%)"), nil, "bullets: never")
 		t.ok(table.find(Tooltip.texts(id.Rounds762), "Fits: Bolt-Action Rifle, Semi-Auto Rifle") ~= nil)
 		local mag = Tooltip.texts(id.PistolMagazine, weapon(id.PistolMagazine, { n = 12, ammo = id.Rounds9mm }))
 		t.eq(mag[2], "Rounds: 12 / 15 (9mm Rounds)")

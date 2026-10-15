@@ -32,17 +32,19 @@
 	            the camera kicked (Handling.recoil, seeded by the player's UserId and the shot
 	            counter: Player/AimCamera), the first-person gun too (Player/HeldItems.kick). The
 	            server's record of the shot (ShotView) stops automatic fire when it refused it or
-	            the gun jammed.
+	            the gun jammed (a record of an earlier press's shot, arriving late, doesn't stop
+	            the press held now; a jam clicks either way).
 	  R         (X on a gamepad, RELOAD on a touch screen) on a jammed gun clears the jam (Inventory
 	            action "weapon" op 3, UnjamTicks); else reloads (op 1): a detachable magazine gun
 	            swaps in the fullest magazine and chambers (Handling.reloadTicks), an internal
 	            magazine loads a round, then one every roundTicks (op 2) until it is full, the
 	            matching rounds run out, the trigger is pressed or the hand changes. The predicted
-	            inventory says what happened (Shared/Weapons/Loading through Inventory/Menu): an op
-	            that changed nothing starts nothing (the server sees the same). While an action runs
-	            (AimRules.lockTicks, as the server locks it) the gun doesn't fire and takes no other
-	            op; item.firearm.reload, load_round and chamber play at once (predicted: the server
-	            plays them for the others).
+	            inventory says what happened (Shared/Weapons/Loading through Inventory/Menu), and
+	            Shared/Weapons/Handling.actionLock what it costs, the rule the server locks by: an
+	            op that changed nothing starts nothing; a detachable magazine gun whose magazine
+	            stayed but had no round chambered only chambers (chamberTicks). While an action runs
+	            the gun doesn't fire and takes no other op; item.firearm.reload, load_round and
+	            chamber play at once (predicted: the server plays them for the others).
 	  F, L      (DPad right, left) the next fire mode (op 4, ModeTicks) of a gun with more than one;
 	            the weapon light on or off (op 5) when one is mounted.
 	  Breath    the sprint key (L3) held in the sights holds breath (Handling: steadier, then out of
@@ -136,6 +138,8 @@ local touchRaise = false
 local triggerHeld: { [string]: boolean? } = {}
 -- The shot counter (Fire's u16) and the recoil's seed.
 local shotCounter = 0
+-- The counter of the current trigger press's first shot (nil: no shot this press).
+local pressFirst: number? = nil
 local seed = 0
 -- The hand last seen (a change lowers the gun and lets go of everything).
 local heldSlot, heldItem = 0, 0
@@ -194,7 +198,9 @@ local read: Read = {
 	modeText = nil,
 }
 
-local ACTION_WORDS: { [string]: string } = { reload = "RELOADING", round = "LOADING", unjam = "CLEARING" }
+-- (R that only chambers a round is a reload to the player: the same word.)
+local ACTION_WORDS: { [string]: string } =
+	{ reload = "RELOADING", chamber = "RELOADING", round = "LOADING", unjam = "CLEARING" }
 
 -- The firearm in hand and its spec (nil, nil: none).
 local function heldGun(): (Items.Stack?, Weapons.FirearmSpec?)
@@ -204,13 +210,6 @@ local function heldGun(): (Items.Stack?, Weapons.FirearmSpec?)
 		return nil, nil
 	end
 	return stack, spec
-end
-
--- Does the melee weapon in hand guard (Interaction/MeleeInput.guarding, read through `any`: the
--- module's first version had none)?
-local function meleeGuarding(): boolean
-	local guarding = (MeleeInput :: any).guarding
-	return type(guarding) == "function" and guarding() == true
 end
 
 -- Do firearms work for this player (Config.Weapons.Enabled, not a spectator)?
@@ -257,12 +256,13 @@ local function play(sound: string, volume: number?, pitch: number?)
 	end
 end
 
--- Weapon op `op` on the held gun (predicted and sent: Inventory action "weapon"): whether the
--- prediction changed it, and whether it chambered a round.
-local function weaponOp(op: number): (boolean, boolean)
+-- Weapon op `op` on the held gun (predicted and sent: Inventory action "weapon"): what the
+-- prediction did and the ticks it locks the gun for (Handling.actionLock, as the server locks it;
+-- nil, 0: nothing timed), and whether it chambered a round.
+local function weaponOp(op: number): (AimRules.BusyKind?, number, boolean)
 	local before = ClientInventory.selectedStack()
 	ClientInventory.apply({ kind = "weapon", op = op, slot = -1, part = 0 })
-	return AimRules.outcome(before, ClientInventory.selectedStack())
+	return Handling.actionLock(op, before, ClientInventory.selectedStack())
 end
 
 --[[ R, F, L, V ]]
@@ -275,21 +275,24 @@ local function reload()
 	end
 	if WeaponState.jammed(stack) then
 		-- (The server clears it as surely: only it knows of jams.)
-		weaponOp(3)
-		AimRules.startBusy(aim, "unjam", now, AimRules.lockTicks(spec, 3, false))
-		closing = ShotRules.CHAMBER
+		local kind, ticks = weaponOp(3)
+		if kind == "unjam" then
+			AimRules.startBusy(aim, kind, now, ticks)
+			closing = ShotRules.CHAMBER
+		end
 		return
 	end
-	local changed, chambered = weaponOp(1)
-	if not changed then
-		return
-	end
-	if spec.magazine ~= nil then
-		AimRules.startBusy(aim, "reload", now, AimRules.lockTicks(spec, 1, chambered))
+	local kind, ticks, chambered = weaponOp(1)
+	if kind == "reload" then
+		AimRules.startBusy(aim, kind, now, ticks)
 		play(ShotRules.RELOAD)
 		closing = if chambered then ShotRules.CHAMBER else nil
-	else
-		AimRules.startBusy(aim, "round", now, AimRules.lockTicks(spec, 1, chambered))
+	elseif kind == "chamber" then
+		AimRules.startBusy(aim, kind, now, ticks)
+		play(ShotRules.CHAMBER)
+		closing = nil
+	elseif kind == "round" then
+		AimRules.startBusy(aim, kind, now, ticks)
 		play(ShotRules.LOAD_ROUND)
 		aim.loading = true
 	end
@@ -301,9 +304,11 @@ local function nextMode()
 	if stack == nil or spec == nil or #spec.modes < 2 or not enabled() or AimRules.busy(aim, now) then
 		return
 	end
-	weaponOp(4)
-	AimRules.startBusy(aim, "mode", now, AimRules.lockTicks(spec, 4, false))
-	play(ShotRules.DRY, SWITCH_VOLUME, SWITCH_PITCH)
+	local kind, ticks = weaponOp(4)
+	if kind == "mode" then
+		AimRules.startBusy(aim, kind, now, ticks)
+		play(ShotRules.DRY, SWITCH_VOLUME, SWITCH_PITCH)
+	end
 end
 
 local function switchLight()
@@ -378,6 +383,9 @@ local function shoot(stack: Items.Stack, spec: Weapons.FirearmSpec)
 	-- Predicted, numbered and sent.
 	local seq = ClientInventory.fire(stack.item)
 	shotCounter = (shotCounter + 1) % 65536
+	if pressFirst == nil then
+		pressFirst = shotCounter
+	end
 	local state = view.state
 	stance.sights = aim.posture == "sights"
 	stance.moving = AimRules.moving(view.speed)
@@ -497,7 +505,7 @@ local function stateStep()
 	end
 	-- (A melee weapon's guard slows the player as raising does: Interaction/MeleeInput.)
 	local inHand = ClientInventory.selectedStack()
-	local guard = spec == nil and inHand ~= nil and Weapons.melee(inHand.item) ~= nil and meleeGuarding()
+	local guard = spec == nil and inHand ~= nil and Weapons.melee(inHand.item) ~= nil and MeleeInput.guarding()
 	AimCamera.set(aim.posture, spec, if spec then read.optic else nil, now, guard)
 	if view and state and humanoid then
 		local breathKey = Keybinds.isDown("sprint")
@@ -523,11 +531,11 @@ local function stateStep()
 		if spec == nil or stack == nil or not AimRules.wantsRound(stack) then
 			aim.loading = false
 		else
-			local changed = weaponOp(2)
-			if changed then
-				AimRules.startBusy(aim, "round", now, AimRules.lockTicks(spec, 2, false))
+			local done, ticks = weaponOp(2)
+			if done == "round" then
+				AimRules.startBusy(aim, done, now, ticks)
 				play(ShotRules.LOAD_ROUND)
-				progress, kind = 0, "round"
+				progress, kind = 0, done
 			else
 				aim.loading = false
 			end
@@ -548,6 +556,9 @@ local function stateStep()
 end
 
 local function fireStep()
+	if next(triggerHeld) == nil or aim.posture == "lowered" then
+		pressFirst = nil
+	end
 	local stack, spec = heldGun()
 	if stack == nil or spec == nil or aim.posture == "lowered" then
 		return
@@ -597,7 +608,9 @@ function Firearms.start(world: ClientWorld.ClientWorld)
 	})
 	-- The server's record of an own shot that stops automatic fire (refused, or a jam).
 	ShotView.onOwnShot(function(shot: WeaponSync.Shot)
-		AimRules.stop(aim)
+		if AimRules.thisPress(pressFirst, shot.shot) then
+			AimRules.stop(aim)
+		end
 		if shot.jammed then
 			play(ShotRules.JAM)
 		end

@@ -22,8 +22,9 @@
 	  ammo         a round by calibre: damage (half hearts at full range), pellets and their cone
 	               (degrees), muzzle velocity (blocks a second: for the drop and the zero only, a hit
 	               lands at once), the range of full damage, the share left at the longest flight
-	               (`falloffMin`), and how often a spent one can be picked up again (`recover`: the
-	               crossbow's bolts)
+	               (`falloffMin`), and whether a spent one can be picked up again (`recover`: the
+	               crossbow's bolts; how often is Config.Weapons.BoltRecover's alone, the one place
+	               that chance is tuned)
 	  magazines    detachable magazines: calibre, capacity and the guns they fit
 	  attachments  optics (`zoom`), muzzle devices (`noise` share, `spread` share, `suppressed`
 	               sound and no flash, `glow` false: tracers without glow) and the weapon light
@@ -108,7 +109,8 @@ export type AmmoData = {
 	velocity: number,
 	range: number,
 	falloffMin: number,
-	recover: number?,
+	-- A spent one may drop again where it stopped (the chance: Config.Weapons.BoltRecover).
+	recover: boolean?,
 }
 
 export type MagazineData = { calibre: string, capacity: number, fits: { string } }
@@ -411,7 +413,7 @@ WeaponList.ammo = {
 		velocity = 60,
 		range = 60,
 		falloffMin = 0.6,
-		recover = 0.7,
+		recover = true,
 	},
 } :: { [string]: AmmoData }
 

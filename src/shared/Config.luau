@@ -2078,7 +2078,8 @@ local Config = {
 		-- Tracers, and how long they show (seconds).
 		Tracers = true,
 		TracerSeconds = 0.06,
-		-- A crossbow bolt that hits a block drops as an item this often (one that hits a mob: half).
+		-- A crossbow bolt that hits a block drops as an item this often (one that hits a mob:
+		-- half): every round Weapons/WeaponList marks `recover` (a switch; this is its only chance).
 		BoltRecover = 0.7,
 		-- The melee rework (Shared/Weapons/Melee): seconds held for a heavy attack, its knockback
 		-- and food exhaustion (times a light hit's), the guard's front cone and the finisher's back

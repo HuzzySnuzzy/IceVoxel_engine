@@ -3418,6 +3418,11 @@ Minecraft 1.20.1's `AbstractContainerMenu.doClick` and `Inventory.add`:
 - drags that split a stack evenly or one per slot;
 - select, drop, the use of a placed block;
 - creative slots;
+- weapons (Shared/Weapons/Loading, Weapons below): a PICKUP click that combines (rounds onto a
+  magazine or a gun, a magazine or an attachment onto its gun, a right click taking a part out)
+  before Minecraft's rules, the `weapon` action (kind 8: reload, a round, clear a jam, the fire
+  mode, the light, detach) and `fire` (WeaponState.fire: a predicted shot, whose number travels
+  in the Fire message);
 - crafting (Minecraft's ResultSlot): the result is `Crafting.match` of the grid, recomputed after
   every action; taking it (click, shift-click repeatedly, number key, `Q`) takes the whole result
   and uses one item from every grid slot. Shift-click routing follows InventoryMenu,
@@ -6314,6 +6319,191 @@ medicine and the rising on a real world server).
   round at its end: Zombie director and noise) and Survival's (`moonTick`: a moon lived through
   from its rise to its set counts on the survivor record).
 
+## Weapons (`Weapons/`, `Net/WeaponSync`, server `Weapons/`, client `Interaction/Firearms`, `Interaction/MeleeInput`, `Player/AimRules`, `Player/AimCamera`, `Player/WeaponPoses`, `Rendering/ShotView`, `Rendering/ShotRules`, `Ui/WeaponHud`, `Ui/WeaponButtons`)
+
+Firearms in the manner of DayZ (magazines, chambers, attachments, condition and jams, raising and
+aiming) and a melee rework (light attacks on release, heavy attacks, a guard, knife finishers).
+The server is the authority over every shot (it traces each one itself: the client claims no hit),
+over how players hold their weapons and over how long a weapon action takes; the client predicts
+the inventory side of everything (a round fired, a magazine swapped) through the ordinary
+inventory prediction, and draws its own shot at once. Everything that decides is pure and lives in
+`Shared/Weapons` or in a pure module beside its glue (server `Weapons/FireRules`, client
+`Player/AimRules`, `Rendering/ShotRules`), so the Lune specs run it.
+
+### Shared (`Shared/Weapons/`, pure)
+
+- **The registry** (`init`, data in `WeaponList`): 11 firearms, 9 rounds, 5 magazines, 5
+  attachments and 9 melee weapons by item id, checked as it loads (every name an item, a firearm's
+  durability, class, modes, feed and calibre, a magazine's fits, an attachment's slot). A
+  `FirearmSpec` carries its feed (a detachable magazine item, or `internal` rounds: 0 for the
+  crossbow, which has only its chamber), fire modes with their rates, damage scale, spread,
+  recoil, sway, noise, zero distance, its reload, chamber and per-round ticks, whether it jams,
+  its mounts (or a built-in `scope`), whether it racks after a shot (`cycle`), its fire sound
+  (`item.firearm.<class>.fire`, the crossbow's `item.crossbow.fire`) and its `look` (where the
+  hand holds it, the muzzle, the sight line, the mounts; model pixels at the gun's `scale`). An
+  `AmmoSpec`'s `recover` is a switch: the chance a spent bolt is found again is
+  `Config.Weapons.BoltRecover` alone. `level` turns a durability fraction into the survival look's
+  condition (1 Pristine .. 5 Ruined).
+- **State** (`WeaponState`): what a gun or a magazine holds lives in its item data, twelve keys
+  (`ch` the chambered round, `jam`, `n` and `ammo` the magazine's rounds, `mag` / `magD` the
+  attached magazine and its wear, `mode`, `optic`, `muzzle` / `muzzleD`, `light`, `lit`); every
+  reader goes through `sane` (a clamped copy, so creative's odd data never fires more than the gun
+  holds). `canFire` refuses a Ruined gun ("ruined"), a jammed one ("jammed") and an empty chamber
+  ("empty", not in creative); `fire` empties the chamber, wears the gun, its magazine and muzzle
+  device by 1, feeds the next round and, when the server rolled one, jams that round (creative
+  hands the stack back unchanged). `detail` is HANDS' line ("12 / 15 +1 AUTO", "JAMMED"),
+  `shownCount` the icons' count box, `lookKey` the `Types.HELD_LOOK_ATTRIBUTE` other clients dress
+  a held gun from.
+- **Handling**: the numbers both sides use. Cadence (`shotTicks`: 1200 / rpm; `ready` with a
+  tick of slack, `after` with two of credit), spread by stance and muzzle device, recoil
+  (deterministic from a seed, the player's UserId, and the shot counter), sway and holding
+  breath, jam chances by condition, noise with suppressors (a Ruined device muffles nothing),
+  `reloadTicks`, zoom; and `actionLock`, the one rule of how long a weapon action locks the gun,
+  read off what it did to the held stack (server `Weapons/WeaponActions` locks by it, client
+  `Interaction/Firearms` times its progress and holds its trigger by it):
+
+  | Op (`Loading.Op`) | Did | Kind | Ticks |
+  | --- | --- | --- | --- |
+  | 1 reload, detachable feed | a magazine went in (another, or the same fuller or worn otherwise) | `reload` | `reloadTicks`, + `chamberTicks` when it chambered |
+  | 1 reload, detachable feed | only chambered (no better magazine) | `chamber` | `chamberTicks` |
+  | 1 reload, internal feed; 2 a round | a round went in | `round` | `roundTicks` |
+  | 3 clear a jam | the jam went | `unjam` | `Config.Weapons.UnjamTicks` |
+  | 4 fire mode | the mode changed | `mode` | `Config.Weapons.ModeTicks` |
+  | anything else (5 the light, 6 detach, a refused op, another item) | | nil | 0 |
+
+- **Ballistics**: a shot's flight, hitscan along a gravity arc lifted by the gun's zero, in
+  `SegmentSeconds` chords through `World/VoxelRaycast` on `Blocks/Shapes.sight`'s collision boxes
+  (no wall stepped over at any speed; an unloaded cell ends the flight), glass shattered through
+  (at most `MAX_PANES` 8, `GlassShare` of the damage kept each) when the shooter may build, leaves
+  passed, mob and player boxes with their heads (the first box entered counts; beside the head is
+  the head's), a mob's box where the shooter's client last saw it (lag compensation), damage with
+  falloff past the round's range and head factors, pellets in their cone, and the bounds of a
+  flight (one `Mobs.targets` call a shot).
+- **Loading**: DayZ's combine through `Inventory/Menu`'s PICKUP hook (`click`, before
+  Minecraft's rules) and the weapon actions (`apply`, Menu's `weapon` action): reload, a round by
+  hand, clear a jam, the fire mode, the light, detach a part; `combines` and `kind` give the
+  screens' outlines and sounds. Deterministic, so the prediction and the server agree action by
+  action.
+- **Melee**: the melee rework's numbers (`Config.Weapons.Melee`): `heavy` (a heavy flag counts
+  only with a listed weapon), `heavyHold`, `heavyDamage`, `knockback`, `exhaustion`,
+  `guardShare` (the weapon's share from a 120 degree front cone) and `finisher`.
+- **Describe**: a weapon's tooltip lines (`Items/Tooltip` requires it): the stack's state under
+  its name and the item's stat block.
+
+### The protocol (`Net/WeaponSync`, `Net/Protocol`)
+
+| Direction | Message | Content |
+| --- | --- | --- |
+| client → server | `Fire` (27) | u32 seq (the predicted inventory `fire` action's number), u16 shot counter (wrapping), u8 hotbar slot, u16 item, u8 flags (sights, moving, crouching, holding breath), f64 eyes, f32 unit aim: 46 bytes |
+| client → server | `Weapon` (28) | u8 op: 1 raise, 2 lower, 3 guard, 4 unguard |
+| client → server | `Attack` (18) | u32 mob id, then u8 flags (bit 0: a heavy attack) when heavy: 4 or 5 bytes |
+| client → server | `Inventory`, action kind 8 `weapon` | u32 seq, u8 8, u8 op (1..6), i16 slot (-1: the held gun), u8 part (0..6): 9 bytes |
+| server → client | `Shots` (33) | u8 count, then each shot: f64 shooter (UserId), u16 item, u16 shot counter, u8 flags (suppressed, jammed after it, refused), f32 origin, u8 pellets, each f32 end and u8 hit (`WeaponSync.Hit`: none, block, glass, mob, mob head, player, player head): 26 + 13 a pellet bytes |
+
+The inventory's `fire` action (`Types`) is never sent on its own: the Fire message carries its
+seq, and the server acknowledges every Fire once, whatever becomes of it, so the predicted round
+never sticks. A refused shot (but one over the rate, dropped silently) comes back to its shooter
+alone as a refused record with no pellets, its jam flag set when the reason is "jammed".
+
+### On the server (`server/Weapons/`)
+
+- **`FireRules`** (pure): the checks in order, the first failing one the reason: rate (silent),
+  disabled, spectator, dead, slot, item, weapon, raise (`RaiseTicks`, a tick of slack), busy (a
+  weapon action's lock), cadence, origin (the claimed eyes within `OriginSlack` of the server's,
+  no block between, a unit aim), ruined, jammed, empty; the flight's numbers, targets (mobs with
+  their helmets and last-seen boxes, players at their pose-aware eyes), damage summed per target
+  (a head's share apart: through no armour on a mob, the helmet alone on a player), knockback, the
+  impact's noise, the Shots record (each pellet's last impact: never glass, which a pellet always
+  passes or stops at as a block), who hears it, and bolt recovery.
+- **`Firing`**: a Fire message played out on the world it is handed: acknowledged, checked, the
+  jam rolled (`Handling.jamChance`; never in creative), the round fired (`Inventories.fire`),
+  every pellet traced, mobs hurt (`Mobs.weaponDamage`) and players (`Characters.weaponHurt`:
+  its own immunity, armour, Bleeding at `BleedChance`; only with `Config.Weapons.PvP`), glass
+  shattered, the shot's noise (`Handling.noise`) and its impact's heard by the infected
+  (`Apocalypse/NoiseBus`), a bolt dropped again, and the records sent once a frame to everyone
+  within `ShotBroadcast`. Shot sounds are the clients' alone.
+- **`WeaponActions`**: Weapon messages (at most 20 a second) set the aim attribute
+  `Types.AIM_ATTRIBUTE` ("raised", "guard"), dropped when the hand or slot changes, the player
+  dies or becomes a spectator, or a character comes or goes; the inventory's weapon actions pass
+  its `allow` (ops 1..4 refused while a lock runs) and `applied` (`effect`: the lock of
+  `Handling.actionLock`, and the predicted sounds for the others: reload, chamber, load_round).
+- **`init`**: the glue that hands them the real modules (`Players/Inventories` with
+  `setWeaponHooks`, `Players/Characters`, `Mobs/Mobs`, `Apocalypse/NoiseBus`, `Entities/Entities`,
+  the world), every Heartbeat the aims' `tick` and the Shots' `flush`.
+- Elsewhere: `Mobs/Mobs`' Attack handler gates the client's heavy flag with `Melee.heavy` (with
+  the held item) before building MobWorld's Attacker and before the food it costs, so a sword
+  never gets a heavy hit's knockback; MobWorld lands heavy hits and finishers; a zombie's hit on a
+  guarding player is cut by `Melee.guardShare` (`item.melee.block`). `Players/Inventories` holds
+  the weapon hooks, sets `HELD_LOOK_ATTRIBUTE` with each snapshot, and never wears a firearm or a
+  magazine as a tool. `Generation/ScavengeLoot` rolls worn guns (an entry's fifth field) into
+  police stations, bunker armories and houses; `Entities/MobList` gives police and soldier zombies
+  rounds and magazines.
+
+### On the client
+
+- **`Interaction/Firearms`** reads the input and runs `Player/AimRules`' state machine every
+  frame (raise with the use button, the sights in first person or with V, lowered by anything that
+  blocks), tells the server raise and lower, fires on the attack button once `AimRules.settled`
+  (RaiseTicks and a tick of margin) at the cadence of `Handling`: each shot aims from the hull's
+  eyes at what the camera's centre ray hits, is predicted (`ClientInventory.fire`), sent (Fire)
+  and drawn at once (`ShotView.ownShot`), and kicks the camera (`Player/AimCamera`) and the
+  first-person model (`Player/HeldItems.kick`). R, F and L are inventory weapon ops (predicted
+  and sent); `Handling.actionLock` of the prediction's before and after starts the same lock the
+  server starts. The server's refused or jammed record of a shot of the press held now
+  (`AimRules.thisPress`: shot counters, wrapping) stops automatic fire; a jam clicks.
+- **`Player/AimRules`** (pure): posture, trigger and cadence, timed actions and their progress,
+  round-by-round loading, speed (`setAimSlow`'s factor: raised, sights, a melee guard), zoom and
+  field of view, recoil and its recovery, the model's kick, the sway's growing in, the
+  first-person hip pose, the third-person arms and gun, the melee guard's and wind-up's poses
+  (`meleeArms`, `meleeView`), the aim's ray tests.
+- **`Player/AimCamera`** works on Roblox's camera scripts: the shoulder offset
+  (`MovementController.setShoulder`), the mouse locked to the centre at Camera + 1, zoom
+  (`setAimZoom`) and the turn's share (`MouseLook.setZoomSensitivity`), the sway after the view
+  bob, recoil through Roblox's camera input (`MouseLook.kick`, a passing turn without the hook),
+  third-person sights from the eyes, and the slowness (`MovementController.setAimSlow`, set only
+  when the posture or a melee guard changes).
+- **`Player/WeaponPoses`** turns every character's shoulders (Motor6D C0) for a gun lowered or
+  raised, a melee guard and a heavy wind-up; **`Player/HeldItems`** holds dressed guns
+  (`Rendering/ItemModels.buildFirearm`) at the posed hand, draws the first-person gun across the
+  whole screen at the world camera's field of view (eased between the hip and the sights), lays a
+  guarding melee weapon across the view and draws it back while a heavy attack winds up
+  (`MeleeInput.guarding`, `charge`), and gives the muzzle's place (`muzzle`). Other players'
+  postures come from `AIM_ATTRIBUTE`, their guns' looks from `HELD_LOOK_ATTRIBUTE`.
+- **`Rendering/ShotView`** draws every shot near from pools (flashes, tracers, dust and blood
+  impacts) and plays the fire sounds by **`Rendering/ShotRules`** (pure): near, far, suppressed,
+  racks, impacts by hit kind. Glass and "none" leave nothing, so nothing waits for a glass impact;
+  the player's own record adds only its impacts and hands a stop to Firearms (`onOwnShot`).
+- **`Ui/WeaponHud`**: the shoulder dot, a red dot, the scope overlay, and the word and bar over and
+  under the held item's box (`Ui/Hud.weaponAnchor`); **`Ui/WeaponButtons`**: the touch AIM, FIRE
+  and RELOAD buttons.
+- **`Interaction/MeleeInput`**: a listed melee weapon's press lands on release (heavy after
+  `HeavyHold`), the guard's Weapon ops, `guarding` and `charge` for the poses and the slowness.
+- **The inventory**: `Ui/InventoryScreen`'s HANDS chips (op 6, detach), `Ui/ItemIcon`'s rounds in
+  the count box, `Ui/Screens.feedbackAt` asking `Loading.combines` first, and the load, attach and
+  unload sounds played from the screen.
+
+### Rules to keep
+
+- **The require-cycle rule.** `Interaction/BlockInteraction` requires `Firearms` and `MeleeInput`
+  and routes the buttons to them (a firearm never mines; the use button raises or guards unless
+  on a block with a menu and not sneaking), so nothing reachable from either may require
+  BlockInteraction: Firearms hides Minecraft's crosshair through `hidesCrosshair`, which
+  BlockInteraction polls every frame, never through BlockInteraction's setter. `Player/HeldItems`
+  and Firearms require `MeleeInput` (it requires neither). `tests/spec/WeaponClient` walks
+  everything Firearms reaches.
+- **One rule a side may not keep alone.** Weapon action locks are `Handling.actionLock`'s on both
+  sides (the WeaponClient spec runs every op through `Inventory/Menu` against
+  `WeaponActions.effect`, and checks Firearms keeps no time of its own); cadence, recoil, spread
+  and jams are `Handling`'s; loading is `Loading`'s.
+- **Sounds.** A class's shot plays through its FirearmSpec `sound` (`ShotRules.fireSound`), every
+  other weapon sound by its literal name (ShotRules, MeleeInput, the inventory screen);
+  `item.firearm.reload`, `load_round` and `chamber` are predicted (the acting client plays its
+  own, the server plays them for the others); `item.melee.block` is the server's.
+  `tests/spec/SoundsClient` checks each is played.
+- **Specs**: `Weapons` (the registry, state, codecs, hooks), `WeaponHandling`, `Ballistics`,
+  `WeaponFiring` (the server's rules and glue on fakes, the exploits), `WeaponLoading`, `Melee`,
+  `Tooltips`, `WeaponClient`, `SoundsClient`.
+
 ## Sounds (`Sounds/`, server `Audio/Sounds`, client `Audio/SoundPlayer`)
 
 Sounds are Minecraft's sound events, played with files that ship with every Roblox client.
@@ -7678,7 +7868,9 @@ live edits after it must arrive in the order they were sent.
 | client → server | `SaveSettings`  | the chosen settings of the client's device profile (below), after changes and when the menu closes |
 | client → server | `Exertion`      | movement that costs thirst and food since the last report: cm sprinted and in water, jumps, sprint jumps, sprinting now (7 bytes, about once a second) |
 | client → server | `Drink`         | u8 action: start / finish / cancel holding a drink; hand (a sip) / fill (a bottle or canteen) at a water source's cell |
-| client → server | `Attack`        | u32 mob id: a left click on a mob (4 bytes) |
+| client → server | `Attack`        | u32 mob id: a left click on a mob (4 bytes); then u8 flags (bit 0: the melee rework's heavy attack, 5 bytes) |
+| client → server | `Fire`          | a shot (Net/WeaponSync: the predicted `fire` action's number, the shot counter, slot, item, stance flags, eyes, aim: 46 bytes; see Weapons) |
+| client → server | `Weapon`        | u8 op: raise, lower, guard, unguard (Net/WeaponSync) |
 | client → server | `Eat`           | u8 action: start / finish / cancel holding a food |
 | client → server | `UnlockSkill`   | u8: a skill tree node's place in Progression/Skills (the server checks the Age, prerequisites and points) |
 | client → server | `CreateWorld`   | the Create World screen: u8 game mode (0..2), u8 difficulty (0..3), u8 flags (allow commands, structures), then name, world type, encoded options and seed text (u16 length + UTF-8 each, at most 128 / 64 / 1024 / 128 bytes) |
@@ -7709,6 +7901,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `CreateWorldResult` | u8 ok, u16 length + text: the answer to this player's CreateWorld |
 | server → client | `WorldList`     | u8 saving works, u16 length + text (how the last WorldAction went), u16 count (at most 200), then each saved world: id, name, type and seed text (u16 length + text each), u8 game mode, f64 last played, f64 bytes |
 | server → client | `WorldSave`     | u8 op: saving; saved (u8 flags ok / sizes / warn, then the sizes for operators only: f64 bytes, max, largest key, key limit; text); loading (u16 keys read, u16 of, text); state (u8 on / off / unavailable / session only, text why) |
+| server → client | `Shots`         | the shots near the player once a frame (Net/WeaponSync: shooter, item, shot counter, flags suppressed / jammed / refused, origin, each pellet's end and what it hit; see Weapons) |
 | server → client | `Lightning`     | a strike within `Weather.Lightning.Distance` (4096 blocks): f32 x, y, z (the struck cell's bottom centre), u32 seed (the bolt's shape), u8 flashes (1-3): 17 bytes |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
@@ -8054,6 +8247,11 @@ Saving worlds).
   `Menu.allows(action, mode)` before `Menu.apply`, and pass the instabuild ability as `creative`.
 - Game modes are asked for what they allow (`GameMode.mayBuild(mode)`, `instabuildOf(player)`...),
   never compared (`mode == GameMode.CREATIVE`), the way Minecraft reads a player's Abilities.
+- Weapons: nothing that `Interaction/Firearms` or `Interaction/MeleeInput` reaches may require
+  `Interaction/BlockInteraction` (it requires them); what both sides time or work out (cadence,
+  recoil, spread, a weapon action's lock: `Shared/Weapons/Handling`) and load
+  (`Shared/Weapons/Loading`) stays in one pure function each, never a copy per side; every weapon
+  stack is read through `WeaponState.sane`. See Weapons.
 - Sides are Minecraft's Direction ordinal everywhere in the pipes (0 Down .. 5 East,
   `Transmitters.SIDES`); transmitter modes, colours, network buffers and tank contents live in
   memory, like chests.

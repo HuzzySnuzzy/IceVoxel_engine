@@ -158,19 +158,14 @@ local SIGHTS_FRAME = CFrame.new(0, 0, -AimRules.SIGHTS_DEPTH) * AHEAD
 -- predicted inventory changes.
 local localKey = ""
 
---[[
-	The local player's melee guard and heavy wind-up (0..1): Interaction/MeleeInput.guarding and
-	.charge (read through `any`: the module's first version had neither, and false / 0 stand in).
-]]
+-- The local player's melee guard and heavy wind-up (0..1): Interaction/MeleeInput.guarding and
+-- .charge.
 local function localGuard(): boolean
-	local read = (MeleeInput :: any).guarding
-	return type(read) == "function" and read() == true
+	return MeleeInput.guarding()
 end
 
 local function localCharge(): number
-	local read = (MeleeInput :: any).charge
-	local value = if type(read) == "function" then read() else 0
-	return if type(value) == "number" then math.clamp(value, 0, 1) else 0
+	return math.clamp(MeleeInput.charge(), 0, 1)
 end
 
 function HeldItems.start()

@@ -948,7 +948,7 @@ return function(t, shared, require, server)
 		local s = settings()
 		local bolt = Weapons.ammo(I.CrossbowBolt) :: Weapons.AmmoSpec
 		local nine = Weapons.ammo(I.Rounds9mm) :: Weapons.AmmoSpec
-		t.ok(bolt.recover > 0 and nine.recover == 0, "only bolts are recovered")
+		t.ok(bolt.recover and not nine.recover, "only bolts are recovered")
 		local block = { kind = "block", x = 10, y = 5, z = 0, dx = 1, dy = 0, dz = 0 } :: any
 		local mob = { kind = "mob", x = 10, y = 5, z = 0, dx = 1, dy = 0, dz = 0 } :: any
 		local none = { kind = "none", x = 10, y = 5, z = 0 } :: any

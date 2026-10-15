@@ -284,7 +284,7 @@ function Firing.fly(
 	if ix ~= nil then
 		env.noise(ix, iy, iz, s.ImpactNoise)
 	end
-	if ammo.recover > 0 then
+	if ammo.recover then
 		for _, impact in tally.finals do
 			local x, y, z = FireRules.recovery(ammo, impact, env.random(), s)
 			if x ~= nil then

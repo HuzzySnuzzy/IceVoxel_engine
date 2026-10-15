@@ -1,18 +1,20 @@
 --[[
 	The client's firearms in the manner of DayZ, through their pure rules: Player/AimRules (the
-	raised / sights state machine, the trigger and its cadence, timed actions and their locks,
-	internal magazines' round-by-round loading, speed, zoom and field of view, the crosshair and
-	the dot, recoil kicks and their recovery, the model's kick, the sway's growing in, the first-
-	person hip pose aimed at the screen's centre, the third-person arms and gun, the aim's ray
-	tests) and Rendering/ShotRules (near, far and suppressed fire sounds, flashes, tracer glow,
-	impacts by hit, pumps' and bolts' racks, own shots against others', look keys); every gun's
-	look block against its model; and the require-cycle rule (nothing reachable from
-	Interaction/Firearms requires Interaction/BlockInteraction, which requires it).
+	raised / sights state machine, the trigger and its cadence, timed actions and their locks (the
+	server's, Shared/Weapons/Handling.actionLock: every op through Inventory/Menu against server
+	Weapons/WeaponActions.effect), internal magazines' round-by-round loading, speed, zoom and
+	field of view, the crosshair and the dot, recoil kicks and their recovery, the model's kick,
+	the sway's growing in, the first-person hip pose aimed at the screen's centre, the third-person
+	arms and gun, the aim's ray tests, the press a refused shot stops) and Rendering/ShotRules
+	(near, far and suppressed fire sounds, flashes, tracer glow, impacts by hit, pumps' and bolts'
+	racks, own shots against others', the server's own records through the message's codec, look
+	keys); every gun's look block against its model; and the require-cycle rule (nothing reachable
+	from Interaction/Firearms requires Interaction/BlockInteraction, which requires it).
 ]]
 
 local fs = require("@lune/fs")
 
-return function(t, shared, require, _server, client)
+return function(t, shared, require, server, client)
 	local Config = require(shared.Config)
 	local Handling = require(shared.Weapons.Handling)
 	local Items = require(shared.Items)
@@ -158,6 +160,12 @@ return function(t, shared, require, _server, client)
 		t.eq(AimRules.pull(aim, now + 3, true, true, 2, true, nil), nil, "stopped")
 		AimRules.pull(aim, now + 3.1, false, true, 2, true, nil)
 		t.eq(AimRules.pull(aim, now + 3.2, true, true, 2, true, nil), "fire", "pressed again")
+		-- Only the record of a shot of the press held now stops it (shot counters wrap).
+		t.ok(not AimRules.thisPress(nil, 5), "no shot this press: a late record of another")
+		t.ok(AimRules.thisPress(10, 10) and AimRules.thisPress(10, 14), "this press's shots")
+		t.ok(not AimRules.thisPress(10, 9), "the press before's last shot, arriving late")
+		t.ok(AimRules.thisPress(65534, 2), "across the wrap")
+		t.ok(not AimRules.thisPress(2, 65534), "before the wrap")
 		-- A timed action locks the trigger.
 		AimRules.startBusy(aim, "reload", now + 4, 40)
 		t.ok(AimRules.busy(aim, now + 4.5), "busy")
@@ -170,15 +178,73 @@ return function(t, shared, require, _server, client)
 
 	--[[ Timed actions ]]
 
-	t.test("weapon client: locks as the server times them, progress and the closing once", function()
+	t.test("weapon client: every weapon op locks the gun as long as the server locks it", function()
+		local Menu = require(shared.Inventory.Menu)
+		local Types = require(shared.Inventory.Types)
+		local WeaponActions = require(server.Weapons.WeaponActions)
 		local ar, pump, bolt = spec("AssaultRifle"), spec("PumpShotgun"), spec("BoltActionRifle")
-		t.eq(AimRules.lockTicks(ar, 1, false), 50, "a magazine swap")
-		t.eq(AimRules.lockTicks(ar, 1, true), 62, "and chambering")
-		t.eq(AimRules.lockTicks(pump, 1, false), 14, "an internal magazine's reload is a round")
-		t.eq(AimRules.lockTicks(bolt, 2, false), 16, "a round by hand")
-		t.eq(AimRules.lockTicks(ar, 3, false), W.UnjamTicks, "clearing a jam")
-		t.eq(AimRules.lockTicks(ar, 4, false), W.ModeTicks, "the fire mode")
-		t.eq(AimRules.lockTicks(ar, 5, false), 0, "the light takes no time")
+		local mag, r556 = I.RifleMagazine, I.Rounds556
+		local function full(n: number): Items.Stack
+			return stack("RifleMagazine", { n = n, ammo = r556 })
+		end
+		-- Op `op` on `held` (hotbar slot 1) with `carried` in the inventory, through Inventory/Menu
+		-- as the prediction and the server apply it: the client's lock (Interaction/Firearms:
+		-- Handling.actionLock) and the server's (Weapons/WeaponActions.effect).
+		local function op(held: Items.Stack, carried: { Items.Stack }, number: number): (string?, number, number)
+			local window = Types.newWindow(Types.newInventory())
+			window.inventory.slots[1] = held
+			for i, item in carried do
+				window.inventory.slots[9 + i] = item
+			end
+			local before = window.inventory.slots[1]
+			Menu.apply(window, { kind = "weapon", op = number, slot = -1, part = 0 }, false)
+			local after = window.inventory.slots[1]
+			local kind, ticks = Handling.actionLock(number, before, after)
+			local server = WeaponActions.effect({ kind = "weapon", op = number, slot = -1, part = 0 }, before, after, W)
+			return kind, ticks, server
+		end
+		local function expect(label: string, kind: string?, ticks: number, got: string?, client: number, server: number)
+			t.eq(got, kind, `{label}: what it did`)
+			t.eq(client, ticks, `{label}: the client's lock`)
+			t.eq(server, ticks, `{label}: the server's lock`)
+		end
+		local k, c, sv = op(stack("AssaultRifle"), { full(30) }, 1)
+		expect("a magazine in, a round chambered", "reload", ar.reloadTicks + ar.chamberTicks, k, c, sv)
+		t.eq(ar.reloadTicks + ar.chamberTicks, 62)
+		k, c, sv = op(stack("AssaultRifle", { mag = mag, n = 9, ammo = r556, ch = r556 }), { full(30) }, 1)
+		expect("a fuller magazine, chambered already", "reload", ar.reloadTicks, k, c, sv)
+		k, c, sv = op(stack("AssaultRifle", { mag = mag, n = 5, ammo = r556 }), {}, 1)
+		expect("no better magazine, only chambering", "chamber", ar.chamberTicks, k, c, sv)
+		t.ok(ar.chamberTicks < ar.reloadTicks, "chambering alone is quicker than a swap")
+		k, c, sv = op(stack("AssaultRifle", { mag = mag, n = 29, ammo = r556, ch = r556 }), { full(20) }, 1)
+		expect("nothing better: nothing", nil, 0, k, c, sv)
+		k, c, sv = op(stack("PumpShotgun"), { stack("Buckshot") }, 1)
+		expect("R on an internal magazine: a round", "round", pump.roundTicks, k, c, sv)
+		k, c, sv = op(stack("BoltActionRifle"), { stack("Rounds762") }, 2)
+		expect("a round by hand", "round", bolt.roundTicks, k, c, sv)
+		k, c, sv = op(stack("BoltActionRifle"), {}, 2)
+		expect("no round to load", nil, 0, k, c, sv)
+		k, c, sv = op(stack("AssaultRifle", { mag = mag, n = 5, ammo = r556, ch = r556, jam = true }), {}, 3)
+		expect("a jam cleared", "unjam", W.UnjamTicks, k, c, sv)
+		k, c, sv = op(stack("AssaultRifle", { mag = mag, n = 5, ammo = r556, ch = r556 }), {}, 3)
+		expect("nothing stuck", nil, 0, k, c, sv)
+		k, c, sv = op(stack("Smg"), {}, 4)
+		expect("the fire mode", "mode", W.ModeTicks, k, c, sv)
+		k, c, sv = op(stack("Pistol"), {}, 4)
+		expect("one fire mode", nil, 0, k, c, sv)
+		k, c, sv = op(stack("Pistol", { light = I.WeaponFlashlight }), {}, 5)
+		expect("the light takes no time", nil, 0, k, c, sv)
+		-- One rule: both sides call it, neither keeps a rule of its own.
+		local firearms = fs.readFile("src/client/Interaction/Firearms.luau")
+		local actions = fs.readFile("src/server/Weapons/WeaponActions.luau")
+		t.ok(string.find(firearms, "Handling.actionLock(", 1, true) ~= nil, "the client times by it")
+		t.ok(string.find(actions, "Handling.actionLock(", 1, true) ~= nil, "the server locks by it")
+		for _, own in { "Handling.reloadTicks(", ".roundTicks", ".chamberTicks", ".UnjamTicks", ".ModeTicks" } do
+			t.eq(string.find(firearms, own, 1, true), nil, `no time of the client's own: {own}`)
+		end
+	end)
+
+	t.test("weapon client: a timed action's progress and the closing once", function()
 		local aim = AimRules.new()
 		t.eq(AimRules.progress(aim, 0), nil, "nothing running")
 		AimRules.startBusy(aim, "reload", 10, 50)
@@ -195,17 +261,7 @@ return function(t, shared, require, _server, client)
 		t.ok(not AimRules.busy(aim, 20), "no ticks: nothing starts")
 	end)
 
-	t.test("weapon client: what a weapon op did, and when an internal magazine wants a round", function()
-		local mag, rounds = I.RifleMagazine, I.Rounds556
-		local empty = stack("AssaultRifle")
-		local loaded = stack("AssaultRifle", { mag = mag, n = 30, ammo = rounds })
-		local changed, chambered = AimRules.outcome(empty, loaded)
-		t.ok(changed and not chambered, "a magazine in: changed, nothing chambered")
-		changed, chambered =
-			AimRules.outcome(loaded, stack("AssaultRifle", { mag = mag, n = 29, ammo = rounds, ch = rounds }))
-		t.ok(changed and chambered, "chambered")
-		changed = AimRules.outcome(loaded, stack("AssaultRifle", { mag = mag, n = 30, ammo = rounds }))
-		t.ok(not changed, "the same")
+	t.test("weapon client: when an internal magazine wants a round", function()
 		local shells = I.Buckshot
 		t.ok(AimRules.wantsRound(stack("PumpShotgun")), "an empty pump wants a shell")
 		t.ok(AimRules.wantsRound(stack("PumpShotgun", { n = 4, ammo = shells, ch = shells })), "5 of 6")
@@ -478,6 +534,50 @@ return function(t, shared, require, _server, client)
 		ShotRules.effects(shot(them), me, W.FarSound + 50, true, out)
 		t.eq(out.sound, ShotRules.FAR, "far away")
 		t.ok(not out.stop, "another's never stops this player's fire")
+		-- The records the server makes (Weapons/FireRules), through the message's codec: a refusal
+		-- (the jam flag on "jammed"), and pellets ending as the server ends them (never in glass:
+		-- a pane is shot through, and nothing waits for one).
+		local FireRules = require(server.Weapons.FireRules)
+		local fire: WeaponSync.Fire = {
+			seq = 1,
+			shot = 3,
+			slot = 1,
+			item = I.AssaultRifle,
+			sights = true,
+			moving = false,
+			crouching = false,
+			breath = false,
+			ox = 0.5,
+			oy = 65.6,
+			oz = 0.5,
+			dx = 1,
+			dy = 0,
+			dz = 0,
+		}
+		local function through(record: WeaponSync.Shot): WeaponSync.Shot
+			local decoded = WeaponSync.decodeShots(WeaponSync.encodeShots({ record })) :: { WeaponSync.Shot }
+			return decoded[1]
+		end
+		ShotRules.effects(through(FireRules.refused(me, fire, WeaponState.JAMMED)), me, 0, true, out)
+		t.ok(out.stop and out.jammed and not out.impacts, "refused as jammed: stops and clicks")
+		ShotRules.effects(through(FireRules.refused(me, fire, "busy")), me, 0, true, out)
+		t.ok(out.stop and not out.jammed and not out.impacts, "refused otherwise: stops")
+		ShotRules.effects(through(FireRules.refused(me, fire, "busy")), them, 0, true, out)
+		t.ok(not out.stop and not out.flash and out.sound == nil, "another's refusal: nothing")
+		local finals = {
+			{ kind = "block", x = 9, y = 65, z = 0.5, block = 1 },
+			{ kind = "mob", x = 6, y = 65, z = 0.5, head = true },
+			{ kind = "none", x = 256, y = 60, z = 0.5 },
+		}
+		local record = through(FireRules.record(them, fire, false, false, finals :: any))
+		local drawn = 0
+		for _, pellet in record.pellets do
+			t.ok(pellet.hit ~= WeaponSync.Hit.Glass, "no pellet ends in glass")
+			if ShotRules.impact(pellet.hit) then
+				drawn += 1
+			end
+		end
+		t.eq(drawn, 2, "dust and blood; the flight into the air leaves nothing")
 	end)
 
 	t.test("weapon client: look keys read back into their parts", function()

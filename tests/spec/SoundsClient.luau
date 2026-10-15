@@ -10,7 +10,9 @@ local fs = require("@lune/fs")
 return function(t, shared, require, _server, client)
 	local Blocks = require(shared.Blocks)
 	local Sounds = require(shared.Sounds)
+	local Weapons = require(shared.Weapons)
 	local SoundRules = require(client.Audio.SoundRules)
+	local ShotRules = require(client.Rendering.ShotRules)
 
 	local B = Blocks.id
 	local SETTINGS = { Volume = 1, Sources = { blocks = 1, players = 1, ambient = 1, ui = 1 } }
@@ -453,38 +455,29 @@ return function(t, shared, require, _server, client)
 		-- that plays them (the double jump: Player/EquipmentLooks.airJump; the cast and mana full:
 		-- Interaction/Casting, Player/ManaState), and so did the zombie apocalypse's (the zombies'
 		-- groans: Entities/ZombieVoices; the medical items' sounds: Interaction/Eating; the blood
-		-- moon's rise: Ui/SurvivorHud). It stays for the next client sound added ahead of its player,
-		-- which comes off with the code that plays it.
+		-- moon's rise: Ui/SurvivorHud) and the weapons' (shots, impacts, reloading, the melee
+		-- swings: Interaction/Firearms, Rendering/ShotRules and ShotView, Interaction/MeleeInput,
+		-- Ui/InventoryScreen). It stays for the next client sound added ahead of its player, which
+		-- comes off with the code that plays it.
 		local pending: { [string]: boolean } = {}
-		-- The weapons' client sounds (Shared/Weapons: shots, impacts, reloading, the melee swings),
-		-- whose players the weapons' client and inventory builders land after FOUNDATION: played
-		-- or not, they pass until the integration takes this tolerance off (then each is checked as
-		-- every other; a class's shot is played through its FirearmSpec `sound`).
-		local building: { [string]: boolean } = {}
-		for _, sound in Sounds.events do
-			local name = sound.name
-			if
-				sound.side ~= "server"
-				and (
-					string.find(name, "^item%.firearm%.") ~= nil
-					or string.find(name, "^item%.crossbow%.") ~= nil
-					or string.find(name, "^entity%.bullet%.") ~= nil
-					or string.find(name, "^item%.melee%.") ~= nil
-				)
-			then
-				building[name] = true
-			end
+		-- A firearm's shot is played by its class through its FirearmSpec `sound` (Rendering/
+		-- ShotRules.fireSound, called by Interaction/Firearms for the player's own shot and by
+		-- Rendering/ShotView for others'), never as a literal; every other weapon sound is one
+		-- (ShotRules' names, Interaction/MeleeInput's swings, Ui/InventoryScreen's load, attach
+		-- and unload).
+		local fired: { [string]: Weapons.FirearmSpec } = {}
+		for _, item in Weapons.FIREARMS do
+			local spec = Weapons.firearm(item) :: Weapons.FirearmSpec
+			fired[spec.sound] = spec
 		end
-		local built = 0
-		for _ in building do
-			built += 1
-		end
-		t.eq(built, 21, "the weapons' 21 client sounds (the blocked hit is the server's)")
+		t.ok(next(fired) ~= nil, "the guns' shots")
 		for _, sound in Sounds.events do
 			local quoted = `"{sound.name}"`
-			if building[sound.name] then
-				-- (Being built: see above.)
-				continue
+			local gun = fired[sound.name]
+			if gun and sound.side ~= "server" then
+				t.eq(ShotRules.fireSound(gun, false, 0), sound.name, `{sound.name}: its gun's shot`)
+				-- (Called, not only defined: Firearms' own shot, ShotRules.effects for ShotView's.)
+				t.ok(uses("[=(,]%s*ShotRules%.fireSound%("), `the client plays {sound.name} (ShotRules.fireSound)`)
 			elseif pending[sound.name] then
 				t.ok(not string.find(source, quoted, 1, true), `{sound.name} is played now: take it off the list`)
 			elseif sound.side == "server" then

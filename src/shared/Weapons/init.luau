@@ -89,7 +89,9 @@ export type AmmoSpec = {
 	velocity: number,
 	range: number,
 	falloffMin: number,
-	recover: number,
+	-- A spent one may drop again (server Weapons/FireRules.recovery; the chance:
+	-- Config.Weapons.BoltRecover).
+	recover: boolean,
 }
 
 export type MagazineSpec = {
@@ -204,7 +206,7 @@ for name, data in WeaponList.ammo do
 	assert(positive(data.damage) and positive(data.velocity) and positive(data.range), `Weapons: {name}'s numbers`)
 	assert(wholeAtLeast(data.pellets, 1) and data.pellets <= 12, `Weapons: {name}'s pellets must be 1..12`)
 	assert(data.cone >= 0 and data.falloffMin >= 0 and data.falloffMin <= 1, `Weapons: {name}'s cone or falloff`)
-	assert((data.recover or 0) >= 0 and (data.recover or 0) <= 1, `Weapons: {name}'s recovery must be 0..1`)
+	assert(data.recover == nil or type(data.recover) == "boolean", `Weapons: {name}'s recover is a switch`)
 	assert(Items.maxStack(item) > 1, `Weapons: ammunition {name} must stack`)
 	ammo[item] = table.freeze({
 		item = item,
@@ -216,7 +218,7 @@ for name, data in WeaponList.ammo do
 		velocity = data.velocity,
 		range = data.range,
 		falloffMin = data.falloffMin,
-		recover = data.recover or 0,
+		recover = data.recover == true,
 	})
 	local list = ammoByCalibre[data.calibre]
 	if list == nil then

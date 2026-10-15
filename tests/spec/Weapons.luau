@@ -305,8 +305,8 @@ return function(t, shared, require, server, client)
 		local buckshot = Weapons.ammo(I.Buckshot) :: Weapons.AmmoSpec
 		t.eq(buckshot.pellets, 8)
 		t.eq(buckshot.cone, 3.5)
-		t.eq((Weapons.ammo(I.CrossbowBolt) :: Weapons.AmmoSpec).recover, 0.7)
-		t.eq((Weapons.ammo(I.Rounds9mm) :: Weapons.AmmoSpec).recover, 0)
+		t.eq((Weapons.ammo(I.CrossbowBolt) :: Weapons.AmmoSpec).recover, true, "a switch (the chance: BoltRecover)")
+		t.eq((Weapons.ammo(I.Rounds9mm) :: Weapons.AmmoSpec).recover, false)
 		local suppressor = Weapons.attachment(I.Suppressor) :: Weapons.AttachmentSpec
 		t.eq(suppressor.noise, 0.25)
 		t.eq(suppressor.spread, 0.9)
