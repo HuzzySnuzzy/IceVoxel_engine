@@ -336,6 +336,15 @@ local function prototype(item: number, size: number): Model
 		part.Parent = model
 		model.PrimaryPart = part
 	end
+	-- The pivot is the model space's origin, which every pose here is built on. A Model with a
+	-- PrimaryPart pivots on that part's pivot and ignores WorldPivot (Roblox's Model.WorldPivot),
+	-- and the first box is turned half round with its view space and off the origin, so the
+	-- part's PivotOffset carries the origin: else PivotTo turned every model half round (a held
+	-- gun's muzzle back at the player).
+	local primary = model.PrimaryPart
+	if primary then
+		primary.PivotOffset = primary.CFrame:Inverse()
+	end
 	model.WorldPivot = CFrame.identity
 	return model
 end

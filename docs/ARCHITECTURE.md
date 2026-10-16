@@ -3803,7 +3803,11 @@ diagonally in icons (`tilt`) and are held by the handle, pointing forward. Plant
 items: icons from the front, held upright like blocks, dropped like items, drawn untinted (the
 Grass block's green); a tall plant shows its `icon`, the lower half plus the top's look in one
 cell, and a plant with a sprite shows the sprite on an upright plane instead. Shears are a tool:
-diagonal in icons, held by the handles.
+diagonal in icons, held by the handles. Every model pivots on its own space's origin, which the
+poses (`handPivot`, `holdPivot`, `firearmPivot`) are built on: its PrimaryPart (the first box,
+turned half round with the item's view space and off the origin) carries that origin in its
+`PivotOffset`, since Roblox ignores a Model's `WorldPivot` once it has a PrimaryPart
+(tests/spec/ItemModelPivots, with Roblox's rule and `PivotTo`'s move).
 
 **Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative
 Energy Cube, the Heat Generator, the Electric Furnace, the Batteries, the Oil Refinery (a light

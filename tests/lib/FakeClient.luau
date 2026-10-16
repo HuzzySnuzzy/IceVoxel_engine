@@ -338,6 +338,35 @@ function methods.SetAttribute(self, name, value)
 end
 function methods.TweenSize() end
 function methods.TweenPosition() end
+-- A copy of the object and its descendants, unparented; a property naming one of the copied
+-- objects (a Model's PrimaryPart) names its copy, as Roblox's Clone does.
+function methods.Clone(self): any
+	local copies: { [any]: any } = {}
+	local function copy(object: any): any
+		local made = setmetatable({}, meta)
+		copies[object] = made
+		propsOf[made] = table.clone(propsOf[object])
+		propsOf[made].Parent = nil
+		childrenOf[made] = {}
+		signalsOf[made] = {}
+		for _, child in childrenOf[object] do
+			local copied = copy(child)
+			propsOf[copied].Parent = made
+			table.insert(childrenOf[made], copied)
+		end
+		return made
+	end
+	local root = copy(self)
+	for _, made in copies do
+		local p = propsOf[made]
+		for key, value in p do
+			if key ~= "Parent" and type(value) == "table" and copies[value] then
+				p[key] = copies[value]
+			end
+		end
+	end
+	return root
+end
 -- A BindableEvent's Fire: its Event's listeners, at once.
 function methods.Fire(self, ...: any)
 	(self :: any).Event:Fire(...)
