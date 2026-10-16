@@ -21,10 +21,18 @@
 	            up and back over the shoulder as a heavy attack winds up (AimRules.meleeArms);
 	            the animation's arms otherwise.
 
+	  applyLook  the local player's head turned with the camera while freelooking (Player/
+	            CameraRig.freelookOffset: yaw within NECK_YAW, pitch within NECK_PITCH; the waist
+	            takes the rest, Player/BodyTwist), on top of a raised gun's head pitch. Freelook
+	            isn't sent, so only the local character's head turns, on this client.
+
 	Whose pose: the local player's from Player/AimCamera at once (raised or in the sights) and from
 	Interaction/MeleeInput (guarding, the heavy wind-up), every other player's from the player
 	attribute Types.AIM_ATTRIBUTE ("raised", "guard"; a wind-up isn't sent) the server sets; the
 	pitch from Player/MovementController (local) or Player/RemotePlayers (the others' last pose).
+	In true first person (Player/FirstPersonBody) the local character is released here: its arms
+	are Player/FirstPersonBody's (IK on the item in the camera's space), and its head is hidden;
+	Player/HeldItems releases one before the other writes the shoulders.
 	Rigs are R15 (RightUpperArm.RightShoulder, LeftUpperArm.LeftShoulder, Head.Neck) or R6 (the
 	Torso's Right Shoulder, Left Shoulder and Neck); one without the joints is left as it is. C0 is
 	set on every client for every character (it doesn't replicate), and nothing is created per
@@ -35,10 +43,27 @@ local AimRules = require(script.Parent.AimRules)
 
 local WeaponPoses = {}
 
+-- The freelook head's reach (radians): the neck's own turn; the waist takes the rest.
+WeaponPoses.NECK_YAW = math.rad(70)
+WeaponPoses.NECK_PITCH = math.rad(60)
+
 type Joint = { motor: Motor6D, base: CFrame }
 
--- A character's joints and whether they are turned now.
-type Rig = { right: Joint?, left: Joint?, neck: Joint?, posed: boolean, leftPosed: boolean, neckPosed: boolean }
+--[[
+	A character's joints and whether they are turned now; the head's pitch a gun wants this frame
+	(nil: none) and the freelook turn (`applyLook`).
+]]
+type Rig = {
+	right: Joint?,
+	left: Joint?,
+	neck: Joint?,
+	posed: boolean,
+	leftPosed: boolean,
+	neckPosed: boolean,
+	head: number?,
+	lookYaw: number,
+	lookPitch: number,
+}
 
 local rigs: { [Model]: Rig } = setmetatable({}, { __mode = "k" }) :: any
 
@@ -65,6 +90,9 @@ local function rigOf(character: Model): Rig
 			posed = false,
 			leftPosed = false,
 			neckPosed = false,
+			head = nil,
+			lookYaw = 0,
+			lookPitch = 0,
 		}
 	else
 		new = {
@@ -74,6 +102,9 @@ local function rigOf(character: Model): Rig
 			posed = false,
 			leftPosed = false,
 			neckPosed = false,
+			head = nil,
+			lookYaw = 0,
+			lookPitch = 0,
 		}
 	end
 	rigs[character] = new
@@ -98,6 +129,20 @@ local function restore(j: Joint?)
 	end
 end
 
+-- The neck: a gun's head pitch (`rig.head`) and the freelook turn on top, else as it was.
+local function neckStep(rig: Rig)
+	local head = rig.head
+	if head == nil and rig.lookYaw == 0 and rig.lookPitch == 0 then
+		if rig.neckPosed then
+			restore(rig.neck)
+			rig.neckPosed = false
+		end
+		return
+	end
+	turn(rig.neck, (head or 0) + rig.lookPitch, rig.lookYaw, 0)
+	rig.neckPosed = true
+end
+
 --[[
 	Poses `character`'s arms (and head) for a firearm held in `posture` with the look's `pitch`
 	(radians, up positive); `long` a long gun (AimRules.longGun). See the header.
@@ -114,13 +159,8 @@ function WeaponPoses.apply(character: Model, posture: AimRules.Posture, pitch: n
 		restore(rig.left)
 		rig.leftPosed = false
 	end
-	if head then
-		turn(rig.neck, head, 0, 0)
-		rig.neckPosed = true
-	elseif rig.neckPosed then
-		restore(rig.neck)
-		rig.neckPosed = false
-	end
+	rig.head = head
+	neckStep(rig)
 end
 
 --[[
@@ -143,22 +183,51 @@ function WeaponPoses.applyMelee(character: Model, guard: boolean, charge: number
 		restore(rig.left)
 		rig.leftPosed = false
 	end
-	if rig.neckPosed then
-		restore(rig.neck)
-		rig.neckPosed = false
-	end
+	rig.head = nil
+	neckStep(rig)
 end
 
--- Puts `character`'s joints back as they were (it holds no gun any more).
+--[[
+	Puts `character`'s arms back as they were (it holds no gun any more) and its head, but for the
+	freelook turn (`applyLook`; none: all of it).
+]]
 function WeaponPoses.release(character: Model)
 	local rig = rigs[character]
-	if rig == nil or not rig.posed then
+	if rig == nil or not (rig.posed or rig.neckPosed) then
 		return
 	end
-	restore(rig.right)
-	restore(rig.left)
-	restore(rig.neck)
-	rig.posed, rig.leftPosed, rig.neckPosed = false, false, false
+	if rig.posed then
+		restore(rig.right)
+		restore(rig.left)
+		rig.posed, rig.leftPosed = false, false
+	end
+	rig.head = nil
+	neckStep(rig)
+end
+
+--[[
+	Turns the local `character`'s head with the camera while freelooking (Player/CameraRig
+	.freelookOffset: radians, `yaw` left and `pitch` up of the aim; 0, 0 puts it back), within the
+	neck's reach (NECK_YAW, NECK_PITCH), on top of a raised gun's head pitch. Call it after this
+	frame's `apply` / `applyMelee` / `release` (they turn the head with the last look given).
+]]
+function WeaponPoses.applyLook(character: Model, yaw: number, pitch: number)
+	local y = math.clamp(yaw, -WeaponPoses.NECK_YAW, WeaponPoses.NECK_YAW)
+	local p = math.clamp(pitch, -WeaponPoses.NECK_PITCH, WeaponPoses.NECK_PITCH)
+	local rig = rigs[character]
+	if rig == nil then
+		if y == 0 and p == 0 then
+			return
+		end
+		rig = rigOf(character)
+	end
+	assert(rig, "rig")
+	if rig.lookYaw == y and rig.lookPitch == p then
+		-- (Already turned this frame by the arms' call.)
+		return
+	end
+	rig.lookYaw, rig.lookPitch = y, p
+	neckStep(rig)
 end
 
 --[[

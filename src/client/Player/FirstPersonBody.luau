@@ -1,28 +1,67 @@
 --!strict
 --[[
-	The local player's body seen in true first person (the First-Person Body setting): at
-	Camera + 2, after Roblox's camera faded the character, the one writer of the local
-	character's LocalTransparencyModifier while Player/CameraRig places the camera and the player
-	is alive and not a spectator. The head and what is worn on it are hidden in first person and
-	the sights, and any part within Config.Camera.NearClear of the camera in every view
-	(Player/FirstPersonRules); the rest is drawn, so looking down shows the chest, legs and feet.
-	The held item is the world model in camera space (Player/HeldItems: `setHeld`) and the arms
-	reach it by two-bone IK (`poseArms`, right after HeldItems placed it). OFF (`setEnabled`):
-	Minecraft's hand as before (the body hidden, HeldItems' first-person view).
+	The local player's body seen in true first person (the First-Person Body setting), in the manner
+	of DayZ: the body is drawn, the head and what is worn on it are not, and both hands hold the
+	item. Player/FirstPersonRules has the rules and numbers.
 
-	FOUNDATION STUB: the API below is frozen (add functions, never change one); the bodies keep
-	today's behaviour: nothing is written, no true first person (`trueFirstPerson` false: HeldItems
-	keeps its first-person view), nothing hidden for others (`hides` false), arms left to the
-	animation.
+	  Visibility  at Camera + 2, after Roblox's camera faded the character (its
+	              TransparencyController fades every part while its camera is at the eyes, again on
+	              every new part), the one writer of the local character's LocalTransparencyModifier
+	              while Player/CameraRig places the camera (`active`) and the player is not a
+	              spectator: every object a character is drawn with (SpectatorRules.HIDDEN_CLASSES,
+	              listed once and again when the character's descendants change) gets
+	              FirstPersonRules.hidden's value for its role (`roleOf`: the head, what is worn on
+	              it, the arms, the rest) in the rig's view, written only when it differs (the
+	              controller's fade is undone the same frame). Third person hides only what is within
+	              Config.Camera.NearClear of the camera; first person and the sights also the head
+	              and what is worn on it (rigid and layered accessories alike), and a scope's view
+	              the arms; First-Person Body off (or an R6 body) hides it all, for Minecraft's hand
+	              (Player/HeldItems' first-person view). A dead body is drawn as in third person
+	              while it tips over (the camera holds it). Player/SpectatorView (Camera + 3) raises
+	              what this wrote for spectating and a body gone after death; spectators and a
+	              player spectating someone (the rig inactive) are left to it and to Roblox's
+	              camera, everything this hid given back first. `hides(part)` and
+	              `hidesHeadWorn()` tell Player/EquipmentLooks which drawn pieces go with them.
+	  Held item   Player/HeldItems places the world model of what the local player holds in the
+	              camera's space (`trueFirstPerson`), pushes what it holds (`setHeld`: the kind, a
+	              scope's view, the sights' share) and then puts the hands on it (`poseArms`).
+	  Arms        two-bone IK on the R15 shoulders, elbows and wrists (FirstPersonRules.twoBone,
+	              the lengths from the joints' own C0 and C1, so scaled bodies work; the elbow
+	              down and out: FirstPersonRules.POLE), written to the Motor6Ds' C0 with the
+	              animation's Transform taken out, in the render step that draws the frame: the
+	              Animator's Transform read there is the one that frame renders, so the hand lands
+	              exactly on the item (IKControl solves in the animation step from targets set a
+	              step earlier, a frame behind the camera: the hands would trail the item). The
+	              hand turns with the grip so the palm wraps it; a grip out of reach is held where
+	              the arm gets to (`reach`: Player/HeldItems moves the item there, a gun along the
+	              view axis only, and poses again). `release` puts the joints back (Player/
+	              WeaponPoses poses them in third person). R6 bodies get no IK.
 
-	Requires only Player/CameraRig, Player/FirstPersonRules, Player/SpectatorRules and Config:
+	Nothing is created per frame (the lists are rebuilt only when the character changes).
+	Requires only Player/CameraRig, Player/FirstPersonRules, Player/SpectatorRules and Shared:
 	Player/EquipmentLooks requires this, and Player/MovementController requires EquipmentLooks.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
+
+local CameraRig = require(script.Parent.CameraRig)
+local FirstPersonRules = require(script.Parent.FirstPersonRules)
+local SpectatorRules = require(script.Parent.SpectatorRules)
+
+-- After Roblox's camera (and its fade) and the rig (Camera + 1), before Player/SpectatorView (+ 3).
+local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 2
+local RENDER_STEP = "IceVoxelFirstPersonBody"
+-- The hand's turn from a grip's frame (looking along the fingers, up the thumb): the hand's
+-- fingers along its -Y, its thumb side -Z, its palm -X (right hand; +X left).
+local HAND_TURN = CFrame.Angles(math.pi / 2, 0, 0)
+-- An arm turned by less than this (radians) counts as straight.
+local STRAIGHT = 1e-4
 
 --[[
 	What the local player holds, as Player/HeldItems draws it (`setHeld`, every frame): the kind of
@@ -46,11 +85,257 @@ local started = false
 local enabled = Config.Camera.FirstPersonBody
 local held: HeldState = { kind = "empty", scoped = false, sightsShare = 0 }
 
+--[[ Visibility ]]
+
+-- The local character's objects: each with the part it is drawn with and its role; listed again
+-- when `dirty` (a descendant came or went). `r15`: an R15 body (IK, the body drawn).
+type Cover = {
+	character: Model,
+	objects: { Instance },
+	parts: { BasePart },
+	roles: { FirstPersonRules.Role },
+	r15: boolean,
+	dirty: boolean,
+	connections: { RBXScriptConnection },
+}
+
+local cover: Cover? = nil
+-- This module writes the local character's transparency this frame (`drawing`), in this view;
+-- whether it is true first person (the body ON, R15, alive, first person or the sights).
+local writing = false
+local shownView: FirstPersonRules.View = "third"
+local trueFirstPerson = false
+-- The character's parts hidden by this module now (`hides`), written when it changes.
+local hiding: { [Instance]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+
+-- Whether objects of a class are hidden with their character (SpectatorRules.hidden), by ClassName.
+local hiddenClasses: { [string]: boolean } = {}
+
+local function hideable(object: Instance): boolean
+	local known = hiddenClasses[object.ClassName]
+	if known == nil then
+		known = SpectatorRules.hidden(function(class: string): boolean
+			return object:IsA(class)
+		end)
+		hiddenClasses[object.ClassName] = known
+	end
+	return known == true
+end
+
+-- (Every hideable class has a LocalTransparencyModifier; the types know it per class only.)
+local function transparencyOf(object: Instance): number
+	return (object :: any).LocalTransparencyModifier
+end
+
+local function setTransparency(object: Instance, value: number)
+	(object :: any).LocalTransparencyModifier = value
+end
+
+-- The part an object is drawn with: itself, or the part it is on (a decal, an effect).
+local function partOf(object: Instance): BasePart?
+	if object:IsA("BasePart") then
+		return object
+	end
+	return object:FindFirstAncestorWhichIsA("BasePart")
+end
+
+-- The body part `joint` joins `handle` to (a weld's or a rigid constraint's other side), if any.
+local function otherSide(joint: Instance, handle: BasePart): BasePart?
+	local a: Instance?, b: Instance? = nil, nil
+	if joint:IsA("JointInstance") or joint:IsA("WeldConstraint") then
+		local welded = joint :: any
+		a, b = welded.Part0, welded.Part1
+	elseif joint:IsA("RigidConstraint") then
+		local a0, a1 = joint.Attachment0, joint.Attachment1
+		a = if a0 then a0.Parent else nil
+		b = if a1 then a1.Parent else nil
+	else
+		return nil
+	end
+	local other = if a == handle then b else a
+	return if other and other:IsA("BasePart") then other else nil
+end
+
+-- What FirstPersonRules.roleOf needs of `accessory` (see FirstPersonRules.AccessoryInfo).
+local function accessoryInfo(accessory: Accessory): FirstPersonRules.AccessoryInfo
+	local info: FirstPersonRules.AccessoryInfo =
+		{ kind = accessory.AccessoryType.Name, joinedTo = nil, attachments = {} }
+	local handle = accessory:FindFirstChild("Handle")
+	if handle and handle:IsA("BasePart") then
+		local names = info.attachments :: { string }
+		local weld = handle:FindFirstChild("AccessoryWeld")
+		local joined = if weld then otherSide(weld, handle) else nil
+		for _, child in handle:GetChildren() do
+			if child:IsA("Attachment") then
+				table.insert(names, child.Name)
+			elseif joined == nil then
+				joined = otherSide(child, handle)
+			end
+		end
+		info.joinedTo = if joined then joined.Name else nil
+	end
+	return info
+end
+
+-- Lists `character`'s objects again (when its descendants changed).
+local function list(made: Cover)
+	local character = made.character
+	table.clear(made.objects)
+	table.clear(made.parts)
+	table.clear(made.roles)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	made.r15 = humanoid ~= nil and humanoid.RigType == Enum.HumanoidRigType.R15
+	local headAttachments: { [string]: boolean } = {}
+	local head = character:FindFirstChild("Head")
+	if head then
+		for _, child in head:GetChildren() do
+			if child:IsA("Attachment") then
+				headAttachments[child.Name] = true
+			end
+		end
+	end
+	local infos: { [Instance]: FirstPersonRules.AccessoryInfo } = {}
+	for _, object in character:GetDescendants() do
+		if hideable(object) and object.Name ~= "HumanoidRootPart" then
+			local part = partOf(object)
+			-- (A Tool's parts are its own: Roblox's camera leaves them alone too.)
+			if part and part:FindFirstAncestorWhichIsA("Tool") == nil then
+				local accessory = part:FindFirstAncestorWhichIsA("Accessory")
+				local info: FirstPersonRules.AccessoryInfo? = nil
+				if accessory then
+					local known = infos[accessory]
+					if known == nil then
+						known = accessoryInfo(accessory)
+						infos[accessory] = known
+					end
+					info = known
+				end
+				table.insert(made.objects, object)
+				table.insert(made.parts, part)
+				table.insert(made.roles, FirstPersonRules.roleOf(part.Name, info, headAttachments))
+			end
+		end
+	end
+end
+
+-- Lets go of the listed character (its connections).
+local function forget()
+	local current = cover
+	if current then
+		for _, connection in current.connections do
+			connection:Disconnect()
+		end
+		cover = nil
+	end
+end
+
+local function coverOf(character: Model): Cover
+	local current = cover
+	if current == nil or current.character ~= character then
+		forget()
+		local made: Cover = {
+			character = character,
+			objects = {},
+			parts = {},
+			roles = {},
+			r15 = false,
+			dirty = true,
+			connections = {},
+		}
+		local function changed()
+			made.dirty = true
+		end
+		table.insert(made.connections, character.DescendantAdded:Connect(changed))
+		table.insert(made.connections, character.DescendantRemoving:Connect(changed))
+		cover = made
+		current = made
+	end
+	assert(current, "cover")
+	if current.dirty then
+		current.dirty = false
+		list(current)
+	end
+	return current
+end
+
+-- Stops writing: what this hid is given back (Roblox's camera and SpectatorView take over).
+local function stop()
+	trueFirstPerson = false
+	if not writing then
+		return
+	end
+	writing = false
+	local current = cover
+	if current then
+		for _, object in current.objects do
+			if object.Parent ~= nil and transparencyOf(object) ~= 0 then
+				setTransparency(object, 0)
+			end
+		end
+	end
+	table.clear(hiding)
+end
+
+local function step()
+	local player = Players.LocalPlayer
+	local character = player.Character
+	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+	local camera = workspace.CurrentCamera
+	if
+		not CameraRig.active()
+		or character == nil
+		or humanoid == nil
+		or camera == nil
+		or GameMode.isSpectator(GameMode.of(player))
+	then
+		stop()
+		if character == nil then
+			forget()
+		end
+		return
+	end
+	local current = coverOf(character)
+	-- (A dead body tips over in view, as in third person.)
+	local alive = humanoid.Health > 0 and not CameraRig.holding()
+	local view: FirstPersonRules.View = if alive then CameraRig.view() else "third"
+	local bodyOn = enabled and current.r15
+	trueFirstPerson = alive and bodyOn and view ~= "third"
+	shownView = view
+	writing = true
+	local scoped = trueFirstPerson and held.scoped
+	local eye = camera.CFrame.Position
+	local margin = FirstPersonRules.NEAR_CLEAR
+	local roles: { FirstPersonRules.Role } = current.roles
+	local parts = current.parts
+	for i, object in current.objects do
+		local role: FirstPersonRules.Role = roles[i]
+		local part = parts[i]
+		local near = false
+		if FirstPersonRules.needsNear(role, view, bodyOn, scoped) then
+			-- (Its bounding ball first: most parts are far from the camera, no CFrame read.)
+			local size = part.Size
+			if (part.Position - eye).Magnitude <= size.Magnitude / 2 + margin then
+				local at = part.CFrame:PointToObjectSpace(eye)
+				near = FirstPersonRules.nearBox(at.X, at.Y, at.Z, size.X / 2, size.Y / 2, size.Z / 2, margin)
+			end
+		end
+		local hide = FirstPersonRules.hidden(role, view, bodyOn, scoped, near)
+		local want = if hide then 1 else 0
+		if transparencyOf(object) ~= want then
+			setTransparency(object, want)
+		end
+		if object == part and hiding[part] ~= hide then
+			hiding[part] = hide
+		end
+	end
+end
+
 function FirstPersonBody.start()
 	if started then
 		return
 	end
 	started = true
+	RunService:BindToRenderStep(RENDER_STEP, RENDER_PRIORITY, step)
 end
 
 -- The First-Person Body setting (false: Minecraft's hand).
@@ -66,18 +351,29 @@ end
 --[[
 	Is the local body drawn in true first person now (the rig in first person or the sights, the
 	setting ON, an R15 body, alive)? HeldItems then places the world model in camera space instead
-	of its first-person view.
+	of its first-person view. (Measured at Camera + 2 this frame.)
 ]]
 function FirstPersonBody.trueFirstPerson(): boolean
-	return false
+	return trueFirstPerson
+end
+
+-- Does this module write the local character's visibility this frame (the rig active, not a
+-- spectator)? Otherwise Roblox's camera fades it (Player/EquipmentLooks then follows the head).
+function FirstPersonBody.drawing(): boolean
+	return writing
 end
 
 --[[
 	Is `part` of the local character hidden by this module now (Player/EquipmentLooks hides a piece
 	whose anchor part is)?
 ]]
-function FirstPersonBody.hides(_part: Instance): boolean
-	return false
+function FirstPersonBody.hides(part: Instance): boolean
+	return writing and hiding[part] == true
+end
+
+-- Are things worn on the head (and at the neck) hidden now: first person or the sights?
+function FirstPersonBody.hidesHeadWorn(): boolean
+	return writing and shownView ~= "third"
 end
 
 -- What the local player holds this frame (Player/HeldItems).
@@ -90,13 +386,256 @@ function FirstPersonBody.held(): HeldState
 	return held
 end
 
+--[[ Arms ]]
+
+-- A joint of an arm: its Motor6D, its Part0's rig attachment (its own C0, also after the body was
+-- scaled) and its C0 as found (without one).
+type Joint = { motor: Motor6D, attachment: Attachment?, base: CFrame }
+
+type Arm = {
+	shoulder: Joint,
+	elbow: Joint,
+	wrist: Joint,
+	hand: BasePart,
+	grip: Attachment?,
+	-- +1 right, -1 left.
+	side: number,
+	posed: boolean,
+}
+
+type Rig = { character: Model, torso: BasePart, right: Arm, left: Arm }
+
+local rig: Rig? = nil
+-- How far the right hand's grip got from where it was sent (`reach`).
+local miss = Vector3.zero
+
+-- The joint `name` in `part1` (R15 keeps an arm's joints in their Part1).
+local function jointOf(part1: Instance?, name: string): Joint?
+	local motor = if part1 then part1:FindFirstChild(name) else nil
+	if motor == nil or not motor:IsA("Motor6D") or motor.Part0 == nil then
+		return nil
+	end
+	local part0 = motor.Part0 :: BasePart
+	local found = part0:FindFirstChild(name .. "RigAttachment")
+	local attachment = if found and found:IsA("Attachment") then found else nil
+	return { motor = motor, attachment = attachment, base = motor.C0 }
+end
+
+local function armOf(character: Model, prefix: string, side: number): Arm?
+	local upper = character:FindFirstChild(prefix .. "UpperArm")
+	local lower = character:FindFirstChild(prefix .. "LowerArm")
+	local hand = character:FindFirstChild(prefix .. "Hand")
+	if hand == nil or not hand:IsA("BasePart") then
+		return nil
+	end
+	local shoulder = jointOf(upper, prefix .. "Shoulder")
+	local elbow = jointOf(lower, prefix .. "Elbow")
+	local wrist = jointOf(hand, prefix .. "Wrist")
+	if shoulder == nil or elbow == nil or wrist == nil then
+		return nil
+	end
+	local found = hand:FindFirstChild(prefix .. "GripAttachment")
+	return {
+		shoulder = shoulder,
+		elbow = elbow,
+		wrist = wrist,
+		hand = hand,
+		grip = if found and found:IsA("Attachment") then found else nil,
+		side = side,
+		posed = false,
+	}
+end
+
+local function intact(arm: Arm): boolean
+	return arm.shoulder.motor.Parent ~= nil and arm.elbow.motor.Parent ~= nil and arm.wrist.motor.Parent ~= nil
+end
+
+-- `character`'s arms (R15 only; nil for R6 or a body without its joints).
+local function rigOf(character: Model): Rig?
+	local current = rig
+	if current and current.character == character and intact(current.right) and intact(current.left) then
+		return current
+	end
+	local torso = character:FindFirstChild("UpperTorso")
+	local right = armOf(character, "Right", 1)
+	local left = armOf(character, "Left", -1)
+	if torso == nil or not torso:IsA("BasePart") or right == nil or left == nil then
+		rig = nil
+		return nil
+	end
+	local made: Rig = { character = character, torso = torso, right = right, left = left }
+	rig = made
+	return made
+end
+
+-- A joint's own C0 (its rig attachment's frame; as found without one).
+local function baseOf(joint: Joint): CFrame
+	local attachment = joint.attachment
+	if attachment and attachment.Parent ~= nil then
+		return attachment.CFrame
+	end
+	return joint.base
+end
+
+local function restore(joint: Joint)
+	if joint.motor.Parent ~= nil then
+		joint.motor.C0 = baseOf(joint)
+	end
+end
+
+local function letGo(arm: Arm)
+	if not arm.posed then
+		return
+	end
+	arm.posed = false
+	restore(arm.shoulder)
+	restore(arm.elbow)
+	restore(arm.wrist)
+end
+
+-- The turn taking the bone's own direction `along` (its part's space) to -Y (identity when it is).
+local function boneTurn(along: Vector3): CFrame
+	local axis = along:Cross(-Vector3.yAxis)
+	local s = axis.Magnitude
+	local c = -along.Y
+	if s < STRAIGHT then
+		return if c > 0 then CFrame.identity else CFrame.Angles(math.pi, 0, 0)
+	end
+	return CFrame.fromAxisAngle(axis / s, math.atan2(s, c))
+end
+
+-- A bone's world frame: from its joint at `from` along `dir` (unit), its hinge axis `hinge`
+-- (unit, across `dir`), turned by `turn` (boneTurn) and placed so `joint` (its part's space) is at
+-- `from`.
+local function boneFrame(from: Vector3, dir: Vector3, hinge: Vector3, turn: CFrame, joint: Vector3): CFrame
+	local y = -dir
+	local z = hinge:Cross(y)
+	return CFrame.fromMatrix(from, hinge, y, z) * turn * CFrame.new(-joint)
+end
+
+--[[
+	Puts `arm`'s hand on `target` (a grip's world frame), `weight` of the way from the animation
+	(1: on it). Returns where its grip got to (world).
+]]
+local function pose(arm: Arm, torso: BasePart, target: CFrame, weight: number): Vector3
+	local shoulder, elbow, wrist = arm.shoulder, arm.elbow, arm.wrist
+	local shoulderC0, elbowC0, wristC0 = baseOf(shoulder), baseOf(elbow), baseOf(wrist)
+	local shoulderC1, elbowC1, wristC1 = shoulder.motor.C1, elbow.motor.C1, wrist.motor.C1
+	local torsoFrame = torso.CFrame
+	-- The bones (each part's space): shoulder to elbow, elbow to wrist.
+	local upperBone = elbowC0.Position - shoulderC1.Position
+	local lowerBone = wristC0.Position - elbowC1.Position
+	local a, b = upperBone.Magnitude, lowerBone.Magnitude
+	if a < STRAIGHT or b < STRAIGHT then
+		return target.Position
+	end
+	-- The hand on the grip: where its wrist joint goes.
+	local handTurn = target.Rotation * HAND_TURN
+	local grip = arm.grip
+	local gripAt = if grip and grip.Parent ~= nil then grip.Position else Vector3.new(0, -arm.hand.Size.Y / 2, 0)
+	local wristAt = target.Position + handTurn:VectorToWorldSpace(wristC1.Position - gripAt)
+	local s = torsoFrame * shoulderC0.Position
+	local poleOffset = FirstPersonRules.POLE
+	local p = s + torsoFrame:VectorToWorldSpace(Vector3.new(poleOffset[1] * arm.side, poleOffset[2], -poleOffset[3]))
+	local ex, ey, ez, _, rx, ry, rz =
+		FirstPersonRules.twoBone(s.X, s.Y, s.Z, wristAt.X, wristAt.Y, wristAt.Z, p.X, p.Y, p.Z, a, b)
+	local e = Vector3.new(ex, ey, ez)
+	local r = Vector3.new(rx, ry, rz)
+	local up = (e - s).Unit
+	local hinge = up:Cross((r - e).Unit)
+	if hinge.Magnitude < STRAIGHT then
+		-- (Straight: the hinge across the pole; any axis across the arm on the pole's line.)
+		local toPole = p - s
+		hinge = (toPole - up * toPole:Dot(up)):Cross(up)
+		if hinge.Magnitude < STRAIGHT then
+			hinge = Vector3.xAxis:Cross(up)
+			if hinge.Magnitude < STRAIGHT then
+				hinge = Vector3.zAxis:Cross(up)
+			end
+		end
+	end
+	hinge = hinge.Unit
+	local upper = boneFrame(s, up, hinge, boneTurn(upperBone.Unit), shoulderC1.Position)
+	local elbowAt = upper * elbowC0.Position
+	local down = r - elbowAt
+	down = if down.Magnitude > STRAIGHT then down.Unit else up
+	local lowerHinge = hinge - down * hinge:Dot(down)
+	lowerHinge = if lowerHinge.Magnitude > STRAIGHT then lowerHinge.Unit else hinge
+	local lower = boneFrame(elbowAt, down, lowerHinge, boneTurn(lowerBone.Unit), elbowC1.Position)
+	local hand = CFrame.new(lower * wristC0.Position) * handTurn * CFrame.new(-wristC1.Position)
+	local shoulderIk = torsoFrame:Inverse() * upper * shoulderC1 * shoulder.motor.Transform:Inverse()
+	local elbowIk = upper:Inverse() * lower * elbowC1 * elbow.motor.Transform:Inverse()
+	local wristIk = lower:Inverse() * hand * wristC1 * wrist.motor.Transform:Inverse()
+	if weight < 1 then
+		shoulderIk = shoulderC0:Lerp(shoulderIk, weight)
+		elbowIk = elbowC0:Lerp(elbowIk, weight)
+		wristIk = wristC0:Lerp(wristIk, weight)
+	end
+	shoulder.motor.C0 = shoulderIk
+	elbow.motor.C0 = elbowIk
+	wrist.motor.C0 = wristIk
+	arm.posed = true
+	return hand * gripAt
+end
+
 --[[
 	Puts the local character's hands on the held item (right on `right`, left on `left`: world
 	CFrames of the grips; nil leaves that arm to the animation), by two-bone IK on the shoulders,
 	elbows and wrists (C0 only), right after Player/HeldItems placed the item this frame.
 ]]
-function FirstPersonBody.poseArms(_character: Model, _right: CFrame?, _left: CFrame?)
-	-- (No true first person yet: the animation keeps the arms.)
+function FirstPersonBody.poseArms(character: Model, right: CFrame?, left: CFrame?)
+	FirstPersonBody.poseArmsWeighted(character, right, left, 1, 1)
+end
+
+--[[
+	`poseArms`, each arm `weight` of the way from the animation to the grip (0..1: a punch eases in
+	and out). A right grip out of reach is held where the arm gets to (`reach`), and the left grip
+	moves with it (the item follows the right hand).
+]]
+function FirstPersonBody.poseArmsWeighted(
+	character: Model,
+	right: CFrame?,
+	left: CFrame?,
+	rightWeight: number,
+	leftWeight: number
+)
+	miss = Vector3.zero
+	local arms = rigOf(character)
+	if arms == nil then
+		return
+	end
+	if right and rightWeight > 0 then
+		local got = pose(arms.right, arms.torso, right, math.min(rightWeight, 1))
+		if rightWeight >= 1 then
+			miss = got - right.Position
+		end
+	else
+		letGo(arms.right)
+	end
+	if left and leftWeight > 0 then
+		local moved = if miss.Magnitude > 0 then left + miss else left
+		pose(arms.left, arms.torso, moved, math.min(leftWeight, 1))
+	else
+		letGo(arms.left)
+	end
+end
+
+--[[
+	How far the right hand's grip got from where `poseArms` sent it this frame (studs, world; zero
+	when it reached it): Player/HeldItems moves the item by it, so the hand never leaves the item.
+]]
+function FirstPersonBody.reach(): Vector3
+	return miss
+end
+
+-- Puts `character`'s arms back to the animation (out of true first person, or holding nothing).
+function FirstPersonBody.release(character: Model)
+	local current = rig
+	if current and current.character == character then
+		letGo(current.right)
+		letGo(current.left)
+	end
+	miss = Vector3.zero
 end
 
 return FirstPersonBody

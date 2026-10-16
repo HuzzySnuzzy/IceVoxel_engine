@@ -61,8 +61,11 @@
 	            (right = the barrel, up = up) with its anchor at `frame`'s position: the grip for
 	            "hand" (third person) and "hip" (first person, low right), the sight line above the
 	            grip for "sights" (so the sight line lies on the view axis). `firearmPoint` gives
-	            where the barrel ends (past a muzzle device: tracers and flashes start there) or the
-	            light's lens for a placed gun.
+	            where the barrel ends (past a muzzle device: tracers and flashes start there), the
+	            light's lens, the grip (the right hand) or the fore end (a long gun's left hand: the
+	            look's `fore` point if it has one, else under the barrel 40 % of the way from the
+	            grip to the muzzle) for a placed gun, `firearmAxes` its axes (Player/HeldItems'
+	            first-person hands, Player/FirstPersonBody).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -652,25 +655,82 @@ function ItemModels.firearmPivot(item: number, size: number, pose: FirearmPose, 
 	return frame * CFrame.new(-ax * pixel, -ay * pixel, 0) * viewFrame(Items.get(item)):Inverse()
 end
 
+-- A long gun's left hand, without a `fore` point in its look: this share of the way from the grip
+-- to the muzzle, under the barrel.
+local FORE_SHARE = 0.4
+
+--[[
+	Where the left hand holds gun `spec` (model pixels, view space): its look's `fore` point, else
+	FORE_SHARE of the way from the grip to the muzzle, at the underside of the box under the
+	barrel there (of the gun's boxes across that point starting below the barrel's line, the one
+	reaching highest: the handguard, the slide; cached per gun).
+]]
+local fores: { [number]: Vector3 } = {}
+local function foreOf(spec: Weapons.FirearmSpec): Vector3
+	local cached = fores[spec.item]
+	if cached then
+		return cached
+	end
+	local look = spec.look
+	local own = (look :: any).fore
+	local point: Vector3
+	if type(own) == "table" then
+		point = Vector3.new(own[1], own[2], own[3] or 0)
+	else
+		local grip, muzzle = look.grip, look.muzzle
+		local x = grip[1] + (muzzle[1] - grip[1]) * FORE_SHARE
+		local line = muzzle[2]
+		local bottom, top = line - 1, -math.huge
+		local def = Items.get(spec.item)
+		for _, box in (if def and def.model then def.model else {}) :: { Items.ModelBox } do
+			local x0, x1 = box.offset[1] - box.size[1] / 2, box.offset[1] + box.size[1] / 2
+			local y0, y1 = box.offset[2] - box.size[2] / 2, box.offset[2] + box.size[2] / 2
+			if x >= x0 and x <= x1 and y0 <= line and y1 > top then
+				bottom, top = y0, y1
+			end
+		end
+		point = Vector3.new(x, bottom, 0)
+	end
+	fores[spec.item] = point
+	return point
+end
+
 --[[
 	Where the barrel of firearm `item` (built at `size`, dressed as `lookKey`, its model at
-	`pivot`) ends ("muzzle": past a muzzle device), or its light's lens ("lens"; the muzzle when
-	it has none), in `pivot`'s space.
+	`pivot`) ends ("muzzle": past a muzzle device), its light's lens ("lens"; the muzzle when it
+	has none), its grip ("grip": where the right hand holds it) or its fore end ("fore": the left
+	hand's, under the barrel), in `pivot`'s space.
 ]]
 function ItemModels.firearmPoint(
 	item: number,
 	lookKey: string,
 	size: number,
 	pivot: CFrame,
-	which: "muzzle" | "lens"
+	which: "muzzle" | "lens" | "grip" | "fore"
 ): Vector3
 	local spec = Weapons.firearm(item)
 	if spec == nil then
 		return pivot.Position
 	end
-	local dress = dressOf(spec, lookKey)
-	local point = if which == "lens" then dress.lens or dress.muzzle else dress.muzzle
+	local point: Vector3
+	if which == "grip" then
+		local grip = spec.look.grip
+		point = Vector3.new(grip[1], grip[2], 0)
+	elseif which == "fore" then
+		point = foreOf(spec)
+	else
+		local dress = dressOf(spec, lookKey)
+		point = if which == "lens" then dress.lens or dress.muzzle else dress.muzzle
+	end
 	return (pivot * viewFrame(Items.get(item))) * (point * (size / 16))
+end
+
+--[[
+	The axes of a model of firearm `item` at `pivot` (a turn, no position): x along the barrel
+	(towards the muzzle), y the gun's top, z its right side.
+]]
+function ItemModels.firearmAxes(item: number, pivot: CFrame): CFrame
+	return (pivot * viewFrame(Items.get(item))).Rotation
 end
 
 return ItemModels

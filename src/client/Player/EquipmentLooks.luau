@@ -23,15 +23,21 @@
 	             throat. A second one at the same place moves a step along (up the leg, round the
 	             waist...), so two never sit in each other.
 	  Frames     one render step after the characters are placed (RemotePlayers' and the local
-	             controller's run before the camera; this runs after it, RENDER_STEP) moves every
-	             piece with one workspace:BulkMoveTo: no allocation but the CFrames. Pieces are
-	             built again when the looks change, the character is a new one, a body part's size
-	             changes (an avatar scaled after loading) or item looks change
-	             (ItemModels.generation).
+	             controller's run before the camera) and posed (the arms by Player/HeldItems at
+	             Camera + 7: this runs at + 8, RENDER_STEP) moves every piece with one
+	             workspace:BulkMoveTo: no allocation but the CFrames. Pieces are built again when
+	             the looks change, the character is a new one, a body part's size changes (an
+	             avatar scaled after loading) or item looks change (ItemModels.generation).
 	  Hidden     for spectators (invisible or a floating head: Player/SpectatorRules), dead bodies,
-	             players this client doesn't show (Player/RemotePlayers.shown), and, with the
-	             character's head faded out by the camera, the local player in first person (and the
-	             player a spectator spectates): LocalTransparencyModifier, as Player/HeldItems.
+	             players this client doesn't show (Player/RemotePlayers.shown), and, by
+	             LocalTransparencyModifier per piece (written when it changes): the local
+	             player's pieces whose body part Player/FirstPersonBody hides (`hides`: in true
+	             first person the head, near the camera anything, everything with the First-Person
+	             Body setting off) and, in first person and the sights, those worn on the head or at
+	             the neck (the helmet layer or a vanity hat, the Face, Head and Neck places:
+	             FirstPersonBody.hidesHeadWorn); without FirstPersonBody drawing it (no camera rig,
+	             spectating) and for other players (the one a spectator spectates), all of them
+	             with the character's head faded out by the camera, as Player/HeldItems.
 	  Air jumps  `airJump(x, y, z)` puffs a little cloud at the feet and plays
 	             entity.player.double_jump (the local player's Player/MovementController calls it
 	             on PlayerPhysics' `airJumped`); other players' are told from their poses
@@ -61,12 +67,16 @@ local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local AirJumps = require(script.Parent.AirJumps)
+local FirstPersonBody = require(script.Parent.FirstPersonBody)
 local RemotePlayers = require(script.Parent.RemotePlayers)
 
 local BLOCK = Config.BlockSize
--- After the camera (the characters are placed before it).
+-- After the camera (the characters are placed before it) and the arms' poses (Player/HeldItems:
+-- Camera + 7).
 local RENDER_STEP = "IceVoxelEquipmentLooks"
-local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 1
+local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 8
+-- Accessory places worn on the head or at the neck (hidden in first person with the head).
+local HEAD_PLACES: { [string]: boolean } = { Face = true, Head = true, Neck = true }
 -- Studs each armor layer stands off its body part (head, chest, legs, feet), boots over leggings.
 local LAYER_PAD = { 0.22, 0.16, 0.12, 0.2 }
 -- Model sizes are rounded to this (studs), so ItemModels' prototype cache stays small.
@@ -102,24 +112,28 @@ local LAYERS: { { string } } = {
 	{ "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg" },
 }
 
--- One drawn piece: its parts, each at `offsets[i]` from the anchor part's CFrame times `at`.
+--[[
+	One drawn piece: its parts, each at `offsets[i]` from the anchor part's CFrame times `at`;
+	whether it is worn on the head or at the neck (hidden in first person) and faded out now.
+]]
 type Piece = {
 	anchor: BasePart,
 	-- The anchor's size when built (rebuilt when it changes).
 	size: Vector3,
 	parts: { BasePart },
 	offsets: { CFrame },
+	headWorn: boolean,
+	hidden: boolean,
 }
 
 -- A character's pieces: what they show (`looks` text), on which body, built with which item
--- looks, and whether they are faded out (first person).
+-- looks.
 type Dressed = {
 	looks: string,
 	character: Model,
 	pieces: { Piece },
 	folder: Folder,
 	look: number,
-	hidden: boolean,
 }
 
 local EquipmentLooks = {}
@@ -182,7 +196,7 @@ local function modelPiece(model: Model, anchor: BasePart, at: CFrame, parent: In
 		end
 	end
 	model.Parent = parent
-	return { anchor = anchor, size = anchor.Size, parts = parts, offsets = offsets }
+	return { anchor = anchor, size = anchor.Size, parts = parts, offsets = offsets, headWorn = false, hidden = false }
 end
 
 --[[
@@ -203,7 +217,7 @@ local function layerPiece(item: number, anchor: BasePart, pad: number, parent: I
 	box.Size = Vector3.new(size.X + pad, size.Y * share + pad, size.Z + pad)
 	box.Parent = parent
 	local at = CFrame.new(0, -size.Y * (1 - share) / 2, 0)
-	return { anchor = anchor, size = anchor.Size, parts = { box }, offsets = { at } }
+	return { anchor = anchor, size = anchor.Size, parts = { box }, offsets = { at }, headWorn = false, hidden = false }
 end
 
 -- Where accessory number `k` (0 first) at `place` sits on `character`: its anchor, offset, size.
@@ -281,7 +295,9 @@ local function build(character: Model, ids: { number }, parent: Instance): { Pie
 				if head then
 					local size = round(head.Size.X * 1.15)
 					local model = ItemModels.build(item, size)
-					table.insert(pieces, modelPiece(model, head, CFrame.new(0, head.Size.Y * 0.45, 0), parent))
+					local piece = modelPiece(model, head, CFrame.new(0, head.Size.Y * 0.45, 0), parent)
+					piece.headWorn = true
+					table.insert(pieces, piece)
 				end
 			else
 				local seen: { [BasePart]: boolean } = {}
@@ -293,7 +309,9 @@ local function build(character: Model, ids: { number }, parent: Instance): { Pie
 						local fraction = if slot == 4 and (part.Name == "Left Leg" or part.Name == "Right Leg")
 							then 0.3
 							else nil
-						table.insert(pieces, layerPiece(item, part, LAYER_PAD[slot], parent, fraction))
+						local piece = layerPiece(item, part, LAYER_PAD[slot], parent, fraction)
+						piece.headWorn = slot == 1
+						table.insert(pieces, piece)
 					end
 				end
 			end
@@ -311,7 +329,9 @@ local function build(character: Model, ids: { number }, parent: Instance): { Pie
 				local anchor, at, size = placeOf(character, place, k, side)
 				if anchor and size > 0 then
 					local model = ItemModels.build(item, round(size))
-					table.insert(pieces, modelPiece(model, anchor, at, parent))
+					local piece = modelPiece(model, anchor, at, parent)
+					piece.headWorn = HEAD_PLACES[place] == true
+					table.insert(pieces, piece)
 				end
 			end
 		end
@@ -381,17 +401,23 @@ local function update(player: Player, root: Folder)
 			pieces = build(character, Accessories.parseLooks(looks), holder),
 			folder = holder,
 			look = look,
-			hidden = false,
 		}
 		dressed[player] = current
 	end
 	assert(current, "dressed")
-	-- (Faded with the head in first person, as Player/HeldItems.)
-	local head = character:FindFirstChild("Head")
-	local hidden = head ~= nil and head:IsA("BasePart") and head.LocalTransparencyModifier > 0.5
-	if hidden ~= current.hidden then
-		current.hidden = hidden
-		for _, piece in current.pieces do
+	-- The local body as Player/FirstPersonBody draws it; else faded with the head (Roblox's first
+	-- person, a spectated player), as Player/HeldItems.
+	local own = player == localPlayer and FirstPersonBody.drawing()
+	local headWorn = own and FirstPersonBody.hidesHeadWorn()
+	local faded = false
+	if not own then
+		local head = character:FindFirstChild("Head")
+		faded = head ~= nil and head:IsA("BasePart") and head.LocalTransparencyModifier > 0.5
+	end
+	for _, piece in current.pieces do
+		local hidden = if own then (piece.headWorn and headWorn) or FirstPersonBody.hides(piece.anchor) else faded
+		if hidden ~= piece.hidden then
+			piece.hidden = hidden
 			for _, part in piece.parts do
 				part.LocalTransparencyModifier = if hidden then 1 else 0
 			end
