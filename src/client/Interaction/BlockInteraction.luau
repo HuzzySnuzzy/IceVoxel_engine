@@ -128,6 +128,17 @@
 	number; an inventory snapshot settles the item). Until it arrives the other half stands alone;
 	breaking it meanwhile is answered with air, like any break of a block that is already gone.
 
+	The camera (Player/CameraRig) may look over the shoulder: the camera's ray then starts at the
+	eyes' plane (nothing between the camera and the player is aimed at; in first person nothing is
+	skipped), and the crosshair may only pick what the eyes see (Interaction/TargetRules): from the
+	eyes (CameraRig.eyes) to the point the ray found (the block, a mob in front of it, or the ray's
+	end), a block met sooner is aimed at instead, with its own face, along the eyes' ray, and a mob
+	the eyes can't see is behind cover; the bucket's and the bottle's rays alike. Reach is still
+	measured from the body (a block's centre from the root part, mobs from the eyes), so the server
+	checks what it always did. Minecraft's crosshair shows for a gamepad and for a mouse locked to
+	the centre (CameraRig.locked). While freelooking (CameraRig.freelooking) nothing is aimed at or
+	outlined and presses do nothing (the camera doesn't show where the hands point; releases count).
+
 	Targeting is a voxel raycast on the client's block data, so it is exact and independent of the
 	parts; blocks smaller than their cell (torches, lanterns) are aimed at and outlined by their own
 	box (Blocks.outline), so the ray passes beside a torch to the wall behind it. Edits are
@@ -135,9 +146,9 @@
 	screen is open (Ui/Screens). Broken blocks throw a few debris particles in their colour;
 	hitting, placing, using and dropping swing the held item (Player/HeldItems).
 
-	Frames (Shared/World/Origin): the camera's ray starts in render studs and is cast from world
-	blocks as doubles (`Origin.renderToBlocks`), exact however far out; reach compares render
-	positions with render positions (the block's centre and the root part). The outline and the
+	Frames (Shared/World/Origin): the camera's ray and the eyes come in render studs and are cast
+	from world blocks as doubles (`Origin.renderToBlocks`), exact however far out; reach compares
+	render positions with render positions (the block's centre and the root part). The outline and the
 	debris are placed at `Origin.blocksToRender`; live debris moves with the render origin
 	(a Rendering/Rebase mover). Other players (placement obstruction, the spectator's pick) are
 	Player/RemotePlayers' (their characters, or the server's relay by interest).
@@ -226,8 +237,10 @@ local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local AttackIndicator = require(script.Parent.Parent.Ui.AttackIndicator)
+local CameraRig = require(script.Parent.Parent.Player.CameraRig)
 local Firearms = require(script.Parent.Firearms)
 local MeleeInput = require(script.Parent.MeleeInput)
+local TargetRules = require(script.Parent.TargetRules)
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
@@ -477,14 +490,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		return nil
 	end
 
-	-- The first block `isTarget` accepts on `ray`, within reach of the character.
-	local function cast(ray: Ray, isTarget: (id: number) -> boolean): Hit?
-		local root = rootPart()
-		if root == nil then
-			return nil
-		end
+	-- The first block `isTarget` accepts on `ray`, however far (up to its maxDistance).
+	local function rawCast(ray: Ray, isTarget: (id: number) -> boolean): Hit?
 		local direction = ray.direction
-		local hit = VoxelRaycast.cast(
+		return VoxelRaycast.cast(
 			ray.x,
 			ray.y,
 			ray.z,
@@ -496,39 +505,92 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			isTarget,
 			outlineAt
 		)
-		if hit then
-			-- (Both in render studs.)
-			if (Origin.blockCentreToRender(hit.x, hit.y, hit.z) - root.Position).Magnitude > REACH * BLOCK then
-				return nil
-			end
+	end
+
+	-- `hit` if its centre is within reach of the character's root, else nil.
+	local function inReach(hit: Hit?, root: BasePart): Hit?
+		-- (Both in render studs.)
+		if hit and (Origin.blockCentreToRender(hit.x, hit.y, hit.z) - root.Position).Magnitude > REACH * BLOCK then
+			return nil
 		end
 		return hit
 	end
 
 	--[[
-		Block under a viewport position (or a GUI position when `gui` is set), within reach, and the
-		ray it was looked for along (nil without a character).
+		The eyes' sight (Interaction/TargetRules.hidden): the block `isTarget` stops that hides the
+		point `t` along `ray` from the eyes (Player/CameraRig.eyes), and the eyes' ray to it, along
+		which it was found; nil when the eyes see the point, look along the ray, or the view is the
+		eyes' own (first person and the sights: the camera is at the eyes, the ray is theirs).
 	]]
-	local function targetAt(point: Vector2, gui: boolean?): (Hit?, Ray?)
-		local root = rootPart()
-		if root == nil then
+	local function sight(ray: Ray, t: number, isTarget: (id: number) -> boolean, root: BasePart): (Hit?, Ray?)
+		local eyes = CameraRig.eyes()
+		if eyes == nil or CameraRig.eyesView() then
 			return nil, nil
 		end
+		local ex, ey, ez = Origin.renderToBlocks(eyes)
+		local d = ray.direction
+		local hit, ux, uy, uz =
+			TargetRules.hidden(ray.x, ray.y, ray.z, d.X, d.Y, d.Z, t, ex, ey, ez, getBlock, isTarget, outlineAt)
+		if hit == nil then
+			return nil, nil
+		end
+		return hit,
+			{
+				x = ex,
+				y = ey,
+				z = ez,
+				origin = Vector3.new(ex, ey, ez),
+				direction = Vector3.new(ux, uy, uz),
+				maxDistance = (eyes - root.Position).Magnitude / BLOCK + REACH,
+			}
+	end
+
+	--[[
+		The first block `isTarget` accepts on `ray` that the eyes see too (`sight`: else the block
+		hiding it from them, or, when the ray hits nothing, the end of the ray), within reach of the
+		character: the bucket's and the bottle's own rays.
+	]]
+	local function seenCast(ray: Ray, isTarget: (id: number) -> boolean): Hit?
+		local root = rootPart()
+		if root == nil then
+			return nil
+		end
+		local hit = rawCast(ray, isTarget)
+		local hidden = sight(ray, if hit then hit.distance else ray.maxDistance, isTarget, root)
+		return inReach(hidden or hit, root)
+	end
+
+	--[[
+		The ray from the camera through a viewport position (or a GUI position when `gui` is set),
+		starting at the eyes' plane (Interaction/TargetRules.skip: where it passes the eyes, from
+		Player/CameraRig.eyes; nowhere else when the camera is at or before them).
+	]]
+	local function cameraRay(point: Vector2, gui: boolean?, root: BasePart): Ray
 		local camera = workspace.CurrentCamera
 		local ray = if gui
 			then camera:ScreenPointToRay(point.X, point.Y)
 			else camera:ViewportPointToRay(point.X, point.Y)
+		local direction = ray.Direction.Unit
 		-- (The camera is in render studs: world blocks from it, as doubles.)
 		local x, y, z = Origin.renderToBlocks(ray.Origin)
-		local aim: Ray = {
+		local start = ray.Origin
+		local eyes = CameraRig.eyes()
+		if eyes then
+			local ex, ey, ez = Origin.renderToBlocks(eyes)
+			local skip = TargetRules.skip(x, y, z, direction.X, direction.Y, direction.Z, ex, ey, ez)
+			if skip > 0 then
+				x, y, z = x + direction.X * skip, y + direction.Y * skip, z + direction.Z * skip
+				start += direction * (skip * BLOCK)
+			end
+		end
+		return {
 			x = x,
 			y = y,
 			z = z,
 			origin = Vector3.new(x, y, z),
-			direction = ray.Direction.Unit,
-			maxDistance = (ray.Origin - root.Position).Magnitude / BLOCK + REACH,
+			direction = direction,
+			maxDistance = (start - root.Position).Magnitude / BLOCK + REACH,
 		}
-		return cast(aim, Blocks.isTargetable), aim
 	end
 
 	--[[
@@ -565,14 +627,51 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		return mob, distance
 	end
 
+	--[[
+		What the player aims at under a viewport position (or a GUI position when `gui` is set): the
+		block within reach, the ray it was looked for along, and (with `mobs`) the mob in reach in
+		front of it, which hides the block (Minecraft's entity pick wins). Over the shoulder the
+		eyes must see it too (`sight`): a block they see first is aimed at instead, along their ray,
+		with its own face, and a mob they can't see is behind cover. nil, nil, nil without a
+		character.
+	]]
+	local function aimAt(point: Vector2, gui: boolean?, mobs: boolean): (Hit?, Ray?, MobRenderer.MobView?)
+		local root = rootPart()
+		if root == nil then
+			return nil, nil, nil
+		end
+		local ray = cameraRay(point, gui, root)
+		local raw = rawCast(ray, Blocks.isTargetable)
+		local hit = inReach(raw, root)
+		local mob, distance = nil, 0
+		if mobs then
+			mob, distance = mobOn(ray)
+		end
+		local mobFirst = mob ~= nil and (hit == nil or distance < hit.distance)
+		-- (What the ray found first: the mob, the block however far, or the ray's end.)
+		local t = if mobFirst then distance elseif raw then raw.distance else ray.maxDistance
+		local hidden, eyeRay = sight(ray, t, Blocks.isTargetable, root)
+		if hidden and eyeRay then
+			return inReach(hidden, root), eyeRay, nil
+		elseif mobFirst then
+			return nil, ray, mob
+		end
+		return hit, ray, nil
+	end
+
 	-- Where the player aims, in viewport coordinates: the mouse while it is the active input and
 	-- free, otherwise the screen centre. (A PC with a controller still has a mouse, so
-	-- MouseEnabled alone would aim at wherever the hidden cursor was left.)
+	-- MouseEnabled alone would aim at wherever the hidden cursor was left.) Minecraft's crosshair
+	-- shows for a gamepad, and for a mouse locked to the centre (Player/CameraRig.locked), unless
+	-- hidden (`setCrosshairHidden`, a raised firearm: Firearms.hidesCrosshair) or freelooking.
 	local function pointer(): Vector2
 		local preferred = UserInputService.PreferredInput
-		crosshair.Visible = (preferred == Enum.PreferredInput.Gamepad or preferred == Enum.PreferredInput.MicroGamepad)
+		local gamepad = preferred == Enum.PreferredInput.Gamepad or preferred == Enum.PreferredInput.MicroGamepad
+		local lockedMouse = preferred == Enum.PreferredInput.KeyboardAndMouse and CameraRig.locked()
+		crosshair.Visible = (gamepad or lockedMouse)
 			and not crosshairHidden
 			and not Firearms.hidesCrosshair()
+			and not CameraRig.freelooking()
 		if
 			preferred == Enum.PreferredInput.KeyboardAndMouse
 			and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter
@@ -1005,9 +1104,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		return true
 	end
 
-	-- Minecraft's empty bucket: its own ray, which stops at fluid sources as well as blocks.
+	-- Minecraft's empty bucket: its own ray, which stops at fluid sources as well as blocks (seen by
+	-- the eyes too, as the aim).
 	local function bucketTarget(ray: Ray): Hit?
-		return cast(ray, function(id: number): boolean
+		return seenCast(ray, function(id: number): boolean
 			return bucketTakes(id) or Blocks.isTargetable(id)
 		end)
 	end
@@ -1138,7 +1238,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		-- bucket's does (Minecraft's BottleItem); in adventure too (no mayBuild needed).
 		if ray and Drinking.handles(stack) then
 			local action = Drinking.use(stack, mode, function(): Drinking.Source?
-				local source = cast(ray, function(id: number): boolean
+				local source = seenCast(ray, function(id: number): boolean
 					return Drinks.isWaterSource(id) or Blocks.isTargetable(id)
 				end)
 				return if source and Drinks.isWaterSource(source.block) then source else nil
@@ -1363,7 +1463,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	--[[ Buttons ]]
 
 	local function beginAttack(source: string)
-		if Screens.isOpen() or GameModeSwitcher.isOpen() then
+		-- (Freelooking, a press does nothing: see the frame below.)
+		if Screens.isOpen() or GameModeSwitcher.isOpen() or CameraRig.freelooking() then
 			return
 		end
 		local first = not anyHeld(attackHeld)
@@ -1476,7 +1577,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	local function beginUse(source: string, hit: Hit?, ray: Ray?)
-		if Screens.isOpen() or GameModeSwitcher.isOpen() then
+		if Screens.isOpen() or GameModeSwitcher.isOpen() or CameraRig.freelooking() then
 			return
 		end
 		if useHeld[source] == nil and weaponUse(source) then
@@ -1550,43 +1651,38 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	RunService.RenderStepped:Connect(function(dt: number)
 		local now = os.clock()
 		local open = Screens.isOpen() or GameModeSwitcher.isOpen()
+		-- Freelooking (Player/CameraRig): the camera shows nothing the hands point at, so nothing is
+		-- aimed at, outlined, pressed or used meanwhile (releases still count).
+		local freelook = CameraRig.freelooking()
 
 		-- A touch held still long enough starts breaking.
 		local t = touch
 		local startHold = false
-		if t and not t.moved and not t.holding and now - t.startedAt >= TOUCH_HOLD and not open then
+		if t and not t.moved and not t.holding and now - t.startedAt >= TOUCH_HOLD and not open and not freelook then
 			t.holding = true
 			startHold = true
 		end
 
 		-- Aim: under a breaking finger, else the mouse / screen centre (with a touch screen only
-		-- where a finger is).
+		-- where a finger is); a mob in reach in front of the block hides it (`aimAt`).
 		local aim = pointer()
-		if t and t.holding then
-			target, targetRay = targetAt(t.position, true)
-		elseif UserInputService.PreferredInput == Enum.PreferredInput.Touch then
+		local aimedMob: MobRenderer.MobView? = nil
+		if t and t.holding and not freelook then
+			target, targetRay, aimedMob = aimAt(t.position, true, not open)
+		elseif freelook or UserInputService.PreferredInput == Enum.PreferredInput.Touch then
 			target, targetRay = nil, nil
 		else
-			target, targetRay = targetAt(aim)
+			target, targetRay, aimedMob = aimAt(aim, false, not open)
 		end
+		mobTarget = aimedMob
 		-- Spectators aim at blocks with a menu only (they pass through the rest), and only those are
 		-- outlined; adventure players outline nothing (GameRenderer.shouldRenderBlockOutline).
+		-- (Spectators have no entity reach: no mob.)
 		local mode = ClientInventory.mode()
 		local aimed = target
 		if aimed and GameMode.isSpectator(mode) and not opensMenu(aimed.block, mode) then
 			-- (The ray stays: it is what the spectator's click looks for players along.)
 			target = nil
-		end
-		-- A mob in reach in front of the block hides it (Minecraft's entity pick wins).
-		mobTarget = nil
-		local ray = targetRay
-		if ray and not open then
-			local mob, distance = mobOn(ray)
-			local block = target
-			if mob and (block == nil or distance < block.distance) then
-				mobTarget = mob
-				target = nil
-			end
 		end
 		if startHold then
 			-- (With a magic weapon a held finger casts at it instead of breaking: Interaction/Casting.
@@ -1666,13 +1762,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			-- A magic weapon held: it casts at its own use time (Interaction/Casting), every frame
 			-- looked at, not the repeat's.
 			local held = ClientInventory.selectedStack()
-			if anyHeld(useHeld) and not useSpent and held and Casting.handles(held) and targetRay then
+			if anyHeld(useHeld) and not useSpent and held and Casting.handles(held) and targetRay and not freelook then
 				if Casting.use(held, mode, targetRay, if hit then hit.distance else nil) then
 					swing()
 				end
 			end
-			-- Using / placing, repeated while held.
-			if anyHeld(useHeld) and now - lastUse >= Config.Interaction.RepeatInterval then
+			-- Using / placing, repeated while held (not while freelooking).
+			if anyHeld(useHeld) and not freelook and now - lastUse >= Config.Interaction.RepeatInterval then
 				lastUse = now
 				useAt(hit, targetRay)
 			end
@@ -1693,7 +1789,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if Keybinds.matches("attack", input) then
 			beginAttack("mouse")
 		end
-		if Keybinds.matches("use", input) then
+		if Keybinds.matches("use", input) and not CameraRig.freelooking() then
 			if
 				kind == Enum.UserInputType.MouseButton2
 				and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter
@@ -1770,7 +1866,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				-- movement); only a short click uses / places.
 				local click = os.clock() - rightDownAt < CLICK_TIME and rightMoved < CLICK_MOVE
 				rightDownAt = nil
-				if click and not Screens.isOpen() then
+				if click and not Screens.isOpen() and not CameraRig.freelooking() then
 					useOnce(target, targetRay)
 				end
 			end
@@ -1788,19 +1884,18 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 					if useHeld.touch then
 						endUse("touch")
 					end
-				elseif not t.moved and os.clock() - t.startedAt < TOUCH_HOLD and not Screens.isOpen() then
-					-- A tap on a mob hits it (Bedrock's touch controls), else it uses.
-					local hit, ray = targetAt(t.position, true)
-					local mob, distance = nil, 0
-					if ray then
-						mob, distance = mobOn(ray)
-					end
+				elseif
+					not t.moved
+					and os.clock() - t.startedAt < TOUCH_HOLD
+					and not Screens.isOpen()
+					and not CameraRig.freelooking()
+				then
+					-- A tap on a mob (in front of the block) hits it (Bedrock's touch controls),
+					-- else it uses.
+					local hit, ray, mob = aimAt(t.position, true, true)
 					-- (A firearm's tap on a mob does nothing: no bash, no door behind it.)
-					local tap = AttackRules.tap(
-						mob ~= nil and (hit == nil or distance < hit.distance),
-						ClientInventory.mode(),
-						isFirearm(ClientInventory.selectedStack())
-					)
+					local tap =
+						AttackRules.tap(mob ~= nil, ClientInventory.mode(), isFirearm(ClientInventory.selectedStack()))
 					if tap == "attack" and mob then
 						attack(mob)
 					elseif tap == "use" then

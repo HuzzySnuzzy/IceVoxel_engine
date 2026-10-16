@@ -20,7 +20,16 @@
 	                 kept within CLIMB_MAX_SPEED (a rope slide falls far faster than one climbs),
 	  holding a tool the arm pose of `toolnone` on top.
 
-	Tracks played on the owning client by the Humanoid's Animator replicate to other players.
+	In the manner of DayZ (Player/BodyRules, the body's motion by Player/BodyTwist):
+	  backpedal      the walk and run play reversed (negative AdjustSpeed) while the legs walk
+	                 backwards (BodyTwist.backwards: moving into the back half, the legs twisted to
+	                 face away from the move),
+	  idle turn      standing on the ground and turning faster than BodyRules.SHUFFLE_RATE (the
+	                 body's turn rate, BodyTwist.turnRate) plays the walk at BodyRules.shuffle's
+	                 speed, so the feet step round.
+
+	Tracks played on the owning client by the Humanoid's Animator replicate to other players, with
+	their speed: others see the backpedal and the shuffle too (BodyTwist folds their legs by it).
 ]]
 
 local Players = game:GetService("Players")
@@ -30,6 +39,8 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 
+local BodyRules = require(script.Parent.BodyRules)
+local BodyTwist = require(script.Parent.BodyTwist)
 local MovementController = require(script.Parent.MovementController)
 
 local BLOCK = Config.BlockSize
@@ -222,8 +233,18 @@ function CharacterAnimator.start()
 			else
 				nextMode = if os.clock() - view.jumpedAt < JUMP_TIME then "jump" else "fall"
 			end
+			-- Turning on the spot shuffles the feet (BodyRules.shuffle; the walk at its speed).
+			local shuffle = 0
+			if nextMode == "idle" and state.onGround and not view.frozen then
+				shuffle = BodyRules.shuffle(BodyTwist.turnRate(), view.speed, true)
+				if shuffle > 0 then
+					nextMode = "walk"
+				end
+			end
 			mode = nextMode
 			local fade = FADES[mode]
+			-- Backpedalling plays the walk and the run backwards (BodyTwist's legs).
+			local sign = if BodyTwist.backwards() then -1 else 1
 
 			set("idle", mode == "idle", fade)
 			set("jump", mode == "jump", fade)
@@ -234,21 +255,21 @@ function CharacterAnimator.start()
 			local climbSpeed = math.clamp(view.climbSpeed * BLOCK / climbScale, -CLIMB_MAX_SPEED, CLIMB_MAX_SPEED)
 			set("climb", mode == "climb", fade, 1, climbSpeed)
 			if mode == "walk" and rig == "R15" then
-				-- The Animate script's setRunSpeed.
-				local runSpeed = speed / 16 * 1.25 / scale
+				-- The Animate script's setRunSpeed (a shuffle walks at its own speed).
+				local runSpeed = if shuffle > 0 then shuffle * WALK_SPEED else speed / 16 * 1.25 / scale
 				if runSpeed <= WALK_SPEED then
-					set("walk", true, fade, 1, runSpeed / WALK_SPEED)
-					set("run", true, fade, ALMOST_ZERO, runSpeed / RUN_SPEED)
+					set("walk", true, fade, 1, sign * runSpeed / WALK_SPEED)
+					set("run", true, fade, ALMOST_ZERO, sign * runSpeed / RUN_SPEED)
 				elseif runSpeed < RUN_SPEED then
 					local blend = (runSpeed - WALK_SPEED) / (RUN_SPEED - WALK_SPEED)
-					set("walk", true, fade, 1 - blend, 1)
-					set("run", true, fade, blend, 1)
+					set("walk", true, fade, 1 - blend, sign)
+					set("run", true, fade, blend, sign)
 				else
-					set("walk", true, fade, ALMOST_ZERO, runSpeed / WALK_SPEED)
-					set("run", true, fade, 1, runSpeed / RUN_SPEED)
+					set("walk", true, fade, ALMOST_ZERO, sign * runSpeed / WALK_SPEED)
+					set("run", true, fade, 1, sign * runSpeed / RUN_SPEED)
 				end
 			else
-				set("walk", mode == "walk", fade, 1, speed / 14.5)
+				set("walk", mode == "walk", fade, 1, sign * (if shuffle > 0 then shuffle else speed / 14.5))
 				set("run", false, fade)
 			end
 			local tool = character:FindFirstChildOfClass("Tool")

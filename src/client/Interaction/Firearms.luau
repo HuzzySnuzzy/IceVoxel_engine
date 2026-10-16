@@ -35,7 +35,8 @@
 	            Player/AimCamera), the first-person gun too (Player/HeldItems.kick). The server's
 	            record of the shot (ShotView) stops automatic fire when it refused it or the gun
 	            jammed (a record of an earlier press's shot, arriving late, doesn't stop the press
-	            held now; a jam clicks either way).
+	            held now; a jam clicks either way). While freelooking (Player/CameraRig) the trigger
+	            pulls nothing: a press meanwhile is dropped, the gun stays raised.
 	  R         (X on a gamepad, RELOAD on a touch screen) on a jammed gun clears the jam (Inventory
 	            action "weapon" op 3, UnjamTicks); else reloads (op 1): a detachable magazine gun
 	            swaps in the fullest magazine and chambers (Handling.reloadTicks), an internal
@@ -114,6 +115,7 @@ local WeaponButtons = require(script.Parent.Parent.Ui.WeaponButtons)
 local WeaponHud = require(script.Parent.Parent.Ui.WeaponHud)
 local AimCamera = require(script.Parent.Parent.Player.AimCamera)
 local AimRules = require(script.Parent.Parent.Player.AimRules)
+local CameraRig = require(script.Parent.Parent.Player.CameraRig)
 local HeldItems = require(script.Parent.Parent.Player.HeldItems)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
@@ -570,6 +572,12 @@ local function fireStep()
 	end
 	local stack, spec = heldGun()
 	if stack == nil or spec == nil or aim.posture == "lowered" then
+		return
+	end
+	if CameraRig.freelooking() then
+		-- Freelooking the trigger pulls nothing (the camera doesn't show where the gun points): a
+		-- press meanwhile is dropped, a held one fires again (an automatic) once it ends.
+		aim.pressed = false
 		return
 	end
 	refresh(stack, spec)
