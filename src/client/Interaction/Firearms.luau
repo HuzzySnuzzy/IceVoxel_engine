@@ -35,8 +35,10 @@
 	            Player/AimCamera), the first-person gun too (Player/HeldItems.kick). The server's
 	            record of the shot (ShotView) stops automatic fire when it refused it or the gun
 	            jammed (a record of an earlier press's shot, arriving late, doesn't stop the press
-	            held now; a jam clicks either way). While freelooking (Player/CameraRig) the trigger
-	            pulls nothing: a press meanwhile is dropped, the gun stays raised.
+	            held now; a jam clicks either way). While freelooking (Player/CameraRig: until the
+	            camera is back within 2 degrees of the aim) the trigger pulls nothing and the gun
+	            stays raised; a press meanwhile waits in Interaction/BlockInteraction, which plays
+	            it once the camera is back (a click fires a semi-automatic once).
 	  R         (X on a gamepad, RELOAD on a touch screen) on a jammed gun clears the jam (Inventory
 	            action "weapon" op 3, UnjamTicks); else reloads (op 1): a detachable magazine gun
 	            swaps in the fullest magazine and chambers (Handling.reloadTicks), an internal
@@ -576,7 +578,8 @@ local function fireStep()
 	end
 	if CameraRig.freelooking() then
 		-- Freelooking the trigger pulls nothing (the camera doesn't show where the gun points): a
-		-- press meanwhile is dropped, a held one fires again (an automatic) once it ends.
+		-- press meanwhile waits in Interaction/BlockInteraction, a held one fires again (an
+		-- automatic) once the camera is back within 2 degrees of the aim.
 		aim.pressed = false
 		return
 	end
