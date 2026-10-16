@@ -26,6 +26,16 @@
 	                moves as fast on the screen however far it is zoomed; every input's turn (mouse,
 	                stick, touch) is scaled in the hook, else (no hook) the mouse's alone through
 	                MouseDeltaSensitivity on top of the Sensitivity setting.
+
+	The camera rig (Player/CameraRig) uses it for freelook and focus:
+	  Turn          `turn` queues a turn (radians: x right, y down) that the next getRotation adds
+	                in full (no cap, unlike a kick): freelook's snap back, while the input still
+	                moves the aim.
+	  Room          `setRoom`: the radians the camera has left to turn each way while freelooking;
+	                the input's turn is clamped to it (math.huge each way: no limit).
+	  Focus         `setFocusShare`: the turn's share while the eyes focus (the focus field of view
+	                over the setting's), multiplied with the zoom's share.
+	`hooked` says whether all this reaches the camera (freelook needs it).
 ]]
 
 local Players = game:GetService("Players")
@@ -43,6 +53,12 @@ local hooked: boolean? = nil
 local sensitivity = 1
 local zoomShare = 1
 local kickX, kickY = 0, 0
+-- Freelook (Player/CameraRig): the turn waiting for the camera (radians: x right, y down), the
+-- room left each way (radians; math.huge: none), and the focus' share of every turn.
+local turnX, turnY = 0, 0
+local roomLeft, roomRight, roomUp, roomDown = math.huge, math.huge, math.huge, math.huge
+local roomed = false
+local focusShare = 1
 -- The most a kick waits for the camera (degrees each way).
 local MAX_KICK = 30
 
@@ -71,13 +87,27 @@ local function hook(): boolean
 			if inverted and Keybinds.usingKeys() then
 				rotation = Vector2.new(rotation.X, -rotation.Y)
 			end
-			if zoomShare ~= 1 then
-				rotation *= zoomShare
+			local share = zoomShare * focusShare
+			if share ~= 1 then
+				rotation *= share
+			end
+			if roomed then
+				-- (Freelook: the input turns no further than the room left.)
+				local x, y = rotation.X, rotation.Y
+				local cx, cy = math.clamp(x, -roomLeft, roomRight), math.clamp(y, -roomUp, roomDown)
+				if cx ~= x or cy ~= y then
+					rotation = Vector2.new(cx, cy)
+				end
 			end
 			if kickX ~= 0 or kickY ~= 0 then
 				-- (A firearm's recoil: Player/AimCamera.)
 				rotation += Vector2.new(kickX, kickY)
 				kickX, kickY = 0, 0
+			end
+			if turnX ~= 0 or turnY ~= 0 then
+				-- (Freelook's snap back: Player/CameraRig.)
+				rotation += Vector2.new(turnX, turnY)
+				turnX, turnY = 0, 0
 			end
 			return rotation
 		end
@@ -89,9 +119,10 @@ local function hook(): boolean
 	return ok
 end
 
--- MouseDeltaSensitivity: the setting, times the zoom's share when the camera isn't hooked.
+-- MouseDeltaSensitivity: the setting, times the zoom's and focus' shares when the camera isn't
+-- hooked.
 local function applySensitivity()
-	local share = if hooked then 1 else zoomShare
+	local share = if hooked then 1 else zoomShare * focusShare
 	UserInputService.MouseDeltaSensitivity = math.max(sensitivity * share, 0.01)
 end
 
@@ -167,6 +198,46 @@ function MouseLook.setZoomSensitivity(share: number)
 	if not hooked then
 		applySensitivity()
 	end
+end
+
+-- The camera's turn share while the eyes focus (the focus field of view over the setting's; 1:
+-- none), multiplied with the zoom's.
+function MouseLook.setFocusShare(share: number)
+	share = math.clamp(share, 0.01, 1)
+	if share == focusShare then
+		return
+	end
+	focusShare = share
+	if not hooked then
+		applySensitivity()
+	end
+end
+
+--[[
+	Turns the camera by (`dx` right, `dy` down) radians at its next update, all of it (freelook's
+	snap back: Player/CameraRig); nothing without the hook (`hooked`).
+]]
+function MouseLook.turn(dx: number, dy: number)
+	if hooked ~= true then
+		return
+	end
+	turnX += dx
+	turnY += dy
+end
+
+--[[
+	The room the camera has left to turn while freelooking (radians each way, never below 0;
+	math.huge: no limit): the input's turn is clamped to it (a turn queued by `turn` is not).
+]]
+function MouseLook.setRoom(left: number, right: number, up: number, down: number)
+	roomLeft, roomRight = math.max(left, 0), math.max(right, 0)
+	roomUp, roomDown = math.max(up, 0), math.max(down, 0)
+	roomed = roomLeft ~= math.huge or roomRight ~= math.huge or roomUp ~= math.huge or roomDown ~= math.huge
+end
+
+-- Is Roblox's camera input hooked (turns, room and kicks reach the camera)?
+function MouseLook.hooked(): boolean
+	return hooked == true
 end
 
 -- Can the mouse be inverted here (false once hooking Roblox's camera failed)?

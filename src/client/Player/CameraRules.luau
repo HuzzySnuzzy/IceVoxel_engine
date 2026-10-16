@@ -21,11 +21,16 @@
 	             the rig (`easeRig`) with DayZ's SmoothCD (`smoothCD`) over a smooth time of 0.3 x
 	             DayZ's blend time (`transition`); the shoulder's side (right +1, left -1) eases at
 	             DayZ's 0.14. In the air the pivot's height lags (`jumpLag`: none of the rise for
-	             0.15 s, then a quarter of it). Collision: the pivot keeps `clip` of the way from
-	             the eyes to it, and the boom pulls in at once and eases back out (`boom`).
+	             0.15 s, then a quarter of it; `heightLag` every frame: continuous across a hop
+	             after a landing, and eased back to 0 on landing). Collision (`collide`, on a ray
+	             cast the rig gives it): the pivot keeps `clip` of the way from the eyes to it, the
+	             boom is cast backwards from it as five rays over the near plane, and pulls in at
+	             once and eases back out (`boom`; `boomStep`: the rig's own length while nothing
+	             pulled it in). A body that moved far in a frame (`movedFar`) starts it afresh.
 	  Eyes       first person and the sights look from the hull's eyes pushed ahead
 	             (`firstPersonEye`: Config.Camera.FirstForward, more looking down), so the chest
-	             and feet show. Targeting skips what lies between the camera and the eyes' plane
+	             and feet show; in at once, out of the sights to the shoulder over DayZ's 0.2 s
+	             (`eyeShare`). Targeting skips what lies between the camera and the eyes' plane
 	             (`eyePlaneSkip`: 0 in first person).
 	  Freelook   a Look (`newLook`): held (or toggled) Freelook freezes the aim while the camera
 	             turns, up to Config.Camera.FreelookYaw each way (FreelookYawFirst in first
@@ -35,9 +40,9 @@
 	             input still moves the aim, and freelook ends below SNAP_END radians. Every frame,
 	             in this order: `freelook` (the key's edges), `aim` (the aim this frame), then
 	             `snapStep` while snapping and `clampRoom`.
-	  Body       the body's yaw follows the aim (`followYaw`): at once when flagged (moving,
-	             raised, first person...), else by SmoothCD over Config.Camera.IdleTurnSeconds,
-	             never more than IdleTurnMaxLag behind.
+	  Body       the body's yaw follows the aim (`followYaw`): at once when flagged
+	             (`turnsAtOnce`: moving, raised, first person...), else by SmoothCD over
+	             Config.Camera.IdleTurnSeconds, never more than IdleTurnMaxLag behind.
 	  Focus      DayZ's eye zoom (`focusFov`): FocusFov, FocusSprintFov sprinting, never wider than
 	             the FOV setting, nothing while raised.
 ]]
@@ -133,6 +138,13 @@ export type Look = {
 	pitchVel: number,
 }
 
+--[[
+	A ray cast for the collision (`collide`): how far (studs) a ray from (ox, oy, oz) along
+	(dx, dy, dz) (render studs, any length) goes before a block stops it, looking `max` studs far;
+	math.huge when nothing does (Player/CameraRig: Shared/World/VoxelRaycast.distance).
+]]
+export type Cast = (ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, max: number) -> number
+
 local CameraRules = {}
 
 local CAMERA = Config.Camera
@@ -156,6 +168,15 @@ CameraRules.SNAP_END = 0.002
 CameraRules.FREELOOK_PITCH = math.rad(85)
 -- The body counts as lying (the `lying` rig) past this tilt.
 CameraRules.LYING_TILT = 0.5
+-- Landing: the jump's lag goes back to 0 over DayZ's blend from the Jump camera (seconds, eased
+-- over BLEND_SHARE of it).
+CameraRules.LAND_SECONDS = 0.3
+-- Leaving the sights from third person for the shoulder: DayZ's Erc <-> Raised blend (seconds).
+CameraRules.SIGHTS_OUT_SECONDS = 0.2
+-- The body moved this far (studs) in one frame: a teleport or a respawn; the camera starts afresh.
+CameraRules.MOVED_FAR = 16
+-- The boom's edge rays start this far (studs) short of a block beside the pivot (`collide`).
+CameraRules.SIDE_GAP = 0.05
 
 --[[
 	DayZ's blend times between rigs (dayzplayercameras.c), "from>to" -> seconds: Erc <-> Raised 0.2,
@@ -349,11 +370,121 @@ function CameraRules.jumpLag(lag: number, vel: number, rise: number, airborne: n
 end
 
 --[[
+	The rig's height lag a frame of `dt` on, for every frame, as `jumpLag` in the air but continuous.
+	`rise` is how far the eyes are above where they were when the feet last left the ground (on
+	the ground too, until the lag is back to 0; 0 when they never left), `takeoff` the lag then
+	(not always 0: one jump may follow a landing). The hold keeps the pivot where it was at the
+	take-off; the pivot never sinks below that height afterwards (the lag's ease would otherwise
+	trail the fall and drop the camera under the standing height as the feet land), and on the
+	ground the lag goes back to 0 over LAND_SECONDS (DayZ's blend from the Jump camera) instead of
+	at once. Returns the lag (studs, down negative) and its velocity.
+]]
+function CameraRules.heightLag(
+	lag: number,
+	vel: number,
+	rise: number,
+	airborne: number,
+	takeoff: number,
+	dt: number
+): (number, number)
+	local floor = math.min(0, takeoff - math.max(rise, 0))
+	local value, velocity
+	if airborne > 0 then
+		if airborne < CameraRules.JUMP_HOLD then
+			return floor, 0
+		end
+		value, velocity = CameraRules.jumpLag(lag, vel, rise, airborne, dt)
+	else
+		if lag == 0 and vel == 0 then
+			return 0, 0
+		end
+		value, velocity = smoothCD(lag, 0, vel, CameraRules.LAND_SECONDS * CameraRules.BLEND_SHARE, dt)
+		if math.abs(value) < 1e-3 and math.abs(velocity) < 1e-2 then
+			return 0, 0
+		end
+	end
+	if value < floor then
+		return floor, 0
+	end
+	return value, velocity
+end
+
+--[[
 	How much of the way `wanted` (studs, eyes to pivot) to keep when a ray along it is free for
 	`free` studs (math.huge: nothing there): `margin` short of what it hit, never below 0.
 ]]
 function CameraRules.clip(free: number, wanted: number, margin: number): number
 	return math.clamp(math.min(wanted, free - margin), 0, wanted)
+end
+
+--[[
+	The shoulder rig's collision with blocks, for eyes (ex, ey, ez), pivot (px, py, pz), the view's
+	unit look (lx, ly, lz), right (rx, ry, rz) and up (ux, uy, uz), and a boom `distance` long:
+	  1. the eyes to the pivot: the pivot keeps `clip` of the way (Config.Camera.Margin short of a
+	     block), so it is never inside a wall beside the head;
+	  2. the boom from that pivot backwards (-look) as five rays covering the near plane: the
+	     centre, and one from each of its edges (right x +-Radius[1], up x +-Radius[2]), each edge
+	     first cast out from the pivot and kept SIDE_GAP short of a block, so a wall alongside
+	     the boom (walking along it) only narrows the plane instead of pulling the camera in.
+	Returns the pivot kept and how long the boom may be: math.huge with nothing in the way, else the
+	nearest block's distance along the boom less the margin (`boomStep` / `boom` take it). At most
+	nine casts, the longest `distance` + the margin.
+]]
+function CameraRules.collide(
+	ex: number,
+	ey: number,
+	ez: number,
+	px: number,
+	py: number,
+	pz: number,
+	lx: number,
+	ly: number,
+	lz: number,
+	rx: number,
+	ry: number,
+	rz: number,
+	ux: number,
+	uy: number,
+	uz: number,
+	distance: number,
+	cast: Cast
+): (number, number, number, number)
+	local margin = CAMERA.Margin
+	local wx, wy, wz = px - ex, py - ey, pz - ez
+	local wanted = math.sqrt(wx * wx + wy * wy + wz * wz)
+	if wanted > 1e-6 then
+		local share = CameraRules.clip(cast(ex, ey, ez, wx, wy, wz, wanted + margin), wanted, margin) / wanted
+		px, py, pz = ex + wx * share, ey + wy * share, ez + wz * share
+	end
+	local free = math.huge
+	if distance <= 0 then
+		return px, py, pz, free
+	end
+	local radiusX, radiusY = CAMERA.Radius[1] or 0, CAMERA.Radius[2] or 0
+	for ray = 0, 4 do
+		local sx, sy, sz = px, py, pz
+		if ray > 0 then
+			-- (The edge: out from the pivot along +-right or +-up, short of a block.)
+			local side = if ray <= 2 then radiusX else radiusY
+			local sign = if ray % 2 == 1 then 1 else -1
+			local ox, oy, oz
+			if ray <= 2 then
+				ox, oy, oz = rx * sign, ry * sign, rz * sign
+			else
+				ox, oy, oz = ux * sign, uy * sign, uz * sign
+			end
+			if side > 0 then
+				local hit = cast(px, py, pz, ox, oy, oz, side)
+				local out = if hit == math.huge then side else math.max(0, hit - CameraRules.SIDE_GAP)
+				sx, sy, sz = px + ox * out, py + oy * out, pz + oz * out
+			end
+		end
+		local hit = cast(sx, sy, sz, -lx, -ly, -lz, distance + margin)
+		if hit ~= math.huge then
+			free = math.min(free, hit - margin)
+		end
+	end
+	return px, py, pz, free
 end
 
 --[[
@@ -369,6 +500,44 @@ function CameraRules.boom(current: number, free: number, dt: number): number
 	end
 	local length = current + (free - current) * (1 - math.exp(-CAMERA.EaseOut * math.max(dt, 0)))
 	return if free - length < 1e-3 then free else length
+end
+
+--[[
+	The boom's length this frame for a rig `distance` long now (`before`: last frame's) where blocks
+	leave `free` studs (math.huge: none; the nearest block less the margin): while the boom isn't
+	pulled in (it was the rig's length) and nothing is in the way, it is the rig's length, which
+	eases by the rig's own blend; otherwise `boom` (in at once, out at EaseOut).
+]]
+function CameraRules.boomStep(current: number, distance: number, before: number, free: number, dt: number): number
+	if free >= distance and current >= before - 1e-6 then
+		return distance
+	end
+	return CameraRules.boom(current, math.min(free, distance), dt)
+end
+
+--[[
+	The share of the way from the shoulder to the eye point the camera is at (1: at the eyes), and
+	its velocity, a frame of `dt` on in `view` (`previous`: last frame's): at once into first
+	person and the sights, at once from first person to the shoulder (Toggle Perspective is
+	instant, as in DayZ), eased over SIGHTS_OUT_SECONDS from the sights to the shoulder.
+]]
+function CameraRules.eyeShare(share: number, vel: number, view: View, previous: View, dt: number): (number, number)
+	if view ~= "third" then
+		return 1, 0
+	elseif previous == "first" or share <= 0 then
+		return 0, 0
+	end
+	local value, velocity = smoothCD(share, 0, vel, CameraRules.SIGHTS_OUT_SECONDS * CameraRules.BLEND_SHARE, dt)
+	if value < 1e-3 then
+		return 0, 0
+	end
+	return value, velocity
+end
+
+-- Did the body move so far since last frame (render studs) that the camera should start afresh?
+function CameraRules.movedFar(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean
+	local dx, dy, dz = bx - ax, by - ay, bz - az
+	return dx * dx + dy * dy + dz * dz > CameraRules.MOVED_FAR * CameraRules.MOVED_FAR
 end
 
 --[[ First person ]]
@@ -554,6 +723,23 @@ function CameraRules.snapStep(look: Look, camYaw: number, camPitch: number, dt: 
 end
 
 --[[ The body ]]
+
+--[[
+	Does the body turn to the aim at once this frame (else it lags while standing: `followYaw`)?
+	Moving (`moving`: move input, or faster than Config.Camera.IdleTurnSpeed blocks a second),
+	raised or guarding, in first person or the sights, swimming, climbing or flying.
+]]
+function CameraRules.turnsAtOnce(
+	speed: number,
+	moving: boolean,
+	raised: boolean,
+	view: View,
+	swimming: boolean,
+	climbing: boolean,
+	flying: boolean
+): boolean
+	return moving or speed > CAMERA.IdleTurnSpeed or raised or view ~= "third" or swimming or climbing or flying
+end
 
 --[[
 	The body's yaw a frame of `dt` on, turning to `aim` (radians), and its velocity: at once when

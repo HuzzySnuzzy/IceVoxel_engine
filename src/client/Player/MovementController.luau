@@ -40,32 +40,48 @@
 	            instead of the character's attributes, and nothing is "moved by another script".
 	            A death plays Minecraft's death tilt (Rig.deathCFrame, 20 ticks) on the body
 	            where it stands; Player/SpectatorView hides it after that (`deathTime`).
-	  Facing    towards where the character walks, or where the camera looks in first person and
-	            with shift lock.
-	  Camera    at the hull's eye height (eased like Minecraft's when crouching / crawling); the
-	            field of view widens while flying (x 1.1) and sprinting (Config.Movement.SprintFov),
-	            eased like Minecraft's FOV modifier, on top of the FOV setting (`setFieldOfView`;
-	            without one, whatever the camera's field of view is), scaled by the FOV Effects
-	            setting (`setFovEffects`, Minecraft's: 0 keeps the field of view still). Minecraft's
-	            view bobbing while walking on the ground (`setViewBobbing`) and the hurt tilt when
-	            health drops (`setDamageTilt`'s share: Player/ViewBob): applied after Roblox's
-	            camera and the screen effects have moved it (VIEW_BOB_PRIORITY) and taken off
-	            again before the camera updates (`unbob`), so the camera's own turning never takes
-	            them in; none while frozen or spectating someone.
+	  Facing    with the camera rig (Player/CameraRig active): the aim (CameraRig.aimHeading: the
+	            camera's look, held still while freelooking) is what forward walks along and what
+	            the body turns to (CameraRules.followYaw): at once while moving, raised or guarding,
+	            from the eyes, swimming, climbing or flying (CameraRules.turnsAtOnce), and then
+	            again right after the camera (CameraRig.onAim), so it faces this frame's aim;
+	            standing, it lags a little behind (Config.Camera.IdleTurnSeconds, at most
+	            IdleTurnMaxLag). Without the rig (Config.Camera.Enabled = false; spectating
+	            someone): towards where the character walks (Movement.TurnSpeed), or where the
+	            camera looks in first person and with the mouse locked to the centre.
+	  Camera    at the hull's eye height (eased like Minecraft's when crouching / crawling): Roblox's
+	            camera through the CameraOffset, and the body pushed to the camera rig every frame
+	            before the camera (CameraRig.setBody: the eyes, yaw, speed, jump and stance it
+	            places the camera by; `hold` at death). The field of view widens while flying
+	            (x 1.1) and sprinting (Config.Movement.SprintFov), eased like Minecraft's FOV
+	            modifier, on top of the FOV setting (`setFieldOfView`; without one, whatever the
+	            camera's field of view is), scaled by the FOV Effects setting (`setFovEffects`,
+	            Minecraft's: 0 keeps the field of view still); the eyes' focus (DayZ's: held Focus,
+	            CameraRig.focusing) narrows it to CameraRules.focusFov, eased over
+	            Config.Camera.FocusSeconds, and slows the camera's turn by as much
+	            (`setFocusZoom`, Player/MouseLook.setFocusShare). Minecraft's view bobbing while
+	            walking on the ground (`setViewBobbing`, in first person and the sights only:
+	            CameraRig.bobShare) and the hurt tilt when health drops (`setDamageTilt`'s share,
+	            in every view: Player/ViewBob): applied after Roblox's camera and the screen
+	            effects have moved it (VIEW_BOB_PRIORITY) and taken off again before the camera
+	            updates (`unbob`), so the camera's own turning never takes them in; none while
+	            frozen or spectating someone.
 	  Weapons   a raised firearm (Player/AimCamera, Interaction/Firearms): the sights' zoom divides
 	            the field of view (`setAimZoom`: a multiplier like the FOV sway, not scaled by FOV
 	            Effects), raising and guarding slow the player and bar sprinting (`setAimSlow`: a
 	            sprint stops and the sprint key toggles nothing meanwhile: in the sights it holds
-	            breath instead), and the camera looks over the right shoulder (`setShoulder`: studs
-	            in the character's space, added to the camera offset).
+	            breath instead), and without the camera rig the camera looks over the right
+	            shoulder (`setShoulder`: studs in the character's space, added to the camera offset;
+	            nothing with the rig, whose profiles have the shoulder).
 	  Modes     the game mode attribute (Shared/GameMode) gives the hull its abilities
 	            (PlayerPhysics.setGameMode): creative may fly (double tap jump); spectators always
 	            fly, through everything (noClip), and their mouse wheel changes the flying speed
 	            while the spectator menu is closed (Ui/SpectatorGui, PlayerPhysics.
 	            scrollFlyingSpeed). Switching to survival or adventure stops flying: the player
 	            falls; from spectator to creative keeps flying, as in Minecraft.
-	  Spectate  a spectator's left click on a player (Interaction/BlockInteraction) spectates them:
-	            the camera looks from their eyes (CameraSubject: their Humanoid, first person, its
+	  Spectate  a spectator's left click on a player (Interaction/BlockInteraction) spectates them
+	            (the camera rig keeps off: CameraRig.setSpectating): the camera looks from their
+	            eyes (CameraSubject: their Humanoid, first person, its
 	            CameraOffset set here every frame, as their own client's never replicates: standing
 	            eyes, or lying ones as far as the body is pitched, since the pose doesn't replicate
 	            either) and the hull follows their feet every frame, so the world streams around
@@ -146,9 +162,13 @@ local LocalPosition = require(script.Parent.LocalPosition)
 local SurvivalState = require(script.Parent.SurvivalState)
 local RemotePlayers = require(script.Parent.RemotePlayers)
 local ViewBob = require(script.Parent.ViewBob)
+local CameraRig = require(script.Parent.CameraRig)
+local CameraRules = require(script.Parent.CameraRules)
+local MouseLook = require(script.Parent.MouseLook)
 
 local BLOCK = Config.BlockSize
 local Movement = Config.Movement
+local CAMERA = Config.Camera
 local TICK_RATE = PlayerPhysics.TICK_RATE
 local TICK = 1 / TICK_RATE
 -- Ticks run at most per frame (a long hitch does not fast-forward the player).
@@ -247,6 +267,31 @@ local aimZoom = 1
 local aimSlow = 1
 local aimNoSprint = false
 local shoulder = Vector3.zero
+-- The eyes' focus: a multiplier on the field of view (`setFocusZoom`; 1: none).
+local focusZoom = 1
+-- The body pushed to the camera rig every frame (Player/CameraRig.setBody), refilled in place.
+local rigBody: CameraRules.Body = {
+	eyeX = 0,
+	eyeY = 0,
+	eyeZ = 0,
+	yaw = 0,
+	speed = 0,
+	airborne = 0,
+	rise = 0,
+	noClip = false,
+	stance = {
+		sprinting = false,
+		sneaking = false,
+		tilt = 0,
+		climbing = false,
+		swimming = false,
+		flying = false,
+		onGround = true,
+	},
+}
+-- Turns the character's body to the aim right after the camera (CameraRig.onAim), while it has
+-- one that turns at once this frame.
+local refaceTo: ((yaw: number) -> ())? = nil
 -- The View Bobbing and Damage Tilt settings (Settings/: on, and the tilt's share 0..1).
 local viewBobbing = true
 local damageTilt = 1
@@ -289,6 +334,7 @@ function MovementController.spectate(target: Player?)
 	end
 	local player = Players.LocalPlayer
 	spectated = target
+	CameraRig.setSpectating(target ~= nil)
 	releaseOffset()
 	-- (The server keeps the target in this player's interest and follows them with its own place.)
 	LocalPosition.spectate(target)
@@ -499,9 +545,18 @@ function MovementController.setAimSlow(factor: number, noSprint: boolean)
 end
 
 -- The camera over the shoulder (studs in the character's space: right, up, back), added to the
--- camera offset every frame (Player/AimCamera; Vector3.zero: none).
+-- camera offset every frame (Player/AimCamera; Vector3.zero: none). Without the camera rig only
+-- (Config.Camera.Enabled = false): the rig's profiles have their own shoulder.
 function MovementController.setShoulder(offset: Vector3)
 	shoulder = offset
+end
+
+-- The eyes' focus: a multiplier on the field of view (CameraRules.focusFov over the setting's;
+-- 1: none), applied every frame, which also slows the camera's turn by as much
+-- (Player/MouseLook.setFocusShare). This controller eases it while the camera rig is on.
+function MovementController.setFocusZoom(multiplier: number)
+	focusZoom = multiplier
+	MouseLook.setFocusShare(multiplier)
 end
 
 -- The View Bobbing setting: the camera bobs while walking (Minecraft's bobView).
@@ -565,6 +620,13 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		local d = Vector3.new(dx, 0, dz)
 		bobClean -= d
 		bobSet -= d
+	end)
+	-- The aim right after the camera: a body that turns at once faces it this frame.
+	CameraRig.onAim(function(yaw: number)
+		local reface = refaceTo
+		if reface then
+			reface(yaw)
+		end
 	end)
 
 	-- The default control scripts, if the game has them (false: tried and failed).
@@ -712,7 +774,9 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	local baseFov = 70
 	-- What this controller last set the field of view to (nil: nothing yet).
 	local setFov: number? = nil
-	local function updateFov(dt: number, target: number)
+	-- The eyes' focus as eased (a multiplier) and its velocity (CameraRules.smoothCD).
+	local focusEase, focusVel = 1, 0
+	local function updateFov(dt: number, target: number, sprinting: boolean)
 		local camera = workspace.CurrentCamera
 		if camera == nil then
 			return
@@ -731,7 +795,17 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		if math.abs(target - fovModifier) < 1e-4 then
 			fovModifier = target
 		end
-		camera.FieldOfView = math.clamp(baseFov * fovModifier * fovSway * aimZoom, 1, MAX_FOV)
+		if CameraRig.enabled() then
+			-- The eyes' focus (DayZ's eye zoom): never wider than the setting, none while raised.
+			local wanted = CameraRules.focusFov(baseFov, sprinting, CameraRig.focusing(), CameraRig.raised())
+				/ math.max(baseFov, 1)
+			focusEase, focusVel = CameraRules.smoothCD(focusEase, wanted, focusVel, CAMERA.FocusSeconds, dt)
+			if math.abs(focusEase - wanted) < 1e-4 and math.abs(focusVel) < 1e-3 then
+				focusEase, focusVel = wanted, 0
+			end
+			MovementController.setFocusZoom(focusEase)
+		end
+		camera.FieldOfView = math.clamp(baseFov * fovModifier * fovSway * aimZoom * focusZoom, 1, MAX_FOV)
 		setFov = camera.FieldOfView
 	end
 	local function resetFov()
@@ -740,6 +814,10 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			camera.FieldOfView = baseFov
 		end
 		fovModifier, fovCamera, setFov = 1, nil, nil
+		focusEase, focusVel = 1, 0
+		if focusZoom ~= 1 then
+			MovementController.setFocusZoom(1)
+		end
 	end
 
 	local connections: { RBXScriptConnection } = {}
@@ -759,6 +837,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		RunService:UnbindFromRenderStep(DYING_STEP)
 		unbob()
 		MovementController.current = nil
+		refaceTo = nil
+		CameraRig.setBody(nil)
 		MovementController.spectate(nil)
 		resetFov()
 	end
@@ -897,6 +977,12 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		local stepLag = 0
 		-- Eye height (blocks) the camera is at, easing towards the hull's.
 		local eye = PlayerPhysics.eyeHeight(state)
+		-- The camera rig (Player/CameraRig): the body's turn towards the aim (its velocity, and
+		-- whether it turns at once this frame), and a jump's time in the air and the eyes'
+		-- height (render studs) when the feet left the ground.
+		local yawVel = 0
+		local turnsNow = false
+		local airTime, airEye = 0, 0
 		-- Where the root part was put last frame (render studs), its velocity then and that
 		-- frame's length (reading characters: the "moved by another script" check).
 		local lastPlaced: Vector3? = nil
@@ -977,6 +1063,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		local function release()
 			local x, y, z, yaw, tilt, bodyPitch = view.feetX, view.feetY, view.feetZ, view.yaw, view.tilt, drawnPitch
 			disconnectAll()
+			-- (The camera stays on the last body while this one tips over: Player/CameraRig.)
+			CameraRig.hold()
 			if antiGravity then
 				antiGravity:Destroy()
 			end
@@ -1026,6 +1114,11 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		end
 
 		local function readInput(dt: number): PlayerPhysics.Input
+			-- (The camera rig's aim: Player/CameraRig. Without it, the camera's own look.)
+			local rigOn = CameraRig.active()
+			local camera = workspace.CurrentCamera
+			local cameraCFrame = camera.CFrame
+			local lookY = if rigOn then math.sin(CameraRig.aimPitch()) else math.clamp(cameraCFrame.LookVector.Y, -1, 1)
 			-- An open inventory screen (or the switcher) takes the input: stand still, keep facing
 			-- the same way.
 			if inputTaken() then
@@ -1036,15 +1129,18 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					forward = 0,
 					facingX = -math.sin(view.yaw),
 					facingZ = -math.cos(view.yaw),
-					lookY = math.clamp(workspace.CurrentCamera.CFrame.LookVector.Y, -1, 1),
+					lookY = lookY,
 					jump = false,
 					sneak = false,
 					sprint = false,
 				}
 			end
-			local camera = workspace.CurrentCamera
-			local cameraCFrame = camera.CFrame
-			local headingX, headingZ = cameraHeading(cameraCFrame)
+			local headingX, headingZ
+			if rigOn then
+				headingX, headingZ = CameraRig.aimHeading()
+			else
+				headingX, headingZ = cameraHeading(cameraCFrame)
+			end
 			local rightX, rightZ = -headingZ, headingX
 
 			-- Input relative to the camera (keyboard diagonals are longer than 1, as in Minecraft;
@@ -1067,15 +1163,31 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			local moveZ = rightZ * strafe + headingZ * ahead
 			local length = math.sqrt(strafe * strafe + ahead * ahead)
 
-			-- Facing: the camera's direction in first person and with shift lock, else where the
+			-- Facing: with the camera rig, the aim (at once or lagging a little, see the header);
+			-- else the camera's direction in first person and with shift lock, or where the
 			-- character walks (turning smoothly).
-			local firstPerson = (cameraCFrame.Position - camera.Focus.Position).Magnitude < FIRST_PERSON_DISTANCE
-			local lockedToCamera = firstPerson or UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
 			local facingX, facingZ, forward
-			if lockedToCamera then
+			if rigOn then
+				turnsNow = CameraRules.turnsAtOnce(
+					view.speed,
+					length > 1e-3,
+					CameraRig.raised(),
+					CameraRig.view(),
+					state.swimming,
+					state.climbing,
+					state.flying
+				)
+				view.yaw, yawVel = CameraRules.followYaw(view.yaw, CameraRig.aimYaw(), yawVel, dt, turnsNow)
+				facingX, facingZ, forward = headingX, headingZ, ahead
+			elseif
+				(cameraCFrame.Position - camera.Focus.Position).Magnitude < FIRST_PERSON_DISTANCE
+				or UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+			then
+				yawVel = 0
 				facingX, facingZ, forward = headingX, headingZ, ahead
 				view.yaw = yawOf(headingX, headingZ)
 			else
+				yawVel = 0
 				if length > 1e-3 then
 					facingX, facingZ = moveX / length, moveZ / length
 					local turn = angleDifference(yawOf(facingX, facingZ), view.yaw)
@@ -1096,16 +1208,39 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				forward = forward,
 				facingX = facingX,
 				facingZ = facingZ,
-				lookY = math.clamp(cameraCFrame.LookVector.Y, -1, 1),
+				lookY = lookY,
 				jump = jumpLatched,
 				sneak = sneakHeld or sneakOn,
 				sprint = sprintHeld or sprintOn,
 			}
 		end
 
+		-- Right after the camera (CameraRig.onAim): a body that turns at once this frame faces
+		-- this frame's aim, so the body seen from the eyes never trails the view by a frame.
+		refaceTo = function(yaw: number)
+			if not turnsNow or rootPart.Parent == nil or hum.Health <= 0 or view.yaw == yaw then
+				return
+			end
+			view.yaw = yaw
+			local cframe = Rig.rootCFrame(
+				character,
+				Origin.blocksToRender(view.feetX, view.feetY, view.feetZ),
+				yaw,
+				view.tilt,
+				drawnPitch
+			)
+			rootPart.CFrame = cframe
+			rigBody.yaw = yaw
+			pose.yaw = yaw
+			if not networked then
+				lastPlaced = cframe.Position
+			end
+		end
+
 		RunService:BindToRenderStep("IceVoxelMovement", RENDER_PRIORITY, function(dt: number)
 			-- (Last frame's bob off first: the input reads the camera's own direction.)
 			unbob()
+			turnsNow = false
 			if rootPart.Parent == nil then
 				return
 			end
@@ -1284,9 +1419,37 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				rootJoint.C0 = CFrame.new(cframe:VectorToObjectSpace(lag)) * rootJointC0
 			end
 			local toEye = Vector3.new(0, eye * BLOCK - rootHeight, 0) + lag
-			hum.CameraOffset = cframe:VectorToObjectSpace(toEye)
-				- Vector3.new(0, cameraHeight(hum, rootPart), 0)
-				+ shoulder
+			local offset = cframe:VectorToObjectSpace(toEye) - Vector3.new(0, cameraHeight(hum, rootPart), 0)
+			hum.CameraOffset = if CameraRig.enabled() then offset else offset + shoulder
+
+			-- The body for the camera rig (Player/CameraRig places the camera by it after Roblox's
+			-- camera): the eyes as drawn, render studs; a jump's time and rise (not flying,
+			-- swimming, climbing, waiting or following someone).
+			local eyes = cframe.Position + toEye
+			local jumping = not state.onGround
+				and not state.flying
+				and not state.swimming
+				and not state.climbing
+				and not state.noClip
+				and not view.frozen
+				and not following
+			if jumping then
+				if airTime == 0 then
+					airEye = eyes.Y
+				end
+				airTime += dt
+			else
+				airTime = 0
+			end
+			rigBody.eyeX, rigBody.eyeY, rigBody.eyeZ = eyes.X, eyes.Y, eyes.Z
+			rigBody.yaw, rigBody.speed, rigBody.noClip = view.yaw, view.speed, state.noClip
+			rigBody.airborne = airTime
+			rigBody.rise = if jumping then eyes.Y - airEye else 0
+			local stance = rigBody.stance
+			stance.sprinting, stance.sneaking, stance.tilt = state.sprinting, state.crouching, view.tilt
+			stance.climbing = state.climbing and not state.onGround
+			stance.swimming, stance.flying, stance.onGround = state.swimming, state.flying, state.onGround
+			CameraRig.setBody(rigBody)
 
 			-- Minecraft's FOV modifier: x 1.1 flying, x SprintFov sprinting, and the effects' speed.
 			local fov = 1
@@ -1295,7 +1458,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					* (if state.sprinting then Movement.SprintFov else 1)
 					* ((state.speedFactor + 1) / 2)
 			end
-			updateFov(dt, fov)
+			updateFov(dt, fov, state.sprinting)
 
 			-- Where the player is, for the server (its own positions): the newest tick's hull.
 			if networked then
@@ -1332,8 +1495,13 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			local bobbing = not still and state.onGround and not state.swimming and not state.flying
 			walk, bob = ViewBob.advance(walk, bob, view.speed, bobbing, dt)
 			local x, y, roll, pitch = 0, 0, 0, 0
-			if viewBobbing and not still and bob > 0 then
+			-- (None over the shoulder: the camera rig's share, 1 in first person and the sights.)
+			local share = CameraRig.bobShare()
+			if viewBobbing and not still and bob > 0 and share > 0 then
 				x, y, roll, pitch = ViewBob.bobView(walk, bob)
+				if share ~= 1 then
+					x, y, roll, pitch = x * share, y * share, roll * share, pitch * share
+				end
 			end
 			roll += ViewBob.hurtRoll((os.clock() - hurtAt) * ViewBob.TICKS_PER_SECOND, damageTilt)
 			if x == 0 and y == 0 and roll == 0 and pitch == 0 then

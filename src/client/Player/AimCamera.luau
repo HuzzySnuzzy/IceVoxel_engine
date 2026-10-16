@@ -2,25 +2,31 @@
 --[[
 	The camera of a raised firearm, in the manner of DayZ (Interaction/Firearms says how the gun is
 	held every frame: `set`, `setStance`; Player/AimRules has the numbers). It works on Roblox's
-	own camera scripts (PlayerModule), never replacing them:
+	own camera scripts (PlayerModule), never replacing them. The camera rig (Player/CameraRig) is
+	told the posture every frame (`setPosture`): its raised profiles are the shoulder, the sights
+	from third person look from the eyes, Toggle Perspective waits while raised, and the mouse is
+	locked and its icon hidden whenever the player plays. Without the rig (Config.Camera.Enabled
+	= false) this module does as before:
 
-	  Raised    third person: the camera over the right shoulder (Config.Weapons.ShoulderOffset,
-	            eased in and out: Player/MovementController.setShoulder), the mouse locked to the
-	            centre (UserInputService.MouseBehavior LockCenter, written every frame at Camera + 1,
-	            after Roblox's camera wrote its own: a held right button would otherwise drag the
-	            camera with a free mouse, which turns it all the same) and its icon hidden (put back
-	            when lowered, also after a screen that opened meanwhile gave back the hidden icon it
+	  Raised    the walk at RaisedSpeed without sprinting (`setAimSlow`; a melee weapon's guard,
+	            Interaction/MeleeInput, at GuardSpeed). Without the rig, third person: the camera
+	            over the right shoulder (Config.Weapons.ShoulderOffset, eased in and out:
+	            Player/MovementController.setShoulder), the mouse locked to the centre
+	            (UserInputService.MouseBehavior LockCenter, written every frame at Camera + 1, after
+	            Roblox's camera wrote its own: a held right button would otherwise drag the camera
+	            with a free mouse, which turns it all the same) and its icon hidden (put back when
+	            lowered, also after a screen that opened meanwhile gave back the hidden icon it
 	            found), so the character faces where the camera looks (MovementController's
-	            facing follows a locked mouse) and walks at RaisedSpeed without sprinting
-	            (`setAimSlow`; a melee weapon's guard, Interaction/MeleeInput, at GuardSpeed).
+	            facing follows a locked mouse).
 	  Sights    in first person the camera already looks from the eyes; V in third person moves it
-	            there too: every frame after Roblox's camera (Camera + 5) it is put at the camera's
-	            focus (the hull's eyes: the shoulder offset is taken off at once) and the
-	            character is hidden (LocalTransparencyModifier, as Roblox's own first person does;
-	            given back on leaving), so the gun in Player/HeldItems' first-person view lies
-	            down the sight line. The field of view is divided by the zoom (AimRules.zoom,
-	            eased: MovementController.setAimZoom), the turn's share is 1 / zoom
-	            (Player/MouseLook.setZoomSensitivity), the speed SightsSpeed.
+	            there too (the rig's "sights" view; without the rig, every frame after Roblox's
+	            camera (Camera + 5) it is put at the camera's focus (the hull's eyes: the shoulder
+	            offset is taken off at once) and the character is hidden (LocalTransparencyModifier,
+	            as Roblox's own first person does; given back on leaving)), so the gun in
+	            Player/HeldItems' first-person view lies down the sight line. The field of view is
+	            divided by the zoom (AimRules.zoom, eased: MovementController.setAimZoom), the
+	            turn's share is 1 / zoom (Player/MouseLook.setZoomSensitivity), the speed
+	            SightsSpeed.
 	  Sway      AimRules / Handling.sway's figure eight (with the breath's factor: holding it in the
 	            sights steadies the aim, then the player is out of breath) turns the view after
 	            the camera, the view bob and the screen effects (Camera + 5) and is taken off again
@@ -32,10 +38,11 @@
 	            RecoilRecoverSeconds; without the hook the kick shows as a passing turn of the view
 	            with the sway instead.
 
-	`firstPerson` (Roblox's camera in first person: within 1 stud of its focus, measured after it
-	updated), `sightsView` (the view is down the sights), `zoom`, `scoped` (a scope's zoom: Ui/
-	WeaponHud draws its overlay, HeldItems hides the model) and `posture` are read by HeldItems,
-	WeaponPoses' callers and the HUD. Nothing is created per frame.
+	`firstPerson` (the rig's chosen view, CameraRig.firstPerson; without the rig Roblox's camera in
+	first person: within 1 stud of its focus, measured after it updated), `eyesView`
+	(CameraRig.eyesView), `sightsView` (the view is down the sights), `zoom`, `scoped` (a scope's
+	zoom: Ui/WeaponHud draws its overlay, HeldItems hides the model) and `posture` are read by
+	HeldItems, WeaponPoses' callers and the HUD. Nothing is created per frame.
 ]]
 
 local Players = game:GetService("Players")
@@ -58,7 +65,7 @@ local MovementController = require(script.Parent.MovementController)
 local CAMERA = Enum.RenderPriority.Camera.Value
 -- Before the view bob comes off (MovementController: Camera - 1).
 local UNSWAY_PRIORITY = CAMERA - 2
--- After Roblox's camera (with the screens' own mouse steps).
+-- After Roblox's camera (with the screens' own mouse steps): without the camera rig only.
 local LOCK_PRIORITY = CAMERA + 1
 -- After the view bob (Camera + 4).
 local SWAY_PRIORITY = CAMERA + 5
@@ -103,9 +110,10 @@ local function shoulderOffset(): Vector3
 	return Vector3.new(o[1] or 0, o[2] or 0, o[3] or 0)
 end
 
--- Is the view in the sights from third person (the camera moved to the eyes)?
+-- Is the view in the sights from third person, the camera moved here to the eyes (without the
+-- camera rig, whose "sights" view does it)?
 local function thirdPersonSights(): boolean
-	return posture == "sights" and not realFirstPerson
+	return posture == "sights" and not realFirstPerson and not CameraRig.enabled()
 end
 
 local function setHidden(character: Model?, hidden: boolean)
@@ -180,10 +188,15 @@ local function swayStep(dt: number)
 	zoom = AimRules.ease(zoom, targetZoom, dt, ZOOM_RATE)
 	MovementController.setAimZoom(1 / zoom)
 	MouseLook.setZoomSensitivity(AimRules.sensitivity(zoom))
-	-- Over the shoulder while raised in third person (at once off for the sights from there).
-	local shoulderTarget = if posture == "raised" and not realFirstPerson then 1 else 0
-	shoulderShare = if posture == "sights" then 0 else AimRules.ease(shoulderShare, shoulderTarget, dt, SHOULDER_RATE)
-	MovementController.setShoulder(if shoulderShare > 0 then shoulderOffset() * shoulderShare else Vector3.zero)
+	-- Over the shoulder while raised in third person (at once off for the sights from there):
+	-- without the camera rig, whose raised profiles have the shoulder.
+	if not CameraRig.enabled() then
+		local shoulderTarget = if posture == "raised" and not realFirstPerson then 1 else 0
+		shoulderShare = if posture == "sights"
+			then 0
+			else AimRules.ease(shoulderShare, shoulderTarget, dt, SHOULDER_RATE)
+		MovementController.setShoulder(if shoulderShare > 0 then shoulderOffset() * shoulderShare else Vector3.zero)
+	end
 	-- Recoil: the kick, then its recovery, through the camera's input.
 	local kickPitch, kickYaw = AimRules.takeKick(recoil)
 	local back = AimRules.recover(recoil, dt)
@@ -230,7 +243,10 @@ function AimCamera.start()
 	started = true
 	MouseLook.hookCamera()
 	RunService:BindToRenderStep("IceVoxelAimUnsway", UNSWAY_PRIORITY, unsway)
-	RunService:BindToRenderStep("IceVoxelAimLock", LOCK_PRIORITY, lockStep)
+	if not CameraRig.enabled() then
+		-- (The camera rig locks the mouse and hides its icon itself, and knows the view.)
+		RunService:BindToRenderStep("IceVoxelAimLock", LOCK_PRIORITY, lockStep)
+	end
 	RunService:BindToRenderStep("IceVoxelAimSway", SWAY_PRIORITY, swayStep)
 	-- (What the sway keeps is in render studs: the origin's moves shift it.)
 	Origin.onRebase(function(dx: number, dz: number)
@@ -287,8 +303,12 @@ function AimCamera.posture(): AimRules.Posture
 	return posture
 end
 
--- Is Roblox's camera in first person (measured after it updated this frame)?
+-- Is the view first person (the camera rig's chosen view; without the rig, Roblox's camera in
+-- first person, measured after it updated this frame)?
 function AimCamera.firstPerson(): boolean
+	if CameraRig.enabled() then
+		return CameraRig.firstPerson()
+	end
 	return realFirstPerson
 end
 
@@ -299,6 +319,9 @@ end
 
 -- Is the view the player's eyes (first person, or the sights from third person)?
 function AimCamera.eyesView(): boolean
+	if CameraRig.enabled() then
+		return CameraRig.eyesView()
+	end
 	return realFirstPerson or posture == "sights"
 end
 

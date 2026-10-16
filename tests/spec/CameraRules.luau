@@ -6,12 +6,21 @@
 	boom, the first-person eye point, the targeting ray's eye-plane skip, the ground heading,
 	freelook (its room across the +-pi wrap, the snap back and input during it, hold and toggle),
 	the body turning to the aim, focus and the view bob's share; Config.Camera's numbers (DayZ's
-	cameras in studs); and the require rules of the camera's modules (Player/CameraRig needs no
+	cameras in studs); the rig's frame-by-frame glue (the height lag across landings and hops, the
+	boom following the rig, the eye point out of the sights, starting afresh, which bodies turn at
+	once); the collision on block data (Shared/World/VoxelRaycast: a wall beside, behind, a
+	pillar, and random rooms where the camera never ends up in a block); Player/MouseLook's hook on a
+	fake client (freelook's room, the snap's turn once, the focus' share); and the require rules of the camera's modules (Player/CameraRig needs no
 	Ui/ or Interaction/ module nor the movement or the aim camera; Player/FirstPersonBody only the
 	rig, its rules, the spectators' rules and Config).
 ]]
 
 local fs = require("@lune/fs")
+local roblox = require("@lune/roblox")
+
+local FakeClient = require("../lib/FakeClient")
+
+local Vector2 = roblox.Vector2
 
 return function(t, shared, require, _server, client)
 	local Config = require(shared.Config)
@@ -509,6 +518,380 @@ return function(t, shared, require, _server, client)
 		t.eq(CameraRules.focusFov(90, false, false, false), 90, "not held")
 		t.eq(CameraRules.focusFov(40, false, true, false), 40, "never wider than the setting")
 		t.eq(CameraRules.focusFov(30, true, true, false), 30)
+	end)
+
+	--[[ The rig's glue, frame by frame (Player/CameraRig) ]]
+
+	t.test("camera rules: the height lag holds the take-off, never dips under it, lands without a jump", function()
+		-- Two jumps of a 0.6 s parabola peaking 3.75 studs, three frames on the ground between, the
+		-- rise kept on the ground (the same height: 0) as the rig does.
+		local function rise(time: number): number
+			return 3.75 * 4 * (time / 0.6) * (1 - time / 0.6)
+		end
+		local lag, vel, takeoff, airborne = 0, 0, 0, 0
+		local jumpTime = 0
+		local inAir = true
+		local groundFrames = 0
+		local hops = 0
+		local lastPivot = 0
+		local largestStep = 0
+		local holds = 0
+		local landings = 0
+		for frame = 1, 200 do
+			local landing = false
+			if inAir then
+				if airborne == 0 then
+					takeoff = lag
+				end
+				airborne += DT
+				jumpTime += DT
+				if jumpTime >= 0.6 then
+					inAir, groundFrames, airborne, landing = false, 0, 0, true
+				end
+			else
+				groundFrames += 1
+				if hops == 0 and groundFrames == 3 then
+					hops, inAir, jumpTime = 1, true, 0
+				end
+			end
+			local up = if inAir then rise(jumpTime) else 0
+			lag, vel = CameraRules.heightLag(lag, vel, up, airborne, takeoff, DT)
+			-- The pivot's height (the eyes' rise and the lag) against where it left the ground.
+			local pivot = up + lag
+			if airborne > 0 and airborne < CameraRules.JUMP_HOLD then
+				t.near(pivot, takeoff, 1e-9, `the hold at frame {frame}`)
+				holds += 1
+			end
+			t.ok(pivot >= takeoff - 1e-9, `never under the take-off (frame {frame}: {pivot})`)
+			if landing then
+				t.near(pivot, lastPivot, 0.05, `no jump on landing (frame {frame})`)
+				landings += 1
+			end
+			largestStep = math.max(largestStep, math.abs(pivot - lastPivot))
+			lastPivot = pivot
+		end
+		t.ok(holds > 10 and landings == 2, `the holds ({holds}) and both landings seen`)
+		-- (The eyes move up to 0.4 studs a 60 Hz frame.)
+		t.ok(largestStep < 0.3, `the pivot never jumps ({largestStep} studs in a frame)`)
+		t.eq(lag, 0, "back to 0 on the ground")
+		-- Landing higher (onto a block, 3 studs up): the lag left eases back, never at once.
+		local eased = CameraRules.heightLag(-1.5, 0, 3, 0, 0, DT)
+		t.ok(eased < 0 and eased > -1.5, `eased on landing ({eased})`)
+		local back, v = -1.5, 0
+		for _ = 1, 30 do
+			back, v = CameraRules.heightLag(back, v, 3, 0, 0, DT)
+		end
+		t.eq(back, 0, "landed in half a second")
+		t.eq(select(1, CameraRules.heightLag(0, 0, 0, 0, 0, DT)), 0, "on the ground at rest")
+		t.near(select(1, CameraRules.heightLag(-0.2, 0, 1, 0.05, -0.2, DT)), -1.2, 1e-12, "the hold from a lag")
+		t.eq(select(1, CameraRules.heightLag(-0.5, 0, 0, 0, 0, DT)), 0, "back where it left: no dip")
+	end)
+
+	t.test("camera rules: the boom follows the rig until a block pulls it in, then eases out at 6/s", function()
+		t.eq(CameraRules.boomStep(4.8, 4.8, 4.8, math.huge, DT), 4.8, "nothing in the way")
+		t.eq(CameraRules.boomStep(2.4, 2.5, 2.4, math.huge, DT), 2.5, "a growing rig is followed exactly")
+		t.eq(CameraRules.boomStep(4.8, 2.4, 4.8, math.huge, DT), 2.4, "a shrinking one too")
+		t.eq(CameraRules.boomStep(4.8, 4.8, 4.8, 1.5, DT), 1.5, "a block pulls it in at once")
+		t.eq(CameraRules.boomStep(4.8, 4.8, 4.8, -0.2, DT), 0, "never below 0")
+		-- Pulled in: out at EaseOut, even with nothing in the way any more.
+		local boom = CameraRules.boomStep(1.5, 4.8, 4.8, math.huge, 0.1)
+		t.near(boom, 1.5 + 3.3 * (1 - math.exp(-0.6)), 1e-12, "eases out")
+		t.near(
+			CameraRules.boomStep(1.5, 4.8, 4.8, 3, 0.1),
+			1.5 + 1.5 * (1 - math.exp(-0.6)),
+			1e-12,
+			"towards the block"
+		)
+		t.eq(CameraRules.boomStep(3, 4.8, 4.8, 2, DT), 2, "in again at once")
+	end)
+
+	t.test("camera rules: the eye point: in at once, out of first person at once, of the sights in 0.2 s", function()
+		t.eq(select(1, CameraRules.eyeShare(0, 0, "first", "third", DT)), 1, "into first person at once")
+		t.eq(select(1, CameraRules.eyeShare(0, 0, "sights", "third", DT)), 1, "into the sights at once")
+		t.eq(select(1, CameraRules.eyeShare(1, 0, "third", "first", DT)), 0, "Toggle Perspective is instant")
+		t.eq(select(1, CameraRules.eyeShare(0, 0, "third", "third", DT)), 0)
+		local share, vel = 1, 0
+		local last = 1
+		local elapsed = 0
+		local previous: any = "sights"
+		local at02 = nil
+		while share > 0 and elapsed < 1 do
+			share, vel = CameraRules.eyeShare(share, vel, "third", previous, DT)
+			previous = "third"
+			elapsed += DT
+			t.ok(share <= last and share >= 0, "monotonic, never past the shoulder")
+			last = share
+			if at02 == nil and elapsed >= 0.2 - 1e-9 then
+				at02 = share
+			end
+		end
+		-- (DayZ's 0.2 s blend: SmoothCD over 0.3 of it is 99 % there in 0.2 s.)
+		t.ok(at02 ~= nil and at02 < 0.02, `{at02} of the way left after 0.2 s`)
+		t.ok(elapsed < 0.3, `out of the sights in {elapsed} s`)
+		local half = select(1, CameraRules.eyeShare(1, 0, "third", "sights", 0.05))
+		t.ok(half < 1 and half > 0.2, `eased, not at once ({half})`)
+	end)
+
+	t.test("camera rules: a far move starts the rig afresh; the body turns at once when it should", function()
+		t.ok(not CameraRules.movedFar(0, 0, 0, 10, 0, 0), "a fast frame")
+		t.ok(CameraRules.movedFar(0, 0, 0, 16.5, 0, 0), "a teleport")
+		t.ok(CameraRules.movedFar(5, 5, 5, 15, 15, 15), "diagonally")
+		local at = CameraRules.turnsAtOnce
+		t.ok(not at(0, false, false, "third", false, false, false), "standing over the shoulder: it lags")
+		t.ok(not at(0.4, false, false, "third", false, false, false), "drifting slowly")
+		t.ok(at(0.6, false, false, "third", false, false, false), "moving faster than IdleTurnSpeed")
+		t.ok(at(0, true, false, "third", false, false, false), "move input")
+		t.ok(at(0, false, true, "third", false, false, false), "raised or guarding")
+		t.ok(at(0, false, false, "first", false, false, false), "first person")
+		t.ok(at(0, false, false, "sights", false, false, false), "the sights")
+		t.ok(at(0, false, false, "third", true, false, false), "swimming")
+		t.ok(at(0, false, false, "third", false, true, false), "climbing")
+		t.ok(at(0, false, false, "third", false, false, true), "flying")
+	end)
+
+	--[[ Collision on block data ]]
+
+	local VoxelRaycast = require(shared.World.VoxelRaycast)
+	local B = Config.BlockSize
+	-- A world of solid cells (keys "x,y,z"), and the rig's cast on it (render studs = world studs).
+	local function world(cells: { [string]: boolean })
+		local function getBlock(x: number, y: number, z: number): number?
+			return if cells[`{x},{y},{z}`] then 1 else 0
+		end
+		local function stops(id: number): boolean
+			return id ~= 0
+		end
+		return function(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, max: number): number
+			local hit = VoxelRaycast.distance(ox / B, oy / B, oz / B, dx, dy, dz, max / B, getBlock, stops)
+			return if hit then hit * B else math.huge
+		end, function(x: number, y: number, z: number): boolean
+			return cells[`{math.floor(x / B)},{math.floor(y / B)},{math.floor(z / B)}`] == true
+		end
+	end
+	-- Looking down -Z, level: look, right, up.
+	local LOOK = { 0, 0, -1, 1, 0, 0, 0, 1, 0 }
+	local function collide(cast: any, e: { number }, p: { number }, distance: number, basis: { number }?)
+		local b = basis or LOOK
+		return CameraRules.collide(
+			e[1],
+			e[2],
+			e[3],
+			p[1],
+			p[2],
+			p[3],
+			b[1],
+			b[2],
+			b[3],
+			b[4],
+			b[5],
+			b[6],
+			b[7],
+			b[8],
+			b[9],
+			distance,
+			cast
+		)
+	end
+
+	t.test("camera rules: collision clips the shoulder at a wall and pulls the boom in", function()
+		-- Open ground: nothing changes.
+		local open = world({})
+		local px, py, pz, free = collide(open, { 1.5, 4.86, 1.5 }, { 2.4, 5.11, 1.5 }, 4.8)
+		t.eq(px, 2.4)
+		t.eq(py, 5.11)
+		t.eq(pz, 1.5)
+		t.eq(free, math.huge, "nothing in the way")
+		-- A wall on the right (cells x = 1, the eyes 0.6 studs from it): the pivot stops the margin
+		-- short of it (along the way there), and the boom along the wall is not pulled in.
+		local cells = {}
+		for y = 0, 3 do
+			for z = -4, 4 do
+				cells[`1,{y},{z}`] = true
+			end
+		end
+		local right = world(cells)
+		px, py, pz, free = collide(right, { 2.4, 4.86, 1.5 }, { 3.3, 5.11, 1.5 }, 4.8)
+		local way = math.sqrt(0.9 ^ 2 + 0.25 ^ 2)
+		t.near(px, 2.4 + (0.6 * way / 0.9 - 0.3) * 0.9 / way, 1e-9, "the margin short of the wall")
+		t.ok(px < 3 - 0.25, `the pivot is out of the wall ({px})`)
+		t.near(pz, 1.5, 1e-12)
+		t.eq(free, math.huge, "walking along a wall keeps the boom")
+		-- A wall behind (cells z = 2: 4.5 studs behind the pivot): the boom stops the margin short.
+		local behind = world({ ["0,1,2"] = true, ["1,1,2"] = true, ["0,2,2"] = true, ["1,2,2"] = true })
+		px, py, pz, free = collide(behind, { 1.5, 4.86, 1.5 }, { 2.4, 5.11, 1.5 }, 4.8)
+		t.near(free, 6 - 1.5 - 0.3, 1e-9, "the wall behind less the margin")
+		-- A pillar just right of the boom's line (cell x = 0 seen from x 0.9 studs off it): an edge
+		-- ray finds it.
+		local pillar = world({ ["0,1,2"] = true })
+		local _, _, _, edge = collide(pillar, { 3.9 - 0.9, 4.86, 1.5 }, { 3.6, 5.11, 1.5 }, 4.8)
+		t.ok(edge == math.huge, "a pillar 0.6 studs aside is clear of the near plane")
+		local _, _, _, near = collide(pillar, { 3.3 - 0.9, 4.86, 1.5 }, { 3.3, 5.11, 1.5 }, 4.8)
+		t.near(near, 6 - 1.5 - 0.3, 1e-9, "one within the near plane's half width stops the boom")
+		-- No boom: only the pivot.
+		local _, _, _, none = collide(behind, { 1.5, 4.86, 1.5 }, { 2.4, 5.11, 1.5 }, 0)
+		t.eq(none, math.huge)
+	end)
+
+	t.test("camera rules: the camera never ends up inside a block (random rooms, random looks)", function()
+		-- (A fixed linear congruential sequence: the same rooms every run.)
+		local seed = 1703
+		local function rand(low: number?, high: number?): number
+			seed = (seed * 1103515245 + 12345) % 2147483648
+			local unit = seed / 2147483648
+			local a, b = low or 0, high or 1
+			return a + (b - a) * unit
+		end
+		local placed = 0
+		for _ = 1, 400 do
+			-- A room of random cells around the eyes' cell (0, 1, 0) kept free with the one below
+			-- it for the feet.
+			local cells = {}
+			for x = -3, 3 do
+				for y = 0, 4 do
+					for z = -3, 3 do
+						if rand() < 0.18 then
+							cells[`{x},{y},{z}`] = true
+						end
+					end
+				end
+			end
+			cells["0,1,0"], cells["0,0,0"] = nil, nil
+			local cast, solid = world(cells)
+			local ex, ey, ez = rand(0.9, 2.1), rand(3.6, 5.4), rand(0.9, 2.1)
+			-- A look within Roblox's 80 degrees of level, any yaw; right and up from it.
+			local yaw, pitch = rand(-math.pi, math.pi), math.rad(rand(-80, 80))
+			local cy, sy, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch)
+			local lx, ly, lz = -sy * cp, sp, -cy * cp
+			local rx, rz = cy, -sy
+			local ux, uy, uz = sy * sp, cp, cy * sp
+			local rig = CameraRules.newRig(CameraRules.profile("standing"), if rand() < 0.5 then 1 else -1)
+			local bodyYaw = yaw + rand(-1, 1)
+			local px, py, pz = CameraRules.pivot(ex, ey, ez, bodyYaw, rig)
+			local kx, ky, kz, free =
+				CameraRules.collide(ex, ey, ez, px, py, pz, lx, ly, lz, rx, 0, rz, ux, uy, uz, rig.distance, cast)
+			local boom = math.clamp(math.min(free, rig.distance), 0, rig.distance)
+			local cx, cy2, cz = kx - lx * boom, ky - ly * boom, kz - lz * boom
+			t.ok(not solid(kx, ky, kz), "the pivot is never in a block")
+			t.ok(not solid(cx, cy2, cz), `the camera is never in a block (boom {boom})`)
+			-- The way from the eyes to the pivot and on to the camera is open.
+			local wx, wy, wz = kx - ex, ky - ey, kz - ez
+			local way = math.sqrt(wx * wx + wy * wy + wz * wz)
+			if way > 1e-6 then
+				t.ok(cast(ex, ey, ez, wx, wy, wz, way) >= way - 1e-9, "eyes to pivot open")
+			end
+			if boom > 1e-6 then
+				t.ok(cast(kx, ky, kz, -lx, -ly, -lz, boom + 0.3) >= boom + 0.3 - 1e-6, "the margin behind the camera")
+				placed += 1
+			end
+		end
+		t.ok(placed > 100, `cameras placed behind the pivot ({placed})`)
+	end)
+
+	--[[ Player/MouseLook's hook (freelook's turn and room, the focus' share) ]]
+
+	-- MouseLook on a fake client whose Roblox camera input turns by `input` (radians, x right, y
+	-- down); `hooked` false: no camera scripts to hook.
+	local function mouseLook(hookable: boolean): (any, any, { input: any }, { MouseDeltaSensitivity: number })
+		local state = { input = Vector2.new(0, 0) }
+		local CameraInput = {
+			getRotation = function()
+				return state.input
+			end,
+		}
+		local function child(name: string?, value: any): any
+			return {
+				FindFirstChild = function(_, wanted: string)
+					return if wanted == name then value else nil
+				end,
+			}
+		end
+		local inputModule = {
+			__fake = true,
+			path = "fake/CameraInput",
+			IsA = function(_, class: string)
+				return class == "ModuleScript"
+			end,
+		}
+		local scripts = child("PlayerModule", child("CameraModule", child("CameraInput", inputModule)))
+		local userInput = { MouseDeltaSensitivity = 1 }
+		local load = FakeClient.loader(shared, require, {
+			["src/client/Settings/Keybinds.luau"] = {
+				usingKeys = function()
+					return true
+				end,
+			},
+			["fake/CameraInput"] = CameraInput,
+		}, {
+			Players = {
+				LocalPlayer = {
+					FindFirstChildOfClass = function(_, class: string)
+						return if class == "PlayerScripts" and hookable then scripts else nil
+					end,
+					WaitForChild = function()
+						return nil
+					end,
+				},
+			},
+			UserInputService = userInput,
+		})
+		local MouseLook = load("src/client/Player/MouseLook.luau")
+		MouseLook.hookCamera()
+		return MouseLook, CameraInput, state, userInput
+	end
+
+	t.test("camera rules: MouseLook's hook clamps freelook's room, adds the snap's turn once, slows focus", function()
+		local MouseLook, CameraInput, state = mouseLook(true)
+		t.ok(MouseLook.hooked(), "hooked")
+		local function rotation(x: number, y: number): (number, number)
+			state.input = Vector2.new(x, y)
+			local turned = CameraInput.getRotation()
+			return turned.X, turned.Y
+		end
+		local x, y = rotation(0.3, -0.2)
+		t.near(x, 0.3, 1e-6, "untouched")
+		t.near(y, -0.2, 1e-6)
+		-- The room left while freelooking: left 0.1, right 0.2, up 0.05, down 0.3.
+		MouseLook.setRoom(0.1, 0.2, 0.05, 0.3)
+		x, y = rotation(-1, 1)
+		t.near(x, -0.1, 1e-6, "no further left than the room")
+		t.near(y, 0.3, 1e-6, "nor down")
+		x, y = rotation(1, -1)
+		t.near(x, 0.2, 1e-6, "right")
+		t.near(y, -0.05, 1e-6, "up")
+		-- The snap back's turn: added once, in full, past the room.
+		MouseLook.turn(0.5, -0.4)
+		x, y = rotation(0, 0)
+		t.near(x, 0.5, 1e-6, "the turn, uncapped")
+		t.near(y, -0.4, 1e-6)
+		x, y = rotation(0, 0)
+		t.eq(x, 0, "once")
+		t.eq(y, 0)
+		-- No room: free again; never a negative room.
+		MouseLook.setRoom(math.huge, math.huge, math.huge, math.huge)
+		x = rotation(3, 0)
+		t.near(x, 3, 1e-6, "no limit")
+		MouseLook.setRoom(-1, math.huge, math.huge, math.huge)
+		x = rotation(-0.5, 0)
+		t.eq(x, 0, "a room below 0 is none")
+		MouseLook.setRoom(math.huge, math.huge, math.huge, math.huge)
+		-- Focus: its share times the zoom's.
+		MouseLook.setFocusShare(0.5)
+		x = rotation(1, 0)
+		t.near(x, 0.5, 1e-6, "focus slows the turn")
+		MouseLook.setZoomSensitivity(0.5)
+		x = rotation(1, 0)
+		t.near(x, 0.25, 1e-6, "times the sights' share")
+		MouseLook.setZoomSensitivity(1)
+		MouseLook.setFocusShare(1)
+		x = rotation(1, 0)
+		t.near(x, 1, 1e-6, "back")
+		-- Without Roblox's camera scripts: no turn, no freelook; the focus through the mouse.
+		local Unhooked, _, _, userInput = mouseLook(false)
+		t.ok(not Unhooked.hooked(), "not hooked")
+		Unhooked.turn(1, 1)
+		Unhooked.setSensitivity(2)
+		Unhooked.setFocusShare(0.5)
+		t.near(userInput.MouseDeltaSensitivity, 1, 1e-9, "the focus' share through the mouse's sensitivity")
 	end)
 
 	--[[ Require rules ]]

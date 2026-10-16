@@ -83,7 +83,8 @@
 		},
 		"StarterPlayer": {
 			"$properties": {
-				"GameSettingsAvatar": "R15"
+				"GameSettingsAvatar": "R15",
+				"EnableMouseLockOption": false
 			},
 			"StarterPlayerScripts": {
 				"IceVoxel": {
