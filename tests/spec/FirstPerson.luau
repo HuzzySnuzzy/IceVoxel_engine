@@ -3,21 +3,25 @@
 	roles of what a character is drawn with (the head and a face decal, a hat by its weld, hair by
 	its attachment, a Face type, layered hair and clothing by type or attachment, back and arm
 	accessories, the arms), the full hiding matrix (views, the First-Person Body setting, a scope,
-	near the camera) and when the near test can be skipped, the near box's edges, the two-bone arm
-	(its lengths kept, the elbow on the pole's side, straight towards a target out of reach, no NaN
-	at the shoulder or with the pole on the line), which holds take the left hand, the hand poses
-	(at rest, at the bottom of the swing, the melee guard's shift, and off the crosshair at 70
-	degrees), the wall's pull and lift; an arm's side, the near plane's cut (`clips`: exact against a
-	sampled near view; in view only), a target's slide into reach; and the glue (Player/
-	FirstPersonBody under Lune): the arm's IK (the grip lands on its target whatever the animation
-	does, the hand turned with it, a target out of reach reported, the joints put back, R6 left
-	alone, the elbow away from the camera); its render step on a fake character (an arm hidden whole
-	where the near plane cuts it in view and only then, a Fire on the root part kept from the eyes,
-	a scope hiding the arms at Camera + 7 in the gun's frame); the hands on every gun (the real
-	Rendering/ItemModels grips, Player/HeldItems' hold at rest: hip and sights, +-60 degrees, short
-	and tall bodies, PC's and a phone's near planes: the sight line kept on the view's axis, a hand
-	either on its grip with no part of its arm cut, or the animation's; the right hand holding every
-	gun looking level or down on PC); and the muzzle placed with the frame's camera.
+	near the camera) and when the near test can be skipped, the two-bone arm (its lengths kept, the
+	elbow on the pole's side, straight towards a target out of reach, no NaN at the shoulder or with
+	the pole on the line), which holds take the left hand (a handgun's in its sights), the hand
+	poses (at rest, at the bottom of the swing, the melee guard's shift, and off the crosshair at 70
+	degrees), the wall's pull and lift; an arm's side, the near plane's cut (`clips`: exact against
+	a sampled near view; in view only), the sight line through a box (`crosses`), a target's slide
+	into reach, the sights at the cheek (`sightsDepth`) and the lowered guns on the body
+	(`lowered`); and the glue (Player/FirstPersonBody under Lune): the arm's IK (the grip lands on
+	its target whatever the animation does, the hand turned with it, a target out of reach reported,
+	the joints put back, R6 left alone, the elbow away from the camera); its render step on a fake
+	character (an arm hidden whole where the near plane cuts it in view and only then, a tall chest
+	drawn unless cut, a Fire on the root part kept from the eyes, a scope hiding the arms at Camera
+	+ 7 in the gun's frame); the hands on every gun (the real Rendering/ItemModels grips,
+	Player/HeldItems' hold at rest: lowered and in the sights from 60 degrees down to 30 up (lowered
+	to 60 up), four bodies (short and tall, the shoulder at the arm's middle or its inner face, the
+	chest leant in the sights), PC's and a phone's near planes: the sight line on the view's axis, a
+	hand either on its grip with no part of its arm cut nor in front of the sights, or the
+	animation's; both hands on every long gun and the right on every handgun on PC; the hold rates
+	printed per body and near plane); and the muzzle placed with the frame's camera.
 ]]
 
 local fs = require("@lune/fs")
@@ -273,7 +277,9 @@ return function(t, shared, require, _server, client)
 
 	t.test("first person: the left hand on a long gun and a guard only", function()
 		t.eq(Rules.leftHand("firearm", true, false), true, "a long gun's fore end")
-		t.eq(Rules.leftHand("firearm", false, false), false, "a handgun: one hand")
+		t.eq(Rules.leftHand("firearm", false, false), false, "a handgun lowered: one hand")
+		t.eq(Rules.leftHand("firearm", false, false, true), true, "a handgun in its sights: two hands")
+		t.eq(Rules.leftHand("firearm", true, false, false), true, "a long gun lowered: both")
 		t.eq(Rules.leftHand("tool", false, true), true, "a guard: both hands on the handle")
 		t.eq(Rules.leftHand("tool", false, false), false)
 		t.eq(Rules.leftHand("block", false, false), false)
@@ -697,6 +703,49 @@ return function(t, shared, require, _server, client)
 		t.ok(alarms <= 1, `no false alarms (one sliver allowed): {alarms} of {checked}`)
 	end)
 
+	t.test("first person: the sights at the cheek, the lowered guns on the body, the sight line kept clear", function()
+		-- The sight line's rear 0.45 ahead of the eyes, nearer looking up; never within the near
+		-- plane's margin and SIGHTS_CLEAR (a phone's 0.5 near plane keeps it further).
+		t.near(Rules.sightsDepth(0, 0.15), 0.45, 1e-12, "level, a computer")
+		t.near(Rules.sightsDepth(math.rad(-60), 0.15), 0.45, 1e-12, "looking down: the same")
+		t.near(Rules.sightsDepth(math.rad(30), 0.15), 0.45 - 0.2 * 0.5, 1e-12, "looking up: nearer")
+		t.near(Rules.sightsDepth(math.rad(90), 0.15), 0.35, 1e-12, "never within the clearance")
+		t.near(Rules.sightsDepth(0, 0.55), 0.75, 1e-12, "a phone's near plane")
+		-- Lowered on the body, following a share of the aim's pitch: a long gun across it (the barrel
+		-- to the left), a handgun ahead on the right.
+		local turn, x, y, z, yaw, pitch = Rules.lowered(math.rad(-50), true)
+		t.near(turn, math.rad(-50) * Rules.LOWERED.follow, 1e-12)
+		t.near(x, Rules.LOWERED.x, 1e-12)
+		t.near(y, Rules.LOWERED.y, 1e-12)
+		t.near(z, Rules.LOWERED.z, 1e-12)
+		t.ok(yaw > math.rad(20), "across the body, the muzzle to the left")
+		t.near(pitch, math.rad(Rules.LOWERED.pitch), 1e-12)
+		local _, hx = Rules.lowered(0, false)
+		t.near(hx, Rules.LOWERED_HANDGUN.x, 1e-12, "a handgun's own")
+		-- The hands under the gun: the right hand's fingers up its grip, the left's up round the fore
+		-- end; a left hand in the way tries back along the barrel, and once a little forward.
+		t.near(math.deg(Rules.GRIP_TILT), 90, 1e-9)
+		t.near(math.deg(Rules.FORE_TILT), 45, 1e-9)
+		t.eq(Rules.FORE_TRIES[1], 0, "where it reaches first")
+		-- The sight line through a box: a unit box straddling the axis ahead, beside it, behind the
+		-- camera, past the reach, and the near part before `near`.
+		local function cross(cx: number, cy: number, cz: number, near: number, far: number): boolean
+			-- (The camera at the origin looking down -z; the box's own space: the camera at -c.)
+			return Rules.crosses(-cx, -cy, -cz, 0, 0, -1, 0.5, 0.5, 0.5, near, far)
+		end
+		t.eq(cross(0, 0, -2, 0.1, 4), true, "a box on the sight line")
+		t.eq(cross(0.6, 0, -2, 0.1, 4), false, "beside it")
+		t.eq(cross(0, -0.49, -2, 0.1, 4), true, "its top edge across it")
+		t.eq(cross(0, 0, 2, 0.1, 4), false, "behind the camera")
+		t.eq(cross(0, 0, -5, 0.1, 4), false, "past the reach")
+		t.eq(cross(0, 0, -0.3, 0.9, 4), false, "only before `near`")
+		-- A turned box (any direction of the view in its space).
+		local frame = CFrame.new(0.3, 0.1, -1.5) * CFrame.Angles(0.4, 0.7, 0.2)
+		local at = frame:PointToObjectSpace(Vector3.zero)
+		local along = frame:VectorToObjectSpace(Vector3.new(0, 0, -1))
+		t.eq(Rules.crosses(at.X, at.Y, at.Z, along.X, along.Y, along.Z, 0.5, 0.5, 0.5, 0.1, 4), true, "turned, on it")
+	end)
+
 	t.test("first person: a target slides along a line to come in reach (slide)", function()
 		local slide = Rules.slide
 		t.eq(slide(0, 0, 0, 1, 0, 0, 1, 0, 0, 2, 5), 0, "in reach already")
@@ -945,141 +994,220 @@ return function(t, shared, require, _server, client)
 	end
 
 	t.test(
-		"first person: hands on every gun, hip and sights, +-60 degrees, short and tall bodies, PC and phone near planes",
+		"first person: both hands on every long gun, lowered and in the sights; short and tall bodies; PC and phone",
 		function()
 			local Body = loadBody()
 			local ItemModels = FakeClient.loader(shared, require, {}, {})("src/client/Rendering/ItemModels.luau")
 			local Weapons = require(shared.Weapons)
 			local BodyRules = require(client.Player.BodyRules)
-			-- Player/HeldItems' frames: the gun ahead, low right aimed at the centre, and in the sights;
-			-- the right hand's grip and the left's on a fore end.
+			local Items = require(shared.Items)
+			-- Player/HeldItems' frames: the gun ahead; lowered on the body (FirstPersonRules.lowered: a
+			-- long gun across it), the sights near the eyes (sightsDepth); the hands under the gun
+			-- (GRIP_TILT, FORE_TILT).
 			local AHEAD = CFrame.fromMatrix(Vector3.zero, Vector3.new(0, 0, -1), Vector3.yAxis)
-			local hx, hy, hz, hyaw, hpitch = AimRules.hipPose()
-			local HIP_FRAME = CFrame.new(hx, hy, hz) * CFrame.Angles(0, hyaw, 0) * CFrame.Angles(hpitch, 0, 0) * AHEAD
-			local SIGHTS_FRAME = CFrame.new(0, 0, -AimRules.SIGHTS_DEPTH) * AHEAD
-			local GUN_GRIP = CFrame.Angles(0, -math.pi / 2, 0)
-			local c30, s30 = math.cos(math.rad(30)), math.sin(math.rad(30))
-			local FORE_GRIP = CFrame.fromMatrix(
-				Vector3.zero,
-				Vector3.new(0, c30, -s30),
-				Vector3.new(1, 0, 0),
-				Vector3.new(0, -s30, -c30)
-			)
-			local held = { right = {}, left = {} }
-			local cases = 0
+			local GUN_GRIP = CFrame.Angles(0, 0, Rules.GRIP_TILT) * CFrame.Angles(0, -math.pi / 2, 0)
+			local cf, sf = math.cos(Rules.FORE_TILT), math.sin(Rules.FORE_TILT)
+			local FORE_GRIP =
+				CFrame.fromMatrix(Vector3.zero, Vector3.new(0, cf, -sf), Vector3.new(1, 0, 0), Vector3.new(0, -sf, -cf))
+			local BODIES = {
+				{ "blocky", 1.1, -0.25 },
+				{ "blocky, inner shoulders", 1.1, -0.5 },
+				{ "tall", 0.4, -0.25 },
+				{ "tall, inner shoulders", 0.4, -0.5 },
+			}
+			local rates: { [string]: { number } } = {}
+			local order: { string } = {}
+			local function count(key: string, slot: number, hit: boolean)
+				local row = rates[key]
+				if row == nil then
+					row = { 0, 0, 0, 0 }
+					rates[key] = row
+					table.insert(order, key)
+				end
+				row[slot] += 1
+				if hit then
+					row[slot + 1] += 1
+				end
+			end
+			local misses: { string } = {}
 			for _, nearZ in { 0.1, 0.5 } do
-				for _, drop in { 1.1, 0.4 } do
-					for _, inner in { -0.25, -0.5 } do
-						for _, item in Weapons.FIREARMS do
-							local spec = Weapons.firearm(item)
-							local long = AimRules.longGun(spec)
-							local size = ItemModels.firearmSize(item)
-							for _, pose in { "hip", "sights" } do
-								for _, deg in { -60, -30, 0, 30, 60 } do
-									cases += 1
-									local key = `{nearZ} {drop} {pose} {deg}`
-									local pitch = math.rad(deg)
-									-- The body under the eyes as Player/MovementController puts it (the eyes
-									-- FirstForward ahead of its middle, more looking down), the shoulders
-									-- `drop` below them, the chest bladed in the sights (Player/BodyTwist).
-									local push = Config.Camera.FirstForward
-										+ Config.Camera.FirstDownPush * math.max(0, -math.sin(pitch))
-									local blade = if pose == "sights" then BodyRules.BLADE else 0
-									local character =
-										body(CFrame.new(0, -drop - 0.56, push) * CFrame.Angles(0, blade, 0), inner)
-									local view = CFrame.Angles(pitch, 0, 0)
-									local camera = cameraAt(view, nearZ)
-									-- Player/HeldItems.holdGun at rest.
-									local pivot = view
-										* ItemModels.firearmPivot(
-											item,
-											size,
-											pose,
-											if pose == "hip" then HIP_FRAME else SIGHTS_FRAME,
-											""
-										)
-									local axes = ItemModels.firearmAxes(item, pivot)
-									local right = CFrame.new(ItemModels.firearmPoint(item, "", size, pivot, "grip"))
+				for _, b in BODIES do
+					for _, item in Weapons.FIREARMS do
+						local spec = Weapons.firearm(item)
+						local long = AimRules.longGun(spec)
+						local size = ItemModels.firearmSize(item)
+						for _, pose in { "lowered", "sights" } do
+							local pitches = if pose == "sights"
+								then { -60, -30, 0, 15, 30 }
+								else { -60, -30, 0, 30, 60 }
+							for _, deg in pitches do
+								local key = `{nearZ} {b[1]} {pose} {deg}`
+								local pitch = math.rad(deg)
+								-- The body under the eyes as Player/MovementController puts it (the eyes
+								-- FirstForward ahead of its middle, more looking down), the shoulders
+								-- `drop` below them; in the sights the chest leans forward at the waist,
+								-- 0.8 under its middle (Player/BodyTwist).
+								local push = Config.Camera.FirstForward
+									+ Config.Camera.FirstDownPush * math.max(0, -math.sin(pitch))
+								local lean = if pose == "sights" then BodyRules.lean(1) else 0
+								local waist = Vector3.new(0, -b[2] - 0.56 - 0.8, push)
+								local torso = CFrame.new(waist) * CFrame.Angles(lean, 0, 0) * CFrame.new(0, 0.8, 0)
+								local character = body(torso, b[3])
+								local view = CFrame.Angles(pitch, 0, 0)
+								local camera = cameraAt(view, nearZ)
+								local nearDepth, tx, ty = Body.nearView(camera)
+								local frame
+								if pose == "sights" then
+									frame = view * CFrame.new(0, 0, -Rules.sightsDepth(pitch, nearDepth)) * AHEAD
+								else
+									local turn, x, y, z, yaw, gunPitch = Rules.lowered(pitch, long)
+									frame = CFrame.new(torso.Position)
+										* CFrame.Angles(turn, 0, 0)
+										* CFrame.new(x, y, z)
+										* CFrame.Angles(0, yaw, 0)
+										* CFrame.Angles(gunPitch, 0, 0)
+										* AHEAD
+								end
+								-- Player/HeldItems.holdGun at rest.
+								local pivot = ItemModels.firearmPivot(
+									item,
+									size,
+									if pose == "sights" then "sights" else "hip",
+									frame,
+									""
+								)
+								local axes = ItemModels.firearmAxes(item, pivot)
+								local right = CFrame.new(ItemModels.firearmPoint(item, "", size, pivot, "grip"))
+									* axes
+									* GUN_GRIP
+								local fore = if Rules.leftHand("firearm", long, false, pose == "sights")
+									then CFrame.new(ItemModels.firearmPoint(item, "", size, pivot, "fore"))
 										* axes
-										* GUN_GRIP
-									local fore = if long
-										then CFrame.new(ItemModels.firearmPoint(item, "", size, pivot, "fore"))
-											* axes
-											* FORE_GRIP
-										else nil
-									local look = view.LookVector
-									local toEye = -look
-									local depth = (right.Position - view.Position):Dot(look)
-									local limit = math.max(depth - Body.nearView(camera) - Rules.GRIP_CLEAR, 0)
-									local want = Body.gripSlide(character, right, toEye, limit, Rules.COMFORT)
-										or Body.gripSlide(character, right, toEye, limit, 1)
-									if want and Body.armClips(character, true, right + toEye * want, camera, 0) then
-										want = nil
-									end
-									local shift = toEye * (want or 0)
-									right += shift
-									local left = nil
-									if fore and want then
-										fore += shift
-										left = Body.foreHold(character, fore, right.Position)
-										if left and Body.armClips(character, false, left, camera, 0) then
-											left = nil
+										* FORE_GRIP
+									else nil
+								local sights = pose == "sights"
+								local look = view.LookVector
+								local toEye = -look
+								local depth = (right.Position - view.Position):Dot(look)
+								local limit = if sights then math.max(depth - nearDepth - Rules.GRIP_CLEAR, 0) else 0
+								local want = Body.gripSlide(character, right, toEye, limit, Rules.COMFORT)
+									or Body.gripSlide(character, right, toEye, limit, 1)
+								if want and Body.armClips(character, true, right + toEye * want, camera, 0, sights) then
+									want = nil
+								end
+								local shift = toEye * (want or 0)
+								right += shift
+								local left = nil
+								local why = if want then "" else "right out of reach or in the way"
+								if fore and want then
+									fore += shift
+									for _, from in Rules.FORE_TRIES do
+										local at = Body.foreHold(character, fore, right.Position, from)
+										if at == nil then
+											why ..= " left out of reach"
+											break
+										elseif not Body.armClips(character, false, at, camera, 0, sights) then
+											left = at
+											break
 										end
+										why ..= if Body.armClips(character, false, at, camera, 0, false)
+											then " left cut"
+											else " left in front of the sights"
 									end
-									Body.poseArmsWeighted(
-										character,
-										right,
-										left,
-										if want then 1 else 0,
-										if left then 1 else 0,
-										view.Position
+								end
+								Body.poseArmsWeighted(
+									character,
+									right,
+									left,
+									if want then 1 else 0,
+									if left then 1 else 0,
+									view.Position
+								)
+								-- The sight picture: on the view's axis, the gun moved along it only.
+								if sights then
+									local anchor = frame.Position + shift - view.Position
+									t.near(
+										(anchor - look * anchor:Dot(look)).Magnitude,
+										0,
+										1e-5,
+										`{key}: the sight line on the axis`
 									)
-									-- The sight picture: the gun moved along the view only (the sights'
-									-- line still on the view's axis).
-									if pose == "sights" then
-										local anchor = (view * SIGHTS_FRAME).Position + shift - view.Position
+								end
+								for _, side in { { "Right", right, want ~= nil }, { "Left", left, left ~= nil } } do
+									local prefix, target, holds = side[1], side[2], side[3]
+									if holds then
+										local frames = armFrames(character, prefix)
+										local got = frames[3].frame * Vector3.new(0, -0.15, 0)
 										t.near(
-											(anchor - look * anchor:Dot(look)).Magnitude,
+											(got - target.Position).Magnitude,
 											0,
-											1e-5,
-											`{key}: the sight line on the axis`
+											2e-3,
+											`{key} {prefix}: the hand on its grip`
 										)
-									end
-									local depthNear, tx, ty = Body.nearView(camera)
-									for _, side in { { "Right", right, want ~= nil }, { "Left", left, left ~= nil } } do
-										local prefix, target, holds = side[1], side[2], side[3]
-										if holds then
-											local frames = armFrames(character, prefix)
-											local got = frames[3].frame * Vector3.new(0, -0.15, 0)
-											t.near(
-												(got - target.Position).Magnitude,
-												0,
-												2e-3,
-												`{key} {prefix}: the hand on its grip`
+										for _, entry in frames do
+											t.eq(
+												Body.clipped(view, entry.frame, entry.size, nearDepth, tx, ty),
+												false,
+												`{key} {prefix}: no part of the holding arm cut by the near plane`
 											)
-											for _, entry in frames do
+											if sights then
+												local at = entry.frame:PointToObjectSpace(view.Position)
+												local along = entry.frame:VectorToObjectSpace(look)
+												local half = entry.size / 2
 												t.eq(
-													Body.clipped(view, entry.frame, entry.size, depthNear, tx, ty),
+													Rules.crosses(
+														at.X,
+														at.Y,
+														at.Z,
+														along.X,
+														along.Y,
+														along.Z,
+														half.X,
+														half.Y,
+														half.Z,
+														nearDepth,
+														Rules.SIGHT_REACH
+													),
 													false,
-													`{key} {prefix}: no part of the holding arm cut by the near plane`
+													`{key} {prefix}: no part of the holding arm in front of the sights`
 												)
 											end
-											local count = if prefix == "Right" then held.right else held.left
-											count[key] = (count[key] or 0) + 1
-										else
-											t.ok(
-												released(character, prefix),
-												`{key} {prefix}: not holding, the animation's arm`
-											)
+										end
+									else
+										t.ok(
+											released(character, prefix),
+											`{key} {prefix}: not holding, the animation's arm`
+										)
+									end
+								end
+								if left and fore then
+									-- (Between the right hand and the fore end, or a forward try past it.)
+									local ahead = (left.Position - right.Position).Magnitude
+									local span = (fore.Position - right.Position).Magnitude
+									local forward = -math.min(table.unpack(Rules.FORE_TRIES))
+									t.ok(
+										ahead >= Rules.FORE_MIN - 1e-6 and ahead <= span + forward + 1e-6,
+										`{key}: the left hand along the fore end`
+									)
+								end
+								-- The rates (a long gun's both hands; a handgun's right, and its left in the
+								-- sights).
+								local range = if sights then deg <= 30 else true
+								if range then
+									local row = `near {nearZ}, {b[1]}, {pose}`
+									if not long then
+										count(row .. ", handguns", 1, want ~= nil)
+										count(row .. ", handguns", 3, left ~= nil)
+										if nearZ == 0.1 and not want then
+											table.insert(misses, `{key} {Items.get(item).name}:{why}`)
 										end
 									end
-									if left and fore then
-										local ahead = (left.Position - right.Position).Magnitude
-										local span = (fore.Position - right.Position).Magnitude
-										t.ok(
-											ahead >= Rules.FORE_MIN - 1e-6 and ahead <= span + 1e-6,
-											`{key}: the left hand between the right and the fore end`
-										)
+									if long then
+										count(row, 1, want ~= nil)
+										count(row, 3, left ~= nil)
+										if nearZ == 0.1 and not (want and left) then
+											table.insert(misses, `{key} {Items.get(item).name}:{why}`)
+										end
 									end
 								end
 							end
@@ -1087,27 +1215,14 @@ return function(t, shared, require, _server, client)
 					end
 				end
 			end
-			t.eq(cases, 2 * 2 * 2 * #Weapons.FIREARMS * 2 * 5)
-			-- Where the hands do hold (PC's near plane): the right hand takes every gun from the hip and
-			-- in the sights looking level or down, a short body's and a tall one's, and at every pitch
-			-- a tall body's.
-			local guns = #Weapons.FIREARMS * 2
-			for _, drop in { 1.1, 0.4 } do
-				for _, pose in { "hip", "sights" } do
-					for _, deg in { -60, -30, 0 } do
-						t.eq(
-							held.right[`0.1 {drop} {pose} {deg}`],
-							guns,
-							`the right hand holds every gun: {drop} {pose} {deg}`
-						)
-					end
-				end
+			print("         hands on guns (right, left: held of cases; lowered -60..60, sights -60..30):")
+			for _, row in order do
+				local r = rates[row]
+				print(string.format("           %-46s right %3d/%3d  left %3d/%3d", row, r[2], r[1], r[4], r[3]))
 			end
-			for _, pose in { "hip", "sights" } do
-				for _, deg in { 30, 60 } do
-					t.eq(held.right[`0.1 0.4 {pose} {deg}`], guns, `a tall body holds every gun: {pose} {deg}`)
-				end
-			end
+			-- Where both hands hold every long gun (and the right every handgun): PC's near plane, every
+			-- body, lowered at every pitch and in the sights from 60 degrees down to 30 up.
+			t.eq(table.concat(misses, "; "), "", "both hands on every long gun on PC")
 		end
 	)
 

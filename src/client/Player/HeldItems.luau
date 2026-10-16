@@ -27,27 +27,32 @@
 	True first person (the world model at the camera, after the view bob and the aim's sway, so the
 	hands move with the final view): the anchor is the camera (turned back by the freelook offset,
 	Player/CameraRig.freelookOffset, so the item stays on the aim while the head looks around). A
-	firearm keeps exactly the first-person view's geometry (below), lit by the world (dark at
-	night, its weapon light shining from it); a tool, a block (or any other item) and a bare fist
-	follow Player/FirstPersonRules.handPose, the swing's sin(pi t) over SWING_TIME, the melee guard
-	and wind-up. An item reaching into a block (a cast from the camera along the view to its far
-	end, on the world's blocks: Shared/World/VoxelRaycast.distance with Shapes.sight) is pulled
-	back, then its far end lifted (FirstPersonRules.obstruction: DayZ's weapon lift; the shot still
-	goes from the eyes). Then the arms take it (Player/FirstPersonBody.poseArms: the right hand on
-	the grip, ItemModels.firearmPoint "grip" for a gun, the left on a long gun's fore end
-	("fore") or a guarded weapon's handle, FirstPersonRules.leftHand; the elbows away from the
-	camera). A gun never leaves its sight line: it slides along the view towards the eyes (eased)
-	until the right wrist is comfortably in reach (FirstPersonBody.gripSlide, its grip
-	FirstPersonRules.GRIP_CLEAR past the near plane; in the sights Player/BodyTwist blades the
-	chest, the right shoulder forward under it), and a long gun's left hand takes the fore end
-	slid back towards the right hand where it reaches (FirstPersonBody.foreHold); a hand out of
-	reach, or whose arm the camera's near plane would cut (FirstPersonBody.armClips), lets go
-	(eased, a little hysteresis) and the animation has that arm while the gun stays in its sights.
-	A part of the gun the near plane would cut (a stock reaching back past the eyes) is hidden. A
-	tool or a block follows the right hand where it can't reach. What it holds goes to
-	FirstPersonBody.setHeld, and the arms are settled in the same step (FirstPersonBody.settleArms:
-	with this frame's camera and scope, so a scope hides them with the gun). Player/WeaponPoses is
-	released for the local character meanwhile.
+	firearm is held as DayZ holds one, lit by the world (dark at night, its weapon light shining
+	from it): in the sights with the cheek on the stock, its sight line on the view's axis and its
+	rear FirstPersonRules.sightsDepth ahead (about 0.45 studs, nearer looking up; Player/BodyTwist
+	leans the chest forward); lowered, held on the body (FirstPersonRules.lowered on the chest's
+	level frame: a long gun across it, a handgun low ahead on the right), eased between the two; a
+	tool, a block (or any other item) and a bare fist follow Player/FirstPersonRules.handPose, the
+	swing's sin(pi t) over SWING_TIME, the melee guard and wind-up. An item reaching into a block (a
+	cast from the camera along the view to its far end, on the world's blocks:
+	Shared/World/VoxelRaycast.distance with Shapes.sight) is pulled back, then its far end lifted
+	(FirstPersonRules.obstruction: DayZ's weapon lift; the shot still goes from the eyes). Then the
+	arms take it (Player/FirstPersonBody.poseArms: the right hand on the grip,
+	ItemModels.firearmPoint "grip" for a gun, the left on a long gun's fore end ("fore"), a
+	handgun's in its sights or a guarded weapon's handle, FirstPersonRules.leftHand; both under the
+	gun, below its sight line: FirstPersonRules.GRIP_TILT, FORE_TILT; the elbows away from the
+	camera). A gun never leaves its sight line: in the sights it may slide along the view towards
+	the eyes (eased) until the right wrist is comfortably in reach (FirstPersonBody.gripSlide, its
+	grip FirstPersonRules.GRIP_CLEAR past the near plane), and the left hand takes the fore end slid
+	back towards the right hand where it reaches (FirstPersonBody.foreHold, trying again a little
+	back or forward where its arm is in the way: FirstPersonRules.FORE_TRIES); a hand out of reach,
+	whose arm the camera's near plane would cut, or (in the sights) whose arm would be in front of
+	the sight line (FirstPersonBody.armClips), lets go (eased, a little hysteresis) and the
+	animation has that arm while the gun stays put. A part of the gun the near plane would cut (a
+	stock reaching back past the eyes) is hidden. A tool or a block follows the right hand where it
+	can't reach. What it holds goes to FirstPersonBody.setHeld, and the arms are settled in the same
+	step (FirstPersonBody.settleArms: with this frame's camera and scope, so a scope hides them with
+	the gun). Player/WeaponPoses is released for the local character meanwhile.
 
 	Firearms (Shared/Weapons), in the manner of DayZ:
 	  third person  the gun dressed as it is (ItemModels.buildFirearm: magazine, optic, muzzle
@@ -61,16 +66,16 @@
 	                shadows, Roblox's lights shine through a hidden model too, so in the corner view
 	                it lights where the raised gun points). The local player's head turns with a
 	                freelooking camera in third person (WeaponPoses.applyLook).
-	  first person  low on the right, its barrel towards the screen's centre (AimRules.hipPose), or
-	                in the sights (Player/AimCamera.sightsView: first person raised, or V in third
-	                person, where the view is the eyes' too) with its sight line on the view axis,
-	                eased between the two (through a mounted optic's middle, the optic itself hidden
-	                there: Ui/WeaponHud draws a red dot's dot); a shot kicks it back and up (`kick`,
+	  first person  (the view without the body; true first person: above) low on the right, its
+	                barrel towards the screen's centre (AimRules.hipPose), or in the sights
+	                (Player/AimCamera.sightsView: first person raised, or V in third person, where
+	                the view is the eyes' too) with its sight line on the view axis, eased between
+	                the two (through a mounted optic's middle, the optic itself hidden there:
+	                Ui/WeaponHud draws a red dot's dot); a shot kicks it back and up (`kick`,
 	                AimRules.modelKick). A scope's zoom (AimCamera.scoped) hides it: Ui/WeaponHud
-	                draws the scope. In true first person that is the world model at the camera; in
-	                the view the viewport covers the whole screen and its camera takes the world
-	                camera's field of view every frame, so a point posed in front of it lands where
-	                the same point in front of the world camera would.
+	                draws the scope. In the view the viewport covers the whole screen and its camera
+	                takes the world camera's field of view every frame, so a point posed in front of
+	                it lands where the same point in front of the world camera would.
 	  muzzle        `muzzle(player)`: where a held gun's barrel ends in the world (render studs; the
 	                local player's in the first-person view through the viewport's pose, by the
 	                world camera; in true first person its model kept in the camera's space and
@@ -150,12 +155,13 @@ local SLIDE_OUT_RATE = 10
 local HOLD_RATE = 20
 -- A hand holding a gun keeps holding it this much (studs) past where it takes hold.
 local HOLD_SLACK = 0.05
--- The grip's frame on a gun (its axes: x the barrel, y up, z right): the fingers along the barrel,
--- the thumb up; on a long gun's fore end the left hand under it, its fingers round the right side
--- (30 degrees up), its thumb along the barrel.
-local GUN_GRIP = CFrame.Angles(0, -math.pi / 2, 0)
+-- The grip's frame on a gun (its axes: x the barrel, y up, z right; the frame looks along the
+-- fingers): the right hand's fingers turned FirstPersonRules.GRIP_TILT from along the barrel up its
+-- grip; on a long gun's fore end the left hand under it, its fingers FORE_TILT up from across, its
+-- thumb along the barrel. Both hands sit under the gun, below its sight line.
+local GUN_GRIP = CFrame.Angles(0, 0, FirstPersonRules.GRIP_TILT) * CFrame.Angles(0, -math.pi / 2, 0)
 local FORE_GRIP = (function(): CFrame
-	local c, s = math.cos(math.rad(30)), math.sin(math.rad(30))
+	local c, s = math.cos(FirstPersonRules.FORE_TILT), math.sin(FirstPersonRules.FORE_TILT)
 	return CFrame.fromMatrix(Vector3.zero, Vector3.new(0, c, -s), Vector3.new(1, 0, 0), Vector3.new(0, -s, -c))
 end)()
 
@@ -228,6 +234,16 @@ end
 
 -- A gun's frame looking down the view axis: its barrel ahead (-Z), its top up.
 local AHEAD = CFrame.fromMatrix(Vector3.zero, Vector3.new(0, 0, -1), Vector3.yAxis)
+
+-- `frame` levelled: at its place, turned only about the vertical to face as it does (lying face
+-- down: as its top).
+local function levelled(frame: CFrame): CFrame
+	local look = frame.LookVector
+	if look.X * look.X + look.Z * look.Z < 1e-6 then
+		look = -frame.UpVector
+	end
+	return CFrame.new(frame.Position) * CFrame.Angles(0, math.atan2(-look.X, -look.Z), 0)
+end
 -- The first-person gun's frames: low on the right aimed at the centre, and in the sights.
 local HIP_FRAME = (function(): CFrame
 	local x, y, z, yaw, pitch = AimRules.hipPose()
@@ -474,6 +490,7 @@ function HeldItems.start(world: ClientWorld.ClientWorld?)
 	]]
 	local function placeFirstPerson(
 		view: Camera,
+		character: Model,
 		item: number,
 		gun: Weapons.FirearmSpec?,
 		key: string,
@@ -490,8 +507,27 @@ function HeldItems.start(world: ClientWorld.ClientWorld?)
 			local back, up = AimRules.modelKick(now - kickStart)
 			local kick = CFrame.Angles(0, 0, math.rad(up))
 			local shove = CFrame.new(0, 0, back)
-			local hip = ItemModels.firearmPivot(item, size, "hip", shove * HIP_FRAME * kick)
-			local sights = ItemModels.firearmPivot(item, size, "sights", shove * SIGHTS_FRAME * kick, key)
+			local long = AimRules.longGun(gun)
+			-- The cheek on the stock: the sights near the eyes (nearer looking up); lowered, the gun
+			-- held on the body (a long gun across it), where both hands reach it.
+			local pitch = math.asin(math.clamp(anchor.LookVector.Y, -1, 1))
+			local sightsFrame = CFrame.new(0, 0, -FirstPersonRules.sightsDepth(pitch, (FirstPersonBody.nearView(view))))
+				* AHEAD
+			local hipFrame = HIP_FRAME
+			local chest = character:FindFirstChild("UpperTorso")
+			if chest and chest:IsA("BasePart") then
+				local turn, x, y, z, yaw, gunPitch = FirstPersonRules.lowered(pitch, long)
+				hipFrame = anchor:ToObjectSpace(
+					levelled(chest.CFrame)
+						* CFrame.Angles(turn, 0, 0)
+						* CFrame.new(x, y, z)
+						* CFrame.Angles(0, yaw, 0)
+						* CFrame.Angles(gunPitch, 0, 0)
+						* AHEAD
+				)
+			end
+			local hip = ItemModels.firearmPivot(item, size, "hip", shove * hipFrame * kick)
+			local sights = ItemModels.firearmPivot(item, size, "sights", shove * sightsFrame * kick, key)
 			local pivot = if sightsShare <= 0
 				then hip
 				elseif sightsShare >= 1 then sights
@@ -500,9 +536,8 @@ function HeldItems.start(world: ClientWorld.ClientWorld?)
 			local grip = ItemModels.firearmPoint(item, key, size, pivot, "grip")
 			local placed = anchor * wallPush(anchor, depth, grip, dt) * pivot
 			local axes = ItemModels.firearmAxes(item, placed)
-			local long = AimRules.longGun(gun)
 			rightGrip = CFrame.new(ItemModels.firearmPoint(item, key, size, placed, "grip")) * axes * GUN_GRIP
-			if FirstPersonRules.leftHand("firearm", long, false) then
+			if FirstPersonRules.leftHand("firearm", long, false, sightsShare > 0.5) then
 				leftGrip = CFrame.new(ItemModels.firearmPoint(item, key, size, placed, "fore")) * axes * FORE_GRIP
 			end
 			holding.kind = "firearm"
@@ -581,12 +616,14 @@ function HeldItems.start(world: ClientWorld.ClientWorld?)
 		local toEye = -placedAlong
 		local depth = (right.Position - placedFrom):Dot(placedAlong)
 		local nearDepth = FirstPersonBody.nearView(view)
-		-- (A hand holding on keeps holding a little further than it takes hold: no flicker.)
+		-- (A hand holding on keeps holding a little further than it takes hold: no flicker. Only a
+		-- gun in its sights slides, and there no arm may be in front of the sight line.)
 		local slack = if holdsRight then HOLD_SLACK else 0
-		local limit = math.max(depth - nearDepth - FirstPersonRules.GRIP_CLEAR, 0) + slack
+		local sightLine = sightsShare > 0.5
+		local limit = math.max(depth - nearDepth - FirstPersonRules.GRIP_CLEAR, 0) * sightsShare + slack
 		local want = FirstPersonBody.gripSlide(character, right, toEye, limit, FirstPersonRules.COMFORT)
 			or FirstPersonBody.gripSlide(character, right, toEye, limit, 1)
-		if want and FirstPersonBody.armClips(character, true, right + toEye * want, view, slack) then
+		if want and FirstPersonBody.armClips(character, true, right + toEye * want, view, slack, sightLine) then
 			want = nil
 		end
 		holdsRight = want ~= nil
@@ -600,9 +637,18 @@ function HeldItems.start(world: ClientWorld.ClientWorld?)
 		if fore then
 			fore += shift
 			local leftSlack = if holdsLeft then HOLD_SLACK else 0
-			left = if holdsRight then FirstPersonBody.foreHold(character, fore, right.Position) else nil
-			if left and FirstPersonBody.armClips(character, false, left, view, leftSlack) then
-				left = nil
+			left = nil
+			if holdsRight then
+				-- (An arm in the way tries a little further back along the barrel.)
+				for _, from in FirstPersonRules.FORE_TRIES do
+					local at = FirstPersonBody.foreHold(character, fore, right.Position, from)
+					if at == nil then
+						break
+					elseif not FirstPersonBody.armClips(character, false, at, view, leftSlack, sightLine) then
+						left = at
+						break
+					end
+				end
 			end
 			holdsLeft = left ~= nil
 			leftHold = AimRules.ease(leftHold, if holdsLeft then 1 else 0, dt, HOLD_RATE)
@@ -648,7 +694,7 @@ function HeldItems.start(world: ClientWorld.ClientWorld?)
 				WeaponPoses.release(character)
 				if item ~= 0 and not tool and humanoid and humanoid.Health > 0 then
 					local size = if gun then ItemModels.firearmSize(item) else ItemModels.handSize(item)
-					where = placeFirstPerson(view, item, gun, keyOf(player), size, dt, now)
+					where = placeFirstPerson(view, character, item, gun, keyOf(player), size, dt, now)
 				end
 			elseif character and gun then
 				if isLocal then

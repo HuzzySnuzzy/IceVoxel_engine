@@ -18,20 +18,20 @@
 	           swimming), not on a ladder.
 	  waist    the local upper body leads an idle turn (the aim ahead of the lagging body, Player/
 	           CameraRig.aimYaw, within 45 degrees) and takes freelook's yaw beyond the neck's 70
-	           (CameraRig.freelookOffset, within 30), while the rig is active, and blades in a
-	           gun's sights seen from the eyes (Player/FirstPersonBody.held's sights share, true
-	           first person only: the right shoulder forward under the gun for the right hand);
-	           the other players' waists stay (BodyRules.waist).
+	           (CameraRig.freelookOffset, within 30), while the rig is active, and leans forward
+	           in a gun's sights seen from the eyes (BodyRules.lean by Player/FirstPersonBody
+	           .held's sights share, true first person only: both shoulders forward under the gun
+	           for both hands); the other players' waists stay (BodyRules.waist).
 	  shuffle  `turnRate` is the local body's turn rate (smoothed), for CharacterAnimator's
 	           idle-turn shuffle (BodyRules.shuffle).
 
 	Joints (R15; R6 rigs have no twist): LeftUpperLeg.LeftHip, RightUpperLeg.RightHip and
 	UpperTorso.Waist, whose C0 is turned about the joint in its Part0's axes and the animation kept
-	(C0 = base turned; never Transform). They are only written when the angle moved, put back as
-	they were when a character is not drawn (dead, gone, untracked, spectating someone) and found
-	again when the rig is rebuilt (a body part replaced) or rescaled (the base C0 moves). Nothing is
-	allocated per frame: one record per player (a weak table), the players from RemotePlayers'
-	`onTracked`.
+	(C0 = base turned: a yaw, the waist's lean about the turned right; never Transform). They are
+	only written when an angle moved, put back as they were when a character is not drawn (dead,
+	gone, untracked, spectating someone) and found again when the rig is rebuilt (a body part
+	replaced) or rescaled (the base C0 moves). Nothing is allocated per frame: one record per player
+	(a weak table), the players from RemotePlayers' `onTracked`.
 ]]
 
 local Players = game:GetService("Players")
@@ -73,8 +73,9 @@ local LOOKUP_SECONDS = 1
 local REVERSED = -0.01
 local CLIMBING = PlayerSync.Flag.Climbing
 
--- A joint this turns: its Motor6D, its own C0, the C0 last written and the angle in it.
-type Joint = { motor: Motor6D, base: CFrame, written: CFrame, yaw: number }
+-- A joint this turns: its Motor6D, its own C0, the C0 last written and the angles in it (a yaw,
+-- then a pitch about the turned joint's right: the waist's lean).
+type Joint = { motor: Motor6D, base: CFrame, written: CFrame, yaw: number, pitch: number }
 
 -- A player's body (see the header).
 type Twist = {
@@ -96,6 +97,7 @@ type Twist = {
 	-- The drawn angles (radians), the way the legs walk, and the frame it was last drawn in.
 	legYaw: number,
 	waistYaw: number,
+	waistLean: number,
 	backwards: boolean,
 	frame: number,
 	-- Another player's: the tracks their Animator played (replicated) and its connection.
@@ -119,15 +121,18 @@ local turnRate = 0
 -- `motor` as a Joint at rest.
 local function jointOf(motor: Motor6D): Joint
 	local c0 = motor.C0
-	return { motor = motor, base = c0, written = c0, yaw = 0 }
+	return { motor = motor, base = c0, written = c0, yaw = 0, pitch = 0 }
 end
 
--- Turns `joint` to `yaw` about its joint, in its Part0's axes, the animation kept (see the header).
-local function setYaw(joint: Joint?, yaw: number)
+-- Turns `joint` to `yaw` (then `pitch`, nil none) about its joint, in its Part0's axes, the
+-- animation kept (see the header).
+local function setYaw(joint: Joint?, yaw: number, pitch: number?)
 	if joint == nil then
 		return
 	end
-	if math.abs(yaw - joint.yaw) < WRITE_EPSILON and (yaw ~= 0 or joint.yaw == 0) then
+	local p = pitch or 0
+	local still = math.abs(yaw - joint.yaw) < WRITE_EPSILON and (yaw ~= 0 or joint.yaw == 0)
+	if still and math.abs(p - joint.pitch) < WRITE_EPSILON and (p ~= 0 or joint.pitch == 0) then
 		return
 	end
 	local motor = joint.motor
@@ -140,21 +145,24 @@ local function setYaw(joint: Joint?, yaw: number)
 		joint.base = CFrame.new(at) * joint.base.Rotation
 	end
 	local base = joint.base
-	local c0 = if yaw == 0 then base else CFrame.new(base.Position) * CFrame.Angles(0, yaw, 0) * base.Rotation
+	local c0 = if yaw == 0 and p == 0
+		then base
+		else CFrame.new(base.Position) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(p, 0, 0) * base.Rotation
 	motor.C0 = c0
 	joint.written = c0
 	joint.yaw = yaw
+	joint.pitch = p
 end
 
 -- Puts `twist`'s joints back as they were (the body not drawn), and starts its feet over.
 local function rest(twist: Twist)
 	twist.seen = false
 	twist.vx, twist.vz = 0, 0
-	twist.legYaw, twist.waistYaw = 0, 0
+	twist.legYaw, twist.waistYaw, twist.waistLean = 0, 0, 0
 	twist.backwards = false
 	setYaw(twist.left, 0)
 	setYaw(twist.right, 0)
-	setYaw(twist.waist, 0)
+	setYaw(twist.waist, 0, 0)
 end
 
 -- Lets go of `twist`'s character: its joints back, its Animator's connection off.
@@ -273,6 +281,7 @@ local function twistFor(player: Player, character: Model, remote: boolean): Twis
 			vz = 0,
 			legYaw = 0,
 			waistYaw = 0,
+			waistLean = 0,
 			backwards = false,
 			frame = 0,
 			tracks = {},
@@ -322,7 +331,7 @@ end
 --[[
 	Draws `twist`'s body facing `yaw` (upright or not) this frame: the legs from its feet (walked
 	backwards as `replicated` says when known: another player's), the waist from `lead`,
-	`freelook` and the `sights` share (BodyRules.waist).
+	`freelook` (BodyRules.waist) and its lean from the `sights` share (BodyRules.lean).
 ]]
 local function pose(
 	twist: Twist,
@@ -344,12 +353,13 @@ local function pose(
 	end
 	twist.backwards = backwards
 	twist.legYaw = towards(twist.legYaw, legs, LEGS_SECONDS, dt)
-	local waist = if upright then BodyRules.waist(lead, twist.legYaw, freelook, sights) else 0
+	local waist = if upright then BodyRules.waist(lead, twist.legYaw, freelook) else 0
 	twist.waistYaw = towards(twist.waistYaw, waist, WAIST_SECONDS, dt)
+	twist.waistLean = towards(twist.waistLean, if upright then BodyRules.lean(sights) else 0, WAIST_SECONDS, dt)
 	if twist.rigged then
 		setYaw(twist.left, twist.legYaw)
 		setYaw(twist.right, twist.legYaw)
-		setYaw(twist.waist, twist.waistYaw)
+		setYaw(twist.waist, twist.waistYaw, twist.waistLean)
 	end
 end
 
@@ -407,7 +417,7 @@ local function step(dt: number)
 				lead = BodyRules.wrap(CameraRig.aimYaw() - view.yaw)
 				freelook = CameraRig.freelookOffset()
 			end
-			-- (A gun's sights seen from the eyes blade the upper body: Player/HeldItems' share.)
+			-- (A gun's sights seen from the eyes lean the upper body forward: Player/HeldItems' share.)
 			if FirstPersonBody.trueFirstPerson() then
 				local held = FirstPersonBody.held()
 				if held.kind == "firearm" then

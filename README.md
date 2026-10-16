@@ -1532,20 +1532,21 @@ A fast, Minecraft-style voxel engine for Roblox.
   let go; a click or press as it swings back counts as soon as the view is within 2 degrees of your
   aim. Hold `Z` to focus your eyes (a 45-degree view, 70 sprinting; not raised). In first person you
   see your own body: the chest's edge, legs and feet when you look down (the eyes lean out past the
-  chest, as a head does), the head, hair, hats, helmet, face and neck pieces hidden, and your hands
-  on what you hold where they reach it: the gun is drawn in the world, lit by it, its sight line on
-  the view's axis, brought nearer the eyes until your right hand holds its grip (in the sights the
-  chest turns side-on, as a rifleman stands; looking steeply up the hands let go), the left hand on
-  a long gun's fore end where it reaches (else the arm hangs), both on a guarded weapon; tools,
-  blocks, food and a punch swing in the right hand; an arm the camera would cut is hidden whole,
-  never a hand alone; a scope hides the gun and the arms; an item that would reach into a wall is
-  pulled back, then lifted (DayZ's weapon lift). Over the shoulder the crosshair (shown with the
-  mouse locked too) picks only what your eyes can see: a block seen past a pillar picks the pillar,
-  and a mob behind cover isn't hit; reach and the server are unchanged. The mouse wheel no longer
-  zooms and there is no shift lock. On a touch screen VIEW and LOOK sit with Sprint, Sneak and a
-  gun's FIRE, AIM and RELOAD, each in a place of its own round the jump button, on phones and
-  tablets alike. First-Person Body OFF keeps Minecraft's hand; `Config.Camera.Enabled = false` puts
-  back Roblox's camera as it was (shift lock included, the crosshair a gamepad's only).
+  chest, as a head does), the head, hair, hats, helmet, face and neck pieces hidden, and both your
+  hands on a gun, as in DayZ: lowered, it is held on the body (a rifle across it, its muzzle to the
+  left; a pistol low ahead on the right); raised, your cheek goes to the stock, the sights a few
+  inches from your eye with their line on the view's axis, the upper body leaning in, both hands
+  under the gun below its sights (a pistol two-handed too); a hand that can't reach, or whose arm
+  would block the sights, lets go and its arm hangs. Tools, blocks, food and a punch swing in the
+  right hand, both hands on a guarded weapon; an arm the camera would cut is hidden whole, never a
+  hand alone; a scope hides the gun and the arms; an item that would reach into a wall is pulled
+  back, then lifted (DayZ's weapon lift). Over the shoulder the crosshair (shown with the mouse
+  locked too) picks only what your eyes can see: a block seen past a pillar picks the pillar, and a
+  mob behind cover isn't hit; reach and the server are unchanged. The mouse wheel no longer zooms
+  and there is no shift lock. On a touch screen VIEW and LOOK sit with Sprint, Sneak and a gun's
+  FIRE, AIM and RELOAD, each in a place of its own round the jump button, on phones and tablets
+  alike. First-Person Body OFF keeps Minecraft's hand; `Config.Camera.Enabled = false` puts back
+  Roblox's camera as it was (shift lock included, the crosshair a gamepad's only).
 - **Ladders, rope and climbing.** Minecraft 1.20.1's ladders and vines and Supplementaries' rope.
   A **Ladder** (seven sticks make three; it burns in a furnace like planks) goes on the wall you
   click, else the first wall the way you look; one clicked on the front of a ladder goes nowhere.
@@ -3931,7 +3932,7 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 2,407 tests, all passing (the zombie apocalypse has
+`lune run tests/run` runs the whole suite: 2,420 tests, all passing (the zombie apocalypse has
 Apocalypse (its registries and shared rules), Zombies (the server's zombies, the director, tracking
 and their costs), MobRig, MobRigPool, ZombieVoices and ZombieRigProbe (the rigs), Infection, Medical
 and Survivor (survival), Cities, Bunkers and, where they all meet on a real world server,

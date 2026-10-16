@@ -5,14 +5,14 @@
 	them). Studs and the camera's space (x right, y up, ahead negative), radians unless named.
 
 	  Roles      `roleOf` sorts what a character is drawn with: the head ("head": the Head and what
-	             is on it, the face; and what is on the root part, ROOT_PART, as a burning
-	             player's Fire, kept out of the eyes), what is worn on it ("headWorn": an Accessory joined to the
-	             Head by its weld, or whose handle's attachment is one of the Head's (Hat, Hair,
+	             is on it, the face; and what is on the root part, ROOT_PART, as a burning player's
+	             Fire, kept out of the eyes), what is worn on it ("headWorn": an Accessory joined to
+	             the Head by its weld, or whose handle's attachment is one of the Head's (Hat, Hair,
 	             FaceFront, FaceCenter), or whose AccessoryType is worn on the head or the neck:
 	             rigid accessories, welded, and layered ones (WrapLayer), sorted by type or
 	             attachment alike), the arms ("arm": the upper and lower arms and hands, and
-	             accessories joined to them) and the rest ("body": the torso, the legs, back,
-	             waist, front and shoulder accessories, layered clothing).
+	             accessories joined to them) and the rest ("body": the torso, the legs, back, waist,
+	             front and shoulder accessories, layered clothing).
 	  Hidden     `hidden`: third person hides only what is near the camera; first person and the
 	             sights also hide the head and what is worn on it, and a scope's view the arms
 	             (DayZ's HideClothing); First-Person Body off hides everything (Minecraft's hand
@@ -26,16 +26,25 @@
 	             shoulder to a wrist target, bent towards a pole point; out of reach it goes
 	             straight towards the target, and says where the wrist got. `POLE`: the elbow down,
 	             out and back from the shoulder (and POLE_AWAY from the camera). `leftHand`: which
-	             holds put the left hand on the item (a long gun's fore end, a melee guard's
-	             handle). `slide`: how far a target moves along a line to come in reach (a gun
-	             along the view towards the eyes, its sight line kept, until the right wrist is
-	             within COMFORT of the arm's reach, its grip GRIP_CLEAR past the near plane; a long
-	             gun's left hand back along the barrel, at least FORE_MIN ahead of the right).
+	             holds put the left hand on the item (a long gun's fore end, a handgun's in its
+	             sights, a melee guard's handle). `slide`: how far a target moves along a line to
+	             come in reach (a gun along the view towards the eyes, its sight line kept, until
+	             the right wrist is within COMFORT of the arm's reach, its grip GRIP_CLEAR past the
+	             near plane; a long gun's left hand back along the barrel, at least FORE_MIN ahead
+	             of the right, trying again FORE_TRIES further where its arm is in the way).
+	             `crosses`: whether an arm is in front of the sight line (the sights and what they
+	             aim at, SIGHT_REACH ahead), so a hand there lets go.
 	  Poses      `handPose`: where the right hand holds a tool, a block (or any other item) or a
-	             bare fist in the camera's space (the grip's frame: looking where the fingers
-	             point, up the thumb), with the swing's dip (Player/HeldItems.swing: sin(pi t)),
-	             a melee guard and a heavy wind-up (Player/AimRules.meleeView's shifts). Firearms
-	             keep Player/AimRules' hip and sights frames (ItemModels.firearmPivot).
+	             bare fist in the camera's space (the grip's frame: looking where the fingers point,
+	             up the thumb), with the swing's dip (Player/HeldItems.swing: sin(pi t)), a melee
+	             guard and a heavy wind-up (Player/AimRules.meleeView's shifts). A gun from the
+	             eyes, as DayZ holds one with the body drawn: in the sights the cheek on the stock
+	             (`sightsDepth`: the sight line's rear SIGHTS_NEAR ahead, nearer looking up, never
+	             within the near plane's margin and SIGHTS_CLEAR), lowered on the body (`lowered`:
+	             LOWERED, a long gun across it; LOWERED_HANDGUN low ahead on the right), both hands
+	             under it, below its sight line (GRIP_TILT: the right hand's fingers up its grip;
+	             FORE_TILT: the left's up round the fore end). The view without the body keeps
+	             Player/AimRules' hip and sights frames.
 	  Walls      `obstruction`: an item reaching into a block is pulled back (up to PULL studs),
 	             then its far end lifted (up to LIFT): DayZ's weapon lift.
 ]]
@@ -99,6 +108,32 @@ FirstPersonRules.CAMERA_SLACK = 0.1
 FirstPersonRules.COMFORT = 0.95
 FirstPersonRules.GRIP_CLEAR = 0.45
 FirstPersonRules.FORE_MIN = 0.3
+-- A gun's sights seen from the eyes: the cheek on the stock, the sight line's rear (over the
+-- grip) SIGHTS_NEAR studs ahead, nearer by SIGHTS_UP times the sine of an upward look (the arms
+-- reach up more steeply), never nearer than the near plane's margin and SIGHTS_CLEAR
+-- (`sightsDepth`). The stock past the eyes is hidden where the near plane would cut it.
+FirstPersonRules.SIGHTS_NEAR = 0.45
+FirstPersonRules.SIGHTS_UP = 0.2
+FirstPersonRules.SIGHTS_CLEAR = 0.2
+-- How far ahead (studs) the sight line counts for an arm in front of it (`crosses`): the sights
+-- and what they aim at.
+FirstPersonRules.SIGHT_REACH = 4
+-- The hands under a gun, below its sight line (a blocky hand is a slab across its arm): the right
+-- hand's fingers turned GRIP_TILT from along the barrel up its grip, the left's FORE_TILT up from
+-- across the fore end (its thumb along the barrel). A left hand whose arm would be in the way
+-- tries again this far (studs) back along the barrel, in turn (negative: further forward).
+FirstPersonRules.GRIP_TILT = math.rad(90)
+FirstPersonRules.FORE_TILT = math.rad(45)
+FirstPersonRules.FORE_TRIES = table.freeze({ 0, 0.15, 0.3, -0.15 })
+--[[
+	A gun lowered, seen from the eyes: held on the body (the grip (x, y, z) studs from the chest's
+	middle in its level frame: right, up, ahead), its barrel turned `yaw` degrees to the left and
+	`pitch` up, the whole following `follow` of the aim's pitch, so the hands reach it however the
+	eyes look and its muzzle shows looking ahead: a long gun across the body as DayZ's lowered
+	rifle, a handgun low ahead on the right.
+]]
+FirstPersonRules.LOWERED = table.freeze({ x = 0.2, y = 0.4, z = -0.9, yaw = 35, pitch = 0, follow = 0.2 })
+FirstPersonRules.LOWERED_HANDGUN = table.freeze({ x = 0.6, y = 0.4, z = -1.2, yaw = 15, pitch = -15, follow = 0.2 })
 -- An item reaching into a wall: pulled back up to this far (studs), then lifted up to LIFT over
 -- LIFT_SPAN more studs of overlap.
 FirstPersonRules.PULL = 0.8
@@ -319,6 +354,69 @@ function FirstPersonRules.clips(
 end
 
 --[[
+	How far ahead of the eyes (studs) the sight line's rear goes for a gun in the sights, looking
+	`pitch` (radians, up positive) with the near plane's margin `nearDepth` (see SIGHTS_NEAR).
+]]
+function FirstPersonRules.sightsDepth(pitch: number, nearDepth: number): number
+	local depth = FirstPersonRules.SIGHTS_NEAR - FirstPersonRules.SIGHTS_UP * math.max(0, math.sin(pitch))
+	return math.max(depth, nearDepth + FirstPersonRules.SIGHTS_CLEAR)
+end
+
+--[[
+	A lowered gun on the body (LOWERED for a `long` gun, else LOWERED_HANDGUN) for an aim at
+	`pitch` (radians): the turn the chest's level frame takes first (radians, about its right), then
+	the grip's place (x, y, z studs) and the barrel's turn (yaw left, pitch up; radians): chest *
+	Angles(turn, 0, 0) * (x, y, z) * Angles(0, yaw, 0) * Angles(pitch, 0, 0), looking along the
+	barrel.
+]]
+function FirstPersonRules.lowered(pitch: number, long: boolean): (number, number, number, number, number, number)
+	local pose = if long then FirstPersonRules.LOWERED else FirstPersonRules.LOWERED_HANDGUN
+	return pitch * pose.follow, pose.x, pose.y, pose.z, math.rad(pose.yaw), math.rad(pose.pitch)
+end
+
+--[[
+	Does the view's middle (the sight line) pass through a box between `near` and `far` studs ahead?
+	The camera in the box's own space: its place (ox, oy, oz) and the view's direction (dx, dy, dz,
+	unit); the box's half sizes (hx, hy, hz). An arm in front of the sights, or in front of what they
+	aim at, lets go of the gun (Player/HeldItems).
+]]
+function FirstPersonRules.crosses(
+	ox: number,
+	oy: number,
+	oz: number,
+	dx: number,
+	dy: number,
+	dz: number,
+	hx: number,
+	hy: number,
+	hz: number,
+	near: number,
+	far: number
+): boolean
+	local lo, hi = near, far
+	for i = 1, 3 do
+		local o = if i == 1 then ox elseif i == 2 then oy else oz
+		local d = if i == 1 then dx elseif i == 2 then dy else dz
+		local h = if i == 1 then hx elseif i == 2 then hy else hz
+		if math.abs(d) < EPSILON then
+			if math.abs(o) > h then
+				return false
+			end
+		else
+			local t1, t2 = (-h - o) / d, (h - o) / d
+			if t1 > t2 then
+				t1, t2 = t2, t1
+			end
+			lo, hi = math.max(lo, t1), math.min(hi, t2)
+			if lo > hi then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+--[[
 	How far (studs) a target at W (wx, wy, wz) moves along the unit direction (dx, dy, dz) to come
 	within `reach` of S (sx, sy, sz): the least t in [0, limit] that does (0: within already); nil
 	when none does. A gun sliding towards the eyes until the right wrist is in reach, a long gun's
@@ -434,12 +532,13 @@ function FirstPersonRules.twoBone(
 end
 
 --[[
-	Does the left hand go on the item (`leftHand`): a long gun's fore end, a melee weapon's handle
-	while guarding; otherwise it is left to the animation.
+	Does the left hand go on the item (`leftHand`): a long gun's fore end, a handgun's in its sights
+	(`sights`: held two-handed, as DayZ raises a pistol), a melee weapon's handle while guarding;
+	otherwise it is left to the animation.
 ]]
-function FirstPersonRules.leftHand(kind: string, long: boolean, guard: boolean): boolean
+function FirstPersonRules.leftHand(kind: string, long: boolean, guard: boolean, sights: boolean?): boolean
 	if kind == "firearm" then
-		return long
+		return long or sights == true
 	elseif kind == "tool" then
 		return guard
 	end

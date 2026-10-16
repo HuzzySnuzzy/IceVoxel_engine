@@ -24,9 +24,10 @@
 	  Waist    the upper body's yaw on the pelvis (`waist`): the local idle lead (the aim ahead of
 	           the lagging body, at most LEAD) plus freelook's yaw beyond the neck's NECK_YAW (at
 	           most WAIST_YAW: `neck` is the head's share), less the pelvis' share of the legs'
-	           twist (PELVIS, none: the hips turn the legs alone, the pelvis stays with the root),
-	           plus BLADE in a gun's sights seen from the eyes (a rifleman's bladed stance, eased
-	           with the sights: the right shoulder forward under the gun, for the right hand).
+	           twist (PELVIS, none: the hips turn the legs alone, the pelvis stays with the root).
+	           In a gun's sights seen from the eyes the upper body leans LEAN forward at the waist
+	           (`lean`, eased with the sights: the cheek on the stock, both shoulders forward under
+	           the gun so both hands take it).
 	`ease` brings a drawn angle to its target exponentially (frame-rate independent).
 ]]
 
@@ -61,9 +62,9 @@ BodyRules.WAIST_YAW = math.rad(30)
 -- The share of the legs' twist the pelvis takes (turned back at the waist): none, the hips turn
 -- the legs alone (the pelvis hangs on the root, LowerTorso.Root, Player/MovementController's).
 BodyRules.PELVIS = 0
--- The upper body's turn to the left in a gun's sights seen from the eyes (a rifleman's bladed
--- stance): the right shoulder comes forward under the gun, so the right hand takes its grip.
-BodyRules.BLADE = math.rad(40)
+-- The upper body's lean forward at the waist in a gun's sights seen from the eyes (the cheek on
+-- the stock, the shoulders forward under the gun): both hands take it, the chest clear of the eyes.
+BodyRules.LEAN = math.rad(20)
 
 -- `angle` into (-pi, pi].
 local function wrap(angle: number): number
@@ -171,14 +172,21 @@ end
 --[[
 	The upper body's yaw at the waist (radians, positive left): the idle `lead` (the aim's yaw less
 	the body's) within LEAD, plus freelook's yaw (`freelookYaw`) beyond the neck's share, within
-	WAIST_YAW, less PELVIS x the legs' twist (`legYaw`), plus `sights` (0..1, nil none) of BLADE.
+	WAIST_YAW, less PELVIS x the legs' twist (`legYaw`).
 ]]
-function BodyRules.waist(lead: number, legYaw: number, freelookYaw: number, sights: number?): number
+function BodyRules.waist(lead: number, legYaw: number, freelookYaw: number): number
 	local beyond = freelookYaw - BodyRules.neck(freelookYaw)
 	return math.clamp(wrap(lead), -BodyRules.LEAD, BodyRules.LEAD)
 		+ math.clamp(beyond, -BodyRules.WAIST_YAW, BodyRules.WAIST_YAW)
 		- BodyRules.PELVIS * legYaw
-		+ BodyRules.BLADE * math.clamp(sights or 0, 0, 1)
+end
+
+--[[
+	The upper body's pitch at the waist (radians, as CFrame.Angles' x: negative leans forward) for a
+	gun `sights` of the way into its sights seen from the eyes (0..1): LEAN forward at most.
+]]
+function BodyRules.lean(sights: number): number
+	return -BodyRules.LEAN * math.clamp(sights, 0, 1)
 end
 
 --[[

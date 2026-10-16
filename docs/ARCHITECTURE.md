@@ -2400,7 +2400,7 @@ trail the item by a frame). The joints' owners, C0 only, never `Transform`:
 | --- | --- |
 | LowerTorso.Root | MovementController (the step-up lag) |
 | LeftHip, RightHip | BodyTwist (every R15 character) |
-| UpperTorso.Waist | BodyTwist (the local character: the idle lead, freelook beyond the neck, the sights' blade) |
+| UpperTorso.Waist | BodyTwist (the local character: the idle lead, freelook beyond the neck, the sights' lean forward) |
 | Head.Neck | WeaponPoses (a raised gun's pitch; the local head's freelook turn, ≤ 70° / 60°) |
 | Shoulders | WeaponPoses in third person; FirstPersonBody in true first person |
 | Elbows, wrists | FirstPersonBody (true first person only) |
@@ -2413,27 +2413,38 @@ hands move with the final view, and after BodyTwist turned the waist, which carr
 In true first person (`FirstPersonBody.trueFirstPerson`: first person or the sights, the setting on,
 an R15 body, alive) the local player's world model is placed at `anchor · pose`, the anchor the
 camera turned back by the freelook offset, so the item stays on the aim while the head looks around.
-A firearm keeps the viewport's exact pivots (`firearmPivot` "hip" eased to "sights", the kick), lit
-by the world; its optic is hidden past 0.6 of the way to the sights; a scope's zoom hides it and the
-arms (Ui/WeaponHud's overlay); `muzzle` places it with the asking frame's camera. Tools, blocks and
-the bare hand follow `FirstPersonRules.handPose` (the swing's sin(πt) over 0.3 s, the melee guard
-and wind-up). An item reaching into a block (a cast from the camera along the aim to its far end, on
-the world's blocks: `HeldItems.start(world)`) is pulled back, then lifted
+A firearm is held as DayZ holds one, lit by the world, eased between its two poses (the kick on
+top): in the sights the cheek on the stock (`FirstPersonRules.sightsDepth`: the sight line on the
+view's axis, its rear 0.45 studs ahead, nearer looking up, never within the near plane's margin and
+`SIGHTS_CLEAR`), lowered held on the body (`lowered` on the chest's level frame, following a fifth
+of the aim's pitch: a long gun across it, its muzzle to the left, a handgun low ahead on the right);
+its optic is hidden past 0.6 of the way to the sights; a scope's zoom hides it and the arms
+(Ui/WeaponHud's overlay); `muzzle` places it with the asking frame's camera. Tools, blocks and the
+bare hand follow `FirstPersonRules.handPose` (the swing's sin(πt) over 0.3 s, the melee guard and
+wind-up). An item reaching into a block (a cast from the camera along the aim to its far end, on the
+world's blocks: `HeldItems.start(world)`) is pulled back, then lifted
 (`FirstPersonRules.obstruction`, DayZ's weapon lift; the shot still goes from the eyes). Then
 `FirstPersonBody.poseArms` puts the right hand on the grip (`ItemModels.firearmPoint` "grip" for a
 gun) and the left on a long gun's fore end ("fore": the look's `fore` point in Weapons/WeaponList,
-else 40 % of the way from the grip to the muzzle under the barrel) or a guarded weapon's handle
-(`leftHand`). A gun never leaves its sight line: it slides along the view towards the eyes (eased)
-until the right wrist is comfortably in reach (`gripSlide`, `FirstPersonRules.slide`, `COMFORT`; its
-grip `GRIP_CLEAR` past the near plane; in the sights BodyTwist turns the chest side-on by
-`BodyRules.BLADE`, the right shoulder under the gun), and a long gun's left hand takes the fore end
-slid back towards the right hand where it reaches (`foreHold`, at least `FORE_MIN` ahead); a hand
-out of reach, or whose arm the near plane would cut (`armClips`), lets go (eased, with a little
-hysteresis) and the animation has that arm while the gun stays in its sights. A part of the gun the
-near plane would cut is hidden. A tool or a block follows the right hand where it can't reach. Third
-person's gun is aimed from the chest's (UpperTorso's) levelled facing, the frame WeaponPoses poses
-the shoulders in, so a waist turn keeps it in the hands; the joints' own C0 come from their rig
-attachments (rescaled bodies). HeldItems pushes what it holds every frame
+else 40 % of the way from the grip to the muzzle under the barrel) or a handgun's in its sights or a
+guarded weapon's handle (`leftHand`), both hands under the gun below its sight line (a blocky hand
+is a slab across its arm: the right hand's fingers up the grip, `GRIP_TILT`; the left's up round the
+fore end, `FORE_TILT`); in the sights BodyTwist leans the chest forward (`BodyRules.LEAN`), both
+shoulders under the gun. A gun never leaves its sight line: in the sights it may slide along the
+view towards the eyes (eased) until the right wrist is comfortably in reach (`gripSlide`,
+`FirstPersonRules.slide`, `COMFORT`; its grip `GRIP_CLEAR` past the near plane), and the left hand
+takes the fore end slid back towards the right hand where it reaches (`foreHold`, at least
+`FORE_MIN` ahead, trying again a little back or forward where its arm is in the way: `FORE_TRIES`);
+a hand out of reach, whose arm the near plane would cut, or (in the sights) whose arm would be in
+front of the sight line or what it aims at (`armClips`, `FirstPersonRules.crosses`), lets go (eased,
+with a little hysteresis) and the animation has that arm while the gun stays put. On a computer's
+0.1 near plane both hands hold every long gun, lowered at any pitch and in the sights from 60
+degrees down to 30 up, on short and tall blocky bodies (tests/spec/FirstPerson prints the rates); a
+phone's 0.5 leaves less room by the eyes, and the sights there are mostly one-handed or hands-free.
+A part of the gun the near plane would cut is hidden. A tool or a block follows the right hand where
+it can't reach. Third person's gun is aimed from the chest's (UpperTorso's) levelled facing, the
+frame WeaponPoses poses the shoulders in, so a waist turn keeps it in the hands; the joints' own C0
+come from their rig attachments (rescaled bodies). HeldItems pushes what it holds every frame
 (`FirstPersonBody.setHeld`). The viewport (the corner hand, the full-screen gun) is left for the
 setting off, an R6 body and the rig off.
 
@@ -2458,11 +2469,11 @@ client twists every shown R15 character's legs at the hips towards a strafe (≤
 feet, folds a backpedal (the walk and run played reversed locally, replicated by the Animator; other
 players' by their drawn feet, their replicated walk track's speed settling only a move within 20° of
 a pure strafe: `BodyRules.remoteLegs`), shuffles the feet on idle turns over 1.2 rad/s until they
-slow under 0.8 (`SHUFFLE_STOP`), turns the local chest 40° side-on in a gun's sights seen from the
-eyes (`BodyRules.BLADE`), and leads the local upper body (the waist) on idle turns (≤ 45°) and
-beyond the neck in freelook (the neck's 70°, then the waist's 30°: `BodyRules.NECK_YAW` is
-`WeaponPoses.NECK_YAW`). Nothing is sent. Upright only (not crawling, swimming or on a ladder); R6
-bodies get no twist.
+slow under 0.8 (`SHUFFLE_STOP`), leans the local upper body forward at the waist in a gun's sights
+seen from the eyes (`BodyRules.lean`, 20°: a pitch after the waist's yaw), and leads the local upper
+body (the waist) on idle turns (≤ 45°) and beyond the neck in freelook (the neck's 70°, then the
+waist's 30°: `BodyRules.NECK_YAW` is `WeaponPoses.NECK_YAW`). Nothing is sent. Upright only (not
+crawling, swimming or on a ladder); R6 bodies get no twist.
 
 **Off.** `Config.Camera.Enabled = false` keeps today's camera: CameraRig binds only a step that
 measures geometric first person (within 1 stud of the camera's focus), `active()` is false, the aim

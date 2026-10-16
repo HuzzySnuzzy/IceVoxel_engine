@@ -5,7 +5,7 @@
 	player's legs by their feet, the replicated walk only near a strafe (no 45 degree snap on a
 	stale way of walking); the idle-turn shuffle's threshold, cap and stop (no flicker); the waist's
 	idle lead and freelook share (the neck's 70, then the waist's 30: DayZ's 100 in first person),
-	the sights' blade, and their clamps; easing; the numbers; and that the
+	the sights' forward lean, and their clamps; easing; the numbers; and that the
 	rules are pure and Player/BodyTwist keeps to its joints (the hips and the waist, never a
 	Transform) at Camera + 6, out of the animator's require cycle.
 ]]
@@ -282,14 +282,15 @@ return function(t, shared, require, _server, client)
 		-- The legs' twist stays at the hips: the pelvis turns none of it (PELVIS 0).
 		t.eq(waist(0, rad(45), 0), 0)
 		t.near(waist(rad(20), rad(-45), 0), rad(20), EPS)
-		-- A gun's sights seen from the eyes blade the upper body left (the right shoulder forward),
-		-- eased with the sights' share.
-		t.near(BodyRules.BLADE, rad(40), EPS)
-		t.near(waist(0, 0, 0, 1), BodyRules.BLADE, EPS, "in the sights")
-		t.near(waist(0, 0, 0, 0.5), BodyRules.BLADE / 2, EPS, "half way there")
-		t.eq(waist(0, 0, 0, 0), 0)
-		t.near(waist(0, 0, 0, 3), BodyRules.BLADE, EPS, "at most the blade")
-		t.near(waist(rad(10), 0, 0, 1), rad(10) + BodyRules.BLADE, EPS, "on top of the lead")
+		-- A gun's sights seen from the eyes lean the upper body forward (a pitch at the waist, as
+		-- CFrame.Angles' x: negative forward), eased with the sights' share; the yaw stays.
+		t.near(BodyRules.LEAN, rad(20), EPS)
+		t.near(BodyRules.lean(1), -BodyRules.LEAN, EPS, "in the sights: forward")
+		t.near(BodyRules.lean(0.5), -BodyRules.LEAN / 2, EPS, "half way there")
+		t.eq(BodyRules.lean(0), 0)
+		t.near(BodyRules.lean(3), -BodyRules.LEAN, EPS, "at most the lean")
+		t.eq(BodyRules.lean(-1), 0, "never backwards")
+		t.eq(BodyRules.BLADE, nil, "the chest square to the aim (no blade)")
 	end)
 
 	t.test("body rules: easing is exponential and frame-rate independent", function()

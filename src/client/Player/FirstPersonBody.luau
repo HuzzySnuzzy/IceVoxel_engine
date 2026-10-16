@@ -35,23 +35,23 @@
 	  Held item   Player/HeldItems places the world model of what the local player holds in the
 	              camera's space (`trueFirstPerson`), pushes what it holds (`setHeld`: the kind, a
 	              scope's view, the sights' share) and then puts the hands on it (`poseArms`).
-	  Arms        two-bone IK on the R15 shoulders, elbows and wrists (FirstPersonRules.twoBone,
-	              the lengths from the joints' own C0 and C1, so scaled bodies work; the elbow
-	              down and out, FirstPersonRules.POLE, and away from the camera, POLE_AWAY), written
-	              to the Motor6Ds' C0 with the animation's Transform taken out, in the render step
-	              that draws the frame: the Animator's Transform read there is the one that frame
+	  Arms        two-bone IK on the R15 shoulders, elbows and wrists (FirstPersonRules.twoBone, the
+	              lengths from the joints' own C0 and C1, so scaled bodies work; the elbow down and
+	              out, FirstPersonRules.POLE, and away from the camera, POLE_AWAY), written to the
+	              Motor6Ds' C0 with the animation's Transform taken out, in the render step that
+	              draws the frame: the Animator's Transform read there is the one that frame
 	              renders, so the hand lands exactly on the item (IKControl solves in the animation
 	              step from targets set a step earlier, a frame behind the camera: the hands would
 	              trail the item). The hand turns with the grip so the palm wraps it; a grip out of
 	              reach is held where the arm gets to (`reach`: Player/HeldItems moves a tool or a
 	              block there). A gun never moves off its sight line: `gripSlide` says how far it
 	              slides along the view towards the eyes for the right hand to take it, and
-	              `foreHold` where a long gun's left hand takes the fore end (slid back along the
-	              barrel towards the right hand until in reach; none: the animation has the arm);
-	              `armClips` whether an arm holding a grip would be cut by the near plane (then it
-	              lets go instead of being hidden).
-	              `release` puts the joints back (Player/WeaponPoses poses them in third person).
-	              R6 bodies get no IK.
+	              `foreHold` where a gun's left hand takes the fore end (slid back along the barrel
+	              towards the right hand until in reach, from a given slide on; none: the animation
+	              has the arm); `armClips` whether an arm holding a grip would be cut by the near
+	              plane, or in the sights be in front of the sight line (then it lets go instead of
+	              being hidden or hiding the aim). `release` puts the joints back
+	              (Player/WeaponPoses poses them in third person). R6 bodies get no IK.
 
 	Nothing is created per frame (the lists are rebuilt only when the character changes).
 	Requires only Player/CameraRig, Player/FirstPersonRules, Player/SpectatorRules and Shared:
@@ -149,6 +149,26 @@ function FirstPersonBody.clipped(
 		depth,
 		tx,
 		ty
+	)
+end
+
+-- Does the middle of the view from `view` pass through a box of `size` at `frame` (world) between
+-- `near` and `far` studs ahead (FirstPersonRules.crosses)?
+local function crossing(view: CFrame, frame: CFrame, size: Vector3, near: number, far: number): boolean
+	local at = frame:PointToObjectSpace(view.Position)
+	local along = frame:VectorToObjectSpace(view.LookVector)
+	return FirstPersonRules.crosses(
+		at.X,
+		at.Y,
+		at.Z,
+		along.X,
+		along.Y,
+		along.Z,
+		size.X / 2,
+		size.Y / 2,
+		size.Z / 2,
+		near,
+		far
 	)
 end
 
@@ -877,11 +897,12 @@ end
 
 --[[
 	Where the left hand takes a long gun whose fore end is at `fore` (the grip's world frame) and
-	whose right grip is at `grip` (world): `fore` slid back along the barrel towards `grip` until the
-	left wrist is in reach (comfortably, else at all), at least FirstPersonRules.FORE_MIN ahead of
-	`grip`; nil when it can't (the animation keeps the left arm), or no R15 arms.
+	whose right grip is at `grip` (world): `fore` slid back along the barrel towards `grip` (from
+	`from` studs on, nil none; negative: further forward first) until the left wrist is in reach (comfortably, else at all), at least
+	FirstPersonRules.FORE_MIN ahead of `grip`; nil when it can't (the animation keeps the left arm),
+	or no R15 arms.
 ]]
-function FirstPersonBody.foreHold(character: Model, fore: CFrame, grip: Vector3): CFrame?
+function FirstPersonBody.foreHold(character: Model, fore: CFrame, grip: Vector3, from: number?): CFrame?
 	local arms = rigOf(character)
 	if arms == nil then
 		return nil
@@ -893,6 +914,11 @@ function FirstPersonBody.foreHold(character: Model, fore: CFrame, grip: Vector3)
 	end
 	local d = back / span
 	local limit = math.max(span - FirstPersonRules.FORE_MIN, 0)
+	local first = math.min(from or 0, limit)
+	if first ~= 0 then
+		fore += d * first
+		limit -= first
+	end
 	local s, w, _, _, a, b = reachOf(arms.left, arms.torso, fore)
 	local t = FirstPersonRules.slide(
 		s.X,
@@ -915,16 +941,18 @@ end
 
 --[[
 	Would the near plane of `camera` cut the right (`right`) or the left arm in view, its hand on
-	`target` (the grip's world frame; the elbow away from the camera, as `poseArms` puts it)? With
-	`slack` (studs) less of the near view counts: a hand holding on keeps holding a little further
-	in than it takes hold. False without R15 arms.
+	`target` (the grip's world frame; the elbow away from the camera, as `poseArms` puts it), or
+	(`sightLine`) would the arm be in front of the view's middle (FirstPersonRules.crosses, up to
+	SIGHT_REACH: the sights and what they aim at)? With `slack` (studs) less of the near view counts:
+	a hand holding on keeps holding a little further in than it takes hold. False without R15 arms.
 ]]
 function FirstPersonBody.armClips(
 	character: Model,
 	right: boolean,
 	target: CFrame,
 	camera: Camera,
-	slack: number
+	slack: number,
+	sightLine: boolean?
 ): boolean
 	local arms = rigOf(character)
 	if arms == nil then
@@ -938,9 +966,20 @@ function FirstPersonBody.armClips(
 	end
 	local depth, tx, ty = FirstPersonBody.nearView(camera)
 	depth = math.max(depth - slack, 0)
-	return FirstPersonBody.clipped(view, upper, arm.upper.Size, depth, tx, ty)
+	if
+		FirstPersonBody.clipped(view, upper, arm.upper.Size, depth, tx, ty)
 		or FirstPersonBody.clipped(view, lower, arm.lower.Size, depth, tx, ty)
 		or FirstPersonBody.clipped(view, hand, arm.hand.Size, depth, tx, ty)
+	then
+		return true
+	end
+	if sightLine then
+		local reach = FirstPersonRules.SIGHT_REACH
+		return crossing(view, upper, arm.upper.Size, depth, reach)
+			or crossing(view, lower, arm.lower.Size, depth, reach)
+			or crossing(view, hand, arm.hand.Size, depth, reach)
+	end
+	return false
 end
 
 --[[
