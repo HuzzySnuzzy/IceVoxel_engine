@@ -2263,7 +2263,7 @@ step from the sources and pins it here):
 | + 4 | `IceVoxelViewBob` (MovementController) | Minecraft's bob × `CameraRig.bobShare` (none over the shoulder), the hurt tilt in every view |
 | + 5 | `IceVoxelAimSway` (AimCamera) | zoom, recoil's recovery, the sway |
 | + 6 | `IceVoxelFirearmsFire` (Firearms); `IceVoxelBodyTwist` (Player/BodyTwist) | shots; every character's hips, the local waist |
-| + 7 | `IceVoxelHeldItems` (Player/HeldItems; a RenderStepped connection before) | every hand's item; the local one at the camera and the arms on it |
+| + 7 | `IceVoxelHeldItems` (Player/HeldItems; a RenderStepped connection before) | every hand's item; the local one at the camera, the arms on it and settled there (FirstPersonBody.settleArms: this frame's camera and scope) |
 | + 8 | `IceVoxelEquipmentLooks` (Player/EquipmentLooks; + 1 before) | worn pieces on the posed and turned body |
 | + 9 | `IceVoxelSoundListener` (Audio/SoundPlayer; + 1 before); `IceVoxelInteraction` (Interaction/BlockInteraction; a RenderStepped connection before) | the listener at the final camera; the aim (the crosshair's ray and the eyes as drawn this frame), the outline, mining, the repeats, presses freelook held back |
 
@@ -2273,8 +2273,10 @@ no documented order against bound steps; none needs the final camera. Targeting 
 BlockInteraction's frame is bound after the camera's last move: were it a RenderStepped connection
 run between Roblox's camera and the rig, third-person targeting would cast from Roblox's own
 first-person place, about 0.9 studs off the crosshair. A press it plays at + 9 (freelook's held-back
-ones, a touch held long enough) fires a gun at + 6 the next frame. A muzzle flash fired at + 6 starts
-from the gun's place last frame.
+ones, a touch held long enough) fires a gun at + 6 the next frame. A muzzle flash fired at + 6
+starts, over the shoulder, from the gun's place last frame; from the eyes the gun is kept in the
+camera's space and HeldItems.muzzle places it with that frame's camera, so the flash starts from the
+gun drawn that frame.
 
 **The rig** (`Player/CameraRig`; the rules in `Player/CameraRules`, pure, tested in
 tests/spec/CameraRules). The player chooses third or first person (the Camera setting, applied only
@@ -2365,24 +2367,31 @@ tested in tests/spec/FirstPerson). Visibility: at + 2 it is the one writer of th
 `LocalTransparencyModifier` while the rig is active and the player isn't a spectator. Under
 `LockFirstPerson` Roblox's TransparencyController would fade the whole character and, at its full
 fade, write every part again every frame (it marks itself dirty on each update), which this then
-wrote back: about two writes a part a frame. `Player/CameraFade` wraps the controller's `Update` (the
-method of the PlayerModule's TransparencyController class table, as MouseLook wraps
+wrote back: about two writes a part a frame. `Player/CameraFade` wraps the controller's `Update`
+(the method of the PlayerModule's TransparencyController class table, as MouseLook wraps
 `CameraInput.getRotation`) so it writes nothing while the rig places the camera for a player who
-isn't a spectator, and only marks itself dirty, so it fades everything again the first frame it
-runs (spectating someone, a spectator, the rig off); tests/spec/CameraFade. Every frame this still
+isn't a spectator, and only marks itself dirty, so it fades everything again the first frame it runs
+(spectating someone, a spectator, the rig off); tests/spec/CameraFade. Every frame this still
 compares each object with its value and writes only where it differs: with the controller held off
-that is only what changes, and a PlayerModule that can't be hooked costs the old two writes. The objects
-(`SpectatorRules.HIDDEN_CLASSES`) are listed once and again when the character's descendants change;
-`roleOf` sorts them: the head (and what is on it), what is worn on the head (an accessory welded to
+that is only what changes, and a PlayerModule that can't be hooked costs the old two writes. The
+objects (`SpectatorRules.HIDDEN_CLASSES`) are listed once and again when the character's descendants
+change; `roleOf` sorts them: the head (and what is on it, and on the root part: a burning player's
+Fire never rises through the camera from the eyes), what is worn on the head (an accessory welded to
 it, carrying one of its attachments, or of AccessoryType Hat, Hair, Face, Eyebrow, Eyelash or Neck:
 rigid and layered alike), the arms, the rest. `hidden(role, view, bodyOn, scoped, near)`: in third
-person only what is within `NearClear` of the camera; from the eyes also the head and what is worn
-on it, and the arms in a scope's view; with First-Person Body off (or an R6 body) everything, for
-Minecraft's hand in HeldItems' viewport. A dead body is drawn as in third person while it tips over.
-`SpectatorView` (+ 3) only raises these values; `EquipmentLooks` (+ 8) hides a piece whose anchor
-part is hidden (`hides`) and head and neck pieces from the eyes (`hidesHeadWorn`). The arms:
-two-bone IK on the R15 shoulders, elbows and wrists (`twoBone`, the lengths from the joints' own C0
-and C1, so scaled bodies work; the elbow down and out, `POLE`), written to the C0
+person only what the camera's near plane would cut in view (`clips`: exact separating axes on the
+camera's `NearPlaneZ` plus `CLIP_MARGIN`, `CAMERA_SLACK` more at + 2 for the bob and the sway; a
+part beside or behind the camera out of view never counts); from the eyes also the head and what is
+worn on it, and the arms in a scope's view; with First-Person Body off (or an R6 body) everything,
+for Minecraft's hand in HeldItems' viewport. A dead body is drawn as in third person while it tips
+over. An arm (its upper and lower arm, its hand and what is joined to them: `armSide`) is shown or
+hidden whole, so a hand is never drawn without its arm; in true first person the arms are settled
+again at + 7 where they were just posed (`settleArms`: the final camera and this frame's scope, so a
+scope hides them in the frame it hides the gun). `SpectatorView` (+ 3) only raises these values;
+`EquipmentLooks` (+ 8) hides a piece whose anchor part is hidden (`hides`) and head and neck pieces
+from the eyes (`hidesHeadWorn`). The arms: two-bone IK on the R15 shoulders, elbows and wrists
+(`twoBone`, the lengths from the joints' own C0 and C1, so scaled bodies work; the elbow down and
+out, `POLE`, and away from the camera, `POLE_AWAY`), written to the C0
 (`Part0⁻¹·bone·C1·Transform⁻¹`) in the render step: the Animator's `Transform` read there is the one
 the frame draws, so the hand lands on the item (IKControl solves a step later and the hands would
 trail the item by a frame). The joints' owners, C0 only, never `Transform`:
@@ -2391,7 +2400,7 @@ trail the item by a frame). The joints' owners, C0 only, never `Transform`:
 | --- | --- |
 | LowerTorso.Root | MovementController (the step-up lag) |
 | LeftHip, RightHip | BodyTwist (every R15 character) |
-| UpperTorso.Waist | BodyTwist (the local character) |
+| UpperTorso.Waist | BodyTwist (the local character: the idle lead, freelook beyond the neck, the sights' blade) |
 | Head.Neck | WeaponPoses (a raised gun's pitch; the local head's freelook turn, ≤ 70° / 60°) |
 | Shoulders | WeaponPoses in third person; FirstPersonBody in true first person |
 | Elbows, wrists | FirstPersonBody (true first person only) |
@@ -2406,17 +2415,27 @@ an R15 body, alive) the local player's world model is placed at `anchor · pose`
 camera turned back by the freelook offset, so the item stays on the aim while the head looks around.
 A firearm keeps the viewport's exact pivots (`firearmPivot` "hip" eased to "sights", the kick), lit
 by the world; its optic is hidden past 0.6 of the way to the sights; a scope's zoom hides it and the
-arms (Ui/WeaponHud's overlay); `muzzle` reads the model's pivot. Tools, blocks and the bare hand
-follow `FirstPersonRules.handPose` (the swing's sin(πt) over 0.3 s, the melee guard and wind-up). An
-item reaching into a block (a cast from the camera along the aim to its far end, on the world's
-blocks: `HeldItems.start(world)`) is pulled back, then lifted (`FirstPersonRules.obstruction`,
-DayZ's weapon lift; the shot still goes from the eyes). Then `FirstPersonBody.poseArms` puts the
-right hand on the grip (`ItemModels.firearmPoint` "grip" for a gun) and the left on a long gun's
-fore end ("fore": the look's `fore` point in Weapons/WeaponList, else 40 % of the way from the grip
-to the muzzle under the barrel) or a guarded weapon's handle (`leftHand`); where the right hand
-can't reach, the item follows it (a gun only along the view axis, so its sight line stays centred).
-HeldItems pushes what it holds every frame (`FirstPersonBody.setHeld`). The viewport (the corner
-hand, the full-screen gun) is left for the setting off, an R6 body and the rig off.
+arms (Ui/WeaponHud's overlay); `muzzle` places it with the asking frame's camera. Tools, blocks and
+the bare hand follow `FirstPersonRules.handPose` (the swing's sin(πt) over 0.3 s, the melee guard
+and wind-up). An item reaching into a block (a cast from the camera along the aim to its far end, on
+the world's blocks: `HeldItems.start(world)`) is pulled back, then lifted
+(`FirstPersonRules.obstruction`, DayZ's weapon lift; the shot still goes from the eyes). Then
+`FirstPersonBody.poseArms` puts the right hand on the grip (`ItemModels.firearmPoint` "grip" for a
+gun) and the left on a long gun's fore end ("fore": the look's `fore` point in Weapons/WeaponList,
+else 40 % of the way from the grip to the muzzle under the barrel) or a guarded weapon's handle
+(`leftHand`). A gun never leaves its sight line: it slides along the view towards the eyes (eased)
+until the right wrist is comfortably in reach (`gripSlide`, `FirstPersonRules.slide`, `COMFORT`; its
+grip `GRIP_CLEAR` past the near plane; in the sights BodyTwist turns the chest side-on by
+`BodyRules.BLADE`, the right shoulder under the gun), and a long gun's left hand takes the fore end
+slid back towards the right hand where it reaches (`foreHold`, at least `FORE_MIN` ahead); a hand
+out of reach, or whose arm the near plane would cut (`armClips`), lets go (eased, with a little
+hysteresis) and the animation has that arm while the gun stays in its sights. A part of the gun the
+near plane would cut is hidden. A tool or a block follows the right hand where it can't reach. Third
+person's gun is aimed from the chest's (UpperTorso's) levelled facing, the frame WeaponPoses poses
+the shoulders in, so a waist turn keeps it in the hands; the joints' own C0 come from their rig
+attachments (rescaled bodies). HeldItems pushes what it holds every frame
+(`FirstPersonBody.setHeld`). The viewport (the corner hand, the full-screen gun) is left for the
+setting off, an R6 body and the rig off.
 
 **Targeting** (Interaction/BlockInteraction, rules in Interaction/TargetRules): the camera's ray
 starts at the eyes' plane (`CameraRules.eyePlaneSkip`; 0 in first person) and, over the shoulder,
@@ -2437,10 +2456,13 @@ before.
 **Body motion** (Player/BodyRules, Player/BodyTwist at Camera + 6, Player/CharacterAnimator): every
 client twists every shown R15 character's legs at the hips towards a strafe (≤ 45°) from its drawn
 feet, folds a backpedal (the walk and run played reversed locally, replicated by the Animator; other
-players' from their replicated walk track's speed), shuffles the feet on idle turns over 1.2 rad/s,
-and leads the local upper body (the waist) on idle turns (≤ 45°) and beyond the neck in freelook
-(the neck's 70°, then the waist's 30°: `BodyRules.NECK_YAW` is `WeaponPoses.NECK_YAW`). Nothing is
-sent. Upright only (not crawling, swimming or on a ladder); R6 bodies get no twist.
+players' by their drawn feet, their replicated walk track's speed settling only a move within 20° of
+a pure strafe: `BodyRules.remoteLegs`), shuffles the feet on idle turns over 1.2 rad/s until they
+slow under 0.8 (`SHUFFLE_STOP`), turns the local chest 40° side-on in a gun's sights seen from the
+eyes (`BodyRules.BLADE`), and leads the local upper body (the waist) on idle turns (≤ 45°) and
+beyond the neck in freelook (the neck's 70°, then the waist's 30°: `BodyRules.NECK_YAW` is
+`WeaponPoses.NECK_YAW`). Nothing is sent. Upright only (not crawling, swimming or on a ladder); R6
+bodies get no twist.
 
 **Off.** `Config.Camera.Enabled = false` keeps today's camera: CameraRig binds only a step that
 measures geometric first person (within 1 stud of the camera's focus), `active()` is false, the aim
@@ -2469,9 +2491,9 @@ viewport and EquipmentLooks follows the faded head; targeting casts from the cam
   (the rig; the bob, the sway and the shake only move it after, and come off before Roblox's camera
   reads it).
 - Specs: CameraRules (with the near plane on a computer's 0.1 and a phone's 0.5, and the torso's
-  share of the view looking down), FirstPerson, BodyRules, TargetRules, CameraFade, TouchButtons and
-  CameraIntegration (the frame table, the require rules, the writers, the freelook contract between
-  the rig, the head and the waist).
+  share of the view looking down), FirstPerson, BodyRules, WeaponPoses, TargetRules, CameraFade,
+  TouchButtons and CameraIntegration (the frame table, the require rules, the writers, the freelook
+  contract between the rig, the head and the waist).
 
 ## Texture pack (`TexturePack`, `Blocks`, `tests/build_textures`, client `Rendering/TextureLooks`)
 

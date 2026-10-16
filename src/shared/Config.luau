@@ -1088,8 +1088,6 @@ local Config = {
 		-- a block would cut the near plane.
 		FirstForward = 0.15,
 		FirstDownPush = 0.75,
-		-- A body part this close to the camera (studs from its box) is hidden, in every view.
-		NearClear = 0.6,
 		-- The body turning to the aim while standing: the smooth time, the most it lags behind
 		-- (degrees), and the speed (blocks a second) above which it turns at once.
 		IdleTurnSeconds = 0.12,

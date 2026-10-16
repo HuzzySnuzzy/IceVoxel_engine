@@ -1523,27 +1523,29 @@ A fast, Minecraft-style voxel engine for Roblox.
   it (a one-block tunnel) moves it off just enough, and from the eyes it comes back from a wall it
   would see through. `F5` (gamepad D-pad up, the touch VIEW button) puts the view at your eyes and
   back, never while a weapon is raised or a guard is up (DayZ's rule); `V` with a gun raised looks
-  down the sights from the eyes in either view. The body faces where you aim, the upper
-  body leading a turn on the spot, the legs twisting up to 45 degrees into a strafe and walking
-  backwards for a backpedal, the feet stepping round on a quick turn (every client draws this for
-  every player; nothing more is sent). Hold `Left Alt` (R3, the touch LOOK button) to freelook: the
-  view turns up to 160 degrees each way (100 from the eyes: the head, then the waist) while you keep
-  walking and aiming the same way, with no crosshair, mining, use or firing meanwhile, and swings
-  back when you let go; a click or press as it swings back counts as soon as the view is within 2
-  degrees of your aim. Hold `Z` to focus your eyes (a 45-degree view, 70 sprinting; not raised). In
-  first person you see your own body: the chest's edge, legs and feet when you look down (the eyes
-  lean out past the chest, as a head does), the head, hair,
-  hats, helmet, face and neck pieces hidden, and your hands on what you hold (both on a long gun or
-  a guarded weapon): the gun is drawn in the world, lit by it, its sight line on the view's axis;
-  tools, blocks, food and a punch swing in the right hand; a scope hides the gun and the arms; an
-  item that would reach into a wall is pulled back, then lifted (DayZ's weapon lift). Over the
-  shoulder the crosshair (shown with the mouse locked too) picks only what your eyes can see: a
-  block seen past a pillar picks the pillar, and a mob behind cover isn't hit; reach and the server
-  are unchanged. The mouse wheel no longer zooms and there is no shift lock. On a touch screen VIEW
-  and LOOK sit with Sprint, Sneak and a gun's FIRE, AIM and RELOAD, each in a place of its own round
-  the jump button, on phones and tablets alike. First-Person Body OFF keeps Minecraft's hand;
-  `Config.Camera.Enabled = false` puts back Roblox's camera as it was (shift lock included, the
-  crosshair a gamepad's only).
+  down the sights from the eyes in either view. The body faces where you aim, the upper body leading
+  a turn on the spot, the legs twisting up to 45 degrees into a strafe and walking backwards for a
+  backpedal, the feet stepping round on a quick turn (every client draws this for every player;
+  nothing more is sent). Hold `Left Alt` (R3, the touch LOOK button) to freelook: the view turns up
+  to 160 degrees each way (100 from the eyes: the head, then the waist) while you keep walking and
+  aiming the same way, with no crosshair, mining, use or firing meanwhile, and swings back when you
+  let go; a click or press as it swings back counts as soon as the view is within 2 degrees of your
+  aim. Hold `Z` to focus your eyes (a 45-degree view, 70 sprinting; not raised). In first person you
+  see your own body: the chest's edge, legs and feet when you look down (the eyes lean out past the
+  chest, as a head does), the head, hair, hats, helmet, face and neck pieces hidden, and your hands
+  on what you hold where they reach it: the gun is drawn in the world, lit by it, its sight line on
+  the view's axis, brought nearer the eyes until your right hand holds its grip (in the sights the
+  chest turns side-on, as a rifleman stands; looking steeply up the hands let go), the left hand on
+  a long gun's fore end where it reaches (else the arm hangs), both on a guarded weapon; tools,
+  blocks, food and a punch swing in the right hand; an arm the camera would cut is hidden whole,
+  never a hand alone; a scope hides the gun and the arms; an item that would reach into a wall is
+  pulled back, then lifted (DayZ's weapon lift). Over the shoulder the crosshair (shown with the
+  mouse locked too) picks only what your eyes can see: a block seen past a pillar picks the pillar,
+  and a mob behind cover isn't hit; reach and the server are unchanged. The mouse wheel no longer
+  zooms and there is no shift lock. On a touch screen VIEW and LOOK sit with Sprint, Sneak and a
+  gun's FIRE, AIM and RELOAD, each in a place of its own round the jump button, on phones and
+  tablets alike. First-Person Body OFF keeps Minecraft's hand; `Config.Camera.Enabled = false` puts
+  back Roblox's camera as it was (shift lock included, the crosshair a gamepad's only).
 - **Ladders, rope and climbing.** Minecraft 1.20.1's ladders and vines and Supplementaries' rope.
   A **Ladder** (seven sticks make three; it burns in a furnace like planks) goes on the wall you
   click, else the first wall the way you look; one clicked on the front of a ladder goes nowhere.
@@ -2684,7 +2686,7 @@ for performance:
 | `Camera.Profiles` | standing { 4.8, 0.9, 0.25, 0 } | The third-person camera by what the body does: { distance behind the pivot, shoulder, height above the eyes, forward } in studs (DayZ's third-person cameras, × 3): `standing`, `sprinting`, `crouching`, `lying` (crawling, swimming), `climbing`, `flying`, `raised` (a firearm: 2.4 behind, 1.5 to the side), `raisedHands` (a melee guard), `crouchRaised`; a change eases over DayZ's blend times. |
 | `Camera.FreelookYaw` / `FreelookYawFirst` / `SnapBackSeconds` | 160 / 100 / 0.14 | How far freelook turns the view from the aim each way (degrees; from the eyes the neck's 70 and the waist's 30), and the smooth time it swings back in (DayZ's). |
 | `Camera.Margin` / `EaseOut` | 0.3 / 6 | Blocks and the third-person camera: the gap kept behind it (studs) and how fast (per second) a camera pulled in eases back out. The near plane kept out of blocks is measured from the camera every frame (its `NearPlaneZ`, field of view and screen), not configured. |
-| `Camera.FirstForward` / `FirstDownPush` / `NearClear` | 0.15 / 0.75 / 0.6 | The first-person eye point this far ahead of the hull's eyes, and this much more looking straight down (times the sine of the pitch: past the chest's front from 60° down, so its edge, the legs and the feet show, not the torso's top; back where a wall would cut the near plane); a body part this close to the camera (studs) is hidden in every view. |
+| `Camera.FirstForward` / `FirstDownPush` | 0.15 / 0.75 | The first-person eye point this far ahead of the hull's eyes, and this much more looking straight down (times the sine of the pitch: past the chest's front from 60° down, so its edge, the legs and the feet show, not the torso's top; back where a wall would cut the near plane) (a body part the camera's near plane would cut in view is hidden: Player/FirstPersonRules.clips). |
 | `Camera.IdleTurnSeconds` / `IdleTurnMaxLag` / `IdleTurnSpeed` | 0.12 / 60 / 0.5 | Standing, the body turns to the aim over this smooth time and at most this many degrees behind; faster than this (blocks a second) it turns at once (and the legs twist into a strafe). |
 | `Camera.FocusFov` / `FocusSprintFov` / `FocusSeconds` | 45 / 70 / 0.1 | Focus: the field of view (never wider than the FOV setting's), the one sprinting, and the smooth time of the change. |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |

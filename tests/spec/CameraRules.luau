@@ -118,7 +118,6 @@ return function(t, shared, require, _server, client)
 			EaseOut = 6,
 			FirstForward = 0.15,
 			FirstDownPush = 0.75,
-			NearClear = 0.6,
 			IdleTurnSeconds = 0.12,
 			IdleTurnMaxLag = 60,
 			IdleTurnSpeed = 0.5,
