@@ -11,8 +11,14 @@
 	             rigid ones: kind ACCESSORY + Enum.AccessoryType's value, layered, order,
 	             puffiness), the six body colours and the scales (clamped to
 	             Config.Characters.Scales), at most Config.Characters.MaxAssets things. Read once
-	             a session per player (cached). When it fails (Studio's test players have negative
-	             ids; the web call can fail) the look is Appearance.default(): a plain blocky R15.
+	             a session per player (kept), with Config.Characters.SnapshotTries tries
+	             (SnapshotBackoff seconds before the second, doubled before each next). When every
+	             try fails (the web call can fail) the look is Appearance.default(), a plain blocky
+	             R15, kept SnapshotRetrySeconds only, never for the session; making a character
+	             (`snapshot(player, true)`) reads again at once rather than use a failure, and
+	             Appearance.sanitize wears what the editor's failed read didn't show. Studio's test
+	             players (negative ids) have no avatar: the plain look is theirs. `serves` and
+	             `retry` are those rules without Roblox (the specs run them).
 	  Spawning   `description(look)`: a new HumanoidDescription with the look's colours, scales,
 	             its worn parts, face, clothing and animations (a body part not worn is 0: the
 	             plain blocky part) and its worn accessories (SetAccessories(list, true)).
@@ -417,40 +423,112 @@ end
 
 --[[ Snapshots ]]
 
-local snapshots: { [Player]: Appearance } = {}
-local reading: { [Player]: boolean } = {}
+-- A snapshot as kept: the look, whether it is the user's avatar as read (false: the plain look
+-- standing in for a read that failed every try) and when it was taken (os.clock).
+export type Snapshot = { look: Appearance, read: boolean, at: number }
 
 --[[
-	`player`'s own avatar as a look (see the header): read once a session, the default look when
-	it can't be read. Yields the first time.
+	Whether the kept snapshot `cached` still serves at `now` (os.clock): an avatar read for the
+	session; a failed read's plain look for Config.Characters.SnapshotRetrySeconds, or, with
+	`since` (a caller making a character, waiting since then), only when it was taken since.
 ]]
-function CharacterLooks.snapshot(player: Player): Appearance
-	local cached = snapshots[player]
-	if cached then
-		return Appearance.copy(cached)
+function CharacterLooks.serves(cached: Snapshot?, now: number, since: number?): boolean
+	if cached == nil then
+		return false
+	elseif cached.read then
+		return true
+	elseif since then
+		return cached.at >= since
 	end
-	while reading[player] do
-		task.wait(0.1)
-		cached = snapshots[player]
-		if cached then
-			return Appearance.copy(cached)
+	return now - cached.at < Config.Characters.SnapshotRetrySeconds
+end
+
+--[[
+	Calls `read` (whether it worked, and its result or error) up to `tries` times (at least once),
+	`wait`ing `backoff` seconds before the second try, twice as long before each next: the first
+	result that worked, else the last error.
+]]
+function CharacterLooks.retry(
+	read: () -> (boolean, unknown),
+	tries: number,
+	backoff: number,
+	wait: (seconds: number) -> ()
+): (boolean, unknown)
+	local ok, result = read()
+	local attempt = 1
+	while not ok and attempt < tries do
+		wait(backoff * 2 ^ (attempt - 1))
+		attempt += 1
+		ok, result = read()
+	end
+	return ok, result
+end
+
+local snapshots: { [Player]: Snapshot } = {}
+local reading: { [Player]: boolean } = {}
+
+-- `player`'s avatar read (Config.Characters.SnapshotTries tries): the description, else the error.
+local function readAvatar(player: Player): (boolean, unknown)
+	return CharacterLooks.retry(
+		function(): (boolean, unknown)
+			local ok, description = callAsync(
+				Players,
+				"GetHumanoidDescriptionFromUserIdAsync",
+				"GetHumanoidDescriptionFromUserId",
+				player.UserId
+			)
+			if ok and typeof(description) == "Instance" and description:IsA("HumanoidDescription") then
+				return true, description
+			end
+			return false, description
+		end,
+		Config.Characters.SnapshotTries,
+		Config.Characters.SnapshotBackoff,
+		function(seconds: number)
+			task.wait(seconds)
 		end
+	)
+end
+
+--[[
+	`player`'s own avatar as a look (see the header), and whether it was read (false: the plain look
+	of a read that failed). Yields while reading; a caller finding a read under way waits for it.
+	`fresh` (making a character): a failure kept from before is not used, the avatar is read again.
+]]
+function CharacterLooks.snapshot(player: Player, fresh: boolean?): (Appearance, boolean)
+	local since = if fresh then os.clock() else nil
+	while true do
+		local cached = snapshots[player]
+		if cached and CharacterLooks.serves(cached, os.clock(), since) then
+			return Appearance.copy(cached.look), cached.read
+		elseif not reading[player] then
+			break
+		end
+		task.wait(0.1)
 	end
 	reading[player] = true
-	local look = Appearance.default()
-	local ok, description =
-		callAsync(Players, "GetHumanoidDescriptionFromUserIdAsync", "GetHumanoidDescriptionFromUserId", player.UserId)
-	if ok and typeof(description) == "Instance" and description:IsA("HumanoidDescription") then
-		look = CharacterLooks.fromDescription(description)
-		description:Destroy()
+	local look, read = Appearance.default(), false
+	if player.UserId <= 0 then
+		-- (Studio's test players have no avatar to read: the plain look is theirs.)
+		read = true
 	else
-		warn(`[IceVoxel] the avatar of {player.Name} could not be read ({description}): a plain one is used`)
+		local ok, result = readAvatar(player)
+		if ok then
+			local description = result :: HumanoidDescription
+			look = CharacterLooks.fromDescription(description)
+			description:Destroy()
+			read = true
+		else
+			warn(
+				`[IceVoxel] the avatar of {player.Name} could not be read ({result}): a plain look stands in, read again in {Config.Characters.SnapshotRetrySeconds} s or when a character is made`
+			)
+		end
 	end
 	reading[player] = nil
 	if player.Parent then
-		snapshots[player] = look
+		snapshots[player] = { look = look, read = read, at = os.clock() }
 	end
-	return Appearance.copy(look)
+	return Appearance.copy(look), read
 end
 
 --[[ Preview rigs ]]

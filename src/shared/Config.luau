@@ -1924,6 +1924,13 @@ local Config = {
 		-- animations), and seconds the server waits after an edit before rebuilding the preview.
 		MaxAssets = 40,
 		PreviewDelay = 0.5,
+		-- Reading the user's own avatar (Players:GetHumanoidDescriptionFromUserIdAsync): tries, and
+		-- seconds before the second (doubled before each next). An avatar read is kept for the
+		-- session; a read that failed every try gives the plain look for SnapshotRetrySeconds only,
+		-- and making a character reads again at once rather than keep a failure.
+		SnapshotTries = 3,
+		SnapshotBackoff = 1,
+		SnapshotRetrySeconds = 30,
 		-- Make a first character for a returning player from their old progress, and bring the
 		-- inventories of their old world records into the first character entering each world.
 		Migrate = true,

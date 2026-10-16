@@ -8,11 +8,18 @@
 	read back and set again lands where it was, a record saved before this rule (rigid accessories
 	stored with order 0) is set right at spawn, "not worn" stays off, and one accessory Roblox
 	refuses never takes the others off (`setAccessories`).
+
+	Reading the user's own avatar: a failed read is tried again with a backoff (`retry`) and its
+	plain look stands in only briefly, never for a character being made (`serves`), and a create
+	whose editor was opened on a failed read wears the avatar's things it didn't show, keeping
+	what the edit switched off (Appearance.sanitize).
 ]]
 
 return function(t, shared, require, server)
 	local Appearance = require(shared.Characters.Appearance)
+	local Config = require(shared.Config)
 	local CharacterLooks = require(server.Players.CharacterLooks)
+	local CharacterMigration = require(server.Save.CharacterMigration)
 
 	local A = Appearance.ACCESSORY
 	local HAT, HAIR, FACE, BACK = 1, 2, 3, 7
@@ -241,5 +248,139 @@ return function(t, shared, require, server)
 		local old = fakeDescription()
 		t.eq(#setOn(old, { { AssetId = 11, AccessoryType = HAT, IsLayered = false, Order = 0, Puffiness = 1 } }), 0)
 		t.eq(old.rigid.HatAccessory, nil, "the old shape: no hat")
+	end)
+
+	--[[ Reading the avatar ]]
+
+	-- A user's avatar as read: two accessories, two faces (the first worn), a shirt, a head.
+	local function readAvatar(): Appearance.Appearance
+		local look = Appearance.default()
+		look.assets = {
+			asset(A + HAT, 1, true, false),
+			asset(A + HAIR, 2, true, false),
+			asset(Appearance.KIND.Face, 3, true, false),
+			asset(Appearance.KIND.Face, 4, true, false),
+			asset(Appearance.KIND.Shirt, 5, true, false),
+			asset(Appearance.KIND.Head, 6, true, false),
+		}
+		return look
+	end
+
+	local function wornIds(look: Appearance.Appearance): { [number]: boolean }
+		local worn = {}
+		for _, item in look.assets do
+			worn[item.id] = item.worn
+		end
+		return worn
+	end
+
+	t.test("character looks: a create after the editor's failed read wears the avatar's things", function()
+		-- The editor opened on a failed read: the plain look, no assets; the player picked colours.
+		local edited = Appearance.default()
+		edited.colors = { 0x101010, 0x202020, 0x303030, 0x404040, 0x505050, 0x606060 }
+		-- The create reads the real avatar.
+		local snapshot = readAvatar()
+		local kept = Appearance.sanitize(edited, snapshot)
+		local worn = wornIds(kept)
+		t.eq(worn[1], true, "the hat, never shown, is worn as the user wears it")
+		t.eq(worn[2], true, "the hair too")
+		t.eq(worn[3], true, "the first face")
+		t.eq(worn[4], false, "one face at a time")
+		t.eq(worn[5], true, "the shirt")
+		t.eq(worn[6], true, "the head")
+		t.eq(kept.colors[1], 0x101010, "the edit's colours")
+		-- The same as the legacy character's rule (CharacterMigration.allWorn).
+		local all = wornIds(CharacterMigration.allWorn(snapshot))
+		for id, isWorn in worn do
+			t.eq(isWorn, all[id], `asset {id} as allWorn wears it`)
+		end
+	end)
+
+	t.test("character looks: what the edit names stays as the player chose it", function()
+		local snapshot = readAvatar()
+		-- The edit saw the hat (switched off) and the second face (switched on); not the rest.
+		local edited = Appearance.default()
+		edited.assets = {
+			asset(A + HAT, 1, false, false),
+			asset(Appearance.KIND.Face, 4, true, false),
+			asset(Appearance.KIND.Shirt, 5, false, false),
+		}
+		local worn = wornIds(Appearance.sanitize(edited, snapshot))
+		t.eq(worn[1], false, "the hat switched off stays off")
+		t.eq(worn[4], true, "the face chosen")
+		t.eq(worn[3], false, "the face not named gives way to the one chosen")
+		t.eq(worn[5], false, "the shirt switched off stays off")
+		t.eq(worn[2], true, "the hair not named is worn")
+		t.eq(worn[6], true, "the head not named is worn")
+		-- An edit that saw everything keeps every choice (the editor's usual case).
+		local seen = Appearance.copy(snapshot)
+		for _, item in seen.assets do
+			item.worn = false
+		end
+		for id, isWorn in wornIds(Appearance.sanitize(seen, snapshot)) do
+			t.eq(isWorn, false, `asset {id} switched off`)
+		end
+	end)
+
+	t.test("character looks: an avatar read is kept, a failed one only briefly, never for a new character", function()
+		local retry = Config.Characters.SnapshotRetrySeconds
+		t.ok(retry > 0 and Config.Characters.SnapshotTries >= 1, "the read's settings")
+		local read: CharacterLooks.Snapshot = { look = readAvatar(), read = true, at = 100 }
+		local failed: CharacterLooks.Snapshot = { look = Appearance.default(), read = false, at = 100 }
+		t.eq(CharacterLooks.serves(nil, 100), false, "nothing kept: read")
+		t.eq(CharacterLooks.serves(read, 100 + 1e9), true, "a read avatar serves the session")
+		t.eq(CharacterLooks.serves(read, 200, 150), true, "and a new character")
+		t.eq(CharacterLooks.serves(failed, 100 + retry / 2), true, "a failure stands in briefly")
+		t.eq(CharacterLooks.serves(failed, 100 + retry), false, "then the avatar is read again")
+		t.eq(CharacterLooks.serves(failed, 101, 100.5), false, "a new character never takes an older failure")
+		failed.at = 102
+		t.eq(CharacterLooks.serves(failed, 102, 100.5), true, "but one read while it waited")
+	end)
+
+	t.test("character looks: a failed avatar read is tried again with a backoff", function()
+		local function reader(results: { any })
+			local calls = 0
+			return function(): (boolean, unknown)
+				calls += 1
+				local result = results[calls]
+				return result.ok, result.value
+			end, function(): number
+				return calls
+			end
+		end
+		local waits: { number } = {}
+		local function wait(seconds: number)
+			table.insert(waits, seconds)
+		end
+		-- Two failures, then the avatar.
+		local read, calls =
+			reader({ { ok = false, value = "e1" }, { ok = false, value = "e2" }, { ok = true, value = "desc" } })
+		local ok, value = CharacterLooks.retry(read, 3, 1, wait)
+		t.eq(ok, true)
+		t.eq(value, "desc")
+		t.eq(calls(), 3)
+		t.eq(#waits, 2)
+		t.eq(waits[1], 1, "the backoff")
+		t.eq(waits[2], 2, "doubled")
+		-- Every try fails: the last error.
+		table.clear(waits)
+		read, calls =
+			reader({ { ok = false, value = "e1" }, { ok = false, value = "e2" }, { ok = false, value = "e3" } })
+		ok, value = CharacterLooks.retry(read, 3, 0.5, wait)
+		t.eq(ok, false)
+		t.eq(value, "e3")
+		t.eq(calls(), 3, "no more than the tries")
+		t.eq(#waits, 2)
+		t.eq(waits[2], 1)
+		-- Read at once: no wait; no tries asked for still reads once.
+		table.clear(waits)
+		read, calls = reader({ { ok = true, value = "now" } })
+		ok = CharacterLooks.retry(read, 3, 1, wait)
+		t.eq(ok, true)
+		t.eq(#waits, 0)
+		read, calls = reader({ { ok = false, value = "x" } })
+		ok = CharacterLooks.retry(read, 0, 1, wait)
+		t.eq(ok, false)
+		t.eq(calls(), 1)
 	end)
 end

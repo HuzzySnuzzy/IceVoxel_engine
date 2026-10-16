@@ -33,8 +33,10 @@
 	            sends them.
 	  sanitize  what the server keeps of an edit from a client: its colours and its scales
 	            (clamped), and the server's own snapshot with each asset's `worn` taken from the
-	            edit when the edit names the same kind and id. A client can switch the user's own
-	            things on and off, never name an asset of its own.
+	            edit when the edit names the same kind and id; one the edit doesn't name (its
+	            editor saw another snapshot: a failed read of the avatar) is worn as the user
+	            wears it. A client can switch the user's own things on and off, never name an
+	            asset of its own.
 	  presets   Classic (blocky parts, body type and proportion 0, Roblox's classic yellow head and
 	            arms, blue torso and green legs) and Natural (body type 1, proportion 0.5), applied
 	            over a look (`preset`); SKIN_TONES are the editor's twelve swatches.
@@ -232,7 +234,10 @@ end
 --[[
 	What the server keeps of `edited` (a client's) over its own `snapshot` (see the header): the
 	edit's colours (the snapshot's where an edit's is no colour), its scales clamped, the snapshot's
-	assets (at most MAX_ASSETS) worn as the edit says, one worn of each single kind.
+	assets (at most MAX_ASSETS) worn as the edit says, one worn of each single kind. An asset the
+	edit doesn't name at all (its editor was opened on another snapshot: a read of the avatar that
+	failed) is worn as the user wears it: an accessory, or the first of its single kind that the
+	edit leaves free. One the edit names as not worn stays off.
 ]]
 function Appearance.sanitize(edited: Appearance, snapshot: Appearance): Appearance
 	local colors: { number } = table.create(#Appearance.PARTS)
@@ -240,25 +245,37 @@ function Appearance.sanitize(edited: Appearance, snapshot: Appearance): Appearan
 		local color = edited.colors[i]
 		colors[i] = if validColor(color) then color else snapshot.colors[i] or 0
 	end
-	local worn: { [string]: boolean } = {}
+	local named: { [string]: boolean } = {}
 	for _, asset in edited.assets do
-		if asset.worn then
-			worn[`{asset.kind}:{asset.id}`] = true
-		end
+		local key = `{asset.kind}:{asset.id}`
+		named[key] = named[key] == true or asset.worn
 	end
-	local taken: { [number]: boolean } = {}
 	local assets: { Asset } = {}
 	for _, asset in snapshot.assets do
 		if #assets >= Appearance.MAX_ASSETS then
 			break
 		end
-		local copied = table.clone(asset)
-		copied.worn = worn[`{asset.kind}:{asset.id}`] == true
-		if copied.worn and not Appearance.isAccessory(asset.kind) then
-			copied.worn = not taken[asset.kind]
+		table.insert(assets, table.clone(asset))
+	end
+	-- The edit's own choices first (they take their single kinds), then what it doesn't name.
+	local taken: { [number]: boolean } = {}
+	for _, asset in assets do
+		local worn = named[`{asset.kind}:{asset.id}`] == true
+		if worn and not Appearance.isAccessory(asset.kind) then
+			worn = not taken[asset.kind]
 			taken[asset.kind] = true
 		end
-		table.insert(assets, copied)
+		asset.worn = worn
+	end
+	for _, asset in assets do
+		if named[`{asset.kind}:{asset.id}`] == nil then
+			if Appearance.isAccessory(asset.kind) then
+				asset.worn = true
+			elseif not taken[asset.kind] then
+				asset.worn = true
+				taken[asset.kind] = true
+			end
+		end
 	end
 	return { colors = colors, scales = Appearance.clampScales(edited.scales), assets = assets }
 end

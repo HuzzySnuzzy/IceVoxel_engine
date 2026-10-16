@@ -7520,8 +7520,16 @@ stays: a non-operator joins the one running.
   Classic; Hardcore marks the record dead, saves it and touches the index at once, and makes the
   player a Spectator for the session.
 - **Looks** (`Players/CharacterLooks`): the snapshot is
-  `GetHumanoidDescriptionFromUserIdAsync` read into an Appearance (cached per session; the
-  default look when it fails, e.g. Studio's negative ids); `fields` / `fromFields` are the pure
+  `GetHumanoidDescriptionFromUserIdAsync` read into an Appearance, with `SnapshotTries` tries
+  (`SnapshotBackoff` s before the second, doubled after) and kept for the session once read.
+  A read that failed every try gives the default look for `SnapshotRetrySeconds` only (never for
+  the session), and making a character (create, the legacy character, the title screen off)
+  reads afresh rather than use a failure; the legacy character waits for a session whose read
+  works (decides nothing). Studio's negative ids have no avatar: the default look is theirs.
+  `Appearance.sanitize` wears an asset the edit doesn't name as the user wears it (accessories,
+  the first of each single kind the edit leaves free), so an editor opened on a failed read and a
+  create that reads the real avatar keep the avatar's things; what the edit names as not worn
+  stays off. `serves` and `retry` are the pure rules (specs); `fields` / `fromFields` are the pure
   mapping to HumanoidDescription properties (specs). Accessories go on with
   `SetAccessories(list, true)`, which files an entry without `Order` under the rigid property of
   its AccessoryType (`HatAccessory`...) and one with `Order` as layered clothing
@@ -7540,7 +7548,8 @@ stays: a non-operator joins the one running.
   most every 0.5 s (EditPreview, sanitized over the server's snapshot). `default.project.json`
   sets `StarterPlayer.GameSettingsAvatar = R15`.
 - **Migration** (`Save/CharacterMigration`, `Config.Characters.Migrate`): an index without the
-  `migrated` mark reads ProgressStore once (a failed read decides nothing); a record makes a
+  `migrated` mark reads ProgressStore once and the avatar afresh (a failed read of either decides
+  nothing); a record makes a
   Mediumcore legacy "Character 1" (DisplayName filtered, avatar all worn, progress copied;
   ProgressStore is never written again). The first character of a user entering a world whose
   meta lists an old player record not yet taken in (`legacyImported`) takes its place and mode

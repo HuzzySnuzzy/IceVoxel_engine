@@ -14,12 +14,14 @@
 	             read, is never written this session: the list says why and new characters last
 	             for the session (memory). Then the migration (Config.Characters.Migrate:
 	             Save/CharacterMigration): a user whose list has not looked at their old progress
-	             yet gets "Character 1" made from it (Players/ProgressStore read once; a failed
-	             read decides nothing), and the list goes to the client (ServerMessage.Characters:
-	             Net/CharacterSync).
+	             yet gets "Character 1" made from it (Players/ProgressStore read once, and the
+	             user's avatar read afresh for its look: a failed read of either decides nothing,
+	             tried again next session), and the list goes to the client
+	             (ServerMessage.Characters: Net/CharacterSync).
 	  Actions    CharacterAction (Net/CharacterSync): list; create (the name through Roblox's
 	             filter for everyone, as world names are; the look kept only over this server's
-	             snapshot of the user's avatar, Appearance.sanitize; at most Characters.MAX; made
+	             snapshot of the user's avatar, read afresh when its last read failed,
+	             Appearance.sanitize; at most Characters.MAX; made
 	             and selected at once); delete and rename (refused while another server has the
 	             character); select (loads it and takes its lock, waiting up to
 	             Config.Characters.LockWait for another server still saving it, then "This
@@ -709,7 +711,8 @@ local function create(player: Player, user: User, request: CharacterSync.Request
 	end
 	local id = user.index.next
 	local name = filterName(request.name or "", player.UserId, id)
-	local snapshot = CharacterLooks.snapshot(player)
+	-- (Read afresh when the avatar's last read failed: a character keeps its look for good.)
+	local snapshot = CharacterLooks.snapshot(player, true)
 	local look = Appearance.sanitize(request.appearance or snapshot, snapshot)
 	local difficulty = request.difficulty or Characters.DEFAULT_DIFFICULTY
 	release(player, user)
@@ -912,9 +915,17 @@ local function migrate(player: Player, user: User)
 		user.migrateMark = true
 		return
 	end
+	local avatar, read = CharacterLooks.snapshot(player, true)
+	if not read then
+		-- (Decides nothing: the old progress becomes a character, in its owner's look, next session.)
+		user.note = "Your progress from before becomes a character once your avatar can be read: rejoin later"
+		return
+	elseif users[player] ~= user then
+		return
+	end
 	local id = user.index.next
 	local name = filterName(player.DisplayName, player.UserId, id)
-	local record = CharacterMigration.legacy(id, name, CharacterLooks.snapshot(player), os.time())
+	local record = CharacterMigration.legacy(id, name, avatar, os.time())
 	local listed, why = CharacterSaves.create(user.saves, player.UserId, record, old, false, true)
 	if listed then
 		user.index = listed
@@ -1259,12 +1270,11 @@ autoPlay = function(player: Player, user: User)
 			return
 		end
 	else
-		local look = CharacterMigration.allWorn(CharacterLooks.snapshot(player))
+		-- (No edit: `create` reads the avatar and wears it all, as the user wears it.)
 		why = create(player, user, {
 			action = A.Create,
 			name = player.DisplayName,
 			difficulty = Characters.DEFAULT_DIFFICULTY,
-			appearance = look,
 		})
 	end
 	local selected = user.selected
