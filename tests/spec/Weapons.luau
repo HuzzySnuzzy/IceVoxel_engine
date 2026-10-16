@@ -424,7 +424,7 @@ return function(t, shared, require, server, client)
 			t.eq(action.context, "game", "in the world only (R is JEI's in screens)")
 			t.ok(action.tooltip ~= "", `{key[1]}'s tooltip`)
 			t.eq(PlayerSettings.entry(KeyBindings.settingKey(key[1])).id, 160 + index, `{key[1]}'s setting id`)
-			t.eq(KeyBindings.ACTIONS[#KeyBindings.ACTIONS - #KEYS + index].id, key[1], "appended in order")
+			t.eq(KeyBindings.ACTIONS[160 - KeyBindings.KEY_BASE + 1 + index].id, key[1], "appended in order")
 		end
 		t.eq(next(KeyBindings.conflicting({})), nil, "the defaults conflict nowhere")
 		t.eq(KeyBindings.action("jeiRecipes").default, "R", "JEI's R stays, in screens")

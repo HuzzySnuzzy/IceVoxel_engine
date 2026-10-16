@@ -42,9 +42,10 @@ local TILE = Config.Map.TileSize
 
 local Map = {}
 
--- The Minimap setting, and the minimap once started.
+-- The Minimap setting, and the minimap once started; the world map once started.
 local minimapVisible = true
 local minimap: Minimap.Minimap? = nil
+local worldMapShown: WorldMap.WorldMap? = nil
 local paused = false
 
 -- Smallest ring image (multiple of the tile size) for a window of `pixels`.
@@ -66,6 +67,12 @@ function Map.setPaused(value: boolean)
 	paused = value
 end
 
+-- Is the world map open (it takes the mouse, which Player/CameraRig then leaves free)?
+function Map.isWorldMapOpen(): boolean
+	local shown = worldMapShown
+	return shown ~= nil and shown.isOpen()
+end
+
 function Map.start(pool: WorkerPool.WorkerPool, generator: TerrainGenerator.Generator)
 	if not Config.Map.Enabled then
 		return
@@ -82,6 +89,7 @@ function Map.start(pool: WorkerPool.WorkerPool, generator: TerrainGenerator.Gene
 	local worldLayer = MapLayer.new(layerSize(WorldMap.MAX_PIXELS), 4)
 
 	local worldMap = WorldMap.new(gui, worldLayer, waypoints, generator)
+	worldMapShown = worldMap
 	local mini = Minimap.new(cornerGui, miniLayer, waypoints, worldMap.toggle)
 	minimap = mini
 	mini.setVisible(minimapVisible)

@@ -266,6 +266,9 @@ return function(t, shared, require, _server, client)
 			jeiUses = "U",
 			jeiBack = "Backspace",
 			weatherMap = "B",
+			toggleView = "F5",
+			freelook = "LeftAlt",
+			focus = "Z",
 		}
 		for id, name in expect do
 			t.eq(KeyBindings.action(id).default, name, `{id}'s default`)
@@ -402,10 +405,27 @@ return function(t, shared, require, _server, client)
 		t.eq(entry.kind, "key")
 		t.eq(entry.id, KeyBindings.KEY_BASE, "the first action's id")
 		-- (Actions append: the Weather Map key was the last, KEY_BASE + #ACTIONS - 1, and the Recipe
-		-- Back key before it; the weapons' four came after, Toggle Sights the newest.)
+		-- Back key before it; the weapons' four came after, Toggle Sights the last of them, then
+		-- the camera's three, Focus the newest.)
 		t.eq(PlayerSettings.entry("key.weatherMap").id, KeyBindings.KEY_BASE + 32)
 		t.eq(PlayerSettings.entry("key.jeiBack").id, KeyBindings.KEY_BASE + 31)
-		t.eq(PlayerSettings.entry("key.sights").id, KeyBindings.KEY_BASE + #KeyBindings.ACTIONS - 1)
+		t.eq(PlayerSettings.entry("key.sights").id, KeyBindings.KEY_BASE + 36)
+		t.eq(PlayerSettings.entry("key.toggleView").id, 165)
+		t.eq(PlayerSettings.entry("key.freelook").id, 166)
+		t.eq(PlayerSettings.entry("key.focus").id, 167)
+		t.eq(PlayerSettings.entry("key.focus").id, KeyBindings.KEY_BASE + #KeyBindings.ACTIONS - 1)
+		for id, row in
+			{
+				toggleView = { "Toggle Perspective", "misc" },
+				freelook = { "Freelook", "gameplay" },
+				focus = { "Focus", "gameplay" },
+			}
+		do
+			local action = KeyBindings.action(id)
+			t.eq(action.name, row[1], `{id}'s name`)
+			t.eq(action.category, row[2], `{id}'s category`)
+			t.eq(action.context, "game", `{id}: in the world only`)
+		end
 		t.eq(PlayerSettings.clamp("key.forward", 104.6), 105, "whole codes")
 		t.eq(PlayerSettings.clamp("key.forward", 500), 119, "a code that can't be bound: the default")
 		t.eq(PlayerSettings.clamp("key.forward", 0 / 0), 119, "NaN: the default")
@@ -577,6 +597,10 @@ return function(t, shared, require, _server, client)
 			scrollHotbar = "mouse",
 			toggleSneak = "controls",
 			toggleSprint = "controls",
+			cameraView = "controls",
+			firstPersonBody = "controls",
+			shoulderSide = "controls",
+			freelookToggle = "controls",
 			viewBobbing = "accessibility",
 			distortionEffects = "accessibility",
 			fovEffects = "accessibility",

@@ -1028,7 +1028,75 @@ local Config = {
 		-- Sprint and sneak buttons on touch screens (toggles).
 		TouchButtons = true,
 		-- How fast the character turns towards where it walks (radians per second; third person).
+		-- Only with Camera.Enabled false: the camera's rig turns the body to the aim instead.
 		TurnSpeed = 14,
+	},
+
+	-- Camera (client) ----------------------------------------------------------------------------------
+
+	--[[
+		DayZ's camera on Roblox's camera scripts (client Player/CameraRig, its numbers and rules in
+		Player/CameraRules): third person over a shoulder at a fixed distance that never enters a
+		block, first person from the eyes with the body drawn (Player/FirstPersonBody), the view
+		toggled with Toggle Perspective (F5; not while a weapon is raised), Freelook (Left Alt: the
+		camera turns while the body and the aim keep their heading) and Focus (Z: the eyes' zoom).
+		Lengths are studs (a block is BlockSize studs), angles degrees, times seconds.
+	]]
+	Camera = {
+		-- false: Roblox's camera as before the rig (its zoom, the raised shoulder from
+		-- Weapons.ShoulderOffset, the body turning where it walks; no freelook, no focus, no
+		-- first-person body).
+		Enabled = true,
+		-- The view a player starts in, "third" or "first" (the Camera setting's default).
+		DefaultView = "third",
+		-- The First-Person Body setting's default (false: Minecraft's hand instead of the body).
+		FirstPersonBody = true,
+		-- The Freelook setting's default: false holds the key, true toggles (DayZ's Lock Freelook).
+		FreelookToggle = false,
+		-- The third-person rig by what the body does: { distance behind the pivot, shoulder (to
+		-- the side), height (of the pivot above the hull's eyes), forward } in the body's frame:
+		-- DayZ's third-person cameras (dayzplayercamera3rdperson.c) in studs. `raised` is a raised
+		-- firearm, `raisedHands` a melee guard. A change of rig eases over DayZ's blend times
+		-- (CameraRules.transition).
+		Profiles = {
+			standing = { 4.8, 0.9, 0.25, 0 },
+			sprinting = { 6.0, 0.45, 0.1, 0 },
+			crouching = { 4.2, 0.9, 0.3, 0.3 },
+			lying = { 3.0, 1.5, 0.6, 0 },
+			climbing = { 3.6, 0.9, 0.3, 0 },
+			flying = { 6.0, 0.9, 0.25, 0 },
+			raised = { 2.4, 1.5, 0.0, 0.6 },
+			raisedHands = { 3.6, 1.2, 0.0, 0.6 },
+			crouchRaised = { 2.4, 1.5, 0.1, 0.3 },
+		},
+		-- Freelook: how far the camera may turn from the aim each way (third person; first person:
+		-- the neck's 70 and the waist's 30), and the smooth time it comes back in (DayZ's 0.14).
+		FreelookYaw = 160,
+		FreelookYawFirst = 100,
+		SnapBackSeconds = 0.14,
+		-- Collision with blocks: the gap kept from them, the half width and half height of the near
+		-- plane the boom's five rays cover, and how fast a boom pulled in eases back out (per second,
+		-- as Roblox's Popper).
+		Margin = 0.3,
+		Radius = { 0.45, 0.3 },
+		EaseOut = 6,
+		-- First person: the eye point this far ahead of the hull's eyes, and this much more when
+		-- looking straight down (times the sine of the pitch), so the chest, legs and feet show
+		-- instead of the inside of the neck.
+		FirstForward = 0.15,
+		FirstDownPush = 0.35,
+		-- A body part this close to the camera (studs from its box) is hidden, in every view.
+		NearClear = 0.6,
+		-- The body turning to the aim while standing: the smooth time, the most it lags behind
+		-- (degrees), and the speed (blocks a second) above which it turns at once.
+		IdleTurnSeconds = 0.12,
+		IdleTurnMaxLag = 60,
+		IdleTurnSpeed = 0.5,
+		-- Focus (held): the field of view (never wider than the FOV setting's), the one while
+		-- sprinting (DayZ's shallow zoom), and the smooth time of the change. None while raised.
+		FocusFov = 45,
+		FocusSprintFov = 70,
+		FocusSeconds = 0.1,
 	},
 
 	-- Map --------------------------------------------------------------------------------------------
@@ -2066,6 +2134,8 @@ local Config = {
 		-- Field of view divided by this in iron sights (an optic's own zoom instead).
 		IronSightsZoom = 1.15,
 		-- Third person raised: the camera over the right shoulder (studs), and a centre dot.
+		-- The offset is superseded by Camera.Profiles' `raised` rig (Player/CameraRig); it only
+		-- applies with Camera.Enabled false.
 		ShoulderOffset = { 1.6, 0.4, 0 },
 		ShoulderDot = true,
 		-- Noise (blocks): at a shot's impact this far or more from the shooter; the least a

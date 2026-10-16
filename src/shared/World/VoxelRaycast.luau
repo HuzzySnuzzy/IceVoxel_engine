@@ -193,4 +193,99 @@ function VoxelRaycast.cast(
 	return nil
 end
 
+--[[
+	`cast`'s distance alone: how far the ray goes before the first block that stops it (the same
+	number `cast` reports as Hit.distance, at most `maxDistance`), or nil when nothing does. Nothing
+	is allocated (no Hit, no closure), for rays cast every frame (the camera's collision: client
+	Player/CameraRig). Same arguments as `cast`.
+]]
+function VoxelRaycast.distance(
+	ox: number,
+	oy: number,
+	oz: number,
+	dx: number,
+	dy: number,
+	dz: number,
+	maxDistance: number,
+	getBlock: (x: number, y: number, z: number) -> number?,
+	isTarget: (id: number) -> boolean,
+	outline: ((id: number, x: number, y: number, z: number) -> { number }?)?
+): number?
+	local length = math.sqrt(dx * dx + dy * dy + dz * dz)
+	if length < 1e-9 then
+		return nil
+	end
+	dx, dy, dz = dx / length, dy / length, dz / length
+
+	local x, y, z = math.floor(ox), math.floor(oy), math.floor(oz)
+	local stepX = if dx > 0 then 1 elseif dx < 0 then -1 else 0
+	local stepY = if dy > 0 then 1 elseif dy < 0 then -1 else 0
+	local stepZ = if dz > 0 then 1 elseif dz < 0 then -1 else 0
+
+	-- (`cast`'s `boundary`, written out per axis.)
+	local tMaxX, tDeltaX = math.huge, math.huge
+	if dx ~= 0 then
+		tDeltaX = math.abs(1 / dx)
+		tMaxX = if dx > 0 then (x + 1 - ox) / dx else (ox - x) / -dx
+	end
+	local tMaxY, tDeltaY = math.huge, math.huge
+	if dy ~= 0 then
+		tDeltaY = math.abs(1 / dy)
+		tMaxY = if dy > 0 then (y + 1 - oy) / dy else (oy - y) / -dy
+	end
+	local tMaxZ, tDeltaZ = math.huge, math.huge
+	if dz ~= 0 then
+		tDeltaZ = math.abs(1 / dz)
+		tMaxZ = if dz > 0 then (z + 1 - oz) / dz else (oz - z) / -dz
+	end
+
+	local t = 0
+	while t <= maxDistance do
+		local block = getBlock(x, y, z)
+		if block ~= nil and isTarget(block) then
+			local box = if outline then outline(block, x, y, z) else nil
+			if box == nil then
+				return t
+			end
+			local enter: number? = nil
+			for i = 1, #box - 5, 6 do
+				local e = enterBox(
+					ox,
+					oy,
+					oz,
+					dx,
+					dy,
+					dz,
+					x + box[i],
+					y + box[i + 1],
+					z + box[i + 2],
+					x + box[i + 3],
+					y + box[i + 4],
+					z + box[i + 5]
+				)
+				if e and (enter == nil or e < enter) then
+					enter = e
+				end
+			end
+			if enter and enter <= maxDistance then
+				return enter
+			end
+		end
+		if tMaxX < tMaxY and tMaxX < tMaxZ then
+			x += stepX
+			t = tMaxX
+			tMaxX += tDeltaX
+		elseif tMaxY < tMaxZ then
+			y += stepY
+			t = tMaxY
+			tMaxY += tDeltaY
+		else
+			z += stepZ
+			t = tMaxZ
+			tMaxZ += tDeltaZ
+		end
+	end
+	return nil
+end
+
 return VoxelRaycast

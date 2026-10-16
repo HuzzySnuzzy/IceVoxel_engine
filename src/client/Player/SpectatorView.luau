@@ -9,9 +9,10 @@
 	of themselves while spectating someone (their body is inside the other player's).
 
 	Only LocalTransparencyModifier is changed (this client alone), never Transparency, and never
-	below what something else set: the camera's first person fade sets the local character's own
-	value, which is kept as the object's own and only ever raised. Objects and names are put back
-	as soon as their player stops spectating (or this player starts).
+	below what something else set: the camera's first person fade (and Player/FirstPersonBody at
+	Camera + 2; this runs at Camera + 3) sets the local character's own value, which is kept as
+	the object's own and only ever raised. Objects and names are put back as soon as their player
+	stops spectating (or this player starts).
 
 	This is the one writer of other characters' visibility on this client. With the server's own
 	positions (Config.Players.ServerPositions) the characters of players it doesn't send this
@@ -37,8 +38,9 @@ local MovementController = require(script.Parent.MovementController)
 local RemotePlayers = require(script.Parent.RemotePlayers)
 local SpectatorRules = require(script.Parent.SpectatorRules)
 
--- After the camera (and its first person fade, which sets the local character's transparency).
-local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 2
+-- After the camera (and its first person fade, which sets the local character's transparency) and
+-- Player/FirstPersonBody (Camera + 2, which then does), so what they set is each object's own.
+local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 3
 -- LocalTransparencyModifier is stored as a float: values read back this close are the same.
 local EPSILON = 1e-3
 

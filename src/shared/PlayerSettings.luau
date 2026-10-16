@@ -1145,6 +1145,76 @@ local ENTRIES: { Entry } = {
 		tooltip = "The day and the days you have survived, under the minimap, with a warning "
 			.. "before each Blood Moon.",
 	},
+	-- The camera (client Player/CameraRig, in the manner of DayZ; Options > Controls): the view a
+	-- player starts in (the Toggle Perspective key switches it live), the body seen in first
+	-- person (Player/FirstPersonBody; OFF: Minecraft's hand), the shoulder the third-person camera
+	-- looks over, and whether the Freelook key holds or toggles.
+	{
+		id = 60,
+		key = "cameraView",
+		name = "Camera",
+		kind = "choice",
+		page = "controls",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = if Config.Camera.DefaultView == "first" then 1 else 0,
+		effect = "camera",
+		preset = false,
+		format = "plain",
+		labels = { [0] = "Third Person", [1] = "First Person" },
+		tooltip = "The view you start in: over the shoulder or from your eyes. Toggle Perspective "
+			.. "switches it while you play.",
+	},
+	{
+		id = 61,
+		key = "firstPersonBody",
+		name = "First-Person Body",
+		kind = "toggle",
+		page = "controls",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = bool(Config.Camera.FirstPersonBody),
+		effect = "camera",
+		preset = false,
+		format = "plain",
+		tooltip = "ON: in first person you see your body, your arms and what you hold. OFF: only "
+			.. "your hand, as in Minecraft.",
+	},
+	{
+		id = 62,
+		key = "shoulderSide",
+		name = "Shoulder",
+		kind = "choice",
+		page = "controls",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = 0,
+		effect = "camera",
+		preset = false,
+		format = "plain",
+		labels = { [0] = "Right", [1] = "Left" },
+		tooltip = "Which shoulder the third-person camera looks over.",
+	},
+	{
+		id = 63,
+		key = "freelookToggle",
+		name = "Freelook",
+		kind = "toggle",
+		page = "controls",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = bool(Config.Camera.FreelookToggle),
+		effect = "camera",
+		preset = false,
+		format = "plain",
+		labels = { [0] = "Hold", [1] = "Toggle" },
+		tooltip = "Hold: look around while the Freelook key is held. Toggle: press it once to look "
+			.. "around, again to stop.",
+	},
 }
 
 -- The key bindings (Shared/KeyBindings), generated: one per action, ids from KEY_BASE in the

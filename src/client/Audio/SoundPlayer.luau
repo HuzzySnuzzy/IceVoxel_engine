@@ -16,7 +16,8 @@
 	  Listener   the camera, as in Minecraft, but never more than SoundRules.LISTENER_REACH blocks
 	             from the eyes it looks at (Camera.Focus): Roblox's camera zooms out to 128 studs,
 	             where the world near the player would fall silent (SoundService:SetListener, every
-	             frame after the camera; a Scriptable camera is left as it is).
+	             frame at Camera + 9, after everything that moves the camera: Player/CameraRig,
+	             the view bob, the sway; a Scriptable camera is left as it is).
 	  2D         interface events (`ui`) play on FLAT_VOICES Sounds in SoundService.IceVoxelAudio.
 	  Distant    far thunder (`playDistant`) plays on DISTANT_VOICES voices of its own and a
 	             looped sound (the distant rain: `newBed`, `setBed`) on one each: every one in its
@@ -1214,7 +1215,8 @@ function SoundPlayer.start()
 	watchService(SoundService)
 	watchService(ReplicatedStorage)
 
-	RunService:BindToRenderStep("IceVoxelSoundListener", Enum.RenderPriority.Camera.Value + 1, updateListener)
+	-- (After the camera's rig, view bob and sway: the camera as the frame draws it.)
+	RunService:BindToRenderStep("IceVoxelSoundListener", Enum.RenderPriority.Camera.Value + 9, updateListener)
 	RunService.Heartbeat:Connect(function()
 		playedThisFrame = 0
 		local now = os.clock()

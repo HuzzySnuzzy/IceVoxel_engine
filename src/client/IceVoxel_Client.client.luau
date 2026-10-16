@@ -83,6 +83,9 @@
 	                             World)
 	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
 	                             character only drawn on top of it (waits for the ground to load)
+	  Player/CameraRig           the camera in the manner of DayZ on Roblox's camera scripts:
+	                             over the shoulder or from the eyes (Toggle Perspective),
+	                             freelook, focus, never inside a block (Player/CameraRules)
 	  Player/RemotePlayers       where the other players are (world blocks): their characters
 	                             now, the server's relay by interest with Config.Players
 	                             .ServerPositions
@@ -91,6 +94,9 @@
 	                             .Origin.Enabled)
 	  Player/CharacterAnimator   the character's animations from the hull's movement
 	  Player/HeldItems           the item in every character's hand, and in first person
+	  Player/FirstPersonBody     the body, arms and held item seen in true first person
+	  Player/BodyTwist           every character's legs twisting to strafe and backpedal, the
+	                             local upper body leading its turns
 	  Player/EquipmentLooks      armor, vanity and accessories drawn on every character, and
 	                             air jumps' puffs (Player/AirJumps)
 	  Player/SpectatorView       spectators invisible to other players, a floating head to spectators
@@ -128,6 +134,7 @@
 	                             (through LightingController)
 ]]
 
+local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -166,6 +173,9 @@ local StructureBoxes = require(Client.Rendering.StructureBoxes)
 local HeldItems = require(Client.Player.HeldItems)
 local EquipmentLooks = require(Client.Player.EquipmentLooks)
 local MovementController = require(Client.Player.MovementController)
+local CameraRig = require(Client.Player.CameraRig)
+local FirstPersonBody = require(Client.Player.FirstPersonBody)
+local BodyTwist = require(Client.Player.BodyTwist)
 local RemotePlayers = require(Client.Player.RemotePlayers)
 local Rebase = require(Client.Rendering.Rebase)
 local CharacterAnimator = require(Client.Player.CharacterAnimator)
@@ -263,6 +273,12 @@ Settings.register("camera", function(values)
 	MovementController.setViewBobbing(on(values, "viewBobbing"))
 	MovementController.setDamageTilt(values.damageTilt / 100)
 	EffectView.setDistortion(PlayerSettings.distortion(values))
+	-- (The camera's settings, Options > Controls: the view to start in, the body in first person,
+	-- the shoulder, Freelook's hold or toggle.)
+	CameraRig.setDefaultView(if values.cameraView == 1 then "first" else "third")
+	CameraRig.setShoulderSide(if values.shoulderSide == 1 then -1 else 1)
+	CameraRig.setFreelookToggle(on(values, "freelookToggle"))
+	FirstPersonBody.setEnabled(on(values, "firstPersonBody"))
 end)
 Settings.register("audio", function(values)
 	local volume = PlayerSettings.volume
@@ -439,6 +455,19 @@ FuseView.start(world)
 -- (Before the movement: other players' positions, from their characters or the server's relay.)
 RemotePlayers.start()
 MovementController.start(world, streamer)
+-- The camera (after the movement, which pushes the body to it before Roblox's camera updates):
+-- the mouse is free while any of these holds.
+CameraRig.start(world, {
+	Screens.isOpen,
+	Chat.isOpen,
+	GameModeSwitcher.isOpen,
+	Keybinds.typing,
+	MainMenu.isShown,
+	Map.isWorldMapOpen,
+	function(): boolean
+		return GuiService.MenuIsOpen
+	end,
+})
 -- The render origin follows the camera (a render step before every placement in the frame).
 Rebase.start()
 -- (After the camera: the fluid at the camera, its fog and tint.)
@@ -461,6 +490,9 @@ FluidFog.start(
 )
 CharacterAnimator.start()
 HeldItems.start()
+-- The body seen in first person and every character's turning body (after the hands they pose).
+FirstPersonBody.start()
+BodyTwist.start()
 -- What every character wears (armor, vanity armor, accessories), drawn after the hands.
 EquipmentLooks.start()
 SpectatorView.start()

@@ -309,6 +309,10 @@ local TOOLTIPS: { [string]: string } = {
 	fireMode = "Switches the firearm in your hand between single shots and automatic fire.",
 	weaponLight = "Turns the light mounted on the firearm in your hand on or off.",
 	sights = "With a firearm raised in third person: looks down its sights, and back over the " .. "shoulder.",
+	toggleView = "Switches between the view over the shoulder and the view from your eyes. Not while "
+		.. "a weapon is raised.",
+	freelook = "Held: looks around while you keep walking and aiming the same way. Let go: the view turns back.",
+	focus = "Held: your eyes focus, narrowing the view to see farther. Not while a weapon is raised.",
 }
 
 local progression = (Config :: any).Progression
@@ -357,6 +361,11 @@ local ACTIONS: { Action } = {
 	action("fireMode", "Fire Mode", "gameplay", "F", "game"),
 	action("weaponLight", "Weapon Light", "gameplay", "L", "game"),
 	action("sights", "Toggle Sights", "gameplay", "V", "game"),
+	-- The camera's keys (client Player/CameraRig, in the manner of DayZ): Minecraft's F5 toggles
+	-- the view, Left Alt held is DayZ's freelook, Z its eye focus.
+	action("toggleView", "Toggle Perspective", "misc", "F5", "game"),
+	action("freelook", "Freelook", "gameplay", "LeftAlt", "game"),
+	action("focus", "Focus", "gameplay", "Z", "game"),
 }
 
 local byId: { [string]: Action } = {}

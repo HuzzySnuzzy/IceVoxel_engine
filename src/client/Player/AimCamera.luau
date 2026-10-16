@@ -51,6 +51,7 @@ local Weapons = require(Shared.Weapons)
 
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local AimRules = require(script.Parent.AimRules)
+local CameraRig = require(script.Parent.CameraRig)
 local MouseLook = require(script.Parent.MouseLook)
 local MovementController = require(script.Parent.MovementController)
 
@@ -253,6 +254,8 @@ function AimCamera.set(value: AimRules.Posture, gun: Weapons.FirearmSpec?, optic
 	posture = value
 	spec = gun
 	targetZoom = AimRules.zoom(value, gun, optic)
+	-- (The camera's rig follows the hands: its profile, and no Toggle Perspective while raised.)
+	CameraRig.setPosture(value, guard == true, gun ~= nil)
 	local slow = if guard then "guard" else value
 	if slow ~= slowFor then
 		slowFor = slow

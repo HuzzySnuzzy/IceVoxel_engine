@@ -17,7 +17,8 @@
 	  sounds         Music & Sounds: the volumes (master, music, blocks, players, ambient,
 	                 interface), footsteps, interface clicks, cave moods and music toasts
 	  controls       Minecraft's ControlsScreen: Mouse Settings..., Key Binds..., Sneak and
-	                 Sprint (Hold / Toggle), touch buttons
+	                 Sprint (Hold / Toggle), the camera (the view to start in, the first-person
+	                 body, the shoulder, Freelook: Hold / Toggle), touch buttons
 	    mouse        Minecraft's MouseSettingsScreen: sensitivity, scroll sensitivity, invert
 	                 mouse, discrete scrolling, and this game's scroll wheel (hotbar or zoom)
 	    keybinds     Minecraft's KeyBindsScreen: a scrolling list (`list = "keys"`, laid out by
@@ -196,6 +197,10 @@ Pages.list = {
 			page("keybinds", "Key Binds..."),
 			setting("toggleSneak"),
 			setting("toggleSprint"),
+			setting("cameraView"),
+			setting("firstPersonBody"),
+			setting("shoulderSide"),
+			setting("freelookToggle"),
 			setting("touchButtons"),
 		},
 		status = { "controls" },

@@ -129,6 +129,32 @@ return function(t, shared, require, _server, client)
 		t.eq(day.default, 1)
 		t.eq(day.preset, false)
 		t.ok(day.tooltip ~= nil and string.find(day.tooltip :: string, "Blood Moon", 1, true) ~= nil, "its tooltip")
+		-- The camera's four (client Player/CameraRig): ids 60..63 on the Controls page, effect
+		-- "camera", none a preset's; Third Person, the body ON, the right shoulder, Freelook held.
+		local camera = {
+			{ "cameraView", 60, "choice", 0, "Camera: Third Person" },
+			{ "firstPersonBody", 61, "toggle", 1, "First-Person Body: ON" },
+			{ "shoulderSide", 62, "choice", 0, "Shoulder: Right" },
+			{ "freelookToggle", 63, "toggle", 0, "Freelook: Hold" },
+		}
+		for _, row in camera do
+			local entry = PlayerSettings.entry(row[1])
+			t.eq(entry.id, row[2], `{row[1]}'s id`)
+			t.eq(PlayerSettings.byId[row[2]], entry)
+			t.eq(entry.kind, row[3])
+			t.eq(entry.page, "controls")
+			t.eq(entry.effect, "camera")
+			t.eq(entry.preset, false)
+			t.eq(entry.min, 0)
+			t.eq(entry.max, 1)
+			t.eq(entry.default, row[4], `{row[1]}'s default`)
+			t.eq(PlayerSettings.text(row[1], entry.default), row[5])
+		end
+		t.eq(PlayerSettings.text("cameraView", 1), "Camera: First Person")
+		t.eq(PlayerSettings.text("shoulderSide", 1), "Shoulder: Left")
+		t.eq(PlayerSettings.text("freelookToggle", 1), "Freelook: Toggle")
+		t.eq(PlayerSettings.text("firstPersonBody", 0), "First-Person Body: OFF")
+		t.eq(PlayerSettings.PLAIN_COUNT, 63, "the newest plain setting")
 	end)
 
 	t.test("player settings: clamp snaps to the step, clamps to the range and the phone limit", function()
