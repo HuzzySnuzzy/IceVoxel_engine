@@ -1517,25 +1517,33 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **A camera in the manner of DayZ, and your own body in first person.** Third person looks over the
   right shoulder (or the left: the Shoulder setting) from a distance that follows what you do:
   closer with a weapon raised, further sprinting, closer in crouching, crawling, swimming or
-  climbing, eased over DayZ's own blend times, the view lagging a jump. It never goes into a block:
-  a wall pulls it in at once and it eases back out. `F5` (gamepad D-pad up, the touch VIEW button)
-  puts the view at your eyes and back, never while a firearm is raised (DayZ's rule); `V` with a gun
-  raised looks down the sights from the eyes in either view. The body faces where you aim, the upper
+  climbing, eased over DayZ's own blend times, the view lagging a jump. It never goes into a block,
+  nor does the screen's near edge cut into one (sized from the camera itself: 0.1 studs ahead on a
+  computer, up to 0.5 on a phone): a wall pulls it in at once and it eases back out, a wall beside
+  it (a one-block tunnel) moves it off just enough, and from the eyes it comes back from a wall it
+  would see through. `F5` (gamepad D-pad up, the touch VIEW button) puts the view at your eyes and
+  back, never while a weapon is raised or a guard is up (DayZ's rule); `V` with a gun raised looks
+  down the sights from the eyes in either view. The body faces where you aim, the upper
   body leading a turn on the spot, the legs twisting up to 45 degrees into a strafe and walking
   backwards for a backpedal, the feet stepping round on a quick turn (every client draws this for
   every player; nothing more is sent). Hold `Left Alt` (R3, the touch LOOK button) to freelook: the
   view turns up to 160 degrees each way (100 from the eyes: the head, then the waist) while you keep
   walking and aiming the same way, with no crosshair, mining, use or firing meanwhile, and swings
-  back when you let go. Hold `Z` to focus your eyes (a 45-degree view, 70 sprinting; not raised). In
-  first person you see your own body: the chest, legs and feet when you look down, the head, hair,
+  back when you let go; a click or press as it swings back counts as soon as the view is within 2
+  degrees of your aim. Hold `Z` to focus your eyes (a 45-degree view, 70 sprinting; not raised). In
+  first person you see your own body: the chest's edge, legs and feet when you look down (the eyes
+  lean out past the chest, as a head does), the head, hair,
   hats, helmet, face and neck pieces hidden, and your hands on what you hold (both on a long gun or
   a guarded weapon): the gun is drawn in the world, lit by it, its sight line on the view's axis;
   tools, blocks, food and a punch swing in the right hand; a scope hides the gun and the arms; an
   item that would reach into a wall is pulled back, then lifted (DayZ's weapon lift). Over the
   shoulder the crosshair (shown with the mouse locked too) picks only what your eyes can see: a
   block seen past a pillar picks the pillar, and a mob behind cover isn't hit; reach and the server
-  are unchanged. The mouse wheel no longer zooms and there is no shift lock. First-Person Body OFF
-  keeps Minecraft's hand; `Config.Camera.Enabled = false` puts back Roblox's camera as it was.
+  are unchanged. The mouse wheel no longer zooms and there is no shift lock. On a touch screen VIEW
+  and LOOK sit with Sprint, Sneak and a gun's FIRE, AIM and RELOAD, each in a place of its own round
+  the jump button, on phones and tablets alike. First-Person Body OFF keeps Minecraft's hand;
+  `Config.Camera.Enabled = false` puts back Roblox's camera as it was (shift lock included, the
+  crosshair a gamepad's only).
 - **Ladders, rope and climbing.** Minecraft 1.20.1's ladders and vines and Supplementaries' rope.
   A **Ladder** (seven sticks make three; it burns in a furnace like planks) goes on the wall you
   click, else the first wall the way you look; one clicked on the front of a ladder goes nowhere.
@@ -1697,7 +1705,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
 | Open a door   | Right click either half (and a double door's other door opens with it); `Shift` + right click with an item places instead | L2 | Tap |
 | Open a hatch  | Right click a Bunker Hatch, from above or from the ladder below, to open or shut it (every game mode but spectator; zombies hear it) | L2 | Tap |
-| Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom, which zooms nothing with the DayZ camera: the wheel never zooms), or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
+| Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom, which zooms nothing with the DayZ camera: the wheel never zooms), or click a slot while the mouse is free (with the DayZ camera the mouse is locked while you play, so with the chat open; spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Climb         | Walk into a ladder or vine, or hold `Space` on a rope or a hanging vine (2.35 blocks a second); let go to slide down (a rope: a fast slide that never hurts); hold `Shift` to hold still | stick / A; B holds | move / Jump; Sneak holds |
 | Rope          | Right click a rope with Rope: one more at the bottom of it, however far down; with an empty hand: pull the bottom one up (held, it repeats); `Shift` + right click with Rope places it against the face | L2 | Tap |
@@ -1738,8 +1746,8 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Minimap zoom  | `-` / `=`                   |         |            |
 | Options menu  | `P` (`P` again, `E`, `Escape` or Done close it), or the gear in the inventory's EQUIPMENT header | D-pad right; B closes | Gear at the left end of the quickbar |
 | Walk          | `W` / `S` / `A` / `D` (Roblox's arrow keys no longer walk: bind them if you like) | left stick | thumbstick |
-| Toggle Perspective | `F5` (the Toggle Perspective key binding): the view over the shoulder or from your eyes; not while a firearm is raised, nor for spectators (always from the eyes). Shift lock is gone with the DayZ camera: the mouse is locked while you play and freed by every screen | D-pad up | VIEW |
-| Freelook      | Hold `Left Alt` (the Freelook key binding; with the Freelook setting on Toggle, press it to start and again to stop): the view turns up to 160° each way (100° from the eyes) while you walk and aim the same way; no crosshair, mining, use or firing meanwhile; let go and it swings back. Not in the sights | Hold R3 (while nothing is raised: R3 is the sights then) | Hold LOOK |
+| Toggle Perspective | `F5` (the Toggle Perspective key binding): the view over the shoulder or from your eyes; not while a weapon is raised or a guard is up, nor for spectators (always from the eyes). Shift lock is gone with the DayZ camera: the mouse is locked while you play and freed by every screen | D-pad up | VIEW (not for spectators) |
+| Freelook      | Hold `Left Alt` (the Freelook key binding; with the Freelook setting on Toggle, press it to start and again to stop): the view turns up to 160° each way (100° from the eyes) while you walk and aim the same way; no crosshair, mining, use or firing meanwhile; let go and it swings back, and a click or press made as it does acts once the view is within 2° of your aim. Not in the sights | Hold R3 (while nothing is raised: R3 is the sights then) | Hold LOOK (not for spectators) |
 | Focus         | Hold `Z` (the Focus key binding): the eyes focus, a 45° view (70° sprinting) and a slower mouse; not while a weapon is raised or guarding | | |
 | Chat / command | `T` / `/` (the Open Chat and Open Command bindings) | | |
 | Skill tree    | `K` (`K` again, `E`, `Escape` or Done close it): click a skill, then Unlock; hover an Age's name for what it takes | D-pad left; A selects, B closes | The button over the gear |
@@ -1773,7 +1781,7 @@ right) or A; buttons cycle their values. Done (on a sub-page: back to the page i
 | Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog (Atmosphere / OFF), Textures (when the texture pack has a filled texture), Far Materials (where far meshes run), Brightness (Moody to Bright), Prefer (Distance / Lighting), Caves (Hidden Until Seen / Always Shown) |
 | Performance     | Far Meshes (with their state), Build Budget (Auto or 1-12 ms), Hidden Terrain (Draw / Skip), Swap Frames (0-3) |
 | Music & Sounds  | Master Volume, Music, Blocks, Players, Ambient, Interface (0-100%); Footsteps, Interface Clicks, Cave Moods, Music Toasts |
-| Controls        | Mouse Settings..., Key Binds... (the two pages below), Sneak (Hold / Toggle), Sprint (Toggle / Hold), Camera (Third Person / First Person), First-Person Body (ON / OFF), Shoulder (Right / Left), Freelook (Hold / Toggle), Touch Buttons (touch screens; after rejoining) |
+| Controls        | Mouse Settings..., Key Binds... (the two pages below), Sneak (Hold / Toggle), Sprint (Toggle / Hold), Camera (Third Person / First Person), First-Person Body (ON / OFF), Shoulder (Right / Left), Freelook (Hold / Toggle), Touch Buttons (touch screens; Sprint and Sneak after rejoining, the camera's VIEW and LOOK at once) |
 | Mouse Settings  | Sensitivity (0-200%: "*yawn*" to "HYPERSPEED!!!", 100% Roblox's own feel), Scroll Sensitivity (0.01-10.00), Invert Mouse, Discrete Scrolling, Scroll Wheel (Hotbar / Zoom: nothing with the DayZ camera, which has no zoom); with a mouse |
 | Key Binds       | Every key binding (below): click its key, then press a key or a mouse button; Reset (per row), Reset Keys (all); with a keyboard |
 | HUD             | Minimap, WAILA, Day Counter (the day, the days survived and the blood moon's warnings under the minimap), Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1 .. the largest this screen allows: 4 at 1920 x 1080, 9 on a 4K window; Auto is always the largest, as in Minecraft) |
@@ -2671,12 +2679,12 @@ for performance:
 | `Weapons.Melee.Enabled` | true | The melee rework (light attacks on release, heavy attacks, the guard, finishers); false: every attack as before. |
 | `Weapons.Melee.HeavyHold` / `HeavyKnockback` / `HeavyExhaustion` | 0.45 / 0.8 / 3 | Seconds held for a heavy attack, its knockback, and its food (times a light hit's exhaustion). |
 | `Weapons.Melee.GuardCone` / `FinisherCone` / `FinisherMaxHealth` | 0.5 / 0.5 / 30 | The guard's front cone and the finisher's back cone (cosines: 120 degrees each), and the most health a zombie may have to die to a finisher. |
-| `Camera.Enabled` | true | The DayZ camera (client `Player/CameraRig`): over the shoulder or from the eyes, freelook, focus, the body facing the aim and drawn in first person. false: Roblox's camera exactly as before (its zoom and shift lock where the place allows it, `Weapons.ShoulderOffset` while raised, the body turning where it walks at `Movement.TurnSpeed`, Minecraft's hand). |
+| `Camera.Enabled` | true | The DayZ camera (client `Player/CameraRig`): over the shoulder or from the eyes, freelook, focus, the body facing the aim and drawn in first person. false: Roblox's camera exactly as before (its zoom; shift lock, which the server gives back through `Player.DevEnableMouseLock`; `Weapons.ShoulderOffset` while raised; the body turning where it walks at `Movement.TurnSpeed`; Minecraft's hand; the crosshair for a gamepad only). |
 | `Camera.DefaultView` / `FirstPersonBody` / `FreelookToggle` | "third" / true / false | The Camera, First-Person Body and Freelook settings' defaults. |
 | `Camera.Profiles` | standing { 4.8, 0.9, 0.25, 0 } | The third-person camera by what the body does: { distance behind the pivot, shoulder, height above the eyes, forward } in studs (DayZ's third-person cameras, × 3): `standing`, `sprinting`, `crouching`, `lying` (crawling, swimming), `climbing`, `flying`, `raised` (a firearm: 2.4 behind, 1.5 to the side), `raisedHands` (a melee guard), `crouchRaised`; a change eases over DayZ's blend times. |
 | `Camera.FreelookYaw` / `FreelookYawFirst` / `SnapBackSeconds` | 160 / 100 / 0.14 | How far freelook turns the view from the aim each way (degrees; from the eyes the neck's 70 and the waist's 30), and the smooth time it swings back in (DayZ's). |
-| `Camera.Margin` / `Radius` / `EaseOut` | 0.3 / { 0.45, 0.3 } / 6 | Blocks and the third-person camera: the gap kept (studs), the half width and height of the near plane the boom's rays cover, and how fast (per second) a camera pulled in eases back out. |
-| `Camera.FirstForward` / `FirstDownPush` / `NearClear` | 0.15 / 0.35 / 0.6 | The first-person eye point this far ahead of the hull's eyes, and this much more looking straight down (so the chest and feet show, not the neck); a body part this close to the camera (studs) is hidden in every view. |
+| `Camera.Margin` / `EaseOut` | 0.3 / 6 | Blocks and the third-person camera: the gap kept behind it (studs) and how fast (per second) a camera pulled in eases back out. The near plane kept out of blocks is measured from the camera every frame (its `NearPlaneZ`, field of view and screen), not configured. |
+| `Camera.FirstForward` / `FirstDownPush` / `NearClear` | 0.15 / 0.75 / 0.6 | The first-person eye point this far ahead of the hull's eyes, and this much more looking straight down (times the sine of the pitch: past the chest's front from 60° down, so its edge, the legs and the feet show, not the torso's top; back where a wall would cut the near plane); a body part this close to the camera (studs) is hidden in every view. |
 | `Camera.IdleTurnSeconds` / `IdleTurnMaxLag` / `IdleTurnSpeed` | 0.12 / 60 / 0.5 | Standing, the body turns to the aim over this smooth time and at most this many degrees behind; faster than this (blocks a second) it turns at once (and the legs twist into a strafe). |
 | `Camera.FocusFov` / `FocusSprintFov` / `FocusSeconds` | 45 / 70 / 0.1 | Focus: the field of view (never wider than the FOV setting's), the one sprinting, and the smooth time of the change. |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
@@ -3921,7 +3929,7 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 2,090 tests, all passing (the zombie apocalypse has
+`lune run tests/run` runs the whole suite: 2,407 tests, all passing (the zombie apocalypse has
 Apocalypse (its registries and shared rules), Zombies (the server's zombies, the director, tracking
 and their costs), MobRig, MobRigPool, ZombieVoices and ZombieRigProbe (the rigs), Infection, Medical
 and Survivor (survival), Cities, Bunkers and, where they all meet on a real world server,
@@ -3934,7 +3942,8 @@ effects and potions have Effects; knowledge, Ages and skills have Progression; w
 meet, Crossover; the floating origin and "fake coords" have Origin, Rebase, PlayerSync,
 PositionStore, MoveCheck, Interest, RemoteMotion and LocalPosition; the server's preloading has
 ServerGeneration; `/locate` has Locate, LocateCommand and LocatePoi; the DayZ camera has
-CameraRules, FirstPerson, BodyRules, TargetRules and, where they meet, CameraIntegration).
+CameraRules, FirstPerson, BodyRules, TargetRules, CameraFade, TouchButtons and, where they meet,
+CameraIntegration).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune

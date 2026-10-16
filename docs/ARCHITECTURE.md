@@ -2086,7 +2086,8 @@ hull is.
   Other duties:
   - Sprint and sneak are `ContextActionService` actions at High priority that sink their keys, so
     Left Shift no longer toggles shift lock (Right Shift still does with the camera rig off; with
-    it there is no shift lock at all: see Camera). Their keys are the Sprint
+    it there is no shift lock at all: see Camera); their touch buttons go in their own slots round
+    the jump button (`Ui/TouchButtons.place`, see Camera). Their keys are the Sprint
     and Sneak key bindings plus `Config.Movement`'s gamepad buttons; a changed binding binds the
     action again (`Keybinds.changed`). With `ToggleSprint` (the Sprint setting), the sprint key
     turns sprinting on and off; turning it off also stops a sprint started by double tapping.
@@ -2236,9 +2237,11 @@ their feet are in a climbable cell and they do not stand.
 
 A camera in the manner of DayZ, on Roblox's own camera scripts. They stay the source of the camera's
 rotation and of the mouse lock only: `CameraRig.start` sets the player's `CameraMode` to
-`LockFirstPerson` for good (as spectating someone already did), turns `DevEnableMouseLock` off
-(default.project.json's `StarterPlayer.EnableMouseLockOption` is false too) and hooks the camera's
-input (`Player/MouseLook`). Roblox's camera rebuilds its look from `camera.CFrame.LookVector` every
+`LockFirstPerson` for good (as spectating someone already did), hooks the camera's input
+(`Player/MouseLook`) and holds Roblox's fade of the character off while it draws the body
+(`Player/CameraFade`). Shift lock is off: default.project.json's
+`StarterPlayer.EnableMouseLockOption` is false, and the server boot sets every player's
+`DevEnableMouseLock` to `not Config.Camera.Enabled` (only a server may set it). Roblox's camera rebuilds its look from `camera.CFrame.LookVector` every
 frame (which is why the view bob and the sway are taken off before it), so the rig, the render step
 right after it, writes the camera's position and keeps its rotation: the next frame starts from the
 same look. There is no wheel zoom, no shift lock, no Popper and no Follow mode. Shaped blocks have
@@ -2253,7 +2256,7 @@ step from the sources and pins it here):
 | − 3 | `IceVoxelOrigin` (Rendering/Rebase) | the render origin |
 | − 2 | `IceVoxelRemotePlayers` (Player/RemotePlayers), `IceVoxelAimUnsway` (Player/AimCamera) | other players' roots; last frame's sway off |
 | − 1 | `IceVoxelMovement`, `IceVoxelDying` (Player/MovementController) | last frame's bob off; the hull's ticks; the root, turned to the aim (`CameraRules.followYaw`); the body pushed to the rig (`CameraRig.setBody`) |
-| Camera | Roblox's CameraModule | the rotation from the mouse, stick and touch through MouseLook's hook (invert, zoom × focus share, freelook's room, recoil, the queued snap-back turn); the TransparencyController's fade |
+| Camera | Roblox's CameraModule | the rotation from the mouse, stick and touch through MouseLook's hook (invert, zoom × focus share, freelook's room, recoil, the queued snap-back turn); the TransparencyController's fade (held off by CameraFade while the rig draws the body) |
 | + 1 | `IceVoxelCameraRig` (Player/CameraRig); the screens', chat's and switcher's mouse steps; `IceVoxelExplosionShake`; the mobs', items', projectiles', shots' and transmitters' renderers | the aim and freelook, the `onAim` listeners (MovementController re-faces a body that turns at once), then the camera's place. `IceVoxelAimLock` (AimCamera) only with the rig off |
 | + 2 | `IceVoxelFirstPersonBody` (Player/FirstPersonBody); `IceVoxelWeatherState`; `IceVoxelFluidView` | the local character's visibility (FluidFog reads the final place: the fog follows the camera, as Minecraft's) |
 | + 3 | `IceVoxelEffectView`; `IceVoxelSpectators` (Player/SpectatorView) | Nausea's roll; spectators and hidden bodies, raised over what + 2 wrote |
@@ -2262,31 +2265,48 @@ step from the sources and pins it here):
 | + 6 | `IceVoxelFirearmsFire` (Firearms); `IceVoxelBodyTwist` (Player/BodyTwist) | shots; every character's hips, the local waist |
 | + 7 | `IceVoxelHeldItems` (Player/HeldItems; a RenderStepped connection before) | every hand's item; the local one at the camera and the arms on it |
 | + 8 | `IceVoxelEquipmentLooks` (Player/EquipmentLooks; + 1 before) | worn pieces on the posed and turned body |
-| + 9 | `IceVoxelSoundListener` (Audio/SoundPlayer; + 1 before) | the listener at the final camera |
+| + 9 | `IceVoxelSoundListener` (Audio/SoundPlayer; + 1 before); `IceVoxelInteraction` (Interaction/BlockInteraction; a RenderStepped connection before) | the listener at the final camera; the aim (the crosshair's ray and the eyes as drawn this frame), the outline, mining, the repeats, presses freelook held back |
 
 Steps at one priority are independent of each other (the rig keeps the rotation and the explosion's
-shake only turns it, so they commute). RenderStepped connections (CharacterAnimator,
-BlockInteraction's loop, the HUD) have no documented order against bound steps; none needs the final
-camera exactly. A muzzle flash fired at + 6 starts from the gun's place last frame.
+shake only turns it, so they commute). RenderStepped connections (CharacterAnimator, the HUD) have
+no documented order against bound steps; none needs the final camera. Targeting does, so
+BlockInteraction's frame is bound after the camera's last move: were it a RenderStepped connection
+run between Roblox's camera and the rig, third-person targeting would cast from Roblox's own
+first-person place, about 0.9 studs off the crosshair. A press it plays at + 9 (freelook's held-back
+ones, a touch held long enough) fires a gun at + 6 the next frame. A muzzle flash fired at + 6 starts
+from the gun's place last frame.
 
 **The rig** (`Player/CameraRig`; the rules in `Player/CameraRules`, pure, tested in
 tests/spec/CameraRules). The player chooses third or first person (the Camera setting, applied only
 when its value changes, then Toggle Perspective: `F5`, D-pad up, the touch VIEW button;
-`CameraRules.toggle` refuses while a firearm is raised, as DayZ's `camChange`, and for spectators,
-who always see from the eyes); V from third person makes the view "sights" (`CameraRules.view`).
+`CameraRules.toggle` refuses while a firearm is raised or a melee guard is up, as DayZ's
+`camChange`, and for spectators, who always see from the eyes); V from third person makes the view
+"sights" (`CameraRules.view`).
 - Third person: the profile by stance and hands (`profileKey`: lying, climbing, flying, raised,
   raisedHands, sprinting, crouching, standing; `Config.Camera.Profiles`, DayZ's numbers × 3) eases
   over DayZ's blend times (`transition`; Enforce's `Math.SmoothCD`, `smoothCD`), the side in 0.14 s.
   The pivot is the hull's eyes plus height (and a jump's lag: `heightLag` holds it at the take-off
   height and eases back on landing), the shoulder to the body's side and forward in the body's yaw
-  frame. Collision (`collide`, on `VoxelRaycast.distance` with `Shapes.sight`'s collision boxes):
-  the eyes to the pivot cast and clipped by `Margin`, then the boom cast back along the look as five
-  rays (the centre and the near plane's edges, `Radius`, each cast sideways first so a wall on the
-  right never pulls the camera into the head); `boomStep` pulls in at once and eases out at
-  `EaseOut`. Spectators skip collision.
-- First person and the sights: from `firstPersonEye` (the hull's eyes plus `FirstForward`, more
-  looking down, so the chest and feet show instead of the inside of the neck). A view toggle is
-  instant; leaving the sights eases back to the shoulder over 0.2 s (`eyeShare`).
+  frame. Collision (`collide`, on `VoxelRaycast.distance` with `Shapes.sight`'s collision boxes)
+  keeps Roblox's near plane out of blocks, sized every frame from the camera (`setLens`: the near
+  plane |`NearPlaneZ`| ahead, "between 0.1 and 0.5 varying across platforms", its half height
+  that × tan(FOV / 2), its half width × the viewport's aspect; a phone's at 70° is about ±0.76 ×
+  ±0.35 studs): the eyes to the pivot cast and clipped by `Margin`; the pivot moved off blocks along
+  the view's right and up until the plane's half width and half height (+ `SIDE_GAP`) are free each
+  way (`room`: a one-block tunnel narrows the shoulder); then the boom cast back along the look from
+  the pivot and from the plane's four corners (each cast out from the pivot first, as Roblox's
+  Popper sweeps its corners); `boomStep` pulls in at once and eases out at `EaseOut`. At most
+  fourteen casts of a few studs. Spectators skip collision. (A block's outside edge seen exactly
+  across a corner of the screen can still leave that corner in it, as with Popper.)
+- First person and the sights: from `firstPersonEye` (the hull's eyes plus `FirstForward`, plus
+  `FirstDownPush` × the downward sine of the pitch: from 60° down past the chest's front by 0.3 or
+  more, so the chest's edge, the legs and the feet show instead of the torso's top face, which
+  covered up to a third of the view looking down; tests/spec/CameraRules measures it on the drawn
+  torso), then `firstPersonClear`: where a block would cut the near plane there, the camera comes
+  back along the way from Roblox's own first-person place (`near` behind the eyes along the look:
+  the plane centred on the eyes, inside the hull, which keeps 0.3 blocks from every block), its
+  centre and corners cast along it (five casts). In the open the eye point is untouched. A view
+  toggle is instant; leaving the sights eases back to the shoulder over 0.2 s (`eyeShare`).
 - `active()`: the rig places the camera (on, started, with a body, spectating no one, `CameraType`
   Custom). Spectating someone (`setSpectating`, from MovementController) is Roblox's own first
   person on their eyes, as before. At death the camera holds the last body (`hold`, `holding`) while
@@ -2297,10 +2317,26 @@ who always see from the eyes); V from third person makes the view "sights" (`Cam
   at + 1 free it, the map and the title screen with Modal. The rig hides the icon while `playing()`
   (active and none of the mouse-free predicates the boot passes to `start`: Screens, Chat,
   GameModeSwitcher, Keybinds.typing, MainMenu, the world map, Roblox's menu); `locked()` (the mouse
-  at the centre) tells BlockInteraction to draw the crosshair.
+  at the centre) tells BlockInteraction to draw the crosshair. A slot of the HUD's quickbar is
+  clicked only with a free mouse (the chat open).
+- Touch: every touch button has a slot of its own round PlayerModule's jump button
+  (`Ui/TouchLayout`, pure: two rows above it, columns from the one over it leftwards; Sprint, FIRE,
+  Sneak, VIEW, then AIM, RELOAD, LOOK; offsets from the safe area's bottom right corner, where both
+  ContextActionService's button frame and the jump button are anchored). Roblox's CoreScript
+  (ContextActionTouch) would give each new ContextActionService touch button the next free place of
+  a fixed seven in binding order and keep it after SetPosition: bound Sprint, Sneak, VIEW, LOOK,
+  FIRE, AIM, RELOAD, AIM landed wholly under a landscape phone's screen and the seven were all
+  taken. Now `Ui/TouchButtons.place` puts MovementController's Sprint and Sneak and WeaponButtons'
+  FIRE, AIM and RELOAD in their slots with SetPosition (again on a screen change), and the camera's
+  VIEW and LOOK are the game's own buttons in ContextActionService's look (`TouchButtons.start`:
+  `CameraRig.touchView`, `touchLook`), in a ScreenGui Ui/UiScale measures with Roblox's buttons for
+  the HUD's corner, shown only on a touch screen with the Touch Buttons setting while the rig plays
+  for a non-spectator (`TouchLayout.cameraShown`). tests/spec/TouchButtons checks every slot on
+  phones and tablets (on screen, clear of each other, the jump button, the quickbar canvas at every
+  GUI scale and the thumbstick) and the binding in any order on Roblox's placement rules.
 - The rig requires no Ui/ or Interaction/ module, nor MovementController or AimCamera: what it needs
   comes in (`start`'s world and predicates, `setBody`, `setPosture` from AimCamera,
-  `setSpectating`).
+  `setSpectating`; the touch buttons call `touchView` and `touchLook`).
 
 **Aim, freelook and focus.** The aim (`aimYaw`, `aimPitch`, `aimHeading`) is the camera's look,
 except while freelooking. MovementController walks along it and turns the body to it (`followYaw`:
@@ -2310,11 +2346,14 @@ at once (`CameraRig.onAim`), so the body seen from the eyes never trails the vie
 pose's pitch is the aim's. Freelook (the Freelook key held, or toggled with the Freelook setting; R3
 held while nothing is raised, where Firearms' R3 sights would otherwise take it; the touch LOOK
 button) holds the aim while the camera turns: every frame at + 1 `freelook`, then `aim`, then
-`snapStep` (the turn back, queued with `MouseLook.turn`), then `clampRoom` (the room left before
-`FreelookYaw`, `FreelookYawFirst` from the eyes: `MouseLook.setRoom`, which the hook clamps input
-to). Let go, the camera swings back over DayZ's 0.14 s smooth time while input still moves the aim.
-`freelooking()` and `freelookOffset()` (the camera minus the aim: yaw positive to the left, pitch
-up) last until the swing back ends. No freelook in the sights, for spectators, while dead, without
+`suspends`, `snapStep` (the turn back, queued with `MouseLook.turn`), then `clampRoom` (the room
+left before `FreelookYaw`, `FreelookYawFirst` from the eyes: `MouseLook.setRoom`, which the hook
+clamps input to). Let go, the camera swings back over DayZ's 0.14 s smooth time while input still
+moves the aim. `freelooking()` (targeting and presses wait) lasts until the camera is back within
+`SNAP_READY` (2°) of the aim, 0.22 s after a 10° look and 0.45 s after 160° (the swing back itself
+ends at `SNAP_END` 0.2 s later); `comingBack()` is that wait once the input was let go, when
+BlockInteraction keeps presses for then. `freelookOffset()` (the camera minus the aim: yaw positive
+to the left, pitch up; the head and the hands) lasts until the swing back ends. No freelook in the sights, for spectators, while dead, without
 the hook, with a screen open or across a view toggle. Freelook isn't sent: others see the body's yaw
 and the aim's pitch. Focus (the Focus key held while playing, nothing raised or guarded:
 `CameraRig.focusing`) eases the field of view to `CameraRules.focusFov` (`FocusFov`,
@@ -2324,8 +2363,15 @@ and the aim's pitch. Focus (the Focus key held while playing, nothing raised or 
 **The first-person body** (`Player/FirstPersonBody`; the rules in `Player/FirstPersonRules`, pure,
 tested in tests/spec/FirstPerson). Visibility: at + 2 it is the one writer of the local character's
 `LocalTransparencyModifier` while the rig is active and the player isn't a spectator. Under
-`LockFirstPerson` Roblox's TransparencyController fades the whole character (again on every new
-part), so every frame it writes each object's value where it differs. The objects
+`LockFirstPerson` Roblox's TransparencyController would fade the whole character and, at its full
+fade, write every part again every frame (it marks itself dirty on each update), which this then
+wrote back: about two writes a part a frame. `Player/CameraFade` wraps the controller's `Update` (the
+method of the PlayerModule's TransparencyController class table, as MouseLook wraps
+`CameraInput.getRotation`) so it writes nothing while the rig places the camera for a player who
+isn't a spectator, and only marks itself dirty, so it fades everything again the first frame it
+runs (spectating someone, a spectator, the rig off); tests/spec/CameraFade. Every frame this still
+compares each object with its value and writes only where it differs: with the controller held off
+that is only what changes, and a PlayerModule that can't be hooked costs the old two writes. The objects
 (`SpectatorRules.HIDDEN_CLASSES`) are listed once and again when the character's descendants change;
 `roleOf` sorts them: the head (and what is on it), what is worn on the head (an accessory welded to
 it, carrying one of its attachments, or of AccessoryType Hat, Hair, Face, Eyebrow, Eyelash or Neck:
@@ -2378,9 +2424,15 @@ the eyes must see what it found: a block met sooner on the way from the eyes
 (`Player/CameraRig.eyes`) is aimed at instead, along the eyes' ray, with its own face; a mob the
 eyes can't see is not hit; the bucket's and the bottle's rays alike. Reach is measured from the body
 as before, so the server is unchanged. Freelook suspends targets, outline and presses (Firearms'
-trigger too). Minecraft's crosshair shows for a gamepad and for a mouse locked to the centre
-(`CameraRig.locked`), unless a raised firearm hides it or the player freelooks. With the camera at
-the eyes (first person, the sights, the rig off) the ray and the target are exactly as before.
+trigger too) until the camera is back within 2° of the aim (`CameraRig.freelooking`); a press made
+once the input was let go (`comingBack`) is played then (a click as a click, a held button as a
+press, a tap as a tap), so none is lost to the swing back; one made and let go while still
+freelooking does nothing. The aim is BlockInteraction's frame at + 9, after every step that moves
+the camera, so the ray is the frame's as drawn and the eyes (`CameraRig.eyes`) the same frame's
+body. Minecraft's crosshair shows for a gamepad and, with the rig on, for a mouse locked to the
+centre (`CameraRig.locked`), unless a raised firearm hides it or the player freelooks. With the
+camera at the eyes (first person, the sights, the rig off) the ray and the target are exactly as
+before.
 
 **Body motion** (Player/BodyRules, Player/BodyTwist at Camera + 6, Player/CharacterAnimator): every
 client twists every shown R15 character's legs at the hips towards a strafe (≤ 45°) from its drawn
@@ -2392,8 +2444,10 @@ sent. Upright only (not crawling, swimming or on a ladder); R6 bodies get no twi
 
 **Off.** `Config.Camera.Enabled = false` keeps today's camera: CameraRig binds only a step that
 measures geometric first person (within 1 stud of the camera's focus), `active()` is false, the aim
-is the camera's look, `locked()` is LockCenter, `eyes()` the camera, `bobShare()` 1;
-`DevEnableMouseLock` is put back on (shift lock where the place allows it); AimCamera binds its
+is the camera's look, `locked()` is LockCenter, `eyes()` the camera, `bobShare()` 1; the server
+sets `DevEnableMouseLock` back on (shift lock as before; a client can't set it); the crosshair is a
+gamepad's only again (not a locked mouse's: Roblox's first-person zoom and shift lock lock it);
+no touch VIEW or LOOK; AimCamera binds its
 mouse lock (`IceVoxelAimLock`) and does the raised shoulder (`Weapons.ShoulderOffset` through
 `MovementController.setShoulder`) and the third-person sights from the focus with the character
 hidden; MovementController faces where the character walks (`Movement.TurnSpeed`) or, in first
@@ -2409,12 +2463,15 @@ viewport and EquipmentLooks follows the faded head; targeting casts from the cam
   the pure AimRules. Nothing reachable from Interaction/Firearms or Interaction/MeleeInput requires
   Interaction/BlockInteraction. The client has no require cycle (`tests/spec/CameraIntegration`
   walks it).
-- One writer each: the local character's visibility (FirstPersonBody with the rig; SpectatorView
-  raising; AimCamera only with the rig off), each joint's C0 (the table above), the camera's place
+- One writer each: the local character's visibility (FirstPersonBody with the rig, Roblox's fade
+  held off by CameraFade; SpectatorView raising; AimCamera only with the rig off), each joint's C0
+  (the table above), the camera's place
   (the rig; the bob, the sway and the shake only move it after, and come off before Roblox's camera
   reads it).
-- Specs: CameraRules, FirstPerson, BodyRules, TargetRules and CameraIntegration (the frame table,
-  the require rules, the writers, the freelook contract between the rig, the head and the waist).
+- Specs: CameraRules (with the near plane on a computer's 0.1 and a phone's 0.5, and the torso's
+  share of the view looking down), FirstPerson, BodyRules, TargetRules, CameraFade, TouchButtons and
+  CameraIntegration (the frame table, the require rules, the writers, the freelook contract between
+  the rig, the head and the waist).
 
 ## Texture pack (`TexturePack`, `Blocks`, `tests/build_textures`, client `Rendering/TextureLooks`)
 
@@ -6696,7 +6753,8 @@ alone as a refused record with no pellets, its jam flag set when the reason is "
   the player's own record adds only its impacts and hands a stop to Firearms (`onOwnShot`).
 - **`Ui/WeaponHud`**: the shoulder dot, a red dot, the scope overlay, and the word and bar over and
   under the held item's box (`Ui/Hud.weaponAnchor`); **`Ui/WeaponButtons`**: the touch AIM, FIRE
-  and RELOAD buttons.
+  and RELOAD buttons, each in its slot round the jump button (`Ui/TouchButtons.place`; see
+  Camera).
 - **`Interaction/MeleeInput`**: a listed melee weapon's press lands on release (heavy after
   `HeavyHold`), the guard's Weapon ops, `guarding` and `charge` for the poses and the slowness,
   `pressing` (a press waiting or the guard up) for **`Interaction/AttackRules`** (pure): the attack
@@ -8005,8 +8063,9 @@ bottom of the screen and the saving icon sat on the minimap).
   | Title, Flash | 100 | the title screen, the Nuke's flash |
 
   Each says its kind: "scaled" (GUI pixels under a UIScale that follows the scale) or "screen"
-  (shares of the screen by design: the hand, the fire overlay, the frost and heat edges, the Nuke's
-  flash and the world map, the spec's allowlist with reasons).
+  (shares of the screen by design: the hand, the fire overlay, the frost and heat edges, the camera's
+  touch VIEW and LOOK among Roblox's touch buttons, the Nuke's flash and the world map, the spec's
+  allowlist with reasons).
 - **Who follows it.** The HUD, the chat, the screens (inventory, creative, JEI, panels, the cursor)
   and the F3 + F4 switcher take the scale fitted to their own area, the device's safe area; JEI's
   list and the inventory's effect list keep beside the shown panel's real width (`size()`: the
@@ -8062,8 +8121,9 @@ bottom of the screen and the saving icon sat on the minimap).
     on a touch screen never in the movement thumbstick's zone (`thumbstick`: the left 40% below
     the top third in landscape, the bottom 40% in portrait): the icons are buttons;
   - the saving icon at the bottom right, raised above Roblox's touch buttons and the HUD where they
-    are in its way, by their real size: the live TouchGui JumpButton and ContextActionService
-    buttons, measured when PlayerGui's children change and every second on touch screens, else
+    are in its way, by their real size: the live TouchGui JumpButton, ContextActionService
+    buttons and the game's own (`Ui/TouchButtons`' VIEW and LOOK), measured when PlayerGui's
+    children change and every second on touch screens, else
     PlayerModule's rule (70 pixels at right - 95, bottom - 90 when the safe area's smaller side is at
     most 500, else 120 at right - 170, bottom - 210);
   - WAILA's edges: left of the map or the Map button (`wailaRight`), left of the coordinates line

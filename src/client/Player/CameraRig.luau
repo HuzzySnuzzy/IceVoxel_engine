@@ -197,6 +197,27 @@ local lastView: CameraRules.View = "third"
 local fresh = true
 -- The camera's axes and near plane this frame (CameraRules.setLens), for the collision.
 local lens = CameraRules.newLens()
+-- The viewport's aspect (width over height), read again only when the camera or its viewport
+-- changes (a Vector2 a frame would be made otherwise).
+local aspect = 16 / 9
+local aspectCamera: Camera? = nil
+local aspectConnection: RBXScriptConnection? = nil
+
+local function aspectOf(camera: Camera): number
+	if camera ~= aspectCamera then
+		aspectCamera = camera
+		if aspectConnection then
+			aspectConnection:Disconnect()
+		end
+		local function read()
+			local size = camera.ViewportSize
+			aspect = size.X / math.max(size.Y, 1)
+		end
+		aspectConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(read)
+		read()
+	end
+	return aspect
+end
 
 -- Freelook and the aim (radians); `aimValid` once the aim was read after Roblox's camera.
 local look = CameraRules.newLook()
@@ -396,7 +417,6 @@ local function step(dt: number)
 	local hx, hz = CameraRules.heading(r00, r01, r02, r12, r22)
 	local camYaw = CameraRules.yawOf(hx, hz)
 	local camPitch = math.asin(math.clamp(-r12, -1, 1))
-	local viewport = camera.ViewportSize
 	CameraRules.setLens(
 		lens,
 		r00,
@@ -410,7 +430,7 @@ local function step(dt: number)
 		r22,
 		camera.NearPlaneZ,
 		camera.FieldOfView,
-		viewport.X / math.max(viewport.Y, 1)
+		aspectOf(camera)
 	)
 
 	-- The body pushed this frame (none kept while holding); far from the last one: start afresh.
