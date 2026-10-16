@@ -10,14 +10,18 @@
 	           yaw, the pose's yaw) twists the legs at the hips towards a strafe, up to 45 degrees,
 	           folded so a backpedal walks backwards (Player/BodyRules.legs, with hysteresis about
 	           a pure strafe). The local walk and run play reversed for it (Player/
-	           CharacterAnimator asks `backwards`), and the Animator replicates that, so another
-	           player's legs fold the way their own client plays their walk (the tracks their
-	           Animator plays, Animator.AnimationPlayed; their feet's own way until one is seen).
-	           Upright only: not lying (crawling, swimming), not on a ladder.
+	           CharacterAnimator asks `backwards`), and the Animator replicates that. Another
+	           player's legs go by their drawn feet as well; the way their own client plays their
+	           walk (the tracks their Animator plays, Animator.AnimationPlayed) only settles a
+	           move near a pure strafe, where the feet can't tell (BodyRules.remoteLegs: the feet
+	           and the tracks arrive with different delays). Upright only: not lying (crawling,
+	           swimming), not on a ladder.
 	  waist    the local upper body leads an idle turn (the aim ahead of the lagging body, Player/
 	           CameraRig.aimYaw, within 45 degrees) and takes freelook's yaw beyond the neck's 70
-	           (CameraRig.freelookOffset, within 30), while the rig is active; the other players'
-	           waists stay (BodyRules.waist).
+	           (CameraRig.freelookOffset, within 30), while the rig is active, and blades in a
+	           gun's sights seen from the eyes (Player/FirstPersonBody.held's sights share, true
+	           first person only: the right shoulder forward under the gun for the right hand);
+	           the other players' waists stay (BodyRules.waist).
 	  shuffle  `turnRate` is the local body's turn rate (smoothed), for CharacterAnimator's
 	           idle-turn shuffle (BodyRules.shuffle).
 
@@ -39,6 +43,7 @@ local PlayerSync = require(Shared.Net.PlayerSync)
 
 local BodyRules = require(script.Parent.BodyRules)
 local CameraRig = require(script.Parent.CameraRig)
+local FirstPersonBody = require(script.Parent.FirstPersonBody)
 local MovementController = require(script.Parent.MovementController)
 local RemotePlayers = require(script.Parent.RemotePlayers)
 
@@ -316,8 +321,8 @@ end
 
 --[[
 	Draws `twist`'s body facing `yaw` (upright or not) this frame: the legs from its feet (walked
-	backwards as `replicated` says when known: another player's), the waist from `lead` and
-	`freelook` (BodyRules.waist).
+	backwards as `replicated` says when known: another player's), the waist from `lead`,
+	`freelook` and the `sights` share (BodyRules.waist).
 ]]
 local function pose(
 	twist: Twist,
@@ -325,6 +330,7 @@ local function pose(
 	upright: boolean,
 	lead: number,
 	freelook: number,
+	sights: number,
 	dt: number,
 	replicated: boolean?
 )
@@ -334,15 +340,11 @@ local function pose(
 		local vx, vz = twist.vx, twist.vz
 		local speed = math.sqrt(vx * vx + vz * vz)
 		local angle = BodyRules.moveAngle(vx, vz, yaw)
-		legs, backwards = BodyRules.legs(angle, speed, twist.backwards)
-		if replicated ~= nil and speed >= BodyRules.MOVING then
-			backwards = replicated
-			legs = BodyRules.fold(angle, backwards)
-		end
+		legs, backwards = BodyRules.remoteLegs(angle, speed, twist.backwards, replicated)
 	end
 	twist.backwards = backwards
 	twist.legYaw = towards(twist.legYaw, legs, LEGS_SECONDS, dt)
-	local waist = if upright then BodyRules.waist(lead, twist.legYaw, freelook) else 0
+	local waist = if upright then BodyRules.waist(lead, twist.legYaw, freelook, sights) else 0
 	twist.waistYaw = towards(twist.waistYaw, waist, WAIST_SECONDS, dt)
 	if twist.rigged then
 		setYaw(twist.left, twist.legYaw)
@@ -400,12 +402,19 @@ local function step(dt: number)
 			local upright = view.tilt < UPRIGHT and not state.swimming and not (state.climbing and not state.onGround)
 			move(twist, view.feetX, view.feetZ, dt)
 			-- (The upper body leads only while the rig turns the body after the aim.)
-			local lead, freelook = 0, 0
+			local lead, freelook, sights = 0, 0, 0
 			if CameraRig.active() and not CameraRig.holding() then
 				lead = BodyRules.wrap(CameraRig.aimYaw() - view.yaw)
 				freelook = CameraRig.freelookOffset()
 			end
-			pose(twist, view.yaw, upright, lead, freelook, dt, nil)
+			-- (A gun's sights seen from the eyes blade the upper body: Player/HeldItems' share.)
+			if FirstPersonBody.trueFirstPerson() then
+				local held = FirstPersonBody.held()
+				if held.kind == "firearm" then
+					sights = held.sightsShare
+				end
+			end
+			pose(twist, view.yaw, upright, lead, freelook, sights, dt, nil)
 			localBackwards = twist.backwards
 		end
 	end
@@ -418,7 +427,7 @@ local function step(dt: number)
 			local twist = twistFor(other, body, true)
 			local upright = remote.tilt < UPRIGHT and not bit32.btest(remote.flags, CLIMBING)
 			move(twist, remote.x, remote.z, dt)
-			pose(twist, remote.yaw, upright, 0, 0, dt, reversed(twist))
+			pose(twist, remote.yaw, upright, 0, 0, 0, dt, reversed(twist))
 		end
 	end
 

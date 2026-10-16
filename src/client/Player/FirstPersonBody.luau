@@ -10,32 +10,48 @@
 	              while Player/CameraRig places the camera (`active`) and the player is not a
 	              spectator: every object a character is drawn with (SpectatorRules.HIDDEN_CLASSES,
 	              listed once and again when the character's descendants change) gets
-	              FirstPersonRules.hidden's value for its role (`roleOf`: the head, what is worn on
-	              it, the arms, the rest) in the rig's view, written only when it differs (the
-	              controller's fade is undone the same frame). Third person hides only what is within
-	              Config.Camera.NearClear of the camera; first person and the sights also the head
-	              and what is worn on it (rigid and layered accessories alike), and a scope's view
-	              the arms; First-Person Body off (or an R6 body) hides it all, for Minecraft's hand
-	              (Player/HeldItems' first-person view). A dead body is drawn as in third person
-	              while it tips over (the camera holds it). Player/SpectatorView (Camera + 3) raises
-	              what this wrote for spectating and a body gone after death; spectators and a
-	              player spectating someone (the rig inactive) are left to it and to Roblox's
-	              camera, everything this hid given back first. `hides(part)` and
-	              `hidesHeadWorn()` tell Player/EquipmentLooks which drawn pieces go with them.
+	              FirstPersonRules.hidden's value for its role (`roleOf`: the head and what is on it
+	              or on the root part (a burning player's Fire), what is worn on the head, the arms,
+	              the rest) in the rig's view, written only when it differs (the controller's fade is
+	              undone the same frame; with the controller held off, a write per change).
+	              Third person hides only what the camera's near plane would cut in view
+	              (FirstPersonRules.clips: the camera's NearPlaneZ, CLIP_MARGIN and CAMERA_SLACK; a
+	              camera pulled into the head, a tall body's chest under a camera looking down);
+	              first person and the sights also the head and what is worn on it (rigid and
+	              layered accessories alike), and a scope's view the arms; First-Person Body off (or
+	              an R6 body) hides it all, for Minecraft's hand (Player/HeldItems' first-person
+	              view). An arm (its upper and lower arm, its hand and what is joined to them) is
+	              shown or hidden whole: hidden where the near plane would cut any of it in view, so
+	              a hand is never drawn without its arm. A dead body
+	              is drawn as in third person while it tips over (the camera holds it).
+	              Player/SpectatorView (Camera + 3) raises what this wrote for spectating and a body
+	              gone after death; spectators and a player spectating someone (the rig inactive)
+	              are left to it and to Roblox's camera, everything this hid given back first.
+	              `hides(part)` and `hidesHeadWorn()` tell Player/EquipmentLooks which drawn pieces
+	              go with them. In true first person the arms are settled again at Camera + 7
+	              (`settleArms`, Player/HeldItems), where they were just posed, with the final camera
+	              (the bob, the sway) and this frame's scope: a scope hides the arms in the frame it
+	              hides the gun.
 	  Held item   Player/HeldItems places the world model of what the local player holds in the
 	              camera's space (`trueFirstPerson`), pushes what it holds (`setHeld`: the kind, a
 	              scope's view, the sights' share) and then puts the hands on it (`poseArms`).
 	  Arms        two-bone IK on the R15 shoulders, elbows and wrists (FirstPersonRules.twoBone,
 	              the lengths from the joints' own C0 and C1, so scaled bodies work; the elbow
-	              down and out: FirstPersonRules.POLE), written to the Motor6Ds' C0 with the
-	              animation's Transform taken out, in the render step that draws the frame: the
-	              Animator's Transform read there is the one that frame renders, so the hand lands
-	              exactly on the item (IKControl solves in the animation step from targets set a
-	              step earlier, a frame behind the camera: the hands would trail the item). The
-	              hand turns with the grip so the palm wraps it; a grip out of reach is held where
-	              the arm gets to (`reach`: Player/HeldItems moves the item there, a gun along the
-	              view axis only, and poses again). `release` puts the joints back (Player/
-	              WeaponPoses poses them in third person). R6 bodies get no IK.
+	              down and out, FirstPersonRules.POLE, and away from the camera, POLE_AWAY), written
+	              to the Motor6Ds' C0 with the animation's Transform taken out, in the render step
+	              that draws the frame: the Animator's Transform read there is the one that frame
+	              renders, so the hand lands exactly on the item (IKControl solves in the animation
+	              step from targets set a step earlier, a frame behind the camera: the hands would
+	              trail the item). The hand turns with the grip so the palm wraps it; a grip out of
+	              reach is held where the arm gets to (`reach`: Player/HeldItems moves a tool or a
+	              block there). A gun never moves off its sight line: `gripSlide` says how far it
+	              slides along the view towards the eyes for the right hand to take it, and
+	              `foreHold` where a long gun's left hand takes the fore end (slid back along the
+	              barrel towards the right hand until in reach; none: the animation has the arm);
+	              `armClips` whether an arm holding a grip would be cut by the near plane (then it
+	              lets go instead of being hidden).
+	              `release` puts the joints back (Player/WeaponPoses poses them in third person).
+	              R6 bodies get no IK.
 
 	Nothing is created per frame (the lists are rebuilt only when the character changes).
 	Requires only Player/CameraRig, Player/FirstPersonRules, Player/SpectatorRules and Shared:
@@ -85,15 +101,116 @@ local started = false
 local enabled = Config.Camera.FirstPersonBody
 local held: HeldState = { kind = "empty", scoped = false, sightsShare = 0 }
 
+--[[ The near plane ]]
+
+--[[
+	The camera's near view for FirstPersonRules.clips: how deep it is (the near plane's distance and
+	CLIP_MARGIN, studs) and the tangents of its edges (across, up; CLIP_WIDEN wider).
+]]
+function FirstPersonBody.nearView(camera: Camera): (number, number, number)
+	local depth = math.abs(camera.NearPlaneZ) + FirstPersonRules.CLIP_MARGIN
+	local ty = math.tan(math.rad(camera.FieldOfView) / 2) * FirstPersonRules.CLIP_WIDEN
+	local size = camera.ViewportSize
+	local tx = if size.Y > 0 then ty * size.X / size.Y else ty * 2
+	return depth, tx, ty
+end
+
+--[[
+	Would the near plane of a camera at `view` (its near view: `nearView`'s depth and edges) cut a
+	box of `size` at `frame` (world) where it sees it?
+]]
+function FirstPersonBody.clipped(
+	view: CFrame,
+	frame: CFrame,
+	size: Vector3,
+	depth: number,
+	tx: number,
+	ty: number
+): boolean
+	-- (Its bounding ball first: most boxes are far from the near view, no turn worked out.)
+	if (frame.Position - view.Position).Magnitude > depth * math.sqrt(1 + tx * tx + ty * ty) + size.Magnitude / 2 then
+		return false
+	end
+	local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = view:ToObjectSpace(frame):GetComponents()
+	local hx, hy, hz = size.X / 2, size.Y / 2, size.Z / 2
+	return FirstPersonRules.clips(
+		x,
+		y,
+		z,
+		r00 * hx,
+		r10 * hx,
+		r20 * hx,
+		r01 * hy,
+		r11 * hy,
+		r21 * hy,
+		r02 * hz,
+		r12 * hz,
+		r22 * hz,
+		depth,
+		tx,
+		ty
+	)
+end
+
+--[[ Arms (their joints; the IK is below) ]]
+
+-- A joint of an arm: its Motor6D, its Part0's rig attachment (its own C0, also after the body was
+-- scaled) and its C0 as found (without one).
+type Joint = { motor: Motor6D, attachment: Attachment?, base: CFrame }
+
+type Arm = {
+	shoulder: Joint,
+	elbow: Joint,
+	wrist: Joint,
+	upper: BasePart,
+	lower: BasePart,
+	hand: BasePart,
+	grip: Attachment?,
+	-- +1 right, -1 left.
+	side: number,
+	posed: boolean,
+	-- Where the posed parts are (world; while `posed`).
+	upperAt: CFrame,
+	lowerAt: CFrame,
+	handAt: CFrame,
+}
+
+type Rig = { character: Model, torso: BasePart, right: Arm, left: Arm }
+
+local rig: Rig? = nil
+
+-- Where `part` is drawn: as the IK posed it this frame, else its own frame.
+local function frameOf(part: BasePart): CFrame
+	local arms = rig
+	if arms then
+		for side = 1, 2 do
+			local arm = if side == 1 then arms.right else arms.left
+			if arm.posed then
+				if part == arm.upper then
+					return arm.upperAt
+				elseif part == arm.lower then
+					return arm.lowerAt
+				elseif part == arm.hand then
+					return arm.handAt
+				end
+			end
+		end
+	end
+	return part.CFrame
+end
+
 --[[ Visibility ]]
 
--- The local character's objects: each with the part it is drawn with and its role; listed again
--- when `dirty` (a descendant came or went). `r15`: an R15 body (IK, the body drawn).
+-- The local character's objects: each with the part it is drawn with, its role and its arm's side
+-- (FirstPersonRules.armSide), and the arms' objects; listed again when `dirty` (a descendant came
+-- or went). `r15`: an R15 body (IK, the body drawn).
 type Cover = {
 	character: Model,
 	objects: { Instance },
 	parts: { BasePart },
 	roles: { FirstPersonRules.Role },
+	sides: { number },
+	arms: { number },
 	r15: boolean,
 	dirty: boolean,
 	connections: { RBXScriptConnection },
@@ -104,6 +221,7 @@ local cover: Cover? = nil
 -- whether it is true first person (the body ON, R15, alive, first person or the sights).
 local writing = false
 local shownView: FirstPersonRules.View = "third"
+local shownBody = false
 local trueFirstPerson = false
 -- The character's parts hidden by this module now (`hides`), written when it changes.
 local hiding: { [Instance]: boolean } = setmetatable({}, { __mode = "k" }) :: any
@@ -183,6 +301,8 @@ local function list(made: Cover)
 	table.clear(made.objects)
 	table.clear(made.parts)
 	table.clear(made.roles)
+	table.clear(made.sides)
+	table.clear(made.arms)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	made.r15 = humanoid ~= nil and humanoid.RigType == Enum.HumanoidRigType.R15
 	local headAttachments: { [string]: boolean } = {}
@@ -196,7 +316,7 @@ local function list(made: Cover)
 	end
 	local infos: { [Instance]: FirstPersonRules.AccessoryInfo } = {}
 	for _, object in character:GetDescendants() do
-		if hideable(object) and object.Name ~= "HumanoidRootPart" then
+		if hideable(object) and object.Name ~= FirstPersonRules.ROOT_PART then
 			local part = partOf(object)
 			-- (A Tool's parts are its own: Roblox's camera leaves them alone too.)
 			if part and part:FindFirstAncestorWhichIsA("Tool") == nil then
@@ -210,9 +330,16 @@ local function list(made: Cover)
 					end
 					info = known
 				end
+				local role = FirstPersonRules.roleOf(part.Name, info, headAttachments)
 				table.insert(made.objects, object)
 				table.insert(made.parts, part)
-				table.insert(made.roles, FirstPersonRules.roleOf(part.Name, info, headAttachments))
+				table.insert(made.roles, role)
+				local side = 0
+				if role == "arm" then
+					side = FirstPersonRules.armSide(if info then info.joinedTo else part.Name)
+					table.insert(made.arms, #made.objects)
+				end
+				table.insert(made.sides, side)
 			end
 		end
 	end
@@ -238,6 +365,8 @@ local function coverOf(character: Model): Cover
 			objects = {},
 			parts = {},
 			roles = {},
+			sides = {},
+			arms = {},
 			r15 = false,
 			dirty = true,
 			connections = {},
@@ -276,6 +405,53 @@ local function stop()
 	table.clear(hiding)
 end
 
+--[[
+	Which arms the near plane of `camera` cuts in view (right, left): any of an arm's objects (its
+	parts where they are drawn, `frameOf`; what is joined to them), when the rules need to know.
+]]
+local function armsNear(
+	current: Cover,
+	camera: Camera,
+	view: FirstPersonRules.View,
+	bodyOn: boolean,
+	scoped: boolean
+): (boolean, boolean)
+	if not FirstPersonRules.needsNear("arm", view, bodyOn, scoped) then
+		return false, false
+	end
+	local eye = camera.CFrame
+	local depth, tx, ty = FirstPersonBody.nearView(camera)
+	local right, left = false, false
+	local parts, sides = current.parts, current.sides
+	for _, i in current.arms do
+		local side = sides[i]
+		if (side == 1 and not right) or (side == -1 and not left) then
+			local part = parts[i]
+			if FirstPersonBody.clipped(eye, frameOf(part), part.Size, depth, tx, ty) then
+				if side == 1 then
+					right = true
+				else
+					left = true
+				end
+			end
+		end
+	end
+	return right, left
+end
+
+-- Writes object `i`'s hiding (`hide`), when it differs.
+local function show(current: Cover, i: number, hide: boolean)
+	local object = current.objects[i]
+	local want = if hide then 1 else 0
+	if transparencyOf(object) ~= want then
+		setTransparency(object, want)
+	end
+	local part = current.parts[i]
+	if object == part and hiding[part] ~= hide then
+		hiding[part] = hide
+	end
+end
+
 local function step()
 	local player = Players.LocalPlayer
 	local character = player.Character
@@ -301,32 +477,34 @@ local function step()
 	local bodyOn = enabled and current.r15
 	trueFirstPerson = alive and bodyOn and view ~= "third"
 	shownView = view
+	shownBody = bodyOn
 	writing = true
 	local scoped = trueFirstPerson and held.scoped
-	local eye = camera.CFrame.Position
-	local margin = FirstPersonRules.NEAR_CLEAR
+	local eye = camera.CFrame
+	local rightNear, leftNear = armsNear(current, camera, view, bodyOn, scoped)
+	-- (The rest is not settled again at + 7: a little more depth for the view bob and the sway
+	-- still to move the camera.)
+	local depth, tx, ty = FirstPersonBody.nearView(camera)
+	depth += FirstPersonRules.CAMERA_SLACK
+	local eyeAt = eye.Position
+	local reach = depth * math.sqrt(1 + tx * tx + ty * ty)
 	local roles: { FirstPersonRules.Role } = current.roles
-	local parts = current.parts
-	for i, object in current.objects do
+	local parts, sides = current.parts, current.sides
+	for i in current.objects do
 		local role: FirstPersonRules.Role = roles[i]
-		local part = parts[i]
 		local near = false
-		if FirstPersonRules.needsNear(role, view, bodyOn, scoped) then
+		if role == "arm" then
+			local side = sides[i]
+			near = (side == 1 and rightNear) or (side == -1 and leftNear)
+		elseif FirstPersonRules.needsNear(role, view, bodyOn, scoped) then
 			-- (Its bounding ball first: most parts are far from the camera, no CFrame read.)
+			local part = parts[i]
 			local size = part.Size
-			if (part.Position - eye).Magnitude <= size.Magnitude / 2 + margin then
-				local at = part.CFrame:PointToObjectSpace(eye)
-				near = FirstPersonRules.nearBox(at.X, at.Y, at.Z, size.X / 2, size.Y / 2, size.Z / 2, margin)
+			if (part.Position - eyeAt).Magnitude <= reach + size.Magnitude / 2 then
+				near = FirstPersonBody.clipped(eye, part.CFrame, size, depth, tx, ty)
 			end
 		end
-		local hide = FirstPersonRules.hidden(role, view, bodyOn, scoped, near)
-		local want = if hide then 1 else 0
-		if transparencyOf(object) ~= want then
-			setTransparency(object, want)
-		end
-		if object == part and hiding[part] ~= hide then
-			hiding[part] = hide
-		end
+		show(current, i, FirstPersonRules.hidden(role, view, bodyOn, scoped, near))
 	end
 end
 
@@ -386,26 +564,28 @@ function FirstPersonBody.held(): HeldState
 	return held
 end
 
+--[[
+	The arms shown or hidden again where Player/HeldItems just posed them (Camera + 7, after
+	`setHeld`), in true first person: `camera` as this frame draws it (after the view bob and the
+	sway) and this frame's scope, so the arms hide and show in the frame the gun does.
+]]
+function FirstPersonBody.settleArms(camera: Camera)
+	local current = cover
+	if current == nil or not (writing and trueFirstPerson) then
+		return
+	end
+	local scoped = held.scoped
+	local rightNear, leftNear = armsNear(current, camera, shownView, shownBody, scoped)
+	local sides = current.sides
+	for _, i in current.arms do
+		local side = sides[i]
+		local near = (side == 1 and rightNear) or (side == -1 and leftNear)
+		show(current, i, FirstPersonRules.hidden("arm", shownView, shownBody, scoped, near))
+	end
+end
+
 --[[ Arms ]]
 
--- A joint of an arm: its Motor6D, its Part0's rig attachment (its own C0, also after the body was
--- scaled) and its C0 as found (without one).
-type Joint = { motor: Motor6D, attachment: Attachment?, base: CFrame }
-
-type Arm = {
-	shoulder: Joint,
-	elbow: Joint,
-	wrist: Joint,
-	hand: BasePart,
-	grip: Attachment?,
-	-- +1 right, -1 left.
-	side: number,
-	posed: boolean,
-}
-
-type Rig = { character: Model, torso: BasePart, right: Arm, left: Arm }
-
-local rig: Rig? = nil
 -- How far the right hand's grip got from where it was sent (`reach`).
 local miss = Vector3.zero
 
@@ -425,7 +605,14 @@ local function armOf(character: Model, prefix: string, side: number): Arm?
 	local upper = character:FindFirstChild(prefix .. "UpperArm")
 	local lower = character:FindFirstChild(prefix .. "LowerArm")
 	local hand = character:FindFirstChild(prefix .. "Hand")
-	if hand == nil or not hand:IsA("BasePart") then
+	if
+		hand == nil
+		or not hand:IsA("BasePart")
+		or upper == nil
+		or not upper:IsA("BasePart")
+		or lower == nil
+		or not lower:IsA("BasePart")
+	then
 		return nil
 	end
 	local shoulder = jointOf(upper, prefix .. "Shoulder")
@@ -439,10 +626,15 @@ local function armOf(character: Model, prefix: string, side: number): Arm?
 		shoulder = shoulder,
 		elbow = elbow,
 		wrist = wrist,
+		upper = upper,
+		lower = lower,
 		hand = hand,
 		grip = if found and found:IsA("Attachment") then found else nil,
 		side = side,
 		posed = false,
+		upperAt = CFrame.identity,
+		lowerAt = CFrame.identity,
+		handAt = CFrame.identity,
 	}
 end
 
@@ -514,29 +706,47 @@ local function boneFrame(from: Vector3, dir: Vector3, hinge: Vector3, turn: CFra
 end
 
 --[[
-	Puts `arm`'s hand on `target` (a grip's world frame), `weight` of the way from the animation
-	(1: on it). Returns where its grip got to (world).
+	`arm`'s reach for a grip at `target` (world): its shoulder (world), where its wrist goes for the
+	hand to hold the grip (world), the hand's turn, the hand's grip point (its own space) and the
+	bones' lengths (shoulder to elbow, elbow to wrist).
 ]]
-local function pose(arm: Arm, torso: BasePart, target: CFrame, weight: number): Vector3
+local function reachOf(arm: Arm, torso: BasePart, target: CFrame): (Vector3, Vector3, CFrame, Vector3, number, number)
 	local shoulder, elbow, wrist = arm.shoulder, arm.elbow, arm.wrist
-	local shoulderC0, elbowC0, wristC0 = baseOf(shoulder), baseOf(elbow), baseOf(wrist)
-	local shoulderC1, elbowC1, wristC1 = shoulder.motor.C1, elbow.motor.C1, wrist.motor.C1
-	local torsoFrame = torso.CFrame
-	-- The bones (each part's space): shoulder to elbow, elbow to wrist.
-	local upperBone = elbowC0.Position - shoulderC1.Position
-	local lowerBone = wristC0.Position - elbowC1.Position
-	local a, b = upperBone.Magnitude, lowerBone.Magnitude
-	if a < STRAIGHT or b < STRAIGHT then
-		return target.Position
-	end
-	-- The hand on the grip: where its wrist joint goes.
+	local upperBone = baseOf(elbow).Position - shoulder.motor.C1.Position
+	local lowerBone = baseOf(wrist).Position - elbow.motor.C1.Position
 	local handTurn = target.Rotation * HAND_TURN
 	local grip = arm.grip
 	local gripAt = if grip and grip.Parent ~= nil then grip.Position else Vector3.new(0, -arm.hand.Size.Y / 2, 0)
-	local wristAt = target.Position + handTurn:VectorToWorldSpace(wristC1.Position - gripAt)
-	local s = torsoFrame * shoulderC0.Position
+	local wristAt = target.Position + handTurn:VectorToWorldSpace(wrist.motor.C1.Position - gripAt)
+	local s = torso.CFrame * baseOf(shoulder).Position
+	return s, wristAt, handTurn, gripAt, upperBone.Magnitude, lowerBone.Magnitude
+end
+
+--[[
+	The IK for `arm`'s hand on `target` (a grip's world frame), its elbow away from a camera at
+	`eye` (nil: down and out only): the upper arm's, the lower arm's and the hand's world frames and
+	the hand's grip point (its own space); nil for an arm without bones.
+]]
+local function solve(arm: Arm, torso: BasePart, target: CFrame, eye: Vector3?): (CFrame?, CFrame, CFrame, Vector3)
+	local shoulder, elbow, wrist = arm.shoulder, arm.elbow, arm.wrist
+	local elbowC0, wristC0 = baseOf(elbow), baseOf(wrist)
+	local shoulderC1, elbowC1, wristC1 = shoulder.motor.C1, elbow.motor.C1, wrist.motor.C1
+	-- The bones (each part's space): shoulder to elbow, elbow to wrist.
+	local upperBone = elbowC0.Position - shoulderC1.Position
+	local lowerBone = wristC0.Position - elbowC1.Position
+	local s, wristAt, handTurn, gripAt, a, b = reachOf(arm, torso, target)
+	if a < STRAIGHT or b < STRAIGHT then
+		return nil, target, target, gripAt
+	end
+	-- The elbow's pole: down and out (the torso's axes), and away from the camera.
 	local poleOffset = FirstPersonRules.POLE
-	local p = s + torsoFrame:VectorToWorldSpace(Vector3.new(poleOffset[1] * arm.side, poleOffset[2], -poleOffset[3]))
+	local p = s + torso.CFrame:VectorToWorldSpace(Vector3.new(poleOffset[1] * arm.side, poleOffset[2], -poleOffset[3]))
+	if eye then
+		local away = s - eye
+		if away.Magnitude > STRAIGHT then
+			p += away.Unit * FirstPersonRules.POLE_AWAY
+		end
+	end
 	local ex, ey, ez, _, rx, ry, rz =
 		FirstPersonRules.twoBone(s.X, s.Y, s.Z, wristAt.X, wristAt.Y, wristAt.Z, p.X, p.Y, p.Z, a, b)
 	local e = Vector3.new(ex, ey, ez)
@@ -563,41 +773,65 @@ local function pose(arm: Arm, torso: BasePart, target: CFrame, weight: number): 
 	lowerHinge = if lowerHinge.Magnitude > STRAIGHT then lowerHinge.Unit else hinge
 	local lower = boneFrame(elbowAt, down, lowerHinge, boneTurn(lowerBone.Unit), elbowC1.Position)
 	local hand = CFrame.new(lower * wristC0.Position) * handTurn * CFrame.new(-wristC1.Position)
-	local shoulderIk = torsoFrame:Inverse() * upper * shoulderC1 * shoulder.motor.Transform:Inverse()
-	local elbowIk = upper:Inverse() * lower * elbowC1 * elbow.motor.Transform:Inverse()
-	local wristIk = lower:Inverse() * hand * wristC1 * wrist.motor.Transform:Inverse()
+	return upper, lower, hand, gripAt
+end
+
+--[[
+	Puts `arm`'s hand on `target` (a grip's world frame), `weight` of the way from the animation
+	(1: on it), its elbow away from a camera at `eye` (`solve`). Returns where its grip got to
+	(world).
+]]
+local function pose(arm: Arm, torso: BasePart, target: CFrame, weight: number, eye: Vector3?): Vector3
+	local upper, lower, hand, gripAt = solve(arm, torso, target, eye)
+	if upper == nil then
+		return target.Position
+	end
+	local shoulder, elbow, wrist = arm.shoulder, arm.elbow, arm.wrist
+	local shoulderC1, elbowC1, wristC1 = shoulder.motor.C1, elbow.motor.C1, wrist.motor.C1
+	local torsoFrame = torso.CFrame
+	local shoulderT, elbowT, wristT = shoulder.motor.Transform, elbow.motor.Transform, wrist.motor.Transform
+	local shoulderIk = torsoFrame:Inverse() * upper * shoulderC1 * shoulderT:Inverse()
+	local elbowIk = upper:Inverse() * lower * elbowC1 * elbowT:Inverse()
+	local wristIk = lower:Inverse() * hand * wristC1 * wristT:Inverse()
 	if weight < 1 then
-		shoulderIk = shoulderC0:Lerp(shoulderIk, weight)
-		elbowIk = elbowC0:Lerp(elbowIk, weight)
-		wristIk = wristC0:Lerp(wristIk, weight)
+		shoulderIk = baseOf(shoulder):Lerp(shoulderIk, weight)
+		elbowIk = baseOf(elbow):Lerp(elbowIk, weight)
+		wristIk = baseOf(wrist):Lerp(wristIk, weight)
+		-- (Where the weighted joints put the parts.)
+		upper = torsoFrame * shoulderIk * shoulderT * shoulderC1:Inverse()
+		lower = upper * elbowIk * elbowT * elbowC1:Inverse()
+		hand = lower * wristIk * wristT * wristC1:Inverse()
 	end
 	shoulder.motor.C0 = shoulderIk
 	elbow.motor.C0 = elbowIk
 	wrist.motor.C0 = wristIk
 	arm.posed = true
+	arm.upperAt, arm.lowerAt, arm.handAt = upper, lower, hand
 	return hand * gripAt
 end
 
 --[[
 	Puts the local character's hands on the held item (right on `right`, left on `left`: world
 	CFrames of the grips; nil leaves that arm to the animation), by two-bone IK on the shoulders,
-	elbows and wrists (C0 only), right after Player/HeldItems placed the item this frame.
+	elbows and wrists (C0 only), right after Player/HeldItems placed the item this frame; the
+	elbows away from a camera at `eye` (nil: down and out only).
 ]]
-function FirstPersonBody.poseArms(character: Model, right: CFrame?, left: CFrame?)
-	FirstPersonBody.poseArmsWeighted(character, right, left, 1, 1)
+function FirstPersonBody.poseArms(character: Model, right: CFrame?, left: CFrame?, eye: Vector3?)
+	FirstPersonBody.poseArmsWeighted(character, right, left, 1, 1, eye)
 end
 
 --[[
 	`poseArms`, each arm `weight` of the way from the animation to the grip (0..1: a punch eases in
-	and out). A right grip out of reach is held where the arm gets to (`reach`), and the left grip
-	moves with it (the item follows the right hand).
+	and out, a hand lets go of a gun out of reach). A right grip out of reach is held where the arm
+	gets to (`reach`), and the left grip moves with it (the item follows the right hand).
 ]]
 function FirstPersonBody.poseArmsWeighted(
 	character: Model,
 	right: CFrame?,
 	left: CFrame?,
 	rightWeight: number,
-	leftWeight: number
+	leftWeight: number,
+	eye: Vector3?
 )
 	miss = Vector3.zero
 	local arms = rigOf(character)
@@ -605,7 +839,7 @@ function FirstPersonBody.poseArmsWeighted(
 		return
 	end
 	if right and rightWeight > 0 then
-		local got = pose(arms.right, arms.torso, right, math.min(rightWeight, 1))
+		local got = pose(arms.right, arms.torso, right, math.min(rightWeight, 1), eye)
 		if rightWeight >= 1 then
 			miss = got - right.Position
 		end
@@ -614,15 +848,104 @@ function FirstPersonBody.poseArmsWeighted(
 	end
 	if left and leftWeight > 0 then
 		local moved = if miss.Magnitude > 0 then left + miss else left
-		pose(arms.left, arms.torso, moved, math.min(leftWeight, 1))
+		pose(arms.left, arms.torso, moved, math.min(leftWeight, 1), eye)
 	else
 		letGo(arms.left)
 	end
 end
 
 --[[
+	How far (studs) a gun whose right grip is at `right` (world) slides along `along` (a unit
+	direction: the view's, towards the eyes) for the right wrist to come within `share` of the arm's
+	reach (FirstPersonRules.slide; FirstPersonRules.COMFORT, or 1 for anywhere in reach), at most
+	`limit`; nil when it can't (or no R15 arms).
+]]
+function FirstPersonBody.gripSlide(
+	character: Model,
+	right: CFrame,
+	along: Vector3,
+	limit: number,
+	share: number
+): number?
+	local arms = rigOf(character)
+	if arms == nil then
+		return nil
+	end
+	local s, w, _, _, a, b = reachOf(arms.right, arms.torso, right)
+	return FirstPersonRules.slide(s.X, s.Y, s.Z, w.X, w.Y, w.Z, along.X, along.Y, along.Z, (a + b) * share, limit)
+end
+
+--[[
+	Where the left hand takes a long gun whose fore end is at `fore` (the grip's world frame) and
+	whose right grip is at `grip` (world): `fore` slid back along the barrel towards `grip` until the
+	left wrist is in reach (comfortably, else at all), at least FirstPersonRules.FORE_MIN ahead of
+	`grip`; nil when it can't (the animation keeps the left arm), or no R15 arms.
+]]
+function FirstPersonBody.foreHold(character: Model, fore: CFrame, grip: Vector3): CFrame?
+	local arms = rigOf(character)
+	if arms == nil then
+		return nil
+	end
+	local back = grip - fore.Position
+	local span = back.Magnitude
+	if span < STRAIGHT then
+		return nil
+	end
+	local d = back / span
+	local limit = math.max(span - FirstPersonRules.FORE_MIN, 0)
+	local s, w, _, _, a, b = reachOf(arms.left, arms.torso, fore)
+	local t = FirstPersonRules.slide(
+		s.X,
+		s.Y,
+		s.Z,
+		w.X,
+		w.Y,
+		w.Z,
+		d.X,
+		d.Y,
+		d.Z,
+		(a + b) * FirstPersonRules.COMFORT,
+		limit
+	) or FirstPersonRules.slide(s.X, s.Y, s.Z, w.X, w.Y, w.Z, d.X, d.Y, d.Z, a + b, limit)
+	if t == nil then
+		return nil
+	end
+	return fore + d * t
+end
+
+--[[
+	Would the near plane of `camera` cut the right (`right`) or the left arm in view, its hand on
+	`target` (the grip's world frame; the elbow away from the camera, as `poseArms` puts it)? With
+	`slack` (studs) less of the near view counts: a hand holding on keeps holding a little further
+	in than it takes hold. False without R15 arms.
+]]
+function FirstPersonBody.armClips(
+	character: Model,
+	right: boolean,
+	target: CFrame,
+	camera: Camera,
+	slack: number
+): boolean
+	local arms = rigOf(character)
+	if arms == nil then
+		return false
+	end
+	local arm = if right then arms.right else arms.left
+	local view = camera.CFrame
+	local upper, lower, hand = solve(arm, arms.torso, target, view.Position)
+	if upper == nil then
+		return false
+	end
+	local depth, tx, ty = FirstPersonBody.nearView(camera)
+	depth = math.max(depth - slack, 0)
+	return FirstPersonBody.clipped(view, upper, arm.upper.Size, depth, tx, ty)
+		or FirstPersonBody.clipped(view, lower, arm.lower.Size, depth, tx, ty)
+		or FirstPersonBody.clipped(view, hand, arm.hand.Size, depth, tx, ty)
+end
+
+--[[
 	How far the right hand's grip got from where `poseArms` sent it this frame (studs, world; zero
-	when it reached it): Player/HeldItems moves the item by it, so the hand never leaves the item.
+	when it reached it): Player/HeldItems moves a tool or a block by it, so the hand never leaves it.
 ]]
 function FirstPersonBody.reach(): Vector3
 	return miss

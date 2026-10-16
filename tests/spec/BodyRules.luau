@@ -1,9 +1,11 @@
 --[[
 	The body's motion in the manner of DayZ, through its pure rules (Player/BodyRules): the way the
 	feet move from the body's facing; the legs' twist (none ahead, 45 degrees on a pure strafe,
-	folded walking backwards, none standing) and the hysteresis about a pure strafe; the idle-turn
-	shuffle's threshold and cap; the waist's idle lead and freelook share (the neck's 70, then the
-	waist's 30: DayZ's 100 in first person), and their clamps; easing; the numbers; and that the
+	folded walking backwards, none standing) and the hysteresis about a pure strafe; another
+	player's legs by their feet, the replicated walk only near a strafe (no 45 degree snap on a
+	stale way of walking); the idle-turn shuffle's threshold, cap and stop (no flicker); the waist's
+	idle lead and freelook share (the neck's 70, then the waist's 30: DayZ's 100 in first person),
+	the sights' blade, and their clamps; easing; the numbers; and that the
 	rules are pure and Player/BodyTwist keeps to its joints (the hips and the waist, never a
 	Transform) at Camera + 6, out of the animator's require cycle.
 ]]
@@ -187,6 +189,77 @@ return function(t, shared, require, _server, client)
 		end
 	end)
 
+	t.test("body rules: the shuffle starts over one rate and stops under a lower one (no flicker)", function()
+		local shuffle = BodyRules.shuffle
+		t.ok(BodyRules.SHUFFLE_STOP < BodyRules.SHUFFLE_RATE, "a band between them")
+		t.eq(BodyRules.SHUFFLE_STOP, 0.8)
+		-- A turn rate hovering about 1.2 rad/s, as a mouse turn does: once started, the shuffle goes
+		-- on until the rate falls under SHUFFLE_STOP; the walk (replicated Play/Stop) never flips on
+		-- the hover.
+		local shuffling = false
+		local flips = 0
+		for i = 1, 200 do
+			local rate = 1.2 + 0.15 * math.sin(i * 0.7)
+			local speed = shuffle(rate, 0, true, shuffling)
+			if (speed > 0) ~= shuffling then
+				flips += 1
+			end
+			shuffling = speed > 0
+		end
+		t.eq(flips, 1, "on once, never off while hovering")
+		t.eq(shuffle(1.0, 0, true, true), 0.25, "still shuffling at 1.0 once started")
+		t.eq(shuffle(1.0, 0, true, false), 0, "not started at 1.0")
+		t.eq(shuffle(0.8, 0, true, true), 0, "stops at SHUFFLE_STOP")
+		t.eq(shuffle(1.0, 0, false, true), 0, "not in the air")
+		t.eq(shuffle(1.0, 0.5, true, true), 0, "not while moving")
+		t.near(shuffle(1.3, 0, true), 0.25 * 1.3, EPS, "without the state: as before")
+	end)
+
+	t.test("body rules: another player's legs trust the feet; the replicated walk only near a strafe", function()
+		local remoteLegs = BodyRules.remoteLegs
+		local tiny = rad(0.5)
+		-- Straight ahead with a stale "backwards" (the tracks behind the feet after S -> W), and
+		-- straight back with a stale "forwards": the legs stay straight, whatever the noise's side.
+		for _, case in
+			{
+				{ tiny, true },
+				{ -tiny, true },
+				{ math.pi - tiny, false },
+				{ -math.pi + tiny, false },
+			}
+		do
+			local legs, backwards = remoteLegs(case[1], WALK, false, case[2])
+			t.ok(math.abs(legs) < rad(1), `straight legs at {math.deg(case[1])} deg, stale {case[2]}`)
+			t.eq(backwards, math.abs(case[1]) > math.pi / 2, "the feet's own way")
+		end
+		-- Outside the strafe band the feet decide (with the hysteresis), whatever is replicated.
+		for _, deg in { 0, 30, 60, 69, -45, 111, 135, 180, -150 } do
+			for _, replicated in { true, false } do
+				local a, ab = remoteLegs(rad(deg), WALK, false, replicated)
+				local b, bb = BodyRules.legs(rad(deg), WALK, false)
+				t.near(a, b, EPS, `{deg} deg: the feet's twist`)
+				t.eq(ab, bb, `{deg} deg: the feet's way`)
+			end
+		end
+		-- Within BACK_BAND of a pure strafe the replicated way settles it (the feet can't tell).
+		for _, deg in { 75, 90, 105, -80, -100 } do
+			local legs, backwards = remoteLegs(rad(deg), WALK, false, true)
+			t.eq(backwards, true, `{deg}: replicated backwards`)
+			t.near(legs, BodyRules.fold(rad(deg), true), EPS)
+			legs, backwards = remoteLegs(rad(deg), WALK, true, false)
+			t.eq(backwards, false, `{deg}: replicated forwards`)
+			t.near(legs, BodyRules.fold(rad(deg), false), EPS)
+		end
+		-- Unknown (no track seen): the feet with their hysteresis. Standing: nothing.
+		local a, ab = remoteLegs(rad(100), WALK, true, nil)
+		local b, bb = BodyRules.legs(rad(100), WALK, true)
+		t.near(a, b, EPS)
+		t.eq(ab, bb)
+		local still, back = remoteLegs(rad(90), 0.1, false, true)
+		t.eq(still, 0)
+		t.eq(back, false)
+	end)
+
 	t.test("body rules: the waist leads an idle turn and takes freelook beyond the neck", function()
 		local waist = BodyRules.waist
 		t.eq(waist(0, 0, 0), 0)
@@ -209,6 +282,14 @@ return function(t, shared, require, _server, client)
 		-- The legs' twist stays at the hips: the pelvis turns none of it (PELVIS 0).
 		t.eq(waist(0, rad(45), 0), 0)
 		t.near(waist(rad(20), rad(-45), 0), rad(20), EPS)
+		-- A gun's sights seen from the eyes blade the upper body left (the right shoulder forward),
+		-- eased with the sights' share.
+		t.near(BodyRules.BLADE, rad(40), EPS)
+		t.near(waist(0, 0, 0, 1), BodyRules.BLADE, EPS, "in the sights")
+		t.near(waist(0, 0, 0, 0.5), BodyRules.BLADE / 2, EPS, "half way there")
+		t.eq(waist(0, 0, 0, 0), 0)
+		t.near(waist(0, 0, 0, 3), BodyRules.BLADE, EPS, "at most the blade")
+		t.near(waist(rad(10), 0, 0, 1), rad(10) + BodyRules.BLADE, EPS, "on top of the lead")
 	end)
 
 	t.test("body rules: easing is exponential and frame-rate independent", function()

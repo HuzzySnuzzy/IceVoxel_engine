@@ -12,14 +12,21 @@
 	           walks backwards (`walkSign`: the walk and run animations played reversed). `legs`
 	           is `legYaw` with BACK_BAND of hysteresis each side of the strafe, so a strafe
 	           wavering about 90 degrees doesn't flip the legs and the walk every frame; `fold`
-	           the twist for a way of walking already known (another player's replicated walk).
+	           the twist for a way of walking already known. Another player's legs
+	           (`remoteLegs`) go by their drawn feet too; their replicated walk (played reversed
+	           or not) only settles a move within BACK_BAND of a pure strafe, where the feet
+	           can't tell (the two come with different delays: a stale way of walking must not
+	           twist a straight walk 45 degrees).
 	  Shuffle  turning on the spot faster than SHUFFLE_RATE on the ground plays the walk at
-	           SHUFFLE_SHARE of the turn rate, at most SHUFFLE_MAX (`shuffle`): the feet step
-	           round, as DayZ's turn steps.
+	           SHUFFLE_SHARE of the turn rate, at most SHUFFLE_MAX, until the turn slows below
+	           SHUFFLE_STOP (`shuffle`): the feet step round, as DayZ's turn steps, without
+	           flickering between idle and walk about one rate.
 	  Waist    the upper body's yaw on the pelvis (`waist`): the local idle lead (the aim ahead of
 	           the lagging body, at most LEAD) plus freelook's yaw beyond the neck's NECK_YAW (at
 	           most WAIST_YAW: `neck` is the head's share), less the pelvis' share of the legs'
-	           twist (PELVIS, none: the hips turn the legs alone, the pelvis stays with the root).
+	           twist (PELVIS, none: the hips turn the legs alone, the pelvis stays with the root),
+	           plus BLADE in a gun's sights seen from the eyes (a rifleman's bladed stance, eased
+	           with the sights: the right shoulder forward under the gun, for the right hand).
 	`ease` brings a drawn angle to its target exponentially (frame-rate independent).
 ]]
 
@@ -40,9 +47,10 @@ BodyRules.LEG_YAW = math.rad(45)
 BodyRules.MOVING = Config.Camera.IdleTurnSpeed
 -- The hysteresis each side of a pure strafe before the walk turns round (`legs`).
 BodyRules.BACK_BAND = math.rad(20)
--- An idle turn faster than this (radians a second) shuffles, the walk played at this share of the
--- rate, at most this fast.
+-- An idle turn faster than this (radians a second) shuffles, until it slows below SHUFFLE_STOP,
+-- the walk played at this share of the rate, at most this fast.
 BodyRules.SHUFFLE_RATE = 1.2
+BodyRules.SHUFFLE_STOP = 0.8
 BodyRules.SHUFFLE_SHARE = 0.25
 BodyRules.SHUFFLE_MAX = 0.6
 -- The upper body's lead on an idle turn at most; the neck's share of freelook's yaw, then the
@@ -53,6 +61,9 @@ BodyRules.WAIST_YAW = math.rad(30)
 -- The share of the legs' twist the pelvis takes (turned back at the waist): none, the hips turn
 -- the legs alone (the pelvis hangs on the root, LowerTorso.Root, Player/MovementController's).
 BodyRules.PELVIS = 0
+-- The upper body's turn to the left in a gun's sights seen from the eyes (a rifleman's bladed
+-- stance): the right shoulder comes forward under the gun, so the right hand takes its grip.
+BodyRules.BLADE = math.rad(40)
 
 -- `angle` into (-pi, pi].
 local function wrap(angle: number): number
@@ -116,13 +127,37 @@ function BodyRules.legs(angle: number, speed: number, wasBackwards: boolean): (n
 end
 
 --[[
+	`legs` for another player, whose walk's replicated playback says which way it walks
+	(`replicated`: true reversed, false forwards, nil unknown). Their drawn feet and their tracks
+	come over different channels with different delays, so the feet decide; the replicated way only
+	settles a move within BACK_BAND of a pure strafe, where the feet can't tell.
+]]
+function BodyRules.remoteLegs(
+	angle: number,
+	speed: number,
+	wasBackwards: boolean,
+	replicated: boolean?
+): (number, boolean)
+	local legs, backwards = BodyRules.legs(angle, speed, wasBackwards)
+	if replicated == nil or speed < BodyRules.MOVING then
+		return legs, backwards
+	end
+	if math.abs(math.abs(wrap(angle)) - HALF) <= BodyRules.BACK_BAND then
+		return BodyRules.fold(angle, replicated), replicated
+	end
+	return legs, backwards
+end
+
+--[[
 	The walk's playback speed for a body turning on the spot at `turnRate` (radians a second, either
 	way), moving at `speed` (blocks a second): SHUFFLE_SHARE x the rate, at most SHUFFLE_MAX, when it
-	is on the ground, standing (under MOVING) and turning faster than SHUFFLE_RATE; else 0.
+	is on the ground, standing (under MOVING) and turning faster than SHUFFLE_RATE, or still faster
+	than SHUFFLE_STOP while it shuffles already (`shuffling`); else 0.
 ]]
-function BodyRules.shuffle(turnRate: number, speed: number, onGround: boolean): number
+function BodyRules.shuffle(turnRate: number, speed: number, onGround: boolean, shuffling: boolean?): number
 	local rate = math.abs(turnRate)
-	if not onGround or speed >= BodyRules.MOVING or rate <= BodyRules.SHUFFLE_RATE then
+	local from = if shuffling then BodyRules.SHUFFLE_STOP else BodyRules.SHUFFLE_RATE
+	if not onGround or speed >= BodyRules.MOVING or rate <= from then
 		return 0
 	end
 	return math.min(BodyRules.SHUFFLE_SHARE * rate, BodyRules.SHUFFLE_MAX)
@@ -136,13 +171,14 @@ end
 --[[
 	The upper body's yaw at the waist (radians, positive left): the idle `lead` (the aim's yaw less
 	the body's) within LEAD, plus freelook's yaw (`freelookYaw`) beyond the neck's share, within
-	WAIST_YAW, less PELVIS x the legs' twist (`legYaw`).
+	WAIST_YAW, less PELVIS x the legs' twist (`legYaw`), plus `sights` (0..1, nil none) of BLADE.
 ]]
-function BodyRules.waist(lead: number, legYaw: number, freelookYaw: number): number
+function BodyRules.waist(lead: number, legYaw: number, freelookYaw: number, sights: number?): number
 	local beyond = freelookYaw - BodyRules.neck(freelookYaw)
 	return math.clamp(wrap(lead), -BodyRules.LEAD, BodyRules.LEAD)
 		+ math.clamp(beyond, -BodyRules.WAIST_YAW, BodyRules.WAIST_YAW)
 		- BodyRules.PELVIS * legYaw
+		+ BodyRules.BLADE * math.clamp(sights or 0, 0, 1)
 end
 
 --[[

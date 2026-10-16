@@ -26,7 +26,8 @@
 	                 face away from the move),
 	  idle turn      standing on the ground and turning faster than BodyRules.SHUFFLE_RATE (the
 	                 body's turn rate, BodyTwist.turnRate) plays the walk at BodyRules.shuffle's
-	                 speed, so the feet step round.
+	                 speed, so the feet step round, until the turn slows below
+	                 BodyRules.SHUFFLE_STOP (no flicker between idle and walk about one rate).
 
 	Tracks played on the owning client by the Humanoid's Animator replicate to other players, with
 	their speed: others see the backpedal and the shuffle too (BodyTwist folds their legs by it).
@@ -194,6 +195,7 @@ function CharacterAnimator.start()
 		end
 
 		local mode = "idle"
+		local shuffling = false
 		connection = RunService.RenderStepped:Connect(function()
 			local view = MovementController.current
 			if view == nil or hum.Health <= 0 then
@@ -233,14 +235,16 @@ function CharacterAnimator.start()
 			else
 				nextMode = if os.clock() - view.jumpedAt < JUMP_TIME then "jump" else "fall"
 			end
-			-- Turning on the spot shuffles the feet (BodyRules.shuffle; the walk at its speed).
+			-- Turning on the spot shuffles the feet (BodyRules.shuffle, on above one rate and off
+			-- below a lower one; the walk at its speed).
 			local shuffle = 0
 			if nextMode == "idle" and state.onGround and not view.frozen then
-				shuffle = BodyRules.shuffle(BodyTwist.turnRate(), view.speed, true)
+				shuffle = BodyRules.shuffle(BodyTwist.turnRate(), view.speed, true, shuffling)
 				if shuffle > 0 then
 					nextMode = "walk"
 				end
 			end
+			shuffling = shuffle > 0
 			mode = nextMode
 			local fade = FADES[mode]
 			-- Backpedalling plays the walk and the run backwards (BodyTwist's legs).

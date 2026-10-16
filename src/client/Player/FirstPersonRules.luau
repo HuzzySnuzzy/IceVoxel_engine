@@ -5,23 +5,32 @@
 	them). Studs and the camera's space (x right, y up, ahead negative), radians unless named.
 
 	  Roles      `roleOf` sorts what a character is drawn with: the head ("head": the Head and what
-	             is on it, the face), what is worn on it ("headWorn": an Accessory joined to the
+	             is on it, the face; and what is on the root part, ROOT_PART, as a burning
+	             player's Fire, kept out of the eyes), what is worn on it ("headWorn": an Accessory joined to the
 	             Head by its weld, or whose handle's attachment is one of the Head's (Hat, Hair,
 	             FaceFront, FaceCenter), or whose AccessoryType is worn on the head or the neck:
 	             rigid accessories, welded, and layered ones (WrapLayer), sorted by type or
 	             attachment alike), the arms ("arm": the upper and lower arms and hands, and
 	             accessories joined to them) and the rest ("body": the torso, the legs, back,
 	             waist, front and shoulder accessories, layered clothing).
-	  Hidden     `hidden`: third person hides only what is near the camera (`nearBox`: within
-	             Config.Camera.NearClear of its box, for the near plane, tall bodies and a camera
-	             pulled into the head); first person and the sights also hide the head and what
-	             is worn on it, and a scope's view the arms (DayZ's HideClothing); First-Person
-	             Body off hides everything (Minecraft's hand instead).
+	  Hidden     `hidden`: third person hides only what is near the camera; first person and the
+	             sights also hide the head and what is worn on it, and a scope's view the arms
+	             (DayZ's HideClothing); First-Person Body off hides everything (Minecraft's hand
+	             instead). Near: where the camera's near plane would cut a part in view (`clips`:
+	             the near plane's distance and CLIP_MARGIN, CAMERA_SLACK more for what the view bob
+	             and the sway still move, within the view's edges): a camera in the head, a tall
+	             body's chest under a camera looking down; never a part beside or behind the camera
+	             out of view. An arm is one piece (`armSide`): near when any of it is, so a hand is
+	             never drawn without its arm.
 	  Arms       `twoBone`: the elbow of a two-bone arm (upper `a`, lower `b`) reaching from the
 	             shoulder to a wrist target, bent towards a pole point; out of reach it goes
 	             straight towards the target, and says where the wrist got. `POLE`: the elbow down,
-	             out and back from the shoulder. `leftHand`: which holds put the left hand on the
-	             item (a long gun's fore end, a melee guard's handle).
+	             out and back from the shoulder (and POLE_AWAY from the camera). `leftHand`: which
+	             holds put the left hand on the item (a long gun's fore end, a melee guard's
+	             handle). `slide`: how far a target moves along a line to come in reach (a gun
+	             along the view towards the eyes, its sight line kept, until the right wrist is
+	             within COMFORT of the arm's reach, its grip GRIP_CLEAR past the near plane; a long
+	             gun's left hand back along the barrel, at least FORE_MIN ahead of the right).
 	  Poses      `handPose`: where the right hand holds a tool, a block (or any other item) or a
 	             bare fist in the camera's space (the grip's frame: looking where the fingers
 	             point, up the thumb), with the swing's dip (Player/HeldItems.swing: sin(pi t)),
@@ -30,11 +39,6 @@
 	  Walls      `obstruction`: an item reaching into a block is pulled back (up to PULL studs),
 	             then its far end lifted (up to LIFT): DayZ's weapon lift.
 ]]
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Config = require(Shared.Config)
 
 local AimRules = require(script.Parent.AimRules)
 
@@ -55,8 +59,6 @@ export type AccessoryInfo = {
 
 local FirstPersonRules = {}
 
--- A body part this close to the camera (studs from its box) is hidden, in every view.
-FirstPersonRules.NEAR_CLEAR = Config.Camera.NearClear
 -- The arms' parts (R15, then R6's).
 FirstPersonRules.ARM_PARTS = table.freeze({
 	LeftUpperArm = true,
@@ -77,8 +79,26 @@ FirstPersonRules.HEAD_KINDS = table.freeze({
 	Eyelash = true,
 	Neck = true,
 } :: { [string]: boolean })
--- The elbow's pole from the shoulder, in the torso's axes (studs: out to the arm's side, up, ahead).
+-- The body part effects on the root are in (a burning player's Fire): drawn like the head.
+FirstPersonRules.ROOT_PART = "HumanoidRootPart"
+-- The elbow's pole from the shoulder, in the torso's axes (studs: out to the arm's side, up, ahead),
+-- and how much more the elbow leans away from the camera (`pose`'s share of the camera's side).
 FirstPersonRules.POLE = table.freeze({ 0.5, -1, -0.3 })
+FirstPersonRules.POLE_AWAY = 1
+-- The arms and a held gun are hidden where the camera's near plane would cut them in view
+-- (`clips`): within this far past it (studs), the view's edges taken this much wider.
+FirstPersonRules.CLIP_MARGIN = 0.05
+FirstPersonRules.CLIP_WIDEN = 1.1
+-- What is decided before the view bob and the sway still move the camera (Player/
+-- FirstPersonBody's Camera + 2; the arms are settled again after them) takes this much more depth.
+FirstPersonRules.CAMERA_SLACK = 0.1
+-- A gun held from the eyes slides along the view towards them until the right wrist is within this
+-- share of the arm's reach (`slide`; the sight line stays on the view's axis), its grip at least
+-- GRIP_CLEAR studs past the near plane's margin; a long gun's left hand slides back along the
+-- barrel until in reach, at least FORE_MIN studs ahead of the right (else the animation has it).
+FirstPersonRules.COMFORT = 0.95
+FirstPersonRules.GRIP_CLEAR = 0.45
+FirstPersonRules.FORE_MIN = 0.3
 -- An item reaching into a wall: pulled back up to this far (studs), then lifted up to LIFT over
 -- LIFT_SPAN more studs of overlap.
 FirstPersonRules.PULL = 0.8
@@ -124,7 +144,7 @@ function FirstPersonRules.roleOf(
 	headAttachments: { [string]: boolean }
 ): Role
 	if accessory == nil then
-		if partName == "Head" then
+		if partName == "Head" or partName == FirstPersonRules.ROOT_PART then
 			return "head"
 		elseif FirstPersonRules.ARM_PARTS[partName] then
 			return "arm"
@@ -155,7 +175,8 @@ end
 
 --[[
 	Is an object of `role` hidden in `view`, with First-Person Body `bodyOn` (and an R15 body), a
-	scope's view (`scoped`) and its part `near` the camera (`nearBox`)? See the header.
+	scope's view (`scoped`) and its part `near` the camera (cut by the near plane in view:
+	`clips`; for an arm, any of its side)? See the header.
 ]]
 function FirstPersonRules.hidden(role: Role, view: View, bodyOn: boolean, scoped: boolean, near: boolean): boolean
 	if view == "third" then
@@ -185,22 +206,154 @@ function FirstPersonRules.needsNear(role: Role, view: View, bodyOn: boolean, sco
 end
 
 --[[
-	Is the camera at (cx, cy, cz) within `margin` studs of a box of half sizes (hx, hy, hz) (the
-	camera in the box's own space: its centre at the origin)? On the margin counts.
+	Which arm a body part (or the part an accessory is joined to) is of: 1 the right, -1 the left, 0
+	none. An arm is shown or hidden whole (`hidden`'s `near` for an arm is its side's: a hand is
+	never drawn without its arm).
 ]]
-function FirstPersonRules.nearBox(
+function FirstPersonRules.armSide(partName: string?): number
+	if partName == nil or not FirstPersonRules.ARM_PARTS[partName] then
+		return 0
+	end
+	return if string.sub(partName, 1, 5) == "Right" then 1 else -1
+end
+
+-- Is the interval [lo, hi] apart from the box's projection on the axis (nx, ny, nz)?
+local function apart(
+	nx: number,
+	ny: number,
+	nz: number,
 	cx: number,
 	cy: number,
 	cz: number,
-	hx: number,
-	hy: number,
-	hz: number,
-	margin: number
+	ux: number,
+	uy: number,
+	uz: number,
+	vx: number,
+	vy: number,
+	vz: number,
+	wx: number,
+	wy: number,
+	wz: number,
+	lo: number,
+	hi: number
 ): boolean
-	local dx = math.max(math.abs(cx) - hx, 0)
-	local dy = math.max(math.abs(cy) - hy, 0)
-	local dz = math.max(math.abs(cz) - hz, 0)
-	return dx * dx + dy * dy + dz * dz <= margin * margin
+	local centre = cx * nx + cy * ny + cz * nz
+	local radius = math.abs(ux * nx + uy * ny + uz * nz)
+		+ math.abs(vx * nx + vy * ny + vz * nz)
+		+ math.abs(wx * nx + wy * ny + wz * nz)
+	return centre - radius > hi or centre + radius < lo
+end
+
+-- The near view's projection on the axis (nx, ny, nz): its apex at the camera and its far corners
+-- (+-tx depth, +-ty depth, -depth).
+local function nearSpan(nx: number, ny: number, nz: number, depth: number, tx: number, ty: number): (number, number)
+	local middle = -depth * nz
+	local spread = depth * (tx * math.abs(nx) + ty * math.abs(ny))
+	return math.min(0, middle - spread), math.max(0, middle + spread)
+end
+
+--[[
+	Would the camera's near plane cut a box where the view sees it? The box in the camera's space
+	(x right, y up, looking down -z): its centre (cx, cy, cz) and its half axes u, v, w (each its
+	half size along one of its own axes). The near view: the view's first `depth` studs (the near
+	plane's distance and CLIP_MARGIN), within its edges (tx, ty: the tangents of half the field of
+	view across and up, CLIP_WIDEN wider). Separating axes (the box's three faces, the near view's
+	five, and across each pair of their edges): exact, so a box beside or behind the camera
+	outside the view doesn't count.
+]]
+function FirstPersonRules.clips(
+	cx: number,
+	cy: number,
+	cz: number,
+	ux: number,
+	uy: number,
+	uz: number,
+	vx: number,
+	vy: number,
+	vz: number,
+	wx: number,
+	wy: number,
+	wz: number,
+	depth: number,
+	tx: number,
+	ty: number
+): boolean
+	-- The near view's faces: its far end (and the camera's plane), then its four sides.
+	local lo, hi = -depth, 0
+	if apart(0, 0, 1, cx, cy, cz, ux, uy, uz, vx, vy, vz, wx, wy, wz, lo, hi) then
+		return false
+	end
+	for i = 1, 4 do
+		local nx = if i == 1 then 1 elseif i == 2 then -1 else 0
+		local ny = if i == 3 then 1 elseif i == 4 then -1 else 0
+		local nz = if i <= 2 then tx else ty
+		lo, hi = nearSpan(nx, ny, nz, depth, tx, ty)
+		if apart(nx, ny, nz, cx, cy, cz, ux, uy, uz, vx, vy, vz, wx, wy, wz, lo, hi) then
+			return false
+		end
+	end
+	for i = 1, 3 do
+		local ex = if i == 1 then ux elseif i == 2 then vx else wx
+		local ey = if i == 1 then uy elseif i == 2 then vy else wy
+		local ez = if i == 1 then uz elseif i == 2 then vz else wz
+		-- The box's own face, then across each of its edges and each of the near view's (its four
+		-- sides' from the camera, its far end's two).
+		lo, hi = nearSpan(ex, ey, ez, depth, tx, ty)
+		if apart(ex, ey, ez, cx, cy, cz, ux, uy, uz, vx, vy, vz, wx, wy, wz, lo, hi) then
+			return false
+		end
+		for j = 1, 6 do
+			local fx = if j == 5 then 1 elseif j == 6 then 0 elseif j % 2 == 1 then tx else -tx
+			local fy = if j == 5 then 0 elseif j == 6 then 1 elseif j <= 2 then ty else -ty
+			local fz = if j >= 5 then 0 else -1
+			local nx, ny, nz = ey * fz - ez * fy, ez * fx - ex * fz, ex * fy - ey * fx
+			if nx * nx + ny * ny + nz * nz > EPSILON then
+				lo, hi = nearSpan(nx, ny, nz, depth, tx, ty)
+				if apart(nx, ny, nz, cx, cy, cz, ux, uy, uz, vx, vy, vz, wx, wy, wz, lo, hi) then
+					return false
+				end
+			end
+		end
+	end
+	return true
+end
+
+--[[
+	How far (studs) a target at W (wx, wy, wz) moves along the unit direction (dx, dy, dz) to come
+	within `reach` of S (sx, sy, sz): the least t in [0, limit] that does (0: within already); nil
+	when none does. A gun sliding towards the eyes until the right wrist is in reach, a long gun's
+	left hand sliding back along the barrel.
+]]
+function FirstPersonRules.slide(
+	sx: number,
+	sy: number,
+	sz: number,
+	wx: number,
+	wy: number,
+	wz: number,
+	dx: number,
+	dy: number,
+	dz: number,
+	reach: number,
+	limit: number
+): number?
+	local px, py, pz = wx - sx, wy - sy, wz - sz
+	local c = px * px + py * py + pz * pz - reach * reach
+	if c <= 0 then
+		return 0
+	end
+	local b = px * dx + py * dy + pz * dz
+	local disc = b * b - c
+	if disc < 0 then
+		return nil
+	end
+	local root = math.sqrt(disc)
+	if -b + root < 0 then
+		-- (In reach only behind where it starts.)
+		return nil
+	end
+	local t = math.max(-b - root, 0)
+	return if t <= limit then t else nil
 end
 
 --[[ Arms ]]

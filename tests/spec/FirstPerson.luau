@@ -7,11 +7,20 @@
 	(its lengths kept, the elbow on the pole's side, straight towards a target out of reach, no NaN
 	at the shoulder or with the pole on the line), which holds take the left hand, the hand poses
 	(at rest, at the bottom of the swing, the melee guard's shift, and off the crosshair at 70
-	degrees), the wall's pull and lift; and the glue's arm (Player/FirstPersonBody.poseArms on a
-	fake R15 arm under Lune: the grip lands on its target whatever the animation does, the hand
-	turned with it, a target out of reach reported, the joints put back, R6 left alone).
+	degrees), the wall's pull and lift; an arm's side, the near plane's cut (`clips`: exact against a
+	sampled near view; in view only), a target's slide into reach; and the glue (Player/
+	FirstPersonBody under Lune): the arm's IK (the grip lands on its target whatever the animation
+	does, the hand turned with it, a target out of reach reported, the joints put back, R6 left
+	alone, the elbow away from the camera); its render step on a fake character (an arm hidden whole
+	where the near plane cuts it in view and only then, a Fire on the root part kept from the eyes,
+	a scope hiding the arms at Camera + 7 in the gun's frame); the hands on every gun (the real
+	Rendering/ItemModels grips, Player/HeldItems' hold at rest: hip and sights, +-60 degrees, short
+	and tall bodies, PC's and a phone's near planes: the sight line kept on the view's axis, a hand
+	either on its grip with no part of its arm cut, or the animation's; the right hand holding every
+	gun looking level or down on PC); and the muzzle placed with the frame's camera.
 ]]
 
+local fs = require("@lune/fs")
 local roblox = require("@lune/roblox")
 local FakeClient = require("../lib/FakeClient")
 
@@ -156,23 +165,9 @@ return function(t, shared, require, _server, client)
 		t.eq(hidden("arm", "sights", true, false, false), false, "iron sights: the arms on the gun")
 		t.eq(hidden("body", "first", true, false, false), false, "first person: the chest, legs and feet")
 		t.eq(hidden("body", "first", false, false, false), true, "the setting off: Minecraft's hand")
-		t.eq(Rules.NEAR_CLEAR, Config.Camera.NearClear)
-	end)
-
-	t.test("first person: the near box's edges", function()
-		local nearBox = Rules.nearBox
-		t.eq(nearBox(0, 0, 0, 0.5, 0.5, 0.5, 0.6), true, "inside")
-		t.eq(nearBox(1, 0, 0, 0.5, 0.5, 0.5, 0.5), true, "on the margin")
-		t.eq(nearBox(1.0001, 0, 0, 0.5, 0.5, 0.5, 0.5), false, "just past it")
-		t.eq(nearBox(0, -1, 0, 0.5, 0.5, 0.5, 0.5), true, "below, on the margin")
-		t.eq(nearBox(1.09, 0, 0, 0.5, 0.5, 0.5, 0.6), true, "within NearClear")
-		t.eq(nearBox(0, 0, 1.2, 0.5, 0.5, 0.5, 0.6), false, "behind, past it")
-		-- A corner: the distance to the corner, not to each face.
-		local d = 0.6 / math.sqrt(3)
-		t.eq(nearBox(0.5 + d * 0.99, 0.5 + d * 0.99, 0.5 + d * 0.99, 0.5, 0.5, 0.5, 0.6), true, "near a corner")
-		t.eq(nearBox(0.5 + d * 1.01, 0.5 + d * 1.01, 0.5 + d * 1.01, 0.5, 0.5, 0.5, 0.6), false, "past a corner")
-		t.eq(nearBox(-0.9, 0.2, -0.3, 0.5, 0.5, 0.5, 0.6), true, "mirrored")
-		t.eq(nearBox(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0), true, "a zero margin: the surface counts")
+		-- Near: the near plane's distance and a margin (more for what the bob and the sway move).
+		t.eq(Rules.CLIP_MARGIN, 0.05)
+		t.eq(Rules.CAMERA_SLACK, 0.1)
 	end)
 
 	--[[ Arms ]]
@@ -401,6 +396,8 @@ return function(t, shared, require, _server, client)
 			Motor6D = { "Motor6D", "JointInstance", "Instance" },
 			Attachment = { "Attachment", "Instance" },
 			Model = { "Model", "Instance" },
+			Humanoid = { "Humanoid", "Instance" },
+			Fire = { "Fire", "Instance" },
 		}
 		function object.IsA(self: any, wanted: string): boolean
 			return table.find(bases[self.ClassName], wanted) ~= nil
@@ -414,6 +411,35 @@ return function(t, shared, require, _server, client)
 				table.insert(list, child)
 			end
 			return list
+		end
+		function object.GetDescendants(self: any): { any }
+			local list = {}
+			local function walk(at: any)
+				for _, child in at.__children do
+					table.insert(list, child)
+					walk(child)
+				end
+			end
+			walk(self)
+			return list
+		end
+		function object.FindFirstChildOfClass(self: any, class: string): any
+			for _, child in self.__children do
+				if child.ClassName == class then
+					return child
+				end
+			end
+			return nil
+		end
+		function object.FindFirstAncestorWhichIsA(self: any, class: string): any
+			local at = self.Parent
+			while at do
+				if at:IsA(class) then
+					return at
+				end
+				at = at.Parent
+			end
+			return nil
 		end
 		return object
 	end
@@ -573,5 +599,541 @@ return function(t, shared, require, _server, client)
 		Body.poseArms(character, CFrame.new(1, 0, -2), nil)
 		t.eq(motor.C0, CFrame.new(1, 0.5, 0), "left alone")
 		t.eq(Body.reach().Magnitude, 0)
+	end)
+
+	--[[ The near plane, an arm whole, what burns on the root ]]
+
+	t.test("first person: an arm is one piece, by its side; what is on the root is kept from the eyes", function()
+		for name in Rules.ARM_PARTS do
+			local side = Rules.armSide(name)
+			t.eq(side, if string.sub(name, 1, 5) == "Right" then 1 else -1, name)
+		end
+		t.eq(Rules.armSide("UpperTorso"), 0)
+		t.eq(Rules.armSide(nil), 0, "an accessory joined to nothing yet")
+		-- A burning player's Fire is in their root part (Rendering/BurningView): drawn like the head,
+		-- so it never rises through the camera from the eyes, and is seen in third person.
+		t.eq(Rules.roleOf("HumanoidRootPart", nil, HEAD), "head", "an effect on the root part")
+		t.eq(Rules.hidden("head", "first", true, false, false), true, "from the eyes: hidden")
+		t.eq(Rules.hidden("head", "third", true, false, false), false, "over the shoulder: drawn")
+	end)
+
+	-- Every point of the near view sampled (`n` a side), whether any is inside the box (camera space:
+	-- centre c, half axes u, v, w).
+	local function sampledInside(
+		c: any,
+		u: any,
+		v: any,
+		w: any,
+		depth: number,
+		tx: number,
+		ty: number,
+		n: number
+	): boolean
+		local frame = CFrame.fromMatrix(c, u.Unit, v.Unit, w.Unit)
+		local hu, hv, hw = u.Magnitude, v.Magnitude, w.Magnitude
+		for k = 0, n do
+			local d = depth * k / n
+			for i = 0, n do
+				for j = 0, n do
+					local p =
+						frame:PointToObjectSpace(Vector3.new((i / n * 2 - 1) * tx * d, (j / n * 2 - 1) * ty * d, -d))
+					if math.abs(p.X) <= hu and math.abs(p.Y) <= hv and math.abs(p.Z) <= hw then
+						return true
+					end
+				end
+			end
+		end
+		return false
+	end
+
+	t.test("first person: the near plane's cut (clips) is exact: in view, never beside or behind", function()
+		local clips = Rules.clips
+		local function box(c: any, size: any, turn: any?): boolean
+			local frame = (turn or CFrame.identity)
+			local u = frame.XVector * size.X / 2
+			local v = frame.YVector * size.Y / 2
+			local w = frame.ZVector * size.Z / 2
+			return clips(c.X, c.Y, c.Z, u.X, u.Y, u.Z, v.X, v.Y, v.Z, w.X, w.Y, w.Z, 0.15, 0.8, 0.45)
+		end
+		local unit = Vector3.new(1, 1, 1)
+		t.eq(box(Vector3.new(0, 0, -0.3), unit), true, "straddling the near plane ahead")
+		t.eq(box(Vector3.new(0, 0, 0), unit), true, "the camera inside it")
+		t.eq(box(Vector3.new(0, 0, -0.7), unit), false, "ahead, past the near view")
+		t.eq(box(Vector3.new(0, 0, 0.6), unit), false, "behind the camera")
+		t.eq(box(Vector3.new(0.75, 0, 0), unit), false, "beside the camera, out of view")
+		t.eq(box(Vector3.new(0, -0.62, -0.1), unit), false, "below it, out of view")
+		t.eq(box(Vector3.new(0, -0.55, -0.1), unit), true, "reaching up into the view")
+		t.eq(box(Vector3.new(0.6, 0, -0.1), unit, CFrame.Angles(0, math.rad(45), 0)), true, "turned, a corner in view")
+		-- Random boxes against a sampled near view: never a miss (a sampled point inside means it
+		-- clips), and where it says it clips, a finer sampling finds the overlap (exact, no false
+		-- alarms but for slivers thinner than the sampling).
+		math.randomseed(2024)
+		local function r(lo: number, hi: number): number
+			return lo + (hi - lo) * math.random()
+		end
+		local alarms, checked, clipping = 0, 0, 0
+		for _ = 1, 400 do
+			local depth, tx, ty = r(0.1, 0.6), r(0.5, 1.5), r(0.4, 1)
+			local c = Vector3.new(r(-1.2, 1.2), r(-1.2, 1.2), r(-1.2, 0.8))
+			local turn = CFrame.Angles(r(-3, 3), r(-3, 3), r(-3, 3))
+			local u = turn.XVector * r(0.05, 0.6)
+			local v = turn.YVector * r(0.05, 0.6)
+			local w = turn.ZVector * r(0.05, 0.6)
+			local said = clips(c.X, c.Y, c.Z, u.X, u.Y, u.Z, v.X, v.Y, v.Z, w.X, w.Y, w.Z, depth, tx, ty)
+			local seen = sampledInside(c, u, v, w, depth, tx, ty, 10)
+			if said then
+				clipping += 1
+			end
+			if seen then
+				t.eq(said, true, "a box the sampling finds in the near view clips")
+			elseif said then
+				checked += 1
+				if not sampledInside(c, u, v, w, depth, tx, ty, 40) then
+					alarms += 1
+				end
+			end
+		end
+		t.ok(clipping > 50 and clipping < 350, `boxes either way ({clipping} of 400 clip)`)
+		t.ok(alarms <= 1, `no false alarms (one sliver allowed): {alarms} of {checked}`)
+	end)
+
+	t.test("first person: a target slides along a line to come in reach (slide)", function()
+		local slide = Rules.slide
+		t.eq(slide(0, 0, 0, 1, 0, 0, 1, 0, 0, 2, 5), 0, "in reach already")
+		-- From 3 ahead, sliding back towards the shoulder: in reach of 2 after 1.
+		t.near(slide(0, 0, 0, 0, 0, -3, 0, 0, 1, 2, 5) :: number, 1, 1e-12, "the least slide")
+		t.eq(slide(0, 0, 0, 0, 0, -3, 0, 0, 1, 2, 0.5), nil, "not within the limit")
+		t.eq(slide(0, 0, 0, 0, 0, -3, 0, 0, -1, 2, 5), nil, "sliding away never comes in reach")
+		t.eq(slide(0, 0, 0, 3, 0, -3, 0, 0, 1, 2, 10), nil, "the line passes out of reach")
+		-- Past a line's nearest point: the first point in reach.
+		local t1 = slide(0, 0, 0, 1, 0, -3, 0, 0, 1, 2, 10) :: number
+		t.near(t1, 3 - math.sqrt(3), 1e-12)
+		t.near(math.sqrt(1 + (t1 - 3) ^ 2), 2, 1e-12, "on the reach")
+	end)
+
+	--[[ The glue's visibility (Player/FirstPersonBody's render step on a fake character) ]]
+
+	-- A camera as Roblox's: its frame, near plane, field of view and viewport.
+	local function cameraAt(frame: any, nearZ: number): any
+		return { CFrame = frame, NearPlaneZ = -nearZ, FieldOfView = 70, ViewportSize = roblox.Vector2.new(1600, 900) }
+	end
+
+	--[[
+		FirstPersonBody with its render step caught, the rig active in `view` (h.view), a local
+		character whose parts sit where a test puts them, the camera at the eyes (0, 5, 0) looking
+		down -Z with PC's near plane.
+	]]
+	local function harness(): any
+		local h: any = { view = "first" }
+		h.camera = cameraAt(CFrame.new(0, 5, 0), 0.1)
+		local character = fake("Model", "Character")
+		local function signal(): any
+			return {
+				Connect = function()
+					return { Disconnect = function() end }
+				end,
+			}
+		end
+		character.DescendantAdded = signal()
+		character.DescendantRemoving = signal()
+		parent(fake("Humanoid", "Humanoid", { RigType = roblox.Enum.HumanoidRigType.R15, Health = 100 }), character)
+		h.character = character
+		function h.part(name: string, at: any, size: any, under: any?): any
+			local p =
+				fake("Part", name, { CFrame = at, Position = at.Position, Size = size, LocalTransparencyModifier = 0 })
+			parent(p, under or character)
+			return p
+		end
+		local player = {
+			Character = character,
+			GetAttribute = function(): any
+				return nil
+			end,
+		}
+		h.Body = FakeClient.loader(shared, require, {
+			["src/client/Player/CameraRig.luau"] = {
+				active = function(): boolean
+					return true
+				end,
+				holding = function(): boolean
+					return false
+				end,
+				view = function(): string
+					return h.view
+				end,
+			},
+		}, {
+			Players = { LocalPlayer = player },
+			RunService = {
+				BindToRenderStep = function(_, _name: string, _priority: number, fn: () -> ())
+					h.step = fn
+				end,
+			},
+		})("src/client/Player/FirstPersonBody.luau")
+		h.Body.start()
+		-- (Roblox's `workspace` for the step, for this test only.)
+		h.env = getfenv(h.Body.start)
+		h.env.workspace = { CurrentCamera = h.camera }
+		function h.done()
+			h.env.workspace = nil
+		end
+		return h
+	end
+
+	t.test("first person: an arm is hidden whole where the near plane cuts it in view, and only then", function()
+		local h = harness()
+		local size = { upper = Vector3.new(1, 1.17, 1), lower = Vector3.new(1, 1.05, 1), hand = Vector3.new(1, 0.3, 1) }
+		h.part("Head", CFrame.new(0, 5, 0.1), Vector3.new(1.2, 1.2, 1.2))
+		local torso = h.part("UpperTorso", CFrame.new(0, 3.4, 0.15), Vector3.new(2, 1.6, 1))
+		-- The right arm: its forearm cut by the near plane in view, its hand well ahead.
+		local rightUpper = h.part("RightUpperArm", CFrame.new(1.5, 3.8, 0.2), size.upper)
+		local rightLower = h.part("RightLowerArm", CFrame.new(0.3, 4.7, -0.3), size.lower)
+		local rightHand = h.part("RightHand", CFrame.new(0.6, 4.0, -2), size.hand)
+		-- The left arm: its upper arm within NearClear of the camera but beside and behind it, out
+		-- of view; its hand ahead.
+		local leftUpper = h.part("LeftUpperArm", CFrame.new(-0.9, 5, 0.4), size.upper)
+		local leftLower = h.part("LeftLowerArm", CFrame.new(-1.2, 4, -0.8), size.lower)
+		local leftHand = h.part("LeftHand", CFrame.new(-0.6, 4, -2), size.hand)
+		h.step()
+		for _, p in { rightUpper, rightLower, rightHand } do
+			t.eq(p.LocalTransparencyModifier, 1, `{p.Name}: the right arm hidden whole (no lone hand)`)
+			t.eq(h.Body.hides(p), true, `{p.Name}: its worn pieces go with it`)
+		end
+		for _, p in { leftUpper, leftLower, leftHand } do
+			t.eq(p.LocalTransparencyModifier, 0, `{p.Name}: the left arm drawn (out of view is never cut)`)
+		end
+		t.eq(torso.LocalTransparencyModifier, 0, "the chest drawn")
+		t.eq(h.character:FindFirstChild("Head").LocalTransparencyModifier, 1, "no head")
+		-- The forearm moved out of the near view: the whole arm comes back.
+		rightLower.CFrame = CFrame.new(1.2, 3.6, -0.6)
+		rightLower.Position = rightLower.CFrame.Position
+		h.step()
+		for _, p in { rightUpper, rightLower, rightHand } do
+			t.eq(p.LocalTransparencyModifier, 0, `{p.Name}: back`)
+		end
+		-- Over the shoulder the same: a cut arm hides whole.
+		h.view = "third"
+		rightLower.CFrame = CFrame.new(0.3, 4.7, -0.3)
+		rightLower.Position = rightLower.CFrame.Position
+		h.step()
+		t.eq(rightHand.LocalTransparencyModifier, 1, "third person: the hand with its cut arm")
+		h.done()
+	end)
+
+	t.test("first person: a tall body's chest close under the eyes is drawn unless the near plane cuts it", function()
+		local h = harness()
+		-- The chest's top 0.3 under the eyes (a tall body; within the old 0.6 of clearance).
+		local chest = h.part("UpperTorso", CFrame.new(0, 3.9, 0.15), Vector3.new(2, 1.6, 1))
+		local legs = h.part("LeftUpperLeg", CFrame.new(-0.5, 2.6, 0.15), Vector3.new(1, 1.2, 1))
+		h.step()
+		t.eq(chest.LocalTransparencyModifier, 0, "looking ahead: the chest drawn")
+		-- Looking 60 degrees down the near plane reaches into it: hidden (the camera rig pushes the
+		-- eyes forward looking down so this rarely happens; Player/CameraRules).
+		h.camera.CFrame = CFrame.new(0, 5, 0) * CFrame.Angles(math.rad(-60), 0, 0)
+		h.step()
+		t.eq(chest.LocalTransparencyModifier, 1, "cut looking down: hidden")
+		t.eq(legs.LocalTransparencyModifier, 0, "the legs drawn")
+		h.done()
+	end)
+
+	t.test(
+		"first person: a fire on the root part is not drawn from the eyes; a scope hides the arms in its frame",
+		function()
+			local h = harness()
+			local root = h.part("HumanoidRootPart", CFrame.new(0, 2.5, 0), Vector3.new(2, 2, 1))
+			local fire = fake("Fire", "Fire", { LocalTransparencyModifier = 0 })
+			parent(fire, root)
+			local hand = h.part("RightHand", CFrame.new(0.6, 4, -2), Vector3.new(1, 0.3, 1))
+			local arm = h.part("RightLowerArm", CFrame.new(1, 3.8, -1.2), Vector3.new(1, 1.05, 1))
+			h.step()
+			t.eq(fire.LocalTransparencyModifier, 1, "the fire from the eyes: hidden")
+			t.eq(root.LocalTransparencyModifier, 0, "the root itself is never touched")
+			t.eq(hand.LocalTransparencyModifier, 0, "the hand drawn")
+			h.view = "third"
+			h.step()
+			t.eq(fire.LocalTransparencyModifier, 0, "over the shoulder: the fire drawn")
+			-- In the sights the gun's scope comes in at Camera + 7 (Player/HeldItems: setHeld, then
+			-- settleArms): the arms hide in that frame, with the gun, not a frame later at + 2.
+			h.view = "sights"
+			h.step()
+			t.eq(hand.LocalTransparencyModifier, 0, "iron sights: the arms on the gun")
+			h.Body.setHeld({ kind = "firearm", scoped = true, sightsShare = 1, long = true, guard = false })
+			h.Body.settleArms(h.camera)
+			t.eq(hand.LocalTransparencyModifier, 1, "scoped at + 7: the hand hidden this frame")
+			t.eq(arm.LocalTransparencyModifier, 1, "its arm too")
+			h.Body.setHeld({ kind = "firearm", scoped = false, sightsShare = 1, long = true, guard = false })
+			h.Body.settleArms(h.camera)
+			t.eq(hand.LocalTransparencyModifier, 0, "out of the scope at + 7: back this frame")
+			h.done()
+		end
+	)
+
+	--[[ The glue's hands on a gun (Player/FirstPersonBody's reach rules, Player/HeldItems' hold) ]]
+
+	-- Both arms on an R15 torso at `torsoFrame` (the spec's arm numbers; `inner` the shoulder's x in
+	-- the upper arm: -0.25, or the arm's inner face -0.5).
+	local function body(torsoFrame: any, inner: number): any
+		local character = fake("Model", "Character")
+		local torso = fake("MeshPart", "UpperTorso", { CFrame = torsoFrame, Size = Vector3.new(2, 1.6, 1) })
+		parent(torso, character)
+		for _, side in { { "Right", 1 }, { "Left", -1 } } do
+			local prefix, s = side[1], side[2]
+			local chain = { torso }
+			local specs = {
+				{
+					"UpperArm",
+					Vector3.new(1, 1.17, 1),
+					"Shoulder",
+					CFrame.new(s, 0.56, 0),
+					CFrame.new(inner * s, 0.42, 0),
+				},
+				{ "LowerArm", Vector3.new(1, 1.05, 1), "Elbow", CFrame.new(0, -0.33, 0), CFrame.new(0, 0.2, 0) },
+				{ "Hand", Vector3.new(1, 0.3, 1), "Wrist", CFrame.new(0, -0.5, 0), CFrame.new(0, 0.125, 0) },
+			}
+			for _, spec in specs do
+				local part0 = chain[#chain]
+				local part1 = fake("MeshPart", prefix .. spec[1], { Size = spec[2] })
+				parent(part1, character)
+				local jointName = prefix .. spec[3]
+				parent(
+					fake("Attachment", jointName .. "RigAttachment", { CFrame = spec[4], Position = spec[4].Position }),
+					part0
+				)
+				parent(
+					fake(
+						"Motor6D",
+						jointName,
+						{ Part0 = part0, Part1 = part1, C0 = spec[4], C1 = spec[5], Transform = CFrame.identity }
+					),
+					part1
+				)
+				table.insert(chain, part1)
+			end
+			local grip = CFrame.new(0, -0.15, 0) * CFrame.Angles(-math.pi / 2, 0, 0)
+			parent(
+				fake("Attachment", prefix .. "GripAttachment", { CFrame = grip, Position = grip.Position }),
+				chain[4]
+			)
+		end
+		return character
+	end
+
+	-- An arm's parts' world frames from its joints (Part1 = Part0 * C0 * Transform * C1^-1).
+	local function armFrames(character: any, prefix: string): { { frame: any, size: any } }
+		local out = {}
+		local frame = character:FindFirstChild("UpperTorso").CFrame
+		for _, pair in { { "UpperArm", "Shoulder" }, { "LowerArm", "Elbow" }, { "Hand", "Wrist" } } do
+			local part = character:FindFirstChild(prefix .. pair[1])
+			local motor = part:FindFirstChild(prefix .. pair[2])
+			frame = frame * motor.C0 * motor.Transform * motor.C1:Inverse()
+			table.insert(out, { frame = frame, size = part.Size })
+		end
+		return out
+	end
+
+	-- Is `prefix`'s arm as the animation has it (every C0 its rig attachment's)?
+	local function released(character: any, prefix: string): boolean
+		local torso = character:FindFirstChild("UpperTorso")
+		local upper = character:FindFirstChild(prefix .. "UpperArm")
+		local lower = character:FindFirstChild(prefix .. "LowerArm")
+		local hand = character:FindFirstChild(prefix .. "Hand")
+		return upper:FindFirstChild(prefix .. "Shoulder").C0
+				== torso:FindFirstChild(prefix .. "ShoulderRigAttachment").CFrame
+			and lower:FindFirstChild(prefix .. "Elbow").C0 == upper:FindFirstChild(prefix .. "ElbowRigAttachment").CFrame
+			and hand:FindFirstChild(prefix .. "Wrist").C0
+				== lower:FindFirstChild(prefix .. "WristRigAttachment").CFrame
+	end
+
+	t.test(
+		"first person: hands on every gun, hip and sights, +-60 degrees, short and tall bodies, PC and phone near planes",
+		function()
+			local Body = loadBody()
+			local ItemModels = FakeClient.loader(shared, require, {}, {})("src/client/Rendering/ItemModels.luau")
+			local Weapons = require(shared.Weapons)
+			local BodyRules = require(client.Player.BodyRules)
+			-- Player/HeldItems' frames: the gun ahead, low right aimed at the centre, and in the sights;
+			-- the right hand's grip and the left's on a fore end.
+			local AHEAD = CFrame.fromMatrix(Vector3.zero, Vector3.new(0, 0, -1), Vector3.yAxis)
+			local hx, hy, hz, hyaw, hpitch = AimRules.hipPose()
+			local HIP_FRAME = CFrame.new(hx, hy, hz) * CFrame.Angles(0, hyaw, 0) * CFrame.Angles(hpitch, 0, 0) * AHEAD
+			local SIGHTS_FRAME = CFrame.new(0, 0, -AimRules.SIGHTS_DEPTH) * AHEAD
+			local GUN_GRIP = CFrame.Angles(0, -math.pi / 2, 0)
+			local c30, s30 = math.cos(math.rad(30)), math.sin(math.rad(30))
+			local FORE_GRIP = CFrame.fromMatrix(
+				Vector3.zero,
+				Vector3.new(0, c30, -s30),
+				Vector3.new(1, 0, 0),
+				Vector3.new(0, -s30, -c30)
+			)
+			local held = { right = {}, left = {} }
+			local cases = 0
+			for _, nearZ in { 0.1, 0.5 } do
+				for _, drop in { 1.1, 0.4 } do
+					for _, inner in { -0.25, -0.5 } do
+						for _, item in Weapons.FIREARMS do
+							local spec = Weapons.firearm(item)
+							local long = AimRules.longGun(spec)
+							local size = ItemModels.firearmSize(item)
+							for _, pose in { "hip", "sights" } do
+								for _, deg in { -60, -30, 0, 30, 60 } do
+									cases += 1
+									local key = `{nearZ} {drop} {pose} {deg}`
+									local pitch = math.rad(deg)
+									-- The body under the eyes as Player/MovementController puts it (the eyes
+									-- FirstForward ahead of its middle, more looking down), the shoulders
+									-- `drop` below them, the chest bladed in the sights (Player/BodyTwist).
+									local push = Config.Camera.FirstForward
+										+ Config.Camera.FirstDownPush * math.max(0, -math.sin(pitch))
+									local blade = if pose == "sights" then BodyRules.BLADE else 0
+									local character =
+										body(CFrame.new(0, -drop - 0.56, push) * CFrame.Angles(0, blade, 0), inner)
+									local view = CFrame.Angles(pitch, 0, 0)
+									local camera = cameraAt(view, nearZ)
+									-- Player/HeldItems.holdGun at rest.
+									local pivot = view
+										* ItemModels.firearmPivot(
+											item,
+											size,
+											pose,
+											if pose == "hip" then HIP_FRAME else SIGHTS_FRAME,
+											""
+										)
+									local axes = ItemModels.firearmAxes(item, pivot)
+									local right = CFrame.new(ItemModels.firearmPoint(item, "", size, pivot, "grip"))
+										* axes
+										* GUN_GRIP
+									local fore = if long
+										then CFrame.new(ItemModels.firearmPoint(item, "", size, pivot, "fore"))
+											* axes
+											* FORE_GRIP
+										else nil
+									local look = view.LookVector
+									local toEye = -look
+									local depth = (right.Position - view.Position):Dot(look)
+									local limit = math.max(depth - Body.nearView(camera) - Rules.GRIP_CLEAR, 0)
+									local want = Body.gripSlide(character, right, toEye, limit, Rules.COMFORT)
+										or Body.gripSlide(character, right, toEye, limit, 1)
+									if want and Body.armClips(character, true, right + toEye * want, camera, 0) then
+										want = nil
+									end
+									local shift = toEye * (want or 0)
+									right += shift
+									local left = nil
+									if fore and want then
+										fore += shift
+										left = Body.foreHold(character, fore, right.Position)
+										if left and Body.armClips(character, false, left, camera, 0) then
+											left = nil
+										end
+									end
+									Body.poseArmsWeighted(
+										character,
+										right,
+										left,
+										if want then 1 else 0,
+										if left then 1 else 0,
+										view.Position
+									)
+									-- The sight picture: the gun moved along the view only (the sights'
+									-- line still on the view's axis).
+									if pose == "sights" then
+										local anchor = (view * SIGHTS_FRAME).Position + shift - view.Position
+										t.near(
+											(anchor - look * anchor:Dot(look)).Magnitude,
+											0,
+											1e-5,
+											`{key}: the sight line on the axis`
+										)
+									end
+									local depthNear, tx, ty = Body.nearView(camera)
+									for _, side in { { "Right", right, want ~= nil }, { "Left", left, left ~= nil } } do
+										local prefix, target, holds = side[1], side[2], side[3]
+										if holds then
+											local frames = armFrames(character, prefix)
+											local got = frames[3].frame * Vector3.new(0, -0.15, 0)
+											t.near(
+												(got - target.Position).Magnitude,
+												0,
+												2e-3,
+												`{key} {prefix}: the hand on its grip`
+											)
+											for _, entry in frames do
+												t.eq(
+													Body.clipped(view, entry.frame, entry.size, depthNear, tx, ty),
+													false,
+													`{key} {prefix}: no part of the holding arm cut by the near plane`
+												)
+											end
+											local count = if prefix == "Right" then held.right else held.left
+											count[key] = (count[key] or 0) + 1
+										else
+											t.ok(
+												released(character, prefix),
+												`{key} {prefix}: not holding, the animation's arm`
+											)
+										end
+									end
+									if left and fore then
+										local ahead = (left.Position - right.Position).Magnitude
+										local span = (fore.Position - right.Position).Magnitude
+										t.ok(
+											ahead >= Rules.FORE_MIN - 1e-6 and ahead <= span + 1e-6,
+											`{key}: the left hand between the right and the fore end`
+										)
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+			t.eq(cases, 2 * 2 * 2 * #Weapons.FIREARMS * 2 * 5)
+			-- Where the hands do hold (PC's near plane): the right hand takes every gun from the hip and
+			-- in the sights looking level or down, a short body's and a tall one's, and at every pitch
+			-- a tall body's.
+			local guns = #Weapons.FIREARMS * 2
+			for _, drop in { 1.1, 0.4 } do
+				for _, pose in { "hip", "sights" } do
+					for _, deg in { -60, -30, 0 } do
+						t.eq(
+							held.right[`0.1 {drop} {pose} {deg}`],
+							guns,
+							`the right hand holds every gun: {drop} {pose} {deg}`
+						)
+					end
+				end
+			end
+			for _, pose in { "hip", "sights" } do
+				for _, deg in { 30, 60 } do
+					t.eq(held.right[`0.1 0.4 {pose} {deg}`], guns, `a tall body holds every gun: {pose} {deg}`)
+				end
+			end
+		end
+	)
+
+	t.test("first person: the elbow goes away from the camera", function()
+		local Body = loadBody()
+		local function elbowFrom(eye: any?): number
+			local character = body(CFrame.new(0, -1.66, 0.15), -0.25)
+			Body.poseArms(character, CFrame.new(0.3, -0.5, -1.1) * CFrame.Angles(0.2, 0.3, 0), nil, eye)
+			local elbow = armFrames(character, "Right")[2].frame * Vector3.new(0, 0.2, 0)
+			return elbow.Magnitude
+		end
+		t.ok(elbowFrom(Vector3.zero) > elbowFrom(nil) + 0.01, "further from the eyes than down and out alone")
+	end)
+
+	t.test("first person: the muzzle of the gun at the eyes is where it is drawn this frame", function()
+		-- Interaction/Firearms fires at Camera + 6, before Player/HeldItems places the gun at + 7:
+		-- the gun is kept in the camera's space and placed with this frame's camera.
+		local held = fs.readFile("src/client/Player/HeldItems.luau")
+		t.ok(
+			string.find(held, "current.relative = view.CFrame:ToObjectSpace(where)", 1, true) ~= nil,
+			"kept in the camera's space"
+		)
+		t.ok(
+			string.find(held, "if relative then workspace.CurrentCamera.CFrame * relative else current.pivot", 1, true)
+				~= nil,
+			"placed with the camera of the frame that asks"
+		)
 	end)
 end
