@@ -1074,17 +1074,20 @@ local Config = {
 		FreelookYaw = 160,
 		FreelookYawFirst = 100,
 		SnapBackSeconds = 0.14,
-		-- Collision with blocks: the gap kept from them, the half width and half height of the near
-		-- plane the boom's five rays cover, and how fast a boom pulled in eases back out (per second,
-		-- as Roblox's Popper).
+		-- Collision with blocks: the gap kept between them and the camera behind the shoulder, and
+		-- how fast a boom pulled in eases back out (per second, as Roblox's Popper). The near plane
+		-- kept out of them is measured from the camera every frame (Player/CameraRules.setLens:
+		-- 0.1 studs ahead on a computer, up to 0.5 on a phone, as wide as the field of view and the
+		-- screen make it).
 		Margin = 0.3,
-		Radius = { 0.45, 0.3 },
 		EaseOut = 6,
 		-- First person: the eye point this far ahead of the hull's eyes, and this much more when
-		-- looking straight down (times the sine of the pitch), so the chest, legs and feet show
-		-- instead of the inside of the neck.
+		-- looking straight down (times the sine of the pitch): past the front of the chest (half a
+		-- torso's depth, 0.5) by 0.3 or more from 60 degrees down, so the chest's edge, the legs and
+		-- the feet show instead of the inside of the neck or the top of the torso. Pulled back where
+		-- a block would cut the near plane.
 		FirstForward = 0.15,
-		FirstDownPush = 0.35,
+		FirstDownPush = 0.75,
 		-- A body part this close to the camera (studs from its box) is hidden, in every view.
 		NearClear = 0.6,
 		-- The body turning to the aim while standing: the smooth time, the most it lags behind

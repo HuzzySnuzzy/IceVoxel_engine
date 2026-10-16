@@ -17,6 +17,7 @@ local SCREEN_KINDS: { [string]: string } = {
 	IceVoxelNukeFlash = "Rendering/ExplosionView: the Nuke's flash over the whole screen",
 	IceVoxelTemperatureOverlay = "Ui/SurvivalHud: frost and heat closing in from the screen's edges",
 	IceVoxelMap = "Map/init: the world map, its backdrop and panel shares of the screen",
+	IceVoxelTouchButtons = "Ui/TouchButtons: the camera's VIEW and LOOK among Roblox's touch buttons, in their pixels",
 }
 
 local function walk(dir: string, out: { string })

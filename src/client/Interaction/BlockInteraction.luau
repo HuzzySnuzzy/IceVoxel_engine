@@ -135,9 +135,18 @@
 	end), a block met sooner is aimed at instead, with its own face, along the eyes' ray, and a mob
 	the eyes can't see is behind cover; the bucket's and the bottle's rays alike. Reach is still
 	measured from the body (a block's centre from the root part, mobs from the eyes), so the server
-	checks what it always did. Minecraft's crosshair shows for a gamepad and for a mouse locked to
-	the centre (CameraRig.locked). While freelooking (CameraRig.freelooking) nothing is aimed at or
-	outlined and presses do nothing (the camera doesn't show where the hands point; releases count).
+	checks what it always did. Minecraft's crosshair shows for a gamepad and, with the DayZ camera,
+	for a mouse locked to the centre (CameraRig.locked; without it, as before, for a gamepad only).
+	While freelooking (CameraRig.freelooking: until the camera is back within 2 degrees of the aim)
+	nothing is aimed at or outlined and presses wait (the camera doesn't show where the hands point;
+	releases count): a press made once Freelook was let go (CameraRig.comingBack) is played as soon
+	as the camera is back, a click as a click, a button still held as a press, so nothing is lost
+	to the swing back; a press while still freelooking still does nothing unless it is held on.
+
+	The frame's work (the aim, the outline, mining, the repeats) is a render step bound right after
+	the camera's last move (RENDER_PRIORITY, docs/ARCHITECTURE's frame table): the camera's ray and
+	the eyes (CameraRig.eyes) are the frame's own, as drawn, whatever order Roblox gives its
+	RenderStepped connections.
 
 	Targeting is a voxel raycast on the client's block data, so it is exact and independent of the
 	parts; blocks smaller than their cell (torches, lanterns) are aimed at and outlined by their own
@@ -263,6 +272,10 @@ local PARTICLE_GRAVITY = 45 -- studs / s^2
 local SWING_RESTART = 0.15
 -- A whole cell, as Blocks.outline gives boxes.
 local FULL_OUTLINE = { 0, 0, 0, 1, 1, 1 }
+-- The frame's work, after everything that moves the camera (the rig + 1, the bob + 4, the sway + 5),
+-- with the sound listener: the crosshair's ray is the frame's as drawn.
+local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 9
+local RENDER_STEP = "IceVoxelInteraction"
 -- Mobs whose feet are this close to a cell may reach into it (the biggest box: 1.4 wide, 2 tall).
 local MOB_NEAR = 3
 -- Items used on blocks (UseItem): the Configurator and the empty Bucket (full buckets: Fluids).
@@ -662,12 +675,16 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	-- Where the player aims, in viewport coordinates: the mouse while it is the active input and
 	-- free, otherwise the screen centre. (A PC with a controller still has a mouse, so
 	-- MouseEnabled alone would aim at wherever the hidden cursor was left.) Minecraft's crosshair
-	-- shows for a gamepad, and for a mouse locked to the centre (Player/CameraRig.locked), unless
-	-- hidden (`setCrosshairHidden`, a raised firearm: Firearms.hidesCrosshair) or freelooking.
+	-- shows for a gamepad, and with the DayZ camera for a mouse locked to the centre
+	-- (Player/CameraRig.locked), unless hidden (`setCrosshairHidden`, a raised firearm:
+	-- Firearms.hidesCrosshair) or freelooking.
 	local function pointer(): Vector2
 		local preferred = UserInputService.PreferredInput
 		local gamepad = preferred == Enum.PreferredInput.Gamepad or preferred == Enum.PreferredInput.MicroGamepad
-		local lockedMouse = preferred == Enum.PreferredInput.KeyboardAndMouse and CameraRig.locked()
+		-- (Without the DayZ camera, as before it: a gamepad's only.)
+		local lockedMouse = CameraRig.enabled()
+			and preferred == Enum.PreferredInput.KeyboardAndMouse
+			and CameraRig.locked()
 		crosshair.Visible = (gamepad or lockedMouse)
 			and not crosshairHidden
 			and not Firearms.hidesCrosshair()
@@ -1462,9 +1479,32 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	--[[ Buttons ]]
 
+	--[[
+		Presses freelook held back (Player/CameraRig.freelooking), by source: true while the button
+		is still down, false once it went up while the camera was coming back (a click). Played as
+		soon as the camera is back on the aim (the frame below); a screen drops them.
+	]]
+	local waitingAttack: { [string]: boolean } = {}
+	local waitingUse: { [string]: boolean } = {}
+
+	-- A press held back by freelook (`waiting`: waitingAttack or waitingUse) went up.
+	local function letGoWaiting(waiting: { [string]: boolean }, source: string)
+		-- (Let go while the camera comes back: a click to play then. Still freelooking: nothing,
+		-- the camera never showed where it would have gone.)
+		if CameraRig.comingBack() then
+			waiting[source] = false
+		else
+			waiting[source] = nil
+		end
+	end
+
 	local function beginAttack(source: string)
-		-- (Freelooking, a press does nothing: see the frame below.)
-		if Screens.isOpen() or GameModeSwitcher.isOpen() or CameraRig.freelooking() then
+		if Screens.isOpen() or GameModeSwitcher.isOpen() then
+			return
+		end
+		if CameraRig.freelooking() then
+			-- (Played once the camera is back on the aim: see the frame below.)
+			waitingAttack[source] = true
 			return
 		end
 		local first = not anyHeld(attackHeld)
@@ -1518,6 +1558,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	local function endAttack(source: string)
+		if waitingAttack[source] ~= nil then
+			letGoWaiting(waitingAttack, source)
+			return
+		end
 		attackHeld[source] = nil
 		Firearms.attackRelease(source)
 		MeleeInput.release(source, mobTarget, attack)
@@ -1577,7 +1621,12 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	local function beginUse(source: string, hit: Hit?, ray: Ray?)
-		if Screens.isOpen() or GameModeSwitcher.isOpen() or CameraRig.freelooking() then
+		if Screens.isOpen() or GameModeSwitcher.isOpen() then
+			return
+		end
+		if CameraRig.freelooking() then
+			-- (Played once the camera is back on the aim: see the frame below.)
+			waitingUse[source] = true
 			return
 		end
 		if useHeld[source] == nil and weaponUse(source) then
@@ -1592,6 +1641,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	local function endUse(source: string)
+		if waitingUse[source] ~= nil then
+			letGoWaiting(waitingUse, source)
+			return
+		end
 		weaponUseEnd(source)
 		useHeld[source] = nil
 		if not anyHeld(useHeld) then
@@ -1606,6 +1659,21 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local touch: Touch? = nil
 	local rightDownAt: number? = nil
 	local rightMoved = 0
+	-- A tap freelook held back (GUI pixels), played once the camera is back on the aim.
+	local waitingTap: Vector2? = nil
+
+	-- A tap at `position` (GUI pixels): on a mob (in front of the block) it hits it (Bedrock's
+	-- touch controls), else it uses.
+	local function tapAt(position: Vector2)
+		local hit, ray, mob = aimAt(position, true, true)
+		-- (A firearm's tap on a mob does nothing: no bash, no door behind it.)
+		local tap = AttackRules.tap(mob ~= nil, ClientInventory.mode(), isFirearm(ClientInventory.selectedStack()))
+		if tap == "attack" and mob then
+			attack(mob)
+		elseif tap == "use" then
+			useOnce(hit, ray)
+		end
+	end
 
 	local function releaseAll()
 		for source in attackHeld do
@@ -1617,6 +1685,9 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 		table.clear(attackHeld)
 		table.clear(useHeld)
+		table.clear(waitingAttack)
+		table.clear(waitingUse)
+		waitingTap = nil
 		useSpent = false
 		touch = nil
 		rightDownAt = nil
@@ -1648,11 +1719,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	-- The outline the highlight was last sized for.
 	local outlined: { number }? = nil
 
-	RunService.RenderStepped:Connect(function(dt: number)
+	RunService:BindToRenderStep(RENDER_STEP, RENDER_PRIORITY, function(dt: number)
 		local now = os.clock()
 		local open = Screens.isOpen() or GameModeSwitcher.isOpen()
 		-- Freelooking (Player/CameraRig): the camera shows nothing the hands point at, so nothing is
-		-- aimed at, outlined, pressed or used meanwhile (releases still count).
+		-- aimed at, outlined, pressed or used meanwhile (releases still count; presses wait).
 		local freelook = CameraRig.freelooking()
 
 		-- A touch held still long enough starts breaking.
@@ -1683,6 +1754,33 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if aimed and GameMode.isSpectator(mode) and not opensMenu(aimed.block, mode) then
 			-- (The ray stays: it is what the spectator's click looks for players along.)
 			target = nil
+		end
+		-- The presses freelook held back, now that the camera is back on the aim (the crosshair
+		-- shows again): a button still down is pressed, a click is pressed and let go.
+		if open then
+			table.clear(waitingAttack)
+			table.clear(waitingUse)
+			waitingTap = nil
+		elseif not freelook then
+			for source, held in waitingAttack do
+				waitingAttack[source] = nil
+				beginAttack(source)
+				if not held then
+					endAttack(source)
+				end
+			end
+			for source, held in waitingUse do
+				waitingUse[source] = nil
+				beginUse(source, target, targetRay)
+				if not held then
+					endUse(source)
+				end
+			end
+			local at = waitingTap
+			if at then
+				waitingTap = nil
+				tapAt(at)
+			end
 		end
 		if startHold then
 			-- (With a magic weapon a held finger casts at it instead of breaking: Interaction/Casting.
@@ -1789,10 +1887,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if Keybinds.matches("attack", input) then
 			beginAttack("mouse")
 		end
-		if Keybinds.matches("use", input) and not CameraRig.freelooking() then
+		if Keybinds.matches("use", input) then
 			if
 				kind == Enum.UserInputType.MouseButton2
 				and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter
+				and not CameraRig.freelooking()
 			then
 				-- A free mouse's right drag turns the camera: only a short click uses. (A weapon's
 				-- raise or guard takes the button at once instead: no drag.)
@@ -1801,7 +1900,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 					rightMoved = 0
 				end
 			else
-				-- First person / shift lock, or another button or key: held, it repeats.
+				-- First person / shift lock, or another button or key: held, it repeats (while
+				-- freelooking it waits: `beginUse`).
 				beginUse("mouse", target, targetRay)
 			end
 		end
@@ -1859,7 +1959,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			endAttack("mouse")
 		end
 		if Keybinds.matches("use", input) then
-			if useHeld.mouse or weaponUseHeld.mouse then
+			if useHeld.mouse or weaponUseHeld.mouse or waitingUse.mouse ~= nil then
 				endUse("mouse")
 			elseif rightDownAt then
 				-- Right drag turns the camera (the mouse stays put meanwhile, so count its
@@ -1884,22 +1984,12 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 					if useHeld.touch then
 						endUse("touch")
 					end
-				elseif
-					not t.moved
-					and os.clock() - t.startedAt < TOUCH_HOLD
-					and not Screens.isOpen()
-					and not CameraRig.freelooking()
-				then
-					-- A tap on a mob (in front of the block) hits it (Bedrock's touch controls),
-					-- else it uses.
-					local hit, ray, mob = aimAt(t.position, true, true)
-					-- (A firearm's tap on a mob does nothing: no bash, no door behind it.)
-					local tap =
-						AttackRules.tap(mob ~= nil, ClientInventory.mode(), isFirearm(ClientInventory.selectedStack()))
-					if tap == "attack" and mob then
-						attack(mob)
-					elseif tap == "use" then
-						useOnce(hit, ray)
+				elseif not t.moved and os.clock() - t.startedAt < TOUCH_HOLD and not Screens.isOpen() then
+					if not CameraRig.freelooking() then
+						tapAt(t.position)
+					elseif CameraRig.comingBack() then
+						-- (Played once the camera is back on the aim: the frame above.)
+						waitingTap = t.position
 					end
 				end
 			end

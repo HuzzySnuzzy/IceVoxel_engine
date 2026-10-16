@@ -48,7 +48,7 @@ return function(t, shared, require, _server, client)
 
 	--[[ Views ]]
 
-	t.test("camera rules: the view, Toggle Perspective (not while raised, not for spectators)", function()
+	t.test("camera rules: the view, Toggle Perspective (not while raised or guarding, not for spectators)", function()
 		local view = CameraRules.view
 		t.eq(view("third", "lowered", false), "third")
 		t.eq(view("third", "raised", false), "third", "raised over the shoulder")
@@ -68,6 +68,9 @@ return function(t, shared, require, _server, client)
 		t.eq(toggle("first", "sights", false), "first", "nor in the sights")
 		t.eq(toggle("third", "lowered", true), "third", "nor for spectators")
 		t.eq(toggle("first", "lowered", true), "first")
+		t.eq(toggle("third", "lowered", false, true), "third", "nor while a melee guard is up (DayZ: anything raised)")
+		t.eq(toggle("first", "lowered", false, true), "first")
+		t.eq(toggle("third", "lowered", false, false), "first", "the guard down: it toggles")
 		t.eq(CameraRules.bobShare("third"), 0, "no view bob over the shoulder")
 		t.eq(CameraRules.bobShare("first"), 1)
 		t.eq(CameraRules.bobShare("sights"), 1)
@@ -114,7 +117,7 @@ return function(t, shared, require, _server, client)
 			Margin = 0.3,
 			EaseOut = 6,
 			FirstForward = 0.15,
-			FirstDownPush = 0.35,
+			FirstDownPush = 0.75,
 			NearClear = 0.6,
 			IdleTurnSeconds = 0.12,
 			IdleTurnMaxLag = 60,
@@ -126,7 +129,7 @@ return function(t, shared, require, _server, client)
 		for key, value in numbers do
 			t.eq((C :: any)[key], value, `Config.Camera.{key}`)
 		end
-		t.eq(table.concat(C.Radius, ","), "0.45,0.3", "the boom's rays cover the near plane")
+		t.eq(C.Radius, nil, "the near plane is measured from the camera (CameraRules.setLens), not configured")
 		t.eq(C.FirstPersonBody, true)
 		t.eq(C.FreelookToggle, false)
 	end)
@@ -296,17 +299,17 @@ return function(t, shared, require, _server, client)
 
 	--[[ First person and targeting ]]
 
-	t.test("camera rules: the first-person eye pushes 0.15 level and 0.5 looking straight down", function()
+	t.test("camera rules: the first-person eye pushes 0.15 level and 0.9 looking straight down", function()
 		local x, y, z = CameraRules.firstPersonEye(1, 2, 3, 0, 0)
 		t.near(x, 1, 1e-12)
 		t.eq(y, 2, "only along the ground")
 		t.near(z, 3 - 0.15, 1e-12, "0.15 ahead, level")
 		_, _, z = CameraRules.firstPersonEye(1, 2, 3, 0, -math.pi / 2)
-		t.near(z, 3 - 0.5, 1e-12, "0.5 looking straight down")
+		t.near(z, 3 - 0.9, 1e-12, "0.9 looking straight down: past the chest's front (half its depth) by 0.4")
 		_, _, z = CameraRules.firstPersonEye(1, 2, 3, 0, math.pi / 2)
 		t.near(z, 3 - 0.15, 1e-12, "looking up pushes no more")
 		x, _, z = CameraRules.firstPersonEye(0, 0, 0, math.pi / 2, rad(-30))
-		t.near(x, -(0.15 + 0.35 * 0.5), 1e-12, "along the body's facing (-X at a quarter left)")
+		t.near(x, -(0.15 + 0.75 * 0.5), 1e-12, "along the body's facing (-X at a quarter left)")
 		t.near(z, 0, 1e-12)
 	end)
 
@@ -420,6 +423,77 @@ return function(t, shared, require, _server, client)
 		t.near(pitch, 0, 1e-12)
 		t.eq(select(1, CameraRules.snapStep(look, cam.yaw, cam.pitch, DT)), 0, "not snapping: no turn")
 	end)
+
+	t.test(
+		"camera rules: targeting and presses come back within 2 degrees of the aim, not at the snap's end",
+		function()
+			t.near(CameraRules.SNAP_READY, rad(2), 1e-12)
+			-- Freelooking: suspended however small the turn.
+			local look = CameraRules.newLook()
+			CameraRules.aim(look, 0, 0)
+			CameraRules.freelook(look, true, true, false, true)
+			CameraRules.aim(look, 0, 0)
+			t.ok(CameraRules.suspends(look), "held: suspended")
+			CameraRules.freelook(look, false, true, false, false)
+			t.ok(not CameraRules.suspends(look), "let go without a turn: nothing to wait for")
+			-- Let go from 10 .. 160 degrees (yaw, and 30 degrees of pitch): every frame the rig asks
+			-- after `aim`, the camera's offset as drawn this frame.
+			local report = {}
+			for _, degrees in { 10, 30, 60, 100, 160 } do
+				local turn = rad(degrees)
+				for _, pitched in { false, true } do
+					look = CameraRules.newLook()
+					local cam = camera()
+					CameraRules.aim(look, cam.yaw, cam.pitch)
+					CameraRules.freelook(look, true, true, false, true)
+					update(cam, turn, if pitched then rad(30) else 0)
+					CameraRules.aim(look, cam.yaw, cam.pitch)
+					CameraRules.freelook(look, false, true, false, false)
+					local elapsed, ready, ended = 0, nil, nil
+					while elapsed < 2 and (ended == nil or ready == nil) do
+						update(cam, 0, 0)
+						CameraRules.aim(look, cam.yaw, cam.pitch)
+						local suspended = CameraRules.suspends(look)
+						local offset = math.max(math.abs(cam.yaw), math.abs(cam.pitch))
+						if suspended then
+							t.ok(ready == nil, "once back, it stays back")
+							t.ok(offset > CameraRules.SNAP_READY - 1e-9, "suspended only beyond 2 degrees")
+						elseif ready == nil then
+							ready = elapsed
+							t.ok(
+								offset <= CameraRules.SNAP_READY + 1e-9,
+								`the crosshair within 2 degrees of the aim ({math.deg(offset)})`
+							)
+						end
+						cam.queuedX, cam.queuedY = CameraRules.snapStep(look, cam.yaw, cam.pitch, DT)
+						if ended == nil and not look.snapping then
+							ended = elapsed
+						end
+						elapsed += DT
+					end
+					t.ok(ready ~= nil and ended ~= nil and ready < ended, `{degrees}: ready before the snap's end`)
+					if not pitched then
+						table.insert(
+							report,
+							string.format(
+								"%d deg: %.2f s (snap ends %.2f s)",
+								degrees,
+								ready :: number,
+								ended :: number
+							)
+						)
+					end
+					-- (SmoothCD 0.14 from rest: within 2 degrees after 0.21 s from 10, 0.43 s from 160.)
+					t.ok(
+						(ready :: number) <= (ended :: number) - 0.2,
+						`{degrees}: {ready} s, a fifth of a second earlier at least`
+					)
+					t.ok((ready :: number) < 0.47, `{degrees}: back within 2 degrees in {ready} s`)
+				end
+			end
+			print("    presses wait after letting go: " .. table.concat(report, ", "))
+		end
+	)
 
 	t.test("camera rules: input during the snap moves the aim", function()
 		local look = CameraRules.newLook()
@@ -670,28 +744,76 @@ return function(t, shared, require, _server, client)
 	end
 	-- Looking down -Z, level: look, right, up.
 	local LOOK = { 0, 0, -1, 1, 0, 0, 0, 1, 0 }
-	local function collide(cast: any, e: { number }, p: { number }, distance: number, basis: { number }?)
+	-- Roblox's near plane (Camera.NearPlaneZ "between -0.1 and -0.5, varying across platforms"): a
+	-- computer's 0.1 on a 16:9 screen, a phone's 0.5 on a 19.5:9 one; a 70 degree field of view.
+	type Screen = { near: number, aspect: number }
+	local PC: Screen = { near = -0.1, aspect = 16 / 9 }
+	local PHONE: Screen = { near = -0.5, aspect = 19.5 / 9 }
+	-- The lens of a camera looking along `basis` (look, right, up) on `screen`.
+	local function lensOf(screen: Screen, basis: { number }?): any
 		local b = basis or LOOK
-		return CameraRules.collide(
-			e[1],
-			e[2],
-			e[3],
-			p[1],
-			p[2],
-			p[3],
-			b[1],
-			b[2],
-			b[3],
+		local lens = CameraRules.newLens()
+		-- (CFrame components: the right is the first column, the up the second, the back the third.)
+		CameraRules.setLens(
+			lens,
 			b[4],
-			b[5],
-			b[6],
 			b[7],
+			-b[1],
+			b[5],
 			b[8],
+			-b[2],
+			b[6],
 			b[9],
-			distance,
-			cast
+			-b[3],
+			screen.near,
+			70,
+			screen.aspect
 		)
+		return lens
 	end
+	local function collide(
+		cast: any,
+		e: { number },
+		p: { number },
+		distance: number,
+		screen: Screen?,
+		basis: { number }?
+	)
+		return CameraRules.collide(e[1], e[2], e[3], p[1], p[2], p[3], distance, lensOf(screen or PC, basis), cast)
+	end
+	-- The near plane's centre and corners of a camera at (cx, cy, cz) with `lens`, that lie in a block
+	-- (`solid`): none is how a near plane stays out of the walls.
+	local function cut(solid: any, lens: any, cx: number, cy: number, cz: number): number
+		local count = 0
+		local n, w, h = lens.near, lens.halfWidth, lens.halfHeight
+		for _, point in { { 0, 0 }, { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } } do
+			local a, u = point[1] * w, point[2] * h
+			local x = cx + lens.lx * n + lens.rx * a + lens.ux * u
+			local y = cy + lens.ly * n + lens.ry * a + lens.uy * u
+			local z = cz + lens.lz * n + lens.rz * a + lens.uz * u
+			if solid(x, y, z) then
+				count += 1
+			end
+		end
+		return count
+	end
+
+	t.test("camera rules: the near plane is measured from the camera (NearPlaneZ, field of view, aspect)", function()
+		local near, w, h = CameraRules.nearPlane(-0.5, 70, 19.5 / 9)
+		t.eq(near, 0.5)
+		t.near(h, 0.5 * math.tan(rad(35)), 1e-12, "half height: near x tan(FOV / 2)")
+		t.near(w, h * 19.5 / 9, 1e-12, "half width: x aspect")
+		t.ok(w > 0.75 and w < 0.77, `a phone's near plane is about 0.76 studs to each side ({w})`)
+		near, w, h = CameraRules.nearPlane(-0.1, 70, 16 / 9)
+		t.near(near, 0.1, 1e-12)
+		t.ok(w < 0.13 and h < 0.08, "a computer's is small")
+		near = CameraRules.nearPlane(0 / 0, 70, 1)
+		t.eq(near, CameraRules.NEAR_FALLBACK, "no near plane: the farthest Roblox uses")
+		local lens = lensOf(PHONE, { 0, -1, 0, 1, 0, 0, 0, 0, -1 })
+		t.eq(lens.ly, -1, "the look")
+		t.eq(lens.uz, -1, "the up (looking down: forward)")
+		t.eq(lens.rx, 1, "the right")
+	end)
 
 	t.test("camera rules: collision clips the shoulder at a wall and pulls the boom in", function()
 		-- Open ground: nothing changes.
@@ -724,13 +846,195 @@ return function(t, shared, require, _server, client)
 		-- ray finds it.
 		local pillar = world({ ["0,1,2"] = true })
 		local _, _, _, edge = collide(pillar, { 3.9 - 0.9, 4.86, 1.5 }, { 3.6, 5.11, 1.5 }, 4.8)
-		t.ok(edge == math.huge, "a pillar 0.6 studs aside is clear of the near plane")
-		local _, _, _, near = collide(pillar, { 3.3 - 0.9, 4.86, 1.5 }, { 3.3, 5.11, 1.5 }, 4.8)
+		t.ok(edge == math.huge, "a pillar 0.6 studs aside is clear of a computer's near plane")
+		local _, _, _, phone = collide(pillar, { 3.9 - 0.9, 4.86, 1.5 }, { 3.6, 5.11, 1.5 }, 4.8, PHONE)
+		t.near(phone, 6 - 1.5 - 0.3, 1e-9, "a phone's (0.76 to the side) meets it: the boom stops short")
+		local _, _, _, near = collide(pillar, { 3.05 - 0.9, 4.86, 1.5 }, { 3.05, 5.11, 1.5 }, 4.8)
 		t.near(near, 6 - 1.5 - 0.3, 1e-9, "one within the near plane's half width stops the boom")
 		-- No boom: only the pivot.
 		local _, _, _, none = collide(behind, { 1.5, 4.86, 1.5 }, { 2.4, 5.11, 1.5 }, 0)
 		t.eq(none, math.huge)
 	end)
+
+	-- A 1 x 2 tunnel along Z (inside x 0..3, y 0..6 studs): floor, ceiling and walls of blocks.
+	local function tunnel()
+		local cells = {}
+		for z = -12, 12 do
+			for x = -1, 1 do
+				cells[`{x},-1,{z}`] = true
+				cells[`{x},2,{z}`] = true
+			end
+			for y = 0, 1 do
+				cells[`-1,{y},{z}`] = true
+				cells[`1,{y},{z}`] = true
+			end
+		end
+		return world(cells)
+	end
+
+	-- The shoulder camera (standing, the right shoulder, looking down -Z) for eyes `e`, as the rig
+	-- places it: the pivot kept by `collide`, the boom as long as it may be.
+	local function shoulder(cast: any, e: { number }, screen: Screen): (number, number, number, any)
+		local rig = CameraRules.newRig(CameraRules.profile("standing"), 1)
+		local px, py, pz = CameraRules.pivot(e[1], e[2], e[3], 0, rig)
+		local lens = lensOf(screen)
+		local kx, ky, kz, free = CameraRules.collide(e[1], e[2], e[3], px, py, pz, rig.distance, lens, cast)
+		local boom = math.clamp(math.min(free, rig.distance), 0, rig.distance)
+		return kx - lens.lx * boom, ky - lens.ly * boom, kz - lens.lz * boom, lens
+	end
+
+	t.test(
+		"camera rules: over the shoulder the near plane stays out of a tunnel's walls (computer and phone)",
+		function()
+			local cast, solid = tunnel()
+			for _, screen in { PC, PHONE } do
+				local label = if screen == PC then "computer" else "phone"
+				-- Centred in the tunnel, then the hull hugging its right wall (0.9 studs off it).
+				for _, ex in { 1.5, 3 - 0.9, 0.9 } do
+					local cx, cy, cz, lens = shoulder(cast, { ex, 4.86, 0 }, screen)
+					t.eq(cut(solid, lens, cx, cy, cz), 0, `{label}, eyes at x {ex}: no near-plane corner in a wall`)
+					t.ok(
+						cx + lens.halfWidth < 3 and cx - lens.halfWidth > 0,
+						`{label}: the plane fits between the walls`
+					)
+					t.ok(cz > 4, `{label}: the boom is not pulled in by walls alongside it ({cz})`)
+				end
+			end
+			-- (The review's case, before: the camera 0.6 studs from the right wall kept a phone's near
+			-- plane, 0.76 to each side, 0.16 inside it.)
+			local cx = shoulder(cast, { 1.5, 4.86, 0 }, PHONE)
+			t.near(cx, 3 - CameraRules.SIDE_GAP - lensOf(PHONE).halfWidth, 1e-9, "moved off the wall just enough")
+			local pcx = shoulder(cast, { 1.5, 4.86, 0 }, PC)
+			t.near(pcx, 2.4, 1e-9, "a computer's small plane needs no move: the full shoulder")
+			-- A low ceiling: the pivot moves down until the near plane's half height fits.
+			local low = {}
+			for x = -2, 2 do
+				for z = -12, 12 do
+					low[`{x},-1,{z}`] = true
+					low[`{x},2,{z}`] = true
+				end
+			end
+			local lowCast, lowSolid = world(low)
+			local hx, hy, hz, lens = shoulder(lowCast, { 1.5, 6 - 0.6 - 0.3, 0 }, PHONE)
+			t.eq(cut(lowSolid, lens, hx, hy, hz), 0, "a ceiling just over the head")
+		end
+	)
+
+	-- The first-person camera as the rig places it: the eye point (`firstPersonEye`), kept clear.
+	local function firstPerson(cast: any, e: { number }, yaw: number, pitch: number, screen: Screen)
+		local cy, sy, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch)
+		local basis = { -sy * cp, sp, -cy * cp, cy, 0, -sy, sy * sp, cp, cy * sp }
+		local lens = lensOf(screen, basis)
+		local dx, dy, dz = CameraRules.firstPersonEye(e[1], e[2], e[3], yaw, pitch)
+		local x, y, z = CameraRules.firstPersonClear(e[1], e[2], e[3], dx, dy, dz, lens, cast)
+		return x, y, z, lens, dx, dy, dz
+	end
+
+	t.test("camera rules: from the eyes the near plane stays out of a wall (computer and phone)", function()
+		-- A wall: cells z = -1 (z -3..0 studs); the hull touching it (the eyes 0.9 studs off).
+		local cells = {}
+		for x = -6, 6 do
+			for y = -1, 3 do
+				cells[`{x},{y},-1`] = true
+			end
+		end
+		for x = -6, 6 do
+			for z = -1, 6 do
+				cells[`{x},-1,{z}`] = true
+			end
+		end
+		local cast, solid = world(cells)
+		local e = { 1.5, 4.86, 0.9 }
+		for _, screen in { PC, PHONE } do
+			local label = if screen == PC then "computer" else "phone"
+			for _, yawDegrees in { 0, 30, 45, 60, 89 } do
+				for _, pitchDegrees in { -80, -60, -30, 0, 30, 80 } do
+					local x, y, z, lens = firstPerson(cast, e, rad(yawDegrees), rad(pitchDegrees), screen)
+					t.eq(
+						cut(solid, lens, x, y, z),
+						0,
+						`{label}, facing the wall {yawDegrees} degrees off, pitch {pitchDegrees}: the near plane clear`
+					)
+				end
+			end
+		end
+		-- The review's case: at 45 degrees, a phone's near plane cut the wall at the eye point; the
+		-- camera now comes back towards Roblox's own (which kept it clear).
+		local x, _, z, _, dx, _, dz = firstPerson(cast, e, rad(45), 0, PHONE)
+		t.ok(x ~= dx or z ~= dz, "pulled back")
+		-- In the open the eye point is untouched (first-person targeting looks from exactly there).
+		local open = world({})
+		for _, screen in { PC, PHONE } do
+			for _, pitchDegrees in { -80, -45, 0, 60 } do
+				local ox, oy, oz, _, ex, ey, ez = firstPerson(open, e, rad(20), rad(pitchDegrees), screen)
+				t.eq(ox, ex)
+				t.eq(oy, ey)
+				t.eq(oz, ez, "the eye point itself")
+			end
+		end
+		-- Facing the wall straight on and level, a computer's near plane (0.1) leaves the eye point.
+		local px, py, pz, _, qx, qy, qz = firstPerson(cast, e, 0, 0, PC)
+		t.eq(px, qx)
+		t.eq(py, qy)
+		t.eq(pz, qz, "0.75 studs off the wall: the eye point")
+	end)
+
+	t.test(
+		"camera rules: looking down from the eyes shows the chest's edge, legs and feet, not the torso's top",
+		function()
+			-- The drawn body (an R15 torso 2 wide and 1 deep, Config.Characters' depth scale at most 1)
+			-- under the hull's eyes, its centre on the hull's (Player/MovementController), its top face 0.66
+			-- to 1.26 studs below the eyes (a tall Rthro body to a short blocky one). The share of the
+			-- screen's centre column (a 70 degree view) whose rays meet the torso's top face first,
+			-- looking down `pitch` with the eye pushed `push` ahead: 0 means the chest's front edge and
+			-- the legs and feet below it fill the bottom of the view instead.
+			local function covered(drop: number, pitch: number, push: number): number
+				local half, rows, hit = rad(35), 2000, 0
+				for i = 0, rows - 1 do
+					local angle = pitch + half - (i + 0.5) / rows * 2 * half
+					local dy, dz = math.sin(angle), -math.cos(angle)
+					if dy < 0 then
+						local z = -push + dz * (-drop / dy)
+						if z >= -0.5 and z <= 0.5 then
+							hit += 1
+						end
+					end
+				end
+				return hit / rows
+			end
+			local function push(pitch: number, down: number): number
+				return C.FirstForward + down * math.max(0, -math.sin(pitch))
+			end
+			-- Before (FirstDownPush 0.35: 0.5 ahead at most, the chest's front face): 10-13 % at -60
+			-- degrees, about 30 % at -75 and 36 % at -80 (Roblox's camera's steepest).
+			for _, drop in { 0.66, 0.86, 1.26 } do
+				t.ok(covered(drop, rad(-60), push(rad(-60), 0.35)) > 0.09, "before: the top face at -60")
+				t.ok(covered(drop, rad(-80), push(rad(-80), 0.35)) > 0.35, "before: over a third at -80")
+			end
+			-- Now: none down to -75 degrees, and at Roblox's steepest -80 at most an eighth for the
+			-- lowest torso (none for the default body).
+			local report = {}
+			for _, drop in { 0.66, 0.86, 1.26 } do
+				for _, degrees in { -45, -60, -70, -75, -80 } do
+					local share = covered(drop, rad(degrees), push(rad(degrees), C.FirstDownPush))
+					table.insert(report, string.format("%.2f@%d:%.1f%%", drop, degrees, share * 100))
+					if degrees >= -70 or drop <= 0.86 and degrees >= -75 then
+						t.eq(share, 0, `torso top {drop} below the eyes at {degrees} degrees`)
+					else
+						t.ok(share <= 0.12, `torso top {drop} below at {degrees}: {share}`)
+					end
+				end
+				t.eq(
+					covered(drop, rad(-80), push(rad(-80), C.FirstDownPush)) > 0.02,
+					drop > 0.86,
+					"-80, default body clear"
+				)
+			end
+			print("    torso top's share of the view's centre column, after: " .. table.concat(report, " "))
+			-- The push at the steepest look is past the chest's front (half the depth) by over 0.3.
+			t.ok(push(rad(-80), C.FirstDownPush) >= 0.5 + 0.3, "past the torso's half depth + 0.3")
+		end
+	)
 
 	t.test("camera rules: the camera never ends up inside a block (random rooms, random looks)", function()
 		-- (A fixed linear congruential sequence: the same rooms every run.)
@@ -741,7 +1045,7 @@ return function(t, shared, require, _server, client)
 			local a, b = low or 0, high or 1
 			return a + (b - a) * unit
 		end
-		local placed = 0
+		local placed, cutPlanes, cutEyes = 0, 0, 0
 		for _ = 1, 400 do
 			-- A room of random cells around the eyes' cell (0, 1, 0) kept free with the one below
 			-- it for the feet.
@@ -767,12 +1071,21 @@ return function(t, shared, require, _server, client)
 			local rig = CameraRules.newRig(CameraRules.profile("standing"), if rand() < 0.5 then 1 else -1)
 			local bodyYaw = yaw + rand(-1, 1)
 			local px, py, pz = CameraRules.pivot(ex, ey, ez, bodyYaw, rig)
-			local kx, ky, kz, free =
-				CameraRules.collide(ex, ey, ez, px, py, pz, lx, ly, lz, rx, 0, rz, ux, uy, uz, rig.distance, cast)
+			local lens = lensOf(if rand() < 0.5 then PC else PHONE, { lx, ly, lz, rx, 0, rz, ux, uy, uz })
+			local kx, ky, kz, free = CameraRules.collide(ex, ey, ez, px, py, pz, rig.distance, lens, cast)
 			local boom = math.clamp(math.min(free, rig.distance), 0, rig.distance)
 			local cx, cy2, cz = kx - lx * boom, ky - ly * boom, kz - lz * boom
 			t.ok(not solid(kx, ky, kz), "the pivot is never in a block")
 			t.ok(not solid(cx, cy2, cz), `the camera is never in a block (boom {boom})`)
+			if cut(solid, lens, cx, cy2, cz) > 0 then
+				cutPlanes += 1
+			end
+			-- From the eyes too (first person and the sights).
+			local dx, dy, dz = CameraRules.firstPersonEye(ex, ey, ez, bodyYaw, pitch)
+			local fx, fy, fz = CameraRules.firstPersonClear(ex, ey, ez, dx, dy, dz, lens, cast)
+			if cut(solid, lens, fx, fy, fz) > 0 then
+				cutEyes += 1
+			end
 			-- The way from the eyes to the pivot and on to the camera is open.
 			local wx, wy, wz = kx - ex, ky - ey, kz - ez
 			local way = math.sqrt(wx * wx + wy * wy + wz * wz)
@@ -785,6 +1098,10 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		t.ok(placed > 100, `cameras placed behind the pivot ({placed})`)
+		-- (A block's outside edge seen exactly across a corner of the screen can still leave a corner
+		-- in it, as with Roblox's Popper, which sweeps the same corners: rare, in rooms this cramped.)
+		t.ok(cutPlanes <= 4, `over the shoulder, near planes with a corner in a block: {cutPlanes} of 400`)
+		t.eq(cutEyes, 0, "from the eyes, none")
 	end)
 
 	--[[ Player/MouseLook's hook (freelook's turn and room, the focus' share) ]]

@@ -4,9 +4,11 @@
 	- the frame order: every render step bound in src/client at the priority the Camera section's
 	  frame table gives (Roblox's camera at Camera: the rig + 1, Player/FirstPersonBody + 2,
 	  Player/SpectatorView + 3, the view bob + 4, the aim's sway + 5, Player/BodyTwist + 6,
-	  Player/HeldItems + 7, Player/EquipmentLooks + 8, the sound listener + 9; before it the
+	  Player/HeldItems + 7, Player/EquipmentLooks + 8, the sound listener and
+	  Interaction/BlockInteraction's frame (targeting reads the camera as drawn) + 9; before it the
 	  trigger's state - 4, the origin - 3, the remote players and the unsway - 2, the movement - 1),
-	  AimCamera's mouse lock only without the rig, and HeldItems off RenderStepped;
+	  AimCamera's mouse lock only without the rig, and HeldItems and BlockInteraction off
+	  RenderStepped;
 	- the require rules: no cycle among the client modules; nothing Interaction/Firearms or
 	  Interaction/MeleeInput reaches requires Interaction/BlockInteraction; Player/CameraRig reaches
 	  no Ui/ or Interaction/ module, nor MovementController or AimCamera; Player/FirstPersonBody
@@ -150,6 +152,7 @@ return function(t, shared, require, _server, client)
 			IceVoxelHeldItems = 7,
 			IceVoxelEquipmentLooks = 8,
 			IceVoxelSoundListener = 9,
+			IceVoxelInteraction = 9,
 		}
 		local bound = steps()
 		for name, step in bound do
@@ -174,6 +177,7 @@ return function(t, shared, require, _server, client)
 			IceVoxelHeldItems = "Player/HeldItems",
 			IceVoxelEquipmentLooks = "Player/EquipmentLooks",
 			IceVoxelSoundListener = "Audio/SoundPlayer",
+			IceVoxelInteraction = "Interaction/BlockInteraction",
 		}
 		for name, owner in owners do
 			t.eq(bound[name].module, owner, `{name}'s module`)
@@ -211,6 +215,18 @@ return function(t, shared, require, _server, client)
 			"AimCamera locks the mouse only without the rig"
 		)
 		t.ok(string.find(code(fs.readFile(files["Player/HeldItems"])), "RenderStepped") == nil, "HeldItems is bound")
+		-- Targeting reads the camera after its last move (the rig, the bob, the sway), whatever
+		-- order Roblox gives RenderStepped connections: BlockInteraction's frame is a bound step.
+		t.ok(
+			string.find(code(fs.readFile(files["Interaction/BlockInteraction"])), "RenderStepped") == nil,
+			"BlockInteraction's frame is bound"
+		)
+		for _, mover in { "IceVoxelCameraRig", "IceVoxelViewBob", "IceVoxelAimSway" } do
+			t.ok(
+				(bound[mover].offset :: number) < (bound.IceVoxelInteraction.offset :: number),
+				`targeting after {mover}`
+			)
+		end
 	end)
 
 	--[[ The require rules ]]

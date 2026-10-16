@@ -152,6 +152,7 @@ local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
+local TouchButtons = require(script.Parent.Parent.Ui.TouchButtons)
 local MovementSounds = require(script.Parent.Parent.Audio.MovementSounds)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Rebase = require(script.Parent.Parent.Rendering.Rebase)
@@ -663,6 +664,9 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	local sneakHeld, sneakOn = false, false
 	-- The key binding each action is bound with now (to bind again when it changes).
 	local boundWith: { [string]: any } = {}
+	-- Each touch button's place round the jump button (Ui/TouchLayout's slots, whatever the order
+	-- the buttons are bound in).
+	local touchSlots: { [string]: "sprint" | "sneak" } = { IceVoxelSprint = "sprint", IceVoxelSneak = "sneak" }
 	local function bind(
 		name: string,
 		action: string,
@@ -688,6 +692,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		end, Movement.TouchButtons, Enum.ContextActionPriority.High.Value, table.unpack(actionInputs(action, buttons)))
 		if Movement.TouchButtons then
 			ContextActionService:SetTitle(name, title)
+			TouchButtons.place(name, touchSlots[name])
 		end
 	end
 	local function setTitle(name: string, title: string)

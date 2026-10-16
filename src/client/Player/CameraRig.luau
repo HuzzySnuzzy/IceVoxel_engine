@@ -13,31 +13,38 @@
 	           every frame before the camera (`setBody`: the hull's eyes, the body's yaw, speed,
 	           jump, stance). The profile by stance and hands (`setPosture`: Player/AimCamera)
 	           eases over DayZ's blend times, the side from the Shoulder setting
-	           (`setShoulderSide`), the pivot lags a jump. Never inside a block: the eyes to the
-	           pivot are cast and clipped, then the boom behind the pivot as five rays (the
-	           centre and the near plane's edges: Config.Camera.Radius) on the world's blocks
-	           (Shared/World/VoxelRaycast.distance on Shared/Blocks/Shapes.sight's collision
-	           boxes; spectators skip it); a block pulls the boom in at once and it eases back
-	           out (CameraRules.boomStep).
-	  first    from the eyes (CameraRules.firstPersonEye: ahead of the hull's eyes, more looking
-	           down), the body drawn by Player/FirstPersonBody.
+	           (`setShoulderSide`), the pivot lags a jump. Roblox's near plane never enters a
+	           block (CameraRules.collide, sized every frame from the camera's NearPlaneZ, field of
+	           view and viewport: CameraRules.setLens): the eyes to the pivot are cast and
+	           clipped, the pivot moves off blocks beside it until the near plane fits there, then
+	           the boom behind it is cast from its centre and the near plane's corners, on the
+	           world's blocks (Shared/World/VoxelRaycast.distance on Shared/Blocks/Shapes.sight's
+	           collision boxes; spectators skip it); a block pulls the boom in at once and it eases
+	           back out (CameraRules.boomStep).
+	  first    from the eyes (CameraRules.firstPersonEye: ahead of the hull's eyes, past the
+	           chest looking down), back towards Roblox's own first-person camera where a block
+	           would cut the near plane (CameraRules.firstPersonClear); the body drawn by
+	           Player/FirstPersonBody.
 	  sights   the third-person sights (V) look from the same eye point; back to the shoulder
 	           over DayZ's 0.2 s (CameraRules.eyeShare).
 	The view starts from the Camera setting (`setDefaultView`: applied only when its value
 	changes, since the boot's "camera" effect runs it again for every camera setting) and Toggle
-	Perspective switches it (its key, the gamepad's D-pad up, the touch VIEW button), never while a
-	weapon is raised and never for spectators, as in DayZ. Spectators always see from the eyes.
+	Perspective switches it (its key, the gamepad's D-pad up, the touch VIEW button: `touchView`),
+	never while a weapon is raised or a melee guard is up and never for spectators, as in DayZ.
+	Spectators always see from the eyes.
 
 	Aim and freelook: the aim (`aimYaw`, `aimPitch`, `aimHeading`: where the body walks and faces,
 	the pose others see) is the camera's own, except while freelooking (the Freelook key held, or
 	toggled with the Freelook setting; R3 held while nothing is raised; the touch LOOK button
-	held), when it holds still while the camera turns up to Config.Camera.FreelookYaw each way
-	(FreelookYawFirst in first person: the room goes to MouseLook.setRoom every frame). Let go, the
-	camera comes back to the aim (CameraRules.snapStep, queued with MouseLook.turn) while input
-	still moves the aim. Not in the sights, for spectators, while dead, without the hook, with a
-	screen open, or across a view toggle. `freelooking` and `freelookOffset` tell targeting,
-	firing and the head. `onAim` listeners (Player/MovementController) hear the aim as soon as it
-	is known, after Roblox's camera, so a body that turns at once faces this frame's aim.
+	held: `touchLook`), when it holds still while the camera turns up to Config.Camera.FreelookYaw
+	each way (FreelookYawFirst in first person: the room goes to MouseLook.setRoom every frame).
+	Let go, the camera comes back to the aim (CameraRules.snapStep, queued with MouseLook.turn)
+	while input still moves the aim. Not in the sights, for spectators, while dead, without the
+	hook, with a screen open, or across a view toggle. `freelooking` tells targeting and firing to
+	wait (CameraRules.suspends: until the camera is back within 2 degrees of the aim, the
+	crosshair is not where the hands point), `freelookOffset` the head and the hands (until the
+	swing back ends). `onAim` listeners (Player/MovementController) hear the aim as soon as it is
+	known, after Roblox's camera, so a body that turns at once faces this frame's aim.
 
 	Focus (DayZ's eye zoom): `focusing` while the Focus key is held, playing and nothing raised;
 	Player/MovementController eases the field of view (CameraRules.focusFov) and the mouse's share.
@@ -56,13 +63,16 @@
 	teleport, a respawn) starts the rig afresh there instead of easing. Only relative values are
 	kept between frames (render studs of last frame's body move with Shared/World/Origin), so a
 	move of the render origin needs nothing else. Nothing is allocated per frame but the camera's
-	CFrame.
+	CFrame. While it places the camera for a player who isn't a spectator, Roblox's own fade of the
+	character is held off (Player/CameraFade): Player/FirstPersonBody draws the body then.
 
 	Config.Camera.Enabled = false: none of the above. Roblox's camera alone places the camera as it
-	did before (its zoom, shift lock, Player/AimCamera's raised shoulder); first person is
-	geometric (within 1 stud of the camera's focus, measured here after Roblox's camera updated),
-	the aim is the camera's own, the mouse counts as locked while it is LockCenter, the view bob
-	always shows, nothing is ever freelooked or focused, and the rig is never active.
+	did before (its zoom, shift lock where the place allows it: the server sets
+	Player.DevEnableMouseLock, which a client can't, from Config.Camera.Enabled, Player/AimCamera's
+	raised shoulder); first person is geometric (within 1 stud of the camera's focus, measured here
+	after Roblox's camera updated), the aim is the camera's own, the mouse counts as locked while it
+	is LockCenter, the view bob always shows, nothing is ever freelooked or focused, and the rig is
+	never active.
 
 	Requires no Ui/ or Interaction/ module, nor Player/MovementController or Player/AimCamera
 	(they require this): what it needs of them comes in (`start`'s predicates, `setBody`,
@@ -84,6 +94,7 @@ local VoxelRaycast = require(Shared.World.VoxelRaycast)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
+local CameraFade = require(script.Parent.CameraFade)
 local CameraRules = require(script.Parent.CameraRules)
 local MouseLook = require(script.Parent.MouseLook)
 
@@ -96,16 +107,11 @@ local RENDER_STEP = "IceVoxelCameraRig"
 -- first person below 1 stud of zoom): Config.Camera.Enabled = false only.
 local FIRST_PERSON_DISTANCE = 1
 -- The gamepad's D-pad up (Toggle Perspective) and R3 (freelook), over Interaction/Firearms' R3
--- (High: the sights, which gets R3 while a gun is raised), and the touch buttons.
+-- (High: the sights, which gets R3 while a gun is raised). (The touch VIEW and LOOK buttons are
+-- the game's own, Ui/TouchButtons': none of ContextActionService's seven touch slots.)
 local INPUT_PRIORITY = Enum.ContextActionPriority.High.Value + 1
 local GAMEPAD_VIEW = "IceVoxelCameraView"
 local GAMEPAD_LOOK = "IceVoxelCameraLook"
-local TOUCH_VIEW = "IceVoxelCameraViewButton"
-local TOUCH_LOOK = "IceVoxelCameraLookButton"
--- The touch buttons in ContextActionService's button frame: its upper right, clear of the ring
--- of buttons round the jump button (Movement's sprint and sneak, Ui/WeaponButtons).
-local TOUCH_VIEW_AT = UDim2.fromScale(0.76, 0.02)
-local TOUCH_LOOK_AT = UDim2.fromScale(0.5, 0.02)
 
 local CameraRig = {}
 
@@ -189,10 +195,14 @@ local eyeShare, eyeShareVel = 0, 0
 local lastView: CameraRules.View = "third"
 -- Start afresh next frame (no easing from the old place): a teleport, a respawn, a return.
 local fresh = true
+-- The camera's axes and near plane this frame (CameraRules.setLens), for the collision.
+local lens = CameraRules.newLens()
 
 -- Freelook and the aim (radians); `aimValid` once the aim was read after Roblox's camera.
 local look = CameraRules.newLook()
 local aimValid = false
+-- Targeting and presses wait this frame (CameraRules.suspends, after this frame's aim).
+local suspended = false
 -- The Freelook inputs: a press this frame (toggle mode), R3 and the touch LOOK button held, and a
 -- view toggle this frame (it ends freelook).
 local freelookPressed = false
@@ -256,7 +266,7 @@ local function viewNow(): CameraRules.View
 end
 
 local function toggleView()
-	local nextView: CameraRules.Chosen = CameraRules.toggle(chosen, posture, isSpectator())
+	local nextView: CameraRules.Chosen = CameraRules.toggle(chosen, posture, isSpectator(), given.guard)
 	if nextView ~= chosen then
 		chosen = nextView
 		viewToggled = true
@@ -342,32 +352,17 @@ local function place(
 	lastView = view
 
 	local x, y, z = CameraRules.firstPersonEye(ex, ey, ez, b.yaw, camPitch)
+	if eyeShare > 0 and not b.noClip then
+		-- (From the eyes: back where a block would cut the near plane.)
+		x, y, z = CameraRules.firstPersonClear(ex, ey, ez, x, y, z, lens, cast)
+	end
 	if eyeShare < 1 then
 		local px, py, pz = CameraRules.pivot(ex, ey, ez, b.yaw, rig)
 		-- (The view's look.)
-		local lx, ly, lz = -r02, -r12, -r22
+		local lx, ly, lz = lens.lx, lens.ly, lens.lz
 		local free = math.huge
 		if not b.noClip then
-			-- (The near plane's right is (r00, r10, r20), its up (r01, r11, r21).)
-			px, py, pz, free = CameraRules.collide(
-				ex,
-				ey,
-				ez,
-				px,
-				py,
-				pz,
-				lx,
-				ly,
-				lz,
-				r00,
-				r10,
-				r20,
-				r01,
-				r11,
-				r21,
-				rig.distance,
-				cast
-			)
+			px, py, pz, free = CameraRules.collide(ex, ey, ez, px, py, pz, rig.distance, lens, cast)
 		end
 		if fresh or eyeShare > 0 then
 			-- (Afresh, and while coming out of the sights: the boom as long as it may be.)
@@ -401,6 +396,22 @@ local function step(dt: number)
 	local hx, hz = CameraRules.heading(r00, r01, r02, r12, r22)
 	local camYaw = CameraRules.yawOf(hx, hz)
 	local camPitch = math.asin(math.clamp(-r12, -1, 1))
+	local viewport = camera.ViewportSize
+	CameraRules.setLens(
+		lens,
+		r00,
+		r01,
+		r02,
+		r10,
+		r11,
+		r12,
+		r20,
+		r21,
+		r22,
+		camera.NearPlaneZ,
+		camera.FieldOfView,
+		viewport.X / math.max(viewport.Y, 1)
+	)
 
 	-- The body pushed this frame (none kept while holding); far from the last one: start afresh.
 	local pushed = body
@@ -430,6 +441,8 @@ local function step(dt: number)
 		look.yaw, look.pitch, look.yawVel, look.pitchVel = 0, 0, 0, 0
 	end
 	CameraRules.aim(look, camYaw, camPitch)
+	-- (The camera's offset from the aim as it is drawn this frame, before the snap's next turn.)
+	suspended = CameraRules.suspends(look)
 	if look.snapping then
 		local dx, dy = CameraRules.snapStep(look, camYaw, camPitch, dt)
 		MouseLook.turn(dx, dy)
@@ -481,11 +494,8 @@ function CameraRig.start(clientWorld: ClientWorld.ClientWorld, mouseFreePredicat
 	given.mouseFree = mouseFreePredicates
 	local player = Players.LocalPlayer
 	if not enabled then
-		-- (As before the rig: shift lock where the place allows it, default.project.json having
-		-- turned the option off for the rig.)
-		pcall(function()
-			player.DevEnableMouseLock = true
-		end)
+		-- (As before the rig. Shift lock is the server's: IceVoxel_Server sets DevEnableMouseLock,
+		-- which a client can't, from Config.Camera.Enabled.)
 		RunService:BindToRenderStep(RENDER_STEP, RENDER_PRIORITY, step)
 		return
 	end
@@ -494,12 +504,14 @@ function CameraRig.start(clientWorld: ClientWorld.ClientWorld, mouseFreePredicat
 	end
 	getBlock = blocks
 	sightStops, sightOutline = Shapes.sight(blocks)
-	-- Roblox's camera for its rotation and the locked mouse only (see the header).
-	pcall(function()
-		player.DevEnableMouseLock = false
-	end)
+	-- Roblox's camera for its rotation and the locked mouse only (see the header; no shift lock:
+	-- default.project.json's EnableMouseLockOption, and the server's DevEnableMouseLock).
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
 	MouseLook.hookCamera()
+	-- Roblox's fade of the character held off while the first-person body draws it.
+	CameraFade.hook(function(): boolean
+		return CameraRig.active() and not isSpectator()
+	end)
 	-- (Last frame's body is in render studs: it moves with the origin.)
 	Origin.onRebase(function(dx: number, dz: number)
 		last.eyeX -= dx
@@ -541,29 +553,22 @@ function CameraRig.start(clientWorld: ClientWorld.ClientWorld, mouseFreePredicat
 		end
 		return Enum.ContextActionResult.Pass
 	end, false, INPUT_PRIORITY, Enum.KeyCode.ButtonR3)
-	-- Touch: VIEW (tap) and LOOK (held), at the button frame's upper right.
-	if Config.Movement.TouchButtons then
-		ContextActionService:BindAction(TOUCH_VIEW, function(_, state: Enum.UserInputState)
-			if state == Enum.UserInputState.Begin and CameraRig.playing() then
-				toggleView()
-			end
-			return Enum.ContextActionResult.Sink
-		end, true)
-		ContextActionService:BindAction(TOUCH_LOOK, function(_, state: Enum.UserInputState)
-			if state == Enum.UserInputState.Begin then
-				touchLook = true
-				freelookPressed = true
-			elseif state == Enum.UserInputState.End or state == Enum.UserInputState.Cancel then
-				touchLook = false
-			end
-			return Enum.ContextActionResult.Sink
-		end, true)
-		ContextActionService:SetTitle(TOUCH_VIEW, "VIEW")
-		ContextActionService:SetTitle(TOUCH_LOOK, "LOOK")
-		ContextActionService:SetPosition(TOUCH_VIEW, TOUCH_VIEW_AT)
-		ContextActionService:SetPosition(TOUCH_LOOK, TOUCH_LOOK_AT)
-	end
 	RunService:BindToRenderStep(RENDER_STEP, RENDER_PRIORITY, step)
+end
+
+-- The touch VIEW button (Ui/TouchButtons) was tapped: Toggle Perspective, while playing.
+function CameraRig.touchView()
+	if CameraRig.playing() then
+		toggleView()
+	end
+end
+
+-- The touch LOOK button (Ui/TouchButtons) went down (true) or up: freelook while it is held.
+function CameraRig.touchLook(held: boolean)
+	if held and not touchLook then
+		freelookPressed = true
+	end
+	touchLook = held
 end
 
 --[[ What the rig is told ]]
@@ -691,10 +696,17 @@ end
 
 --[[
 	Is the camera freelooking (the aim held still; targeting and presses suspended)? Also while it
-	comes back to the aim.
+	comes back to the aim, until it is within 2 degrees of it (CameraRules.suspends: the crosshair
+	is then where the hands point; Interaction/BlockInteraction plays the presses made meanwhile).
 ]]
 function CameraRig.freelooking(): boolean
-	return look.active or look.snapping
+	return enabled and suspended
+end
+
+-- Is the camera coming back to the aim after freelook, the Freelook input let go (presses made
+-- now are kept for when it is back: Interaction/BlockInteraction)?
+function CameraRig.comingBack(): boolean
+	return enabled and suspended and not look.active
 end
 
 -- The camera's turn from the aim while freelooking (radians: yaw left, pitch up); 0, 0 otherwise.

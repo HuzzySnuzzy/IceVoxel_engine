@@ -32,9 +32,10 @@
 	  corner     what shows in the HUD's corner (`setMinimap`, `setDayLine`, `setToast`,
 	             `setEffects`, `setSaving`, `setDebugRight`, `setHudRaise`), the status icons'
 	             sizes (`setStatus`, Ui/StatusCluster: placed at the bottom right before the rest
-	             of the corner, which keeps clear of them) and Roblox's touch buttons (the live
-	             JumpButton and ContextActionService buttons, measured again when PlayerGui's
-	             children change and every BUTTON_CHECK seconds on touch screens) go into
+	             of the corner, which keeps clear of them) and the touch buttons (the live
+	             JumpButton, ContextActionService buttons and the game's own, Ui/TouchButtons',
+	             measured again when PlayerGui's children change and every BUTTON_CHECK seconds on
+	             touch screens) go into
 	             HudLayout.compute, which also lifts the HUD's canvas off a PC screen's bottom;
 	             `hud()` is the result (screen pixels) and `hudChanged` fires when anything in it
 	             may have moved.
@@ -105,6 +106,9 @@ export type GuiOptions = {
 
 -- Seconds between measures of Roblox's touch buttons on touch screens.
 local BUTTON_CHECK = 1
+-- The game's own touch buttons' ScreenGui (Ui/TouchButtons: the camera's VIEW and LOOK), measured
+-- with Roblox's.
+local TOUCH_BUTTONS = "IceVoxelTouchButtons"
 -- The viewport before the camera reports one.
 local FALLBACK = Vector2.new(1280, 720)
 
@@ -204,9 +208,9 @@ local function drawn(object: Instance): boolean
 end
 
 --[[
-	Roblox's touch buttons in screen pixels: TouchGui's JumpButton and the ContextActionService
-	buttons (Sprint, Sneak), as drawn now; nil when none is (HudLayout then assumes PlayerModule's
-	jump button on a touch screen).
+	The touch buttons in screen pixels: TouchGui's JumpButton, the ContextActionService buttons
+	(Sprint, Sneak, a firearm's) and the game's own (VIEW, LOOK), as drawn now; nil when none is
+	(HudLayout then assumes PlayerModule's jump button on a touch screen).
 ]]
 local function readButtons(): { HudLayout.Rect }?
 	local full = fullProbe
@@ -233,6 +237,13 @@ local function readButtons(): { HudLayout.Rect }?
 	local actions = playerGui:FindFirstChild("ContextActionGui")
 	if actions then
 		for _, object in actions:GetDescendants() do
+			add(object)
+		end
+	end
+	-- (The game's own touch buttons among them: the camera's VIEW and LOOK, Ui/TouchButtons.)
+	local own = playerGui:FindFirstChild(TOUCH_BUTTONS)
+	if own then
+		for _, object in own:GetDescendants() do
 			add(object)
 		end
 	end

@@ -23,23 +23,32 @@
 	             DayZ's 0.14. In the air the pivot's height lags (`jumpLag`: none of the rise for
 	             0.15 s, then a quarter of it; `heightLag` every frame: continuous across a hop
 	             after a landing, and eased back to 0 on landing). Collision (`collide`, on a ray
-	             cast the rig gives it): the pivot keeps `clip` of the way from the eyes to it, the
-	             boom is cast backwards from it as five rays over the near plane, and pulls in at
-	             once and eases back out (`boom`; `boomStep`: the rig's own length while nothing
-	             pulled it in). A body that moved far in a frame (`movedFar`) starts it afresh.
+	             cast the rig gives it) keeps Roblox's near plane out of blocks, sized every frame
+	             from the camera itself (a Lens, `setLens`: |NearPlaneZ|, the field of view and the
+	             viewport's aspect, as Roblox's Popper sizes its checks; the near plane is 0.1 studs
+	             ahead on a computer and up to 0.5 on a phone): the pivot keeps `clip` of the way
+	             from the eyes to it, then moves off blocks beside it until the near plane's half
+	             width and half height fit there, and the boom is cast backwards from it and from
+	             the near plane's four corners; it pulls in at once and eases back out (`boom`;
+	             `boomStep`: the rig's own length while nothing pulled it in). A body that moved
+	             far in a frame (`movedFar`) starts it afresh.
 	  Eyes       first person and the sights look from the hull's eyes pushed ahead
-	             (`firstPersonEye`: Config.Camera.FirstForward, more looking down), so the chest
-	             and feet show; in at once, out of the sights to the shoulder over DayZ's 0.2 s
-	             (`eyeShare`). Targeting skips what lies between the camera and the eyes' plane
-	             (`eyePlaneSkip`: 0 in first person).
+	             (`firstPersonEye`: Config.Camera.FirstForward, more looking down, past the front of
+	             the chest, so its edge, the legs and the feet show instead of the torso's top),
+	             pulled back towards Roblox's own first-person camera where a block would cut the
+	             near plane (`firstPersonClear`); in at once, out of the sights to the shoulder over
+	             DayZ's 0.2 s (`eyeShare`). Targeting skips what lies between the camera and the
+	             eyes' plane (`eyePlaneSkip`: 0 in first person).
 	  Freelook   a Look (`newLook`): held (or toggled) Freelook freezes the aim while the camera
 	             turns, up to Config.Camera.FreelookYaw each way (FreelookYawFirst in first
 	             person; `clampRoom` gives the room left, which MouseLook's hook clamps the turn
 	             to); let go, the camera's offset from the aim comes back by SmoothCD over
 	             SnapBackSeconds (`snapStep`: the turn to queue on Roblox's camera input) while
-	             input still moves the aim, and freelook ends below SNAP_END radians. Every frame,
-	             in this order: `freelook` (the key's edges), `aim` (the aim this frame), then
-	             `snapStep` while snapping and `clampRoom`.
+	             input still moves the aim, and freelook ends below SNAP_END radians. Targeting
+	             and presses wait while it `suspends`: freelooking, and swinging back until the
+	             camera is within SNAP_READY of the aim. Every frame, in this order: `freelook`
+	             (the key's edges), `aim` (the aim this frame), `suspends`, then `snapStep` while
+	             snapping and `clampRoom`.
 	  Body       the body's yaw follows the aim (`followYaw`): at once when flagged
 	             (`turnsAtOnce`: moving, raised, first person...), else by SmoothCD over
 	             Config.Camera.IdleTurnSeconds, never more than IdleTurnMaxLag behind.
@@ -139,6 +148,26 @@ export type Look = {
 }
 
 --[[
+	The camera this frame, for the collision (`setLens` fills one in place every frame): the view's
+	unit look, right and up, how far ahead of the camera Roblox's near plane is (studs) and its half
+	width and half height there.
+]]
+export type Lens = {
+	lx: number,
+	ly: number,
+	lz: number,
+	rx: number,
+	ry: number,
+	rz: number,
+	ux: number,
+	uy: number,
+	uz: number,
+	near: number,
+	halfWidth: number,
+	halfHeight: number,
+}
+
+--[[
 	A ray cast for the collision (`collide`): how far (studs) a ray from (ox, oy, oz) along
 	(dx, dy, dz) (render studs, any length) goes before a block stops it, looking `max` studs far;
 	math.huge when nothing does (Player/CameraRig: Shared/World/VoxelRaycast.distance).
@@ -175,8 +204,15 @@ CameraRules.LAND_SECONDS = 0.3
 CameraRules.SIGHTS_OUT_SECONDS = 0.2
 -- The body moved this far (studs) in one frame: a teleport or a respawn; the camera starts afresh.
 CameraRules.MOVED_FAR = 16
--- The boom's edge rays start this far (studs) short of a block beside the pivot (`collide`).
+-- The near plane keeps this far (studs) from blocks beside it (`collide`, `firstPersonClear`).
 CameraRules.SIDE_GAP = 0.05
+-- Roblox's near plane is "between 0.1 and 0.5 studs ahead, varying across platforms" (Camera.
+-- NearPlaneZ): a camera that reports none counts as the farthest.
+CameraRules.NEAR_FALLBACK = 0.5
+-- While the camera swings back from freelook, targeting and presses come back once it is within
+-- this of the aim each way (radians): the crosshair, the camera's centre, is then where the hands
+-- point, as near as the eye can tell (`suspends`).
+CameraRules.SNAP_READY = math.rad(2)
 
 --[[
 	DayZ's blend times between rigs (dayzplayercameras.c), "from>to" -> seconds: Erc <-> Raised 0.2,
@@ -227,9 +263,12 @@ function CameraRules.view(chosen: Chosen, posture: Posture, spectator: boolean):
 	return "third"
 end
 
--- The chosen view after a Toggle Perspective press: unchanged while raised (DayZ) or spectating.
-function CameraRules.toggle(chosen: Chosen, posture: Posture, spectator: boolean): Chosen
-	if spectator or posture ~= "lowered" then
+--[[
+	The chosen view after a Toggle Perspective press: unchanged while a firearm is raised or a melee
+	guard is up (`guard`: DayZ's camChange is false while anything is raised) or spectating.
+]]
+function CameraRules.toggle(chosen: Chosen, posture: Posture, spectator: boolean, guard: boolean?): Chosen
+	if spectator or posture ~= "lowered" or guard == true then
 		return chosen
 	end
 	return if chosen == "first" then "third" else "first"
@@ -417,18 +456,115 @@ function CameraRules.clip(free: number, wanted: number, margin: number): number
 	return math.clamp(math.min(wanted, free - margin), 0, wanted)
 end
 
+--[[ The near plane ]]
+
+function CameraRules.newLens(): Lens
+	return {
+		lx = 0,
+		ly = 0,
+		lz = -1,
+		rx = 1,
+		ry = 0,
+		rz = 0,
+		ux = 0,
+		uy = 1,
+		uz = 0,
+		near = CameraRules.NEAR_FALLBACK,
+		halfWidth = 0,
+		halfHeight = 0,
+	}
+end
+
 --[[
-	The shoulder rig's collision with blocks, for eyes (ex, ey, ez), pivot (px, py, pz), the view's
-	unit look (lx, ly, lz), right (rx, ry, rz) and up (ux, uy, uz), and a boom `distance` long:
+	The size of Roblox's near plane (studs) for a camera whose Camera.NearPlaneZ is `nearPlaneZ`
+	(negative), whose vertical field of view is `fov` degrees and whose viewport is `aspect` (width
+	over height): how far ahead of the camera it is, and its half width and half height there
+	(Roblox's Popper sizes its own checks from the same three).
+]]
+function CameraRules.nearPlane(nearPlaneZ: number, fov: number, aspect: number): (number, number, number)
+	local near = math.abs(nearPlaneZ)
+	if near ~= near or near <= 0 then
+		near = CameraRules.NEAR_FALLBACK
+	end
+	if not (fov > 0) then
+		fov = 70
+	end
+	if not (aspect > 0) then
+		aspect = 1
+	end
+	local halfHeight = near * math.tan(math.rad(math.min(fov, 179)) / 2)
+	return near, halfHeight * aspect, halfHeight
+end
+
+--[[
+	Fills `lens` (in place) for this frame: the camera's rotation (CFrame:GetComponents() r00 .. r22),
+	and its near plane (`nearPlane`).
+]]
+function CameraRules.setLens(
+	lens: Lens,
+	r00: number,
+	r01: number,
+	r02: number,
+	r10: number,
+	r11: number,
+	r12: number,
+	r20: number,
+	r21: number,
+	r22: number,
+	nearPlaneZ: number,
+	fov: number,
+	aspect: number
+)
+	lens.lx, lens.ly, lens.lz = -r02, -r12, -r22
+	lens.rx, lens.ry, lens.rz = r00, r10, r20
+	lens.ux, lens.uy, lens.uz = r01, r11, r21
+	lens.near, lens.halfWidth, lens.halfHeight = CameraRules.nearPlane(nearPlaneZ, fov, aspect)
+end
+
+--[[
+	Moves the point (px, py, pz) along the unit axis (ax, ay, az) until `need` studs are free of
+	blocks on both sides of it along the axis (as little as it takes; midway where the gap is
+	narrower than twice `need`). Two casts of 2 x `need`.
+]]
+local function room(
+	px: number,
+	py: number,
+	pz: number,
+	ax: number,
+	ay: number,
+	az: number,
+	need: number,
+	cast: Cast
+): (number, number, number)
+	if need <= 0 then
+		return px, py, pz
+	end
+	local span = 2 * need
+	local plus = math.min(cast(px, py, pz, ax, ay, az, span), span)
+	local minus = math.min(cast(px, py, pz, -ax, -ay, -az, span), span)
+	-- (Where along the axis the point keeps `need` both ways, from where it is.)
+	local low, high = need - minus, plus - need
+	local shift = if low <= high then math.clamp(0, low, high) else (plus - minus) / 2
+	if shift == 0 then
+		return px, py, pz
+	end
+	return px + ax * shift, py + ay * shift, pz + az * shift
+end
+
+--[[
+	The shoulder rig's collision with blocks, for eyes (ex, ey, ez), pivot (px, py, pz), a boom
+	`distance` long and the camera's `lens` (its axes and near plane: `setLens`):
 	  1. the eyes to the pivot: the pivot keeps `clip` of the way (Config.Camera.Margin short of a
 	     block), so it is never inside a wall beside the head;
-	  2. the boom from that pivot backwards (-look) as five rays covering the near plane: the
-	     centre, and one from each of its edges (right x +-Radius[1], up x +-Radius[2]), each edge
-	     first cast out from the pivot and kept SIDE_GAP short of a block, so a wall alongside
-	     the boom (walking along it) only narrows the plane instead of pulling the camera in.
+	  2. room beside it: the pivot moves off blocks along the view's right and up (`room`) until
+	     the near plane's half width and half height (and SIDE_GAP) are free each way, so a wall
+	     beside the camera (a 1 x 2 tunnel, walking along a wall) never cuts the near plane;
+	  3. the boom from that pivot backwards (-look) as five rays: the centre, and one from each of
+	     the near plane's corners (right x +-half width, up x +-half height, each first cast out
+	     from the pivot and kept SIDE_GAP short of a block), as Roblox's Popper sweeps its corners.
 	Returns the pivot kept and how long the boom may be: math.huge with nothing in the way, else the
 	nearest block's distance along the boom less the margin (`boomStep` / `boom` take it). At most
-	nine casts, the longest `distance` + the margin.
+	fourteen casts of a few studs, the longest `distance` + the margin.
 ]]
 function CameraRules.collide(
 	ex: number,
@@ -437,49 +573,40 @@ function CameraRules.collide(
 	px: number,
 	py: number,
 	pz: number,
-	lx: number,
-	ly: number,
-	lz: number,
-	rx: number,
-	ry: number,
-	rz: number,
-	ux: number,
-	uy: number,
-	uz: number,
 	distance: number,
+	lens: Lens,
 	cast: Cast
 ): (number, number, number, number)
-	local margin = CAMERA.Margin
+	local margin, gap = CAMERA.Margin, CameraRules.SIDE_GAP
 	local wx, wy, wz = px - ex, py - ey, pz - ez
 	local wanted = math.sqrt(wx * wx + wy * wy + wz * wz)
 	if wanted > 1e-6 then
 		local share = CameraRules.clip(cast(ex, ey, ez, wx, wy, wz, wanted + margin), wanted, margin) / wanted
 		px, py, pz = ex + wx * share, ey + wy * share, ez + wz * share
 	end
+	local halfWidth, halfHeight = lens.halfWidth, lens.halfHeight
+	local rx, ry, rz = lens.rx, lens.ry, lens.rz
+	local ux, uy, uz = lens.ux, lens.uy, lens.uz
+	px, py, pz = room(px, py, pz, rx, ry, rz, halfWidth + gap, cast)
+	px, py, pz = room(px, py, pz, ux, uy, uz, halfHeight + gap, cast)
 	local free = math.huge
 	if distance <= 0 then
 		return px, py, pz, free
 	end
-	local radiusX, radiusY = CAMERA.Radius[1] or 0, CAMERA.Radius[2] or 0
+	local bx, by, bz = -lens.lx, -lens.ly, -lens.lz
+	local corner = math.sqrt(halfWidth * halfWidth + halfHeight * halfHeight)
 	for ray = 0, 4 do
 		local sx, sy, sz = px, py, pz
-		if ray > 0 then
-			-- (The edge: out from the pivot along +-right or +-up, short of a block.)
-			local side = if ray <= 2 then radiusX else radiusY
-			local sign = if ray % 2 == 1 then 1 else -1
-			local ox, oy, oz
-			if ray <= 2 then
-				ox, oy, oz = rx * sign, ry * sign, rz * sign
-			else
-				ox, oy, oz = ux * sign, uy * sign, uz * sign
-			end
-			if side > 0 then
-				local hit = cast(px, py, pz, ox, oy, oz, side)
-				local out = if hit == math.huge then side else math.max(0, hit - CameraRules.SIDE_GAP)
-				sx, sy, sz = px + ox * out, py + oy * out, pz + oz * out
-			end
+		if ray > 0 and corner > 0 then
+			-- (A corner: out from the pivot, short of a block.)
+			local across = if ray <= 2 then halfWidth else -halfWidth
+			local along = if ray % 2 == 1 then halfHeight else -halfHeight
+			local ox, oy, oz = rx * across + ux * along, ry * across + uy * along, rz * across + uz * along
+			local hit = cast(px, py, pz, ox, oy, oz, corner)
+			local share = if hit == math.huge then 1 else math.max(0, hit - gap) / corner
+			sx, sy, sz = px + ox * share, py + oy * share, pz + oz * share
 		end
-		local hit = cast(sx, sy, sz, -lx, -ly, -lz, distance + margin)
+		local hit = cast(sx, sy, sz, bx, by, bz, distance + margin)
 		if hit ~= math.huge then
 			free = math.min(free, hit - margin)
 		end
@@ -555,6 +682,55 @@ function CameraRules.firstPersonEye(
 ): (number, number, number)
 	local push = CAMERA.FirstForward + CAMERA.FirstDownPush * math.max(0, -math.sin(pitch))
 	return ex - math.sin(yaw) * push, ey, ez - math.cos(yaw) * push
+end
+
+--[[
+	The first-person (and sights) camera for the eye point (dx, dy, dz) (`firstPersonEye`) of the
+	hull's eyes (ex, ey, ez), keeping the camera's near plane (`lens`) out of blocks: the eye point
+	itself where its near plane is clear, else as far along the way to it as stays clear from Roblox's
+	own first-person camera, `near` behind the eyes along the look, whose near plane is centred on
+	the eyes, inside the hull, which keeps 0.3 blocks from every block beside it (wider than the near
+	plane's half width on any screen). The near plane's centre and four corners are cast along that
+	way and each stops SIDE_GAP short of a block. Five casts of under two studs.
+]]
+function CameraRules.firstPersonClear(
+	ex: number,
+	ey: number,
+	ez: number,
+	dx: number,
+	dy: number,
+	dz: number,
+	lens: Lens,
+	cast: Cast
+): (number, number, number)
+	local near = lens.near
+	local lx, ly, lz = lens.lx, lens.ly, lens.lz
+	-- (Roblox's first-person camera, and the way from it to the eye point.)
+	local sx, sy, sz = ex - lx * near, ey - ly * near, ez - lz * near
+	local wx, wy, wz = dx - sx, dy - sy, dz - sz
+	local way = math.sqrt(wx * wx + wy * wy + wz * wz)
+	if way < 1e-6 then
+		return dx, dy, dz
+	end
+	local gap = CameraRules.SIDE_GAP
+	local halfWidth, halfHeight = lens.halfWidth, lens.halfHeight
+	local share = 1
+	for point = 0, 4 do
+		-- (The near plane's centre, then its corners: from that camera they lie around the eyes.)
+		local across = if point == 0 then 0 elseif point <= 2 then halfWidth else -halfWidth
+		local along = if point == 0 then 0 elseif point % 2 == 1 then halfHeight else -halfHeight
+		local ox = lx * near + lens.rx * across + lens.ux * along
+		local oy = ly * near + lens.ry * across + lens.uy * along
+		local oz = lz * near + lens.rz * across + lens.uz * along
+		local hit = cast(sx + ox, sy + oy, sz + oz, wx, wy, wz, way + gap)
+		if hit ~= math.huge then
+			share = math.min(share, math.max(0, hit - gap) / way)
+		end
+	end
+	if share >= 1 then
+		return dx, dy, dz
+	end
+	return sx + wx * share, sy + wy * share, sz + wz * share
 end
 
 --[[
@@ -671,6 +847,20 @@ function CameraRules.aim(look: Look, camYaw: number, camPitch: number): (number,
 		look.yaw, look.pitch = 0, 0
 	end
 	return look.aimYaw, look.aimPitch
+end
+
+--[[
+	Does freelook hold targeting and presses back now (after `aim` this frame: the camera's offset
+	from the aim as it is now)? While freelooking, and while the camera swings back until it is
+	within SNAP_READY of the aim each way: from then on the camera's own ray, which the crosshair
+	shows, is where the hands point, as near as the eye can tell.
+]]
+function CameraRules.suspends(look: Look): boolean
+	if look.active then
+		return true
+	end
+	local ready = CameraRules.SNAP_READY
+	return look.snapping and (math.abs(look.yaw) > ready or math.abs(look.pitch) > ready)
 end
 
 --[[

@@ -107,6 +107,17 @@ local Config = require(Shared.Config)
 if Config.MainMenu.Enabled then
 	Players.CharacterAutoLoads = false
 end
+-- Shift lock: none with the DayZ camera (client Player/CameraRig locks the mouse for good;
+-- default.project.json's EnableMouseLockOption is off for it), back as before the rig with
+-- Config.Camera.Enabled = false. Only the server may set Player.DevEnableMouseLock (a client
+-- can't); Roblox's camera scripts on the client follow the change.
+local function mouseLock(player: Player)
+	player.DevEnableMouseLock = not Config.Camera.Enabled
+end
+Players.PlayerAdded:Connect(mouseLock)
+for _, player in Players:GetPlayers() do
+	mouseLock(player)
+end
 local WorldTypes = require(Shared.Generation.WorldTypes)
 local WorldSettings = require(Shared.WorldSettings)
 local Mining = require(Shared.Mining)

@@ -86,6 +86,8 @@
 	  Player/CameraRig           the camera in the manner of DayZ on Roblox's camera scripts:
 	                             over the shoulder or from the eyes (Toggle Perspective),
 	                             freelook, focus, never inside a block (Player/CameraRules)
+	  Ui/TouchButtons            the touch buttons' places round the jump button (Ui/TouchLayout)
+	                             and the camera's own VIEW and LOOK
 	  Player/RemotePlayers       where the other players are (world blocks): their characters
 	                             now, the server's relay by interest with Config.Players
 	                             .ServerPositions
@@ -214,6 +216,7 @@ local SaveIndicator = require(Client.Ui.SaveIndicator)
 local SurvivorHud = require(Client.Ui.SurvivorHud)
 local Style = require(Client.Ui.Style)
 local UiScale = require(Client.Ui.UiScale)
+local TouchButtons = require(Client.Ui.TouchButtons)
 
 -- First, so the server's sounds play from the start instead of piling up.
 SoundPlayer.start()
@@ -468,6 +471,8 @@ CameraRig.start(world, {
 		return GuiService.MenuIsOpen
 	end,
 })
+-- The camera's touch VIEW and LOOK (the game's own buttons, beside Roblox's touch buttons).
+TouchButtons.start()
 -- The render origin follows the camera (a render step before every placement in the frame).
 Rebase.start()
 -- (After the camera: the fluid at the camera, its fog and tint.)

@@ -9,13 +9,16 @@
 	          press, an automatic at its rate)
 	  RELOAD  reloads (or clears a jam), as R
 
-	They are ContextActionService's touch buttons (bound only while a gun is held), so Roblox places
-	them round the jump button among the others and Ui/UiScale measures them with the rest for the
-	HUD's corner to keep clear of; a press on one never reaches the world (no tap, no bash).
-	Elsewhere (a mouse, a gamepad) no button shows.
+	They are ContextActionService's touch buttons (bound only while a gun is held), each put in a
+	slot of its own round the jump button (Ui/TouchButtons.place, Ui/TouchLayout: FIRE beside the
+	sprint button, AIM over it, RELOAD beside AIM), whatever order the buttons were bound in, and
+	Ui/UiScale measures them with the rest for the HUD's corner to keep clear of; a press on one
+	never reaches the world (no tap, no bash). Elsewhere (a mouse, a gamepad) no button shows.
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
+
+local TouchButtons = require(script.Parent.TouchButtons)
 
 export type Handlers = {
 	-- FIRE went down (true) or up (false).
@@ -69,6 +72,9 @@ local function bind()
 	ContextActionService:SetTitle(FIRE, "FIRE")
 	ContextActionService:SetTitle(AIM, if raised then "LOWER" else "AIM")
 	ContextActionService:SetTitle(RELOAD, "RELOAD")
+	TouchButtons.place(FIRE, "fire")
+	TouchButtons.place(AIM, "aim")
+	TouchButtons.place(RELOAD, "reload")
 end
 
 local function unbind()
