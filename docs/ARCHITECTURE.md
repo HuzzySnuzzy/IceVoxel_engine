@@ -2075,14 +2075,18 @@ hull is.
     - a `VectorForce` cancelling gravity.
   - Puts the camera at the hull's eye height. Roblox's camera adds `CameraOffset` in the root
     part's space, so the offset is computed through the root's CFrame. The eye height eases like
-    Minecraft's, half the remaining way per tick.
+    Minecraft's, half the remaining way per tick. The same eyes, the body's yaw, speed, jump and
+    stance go to the camera rig every frame (`CameraRig.setBody`), which places the camera after
+    Roblox's (see Camera); with the rig, forward input walks along the rig's aim and the body
+    turns to it.
   - Scales the camera's field of view by `SprintFov` (1.15) while sprinting, eased the same way, on
     top of the FOV setting (`setFieldOfView`; without one, whatever the field of view is set to),
     the modifier scaled towards 1 by the FOV Effects setting (`setFovEffects`).
 
   Other duties:
   - Sprint and sneak are `ContextActionService` actions at High priority that sink their keys, so
-    Left Shift no longer toggles shift lock (Right Shift still does). Their keys are the Sprint
+    Left Shift no longer toggles shift lock (Right Shift still does with the camera rig off; with
+    it there is no shift lock at all: see Camera). Their keys are the Sprint
     and Sneak key bindings plus `Config.Movement`'s gamepad buttons; a changed binding binds the
     action again (`Keybinds.changed`). With `ToggleSprint` (the Sprint setting), the sprint key
     turns sprinting on and off; turning it off also stops a sprint started by double tapping.
@@ -2227,6 +2231,190 @@ their feet are in a climbable cell and they do not stand.
   pouring into a hole keeps spreading at its edge. So water runs down slopes the way it does in
   Minecraft instead of flooding the ground around it. Lava, oil and fuel spread the same way with
   their own slope distance (see Fluids: lava and oil look for holes up to 3 blocks away).
+
+### Camera (`Player/CameraRig`, `Player/CameraRules`, `Player/MouseLook`, `Player/FirstPersonBody`, `Player/FirstPersonRules`, `Player/BodyTwist`, `Player/BodyRules`, `Interaction/TargetRules`)
+
+A camera in the manner of DayZ, on Roblox's own camera scripts. They stay the source of the camera's
+rotation and of the mouse lock only: `CameraRig.start` sets the player's `CameraMode` to
+`LockFirstPerson` for good (as spectating someone already did), turns `DevEnableMouseLock` off
+(default.project.json's `StarterPlayer.EnableMouseLockOption` is false too) and hooks the camera's
+input (`Player/MouseLook`). Roblox's camera rebuilds its look from `camera.CFrame.LookVector` every
+frame (which is why the view bob and the sway are taken off before it), so the rig, the render step
+right after it, writes the camera's position and keeps its rotation: the next frame starts from the
+same look. There is no wheel zoom, no shift lock, no Popper and no Follow mode. Shaped blocks have
+`CanQuery` off, so the rig collides with the block data instead.
+
+**The frame** (`Enum.RenderPriority.Camera` = 200; `tests/spec/CameraIntegration` reads every bound
+step from the sources and pins it here):
+
+| Priority | Step (module) | What it does |
+| --- | --- | --- |
+| Camera − 4 | `IceVoxelFirearmsState` (Interaction/Firearms) | the trigger's state |
+| − 3 | `IceVoxelOrigin` (Rendering/Rebase) | the render origin |
+| − 2 | `IceVoxelRemotePlayers` (Player/RemotePlayers), `IceVoxelAimUnsway` (Player/AimCamera) | other players' roots; last frame's sway off |
+| − 1 | `IceVoxelMovement`, `IceVoxelDying` (Player/MovementController) | last frame's bob off; the hull's ticks; the root, turned to the aim (`CameraRules.followYaw`); the body pushed to the rig (`CameraRig.setBody`) |
+| Camera | Roblox's CameraModule | the rotation from the mouse, stick and touch through MouseLook's hook (invert, zoom × focus share, freelook's room, recoil, the queued snap-back turn); the TransparencyController's fade |
+| + 1 | `IceVoxelCameraRig` (Player/CameraRig); the screens', chat's and switcher's mouse steps; `IceVoxelExplosionShake`; the mobs', items', projectiles', shots' and transmitters' renderers | the aim and freelook, the `onAim` listeners (MovementController re-faces a body that turns at once), then the camera's place. `IceVoxelAimLock` (AimCamera) only with the rig off |
+| + 2 | `IceVoxelFirstPersonBody` (Player/FirstPersonBody); `IceVoxelWeatherState`; `IceVoxelFluidView` | the local character's visibility (FluidFog reads the final place: the fog follows the camera, as Minecraft's) |
+| + 3 | `IceVoxelEffectView`; `IceVoxelSpectators` (Player/SpectatorView) | Nausea's roll; spectators and hidden bodies, raised over what + 2 wrote |
+| + 4 | `IceVoxelViewBob` (MovementController) | Minecraft's bob × `CameraRig.bobShare` (none over the shoulder), the hurt tilt in every view |
+| + 5 | `IceVoxelAimSway` (AimCamera) | zoom, recoil's recovery, the sway |
+| + 6 | `IceVoxelFirearmsFire` (Firearms); `IceVoxelBodyTwist` (Player/BodyTwist) | shots; every character's hips, the local waist |
+| + 7 | `IceVoxelHeldItems` (Player/HeldItems; a RenderStepped connection before) | every hand's item; the local one at the camera and the arms on it |
+| + 8 | `IceVoxelEquipmentLooks` (Player/EquipmentLooks; + 1 before) | worn pieces on the posed and turned body |
+| + 9 | `IceVoxelSoundListener` (Audio/SoundPlayer; + 1 before) | the listener at the final camera |
+
+Steps at one priority are independent of each other (the rig keeps the rotation and the explosion's
+shake only turns it, so they commute). RenderStepped connections (CharacterAnimator,
+BlockInteraction's loop, the HUD) have no documented order against bound steps; none needs the final
+camera exactly. A muzzle flash fired at + 6 starts from the gun's place last frame.
+
+**The rig** (`Player/CameraRig`; the rules in `Player/CameraRules`, pure, tested in
+tests/spec/CameraRules). The player chooses third or first person (the Camera setting, applied only
+when its value changes, then Toggle Perspective: `F5`, D-pad up, the touch VIEW button;
+`CameraRules.toggle` refuses while a firearm is raised, as DayZ's `camChange`, and for spectators,
+who always see from the eyes); V from third person makes the view "sights" (`CameraRules.view`).
+- Third person: the profile by stance and hands (`profileKey`: lying, climbing, flying, raised,
+  raisedHands, sprinting, crouching, standing; `Config.Camera.Profiles`, DayZ's numbers × 3) eases
+  over DayZ's blend times (`transition`; Enforce's `Math.SmoothCD`, `smoothCD`), the side in 0.14 s.
+  The pivot is the hull's eyes plus height (and a jump's lag: `heightLag` holds it at the take-off
+  height and eases back on landing), the shoulder to the body's side and forward in the body's yaw
+  frame. Collision (`collide`, on `VoxelRaycast.distance` with `Shapes.sight`'s collision boxes):
+  the eyes to the pivot cast and clipped by `Margin`, then the boom cast back along the look as five
+  rays (the centre and the near plane's edges, `Radius`, each cast sideways first so a wall on the
+  right never pulls the camera into the head); `boomStep` pulls in at once and eases out at
+  `EaseOut`. Spectators skip collision.
+- First person and the sights: from `firstPersonEye` (the hull's eyes plus `FirstForward`, more
+  looking down, so the chest and feet show instead of the inside of the neck). A view toggle is
+  instant; leaving the sights eases back to the shoulder over 0.2 s (`eyeShare`).
+- `active()`: the rig places the camera (on, started, with a body, spectating no one, `CameraType`
+  Custom). Spectating someone (`setSpectating`, from MovementController) is Roblox's own first
+  person on their eyes, as before. At death the camera holds the last body (`hold`, `holding`) while
+  it tips over in view; a jump of more than 16 studs in a frame (a teleport, a respawn) starts the
+  rig afresh. Only relative values are kept between frames (the held body moves with
+  `Origin.onRebase`).
+- The mouse: Roblox's first person locks it to the centre; the screens', chat's and switcher's steps
+  at + 1 free it, the map and the title screen with Modal. The rig hides the icon while `playing()`
+  (active and none of the mouse-free predicates the boot passes to `start`: Screens, Chat,
+  GameModeSwitcher, Keybinds.typing, MainMenu, the world map, Roblox's menu); `locked()` (the mouse
+  at the centre) tells BlockInteraction to draw the crosshair.
+- The rig requires no Ui/ or Interaction/ module, nor MovementController or AimCamera: what it needs
+  comes in (`start`'s world and predicates, `setBody`, `setPosture` from AimCamera,
+  `setSpectating`).
+
+**Aim, freelook and focus.** The aim (`aimYaw`, `aimPitch`, `aimHeading`) is the camera's look,
+except while freelooking. MovementController walks along it and turns the body to it (`followYaw`:
+at once when moving, raised or guarding, from the eyes, swimming, climbing or flying, `turnsAtOnce`;
+standing, `IdleTurnSeconds` behind and at most `IdleTurnMaxLag`), again at + 1 for a body that turns
+at once (`CameraRig.onAim`), so the body seen from the eyes never trails the view by a frame; the
+pose's pitch is the aim's. Freelook (the Freelook key held, or toggled with the Freelook setting; R3
+held while nothing is raised, where Firearms' R3 sights would otherwise take it; the touch LOOK
+button) holds the aim while the camera turns: every frame at + 1 `freelook`, then `aim`, then
+`snapStep` (the turn back, queued with `MouseLook.turn`), then `clampRoom` (the room left before
+`FreelookYaw`, `FreelookYawFirst` from the eyes: `MouseLook.setRoom`, which the hook clamps input
+to). Let go, the camera swings back over DayZ's 0.14 s smooth time while input still moves the aim.
+`freelooking()` and `freelookOffset()` (the camera minus the aim: yaw positive to the left, pitch
+up) last until the swing back ends. No freelook in the sights, for spectators, while dead, without
+the hook, with a screen open or across a view toggle. Freelook isn't sent: others see the body's yaw
+and the aim's pitch. Focus (the Focus key held while playing, nothing raised or guarded:
+`CameraRig.focusing`) eases the field of view to `CameraRules.focusFov` (`FocusFov`,
+`FocusSprintFov`) over `FocusSeconds` (`MovementController.setFocusZoom`, which also slows the turn:
+`MouseLook.setFocusShare`). The view bob shows from the eyes only (`bobShare`).
+
+**The first-person body** (`Player/FirstPersonBody`; the rules in `Player/FirstPersonRules`, pure,
+tested in tests/spec/FirstPerson). Visibility: at + 2 it is the one writer of the local character's
+`LocalTransparencyModifier` while the rig is active and the player isn't a spectator. Under
+`LockFirstPerson` Roblox's TransparencyController fades the whole character (again on every new
+part), so every frame it writes each object's value where it differs. The objects
+(`SpectatorRules.HIDDEN_CLASSES`) are listed once and again when the character's descendants change;
+`roleOf` sorts them: the head (and what is on it), what is worn on the head (an accessory welded to
+it, carrying one of its attachments, or of AccessoryType Hat, Hair, Face, Eyebrow, Eyelash or Neck:
+rigid and layered alike), the arms, the rest. `hidden(role, view, bodyOn, scoped, near)`: in third
+person only what is within `NearClear` of the camera; from the eyes also the head and what is worn
+on it, and the arms in a scope's view; with First-Person Body off (or an R6 body) everything, for
+Minecraft's hand in HeldItems' viewport. A dead body is drawn as in third person while it tips over.
+`SpectatorView` (+ 3) only raises these values; `EquipmentLooks` (+ 8) hides a piece whose anchor
+part is hidden (`hides`) and head and neck pieces from the eyes (`hidesHeadWorn`). The arms:
+two-bone IK on the R15 shoulders, elbows and wrists (`twoBone`, the lengths from the joints' own C0
+and C1, so scaled bodies work; the elbow down and out, `POLE`), written to the C0
+(`Part0⁻¹·bone·C1·Transform⁻¹`) in the render step: the Animator's `Transform` read there is the one
+the frame draws, so the hand lands on the item (IKControl solves a step later and the hands would
+trail the item by a frame). The joints' owners, C0 only, never `Transform`:
+
+| Joint | Writer |
+| --- | --- |
+| LowerTorso.Root | MovementController (the step-up lag) |
+| LeftHip, RightHip | BodyTwist (every R15 character) |
+| UpperTorso.Waist | BodyTwist (the local character) |
+| Head.Neck | WeaponPoses (a raised gun's pitch; the local head's freelook turn, ≤ 70° / 60°) |
+| Shoulders | WeaponPoses in third person; FirstPersonBody in true first person |
+| Elbows, wrists | FirstPersonBody (true first person only) |
+
+HeldItems releases one before the other writes the shoulders (WeaponPoses is released for the local
+character in true first person, FirstPersonBody outside it).
+
+**Held items in the camera's space** (`Player/HeldItems` at + 7: after the bob and the sway, so the
+hands move with the final view, and after BodyTwist turned the waist, which carries the shoulders).
+In true first person (`FirstPersonBody.trueFirstPerson`: first person or the sights, the setting on,
+an R15 body, alive) the local player's world model is placed at `anchor · pose`, the anchor the
+camera turned back by the freelook offset, so the item stays on the aim while the head looks around.
+A firearm keeps the viewport's exact pivots (`firearmPivot` "hip" eased to "sights", the kick), lit
+by the world; its optic is hidden past 0.6 of the way to the sights; a scope's zoom hides it and the
+arms (Ui/WeaponHud's overlay); `muzzle` reads the model's pivot. Tools, blocks and the bare hand
+follow `FirstPersonRules.handPose` (the swing's sin(πt) over 0.3 s, the melee guard and wind-up). An
+item reaching into a block (a cast from the camera along the aim to its far end, on the world's
+blocks: `HeldItems.start(world)`) is pulled back, then lifted (`FirstPersonRules.obstruction`,
+DayZ's weapon lift; the shot still goes from the eyes). Then `FirstPersonBody.poseArms` puts the
+right hand on the grip (`ItemModels.firearmPoint` "grip" for a gun) and the left on a long gun's
+fore end ("fore": the look's `fore` point in Weapons/WeaponList, else 40 % of the way from the grip
+to the muzzle under the barrel) or a guarded weapon's handle (`leftHand`); where the right hand
+can't reach, the item follows it (a gun only along the view axis, so its sight line stays centred).
+HeldItems pushes what it holds every frame (`FirstPersonBody.setHeld`). The viewport (the corner
+hand, the full-screen gun) is left for the setting off, an R6 body and the rig off.
+
+**Targeting** (Interaction/BlockInteraction, rules in Interaction/TargetRules): the camera's ray
+starts at the eyes' plane (`CameraRules.eyePlaneSkip`; 0 in first person) and, over the shoulder,
+the eyes must see what it found: a block met sooner on the way from the eyes
+(`Player/CameraRig.eyes`) is aimed at instead, along the eyes' ray, with its own face; a mob the
+eyes can't see is not hit; the bucket's and the bottle's rays alike. Reach is measured from the body
+as before, so the server is unchanged. Freelook suspends targets, outline and presses (Firearms'
+trigger too). Minecraft's crosshair shows for a gamepad and for a mouse locked to the centre
+(`CameraRig.locked`), unless a raised firearm hides it or the player freelooks. With the camera at
+the eyes (first person, the sights, the rig off) the ray and the target are exactly as before.
+
+**Body motion** (Player/BodyRules, Player/BodyTwist at Camera + 6, Player/CharacterAnimator): every
+client twists every shown R15 character's legs at the hips towards a strafe (≤ 45°) from its drawn
+feet, folds a backpedal (the walk and run played reversed locally, replicated by the Animator; other
+players' from their replicated walk track's speed), shuffles the feet on idle turns over 1.2 rad/s,
+and leads the local upper body (the waist) on idle turns (≤ 45°) and beyond the neck in freelook
+(the neck's 70°, then the waist's 30°: `BodyRules.NECK_YAW` is `WeaponPoses.NECK_YAW`). Nothing is
+sent. Upright only (not crawling, swimming or on a ladder); R6 bodies get no twist.
+
+**Off.** `Config.Camera.Enabled = false` keeps today's camera: CameraRig binds only a step that
+measures geometric first person (within 1 stud of the camera's focus), `active()` is false, the aim
+is the camera's look, `locked()` is LockCenter, `eyes()` the camera, `bobShare()` 1;
+`DevEnableMouseLock` is put back on (shift lock where the place allows it); AimCamera binds its
+mouse lock (`IceVoxelAimLock`) and does the raised shoulder (`Weapons.ShoulderOffset` through
+`MovementController.setShoulder`) and the third-person sights from the focus with the character
+hidden; MovementController faces where the character walks (`Movement.TurnSpeed`) or, in first
+person and with a locked mouse, the camera; FirstPersonBody writes nothing, so HeldItems draws the
+viewport and EquipmentLooks follows the faded head; targeting casts from the camera as before.
+
+**Rules to keep.**
+- Code that asks "first person?" asks the rig (`CameraRig.firstPerson`: the chosen view, `AimRules`'
+  input; `eyesView`: first person or the sights), never the camera's distance to its focus.
+- `Player/CameraRig` requires no Ui/ or Interaction/ module, nor MovementController or AimCamera.
+  `Player/FirstPersonBody` requires only CameraRig, FirstPersonRules, SpectatorRules and Shared
+  (EquipmentLooks requires it, and MovementController EquipmentLooks); FirstPersonRules adds only
+  the pure AimRules. Nothing reachable from Interaction/Firearms or Interaction/MeleeInput requires
+  Interaction/BlockInteraction. The client has no require cycle (`tests/spec/CameraIntegration`
+  walks it).
+- One writer each: the local character's visibility (FirstPersonBody with the rig; SpectatorView
+  raising; AimCamera only with the rig off), each joint's C0 (the table above), the camera's place
+  (the rig; the bob, the sway and the shake only move it after, and come off before Roblox's camera
+  reads it).
+- Specs: CameraRules, FirstPerson, BodyRules, TargetRules and CameraIntegration (the frame table,
+  the require rules, the writers, the freelook contract between the rig, the head and the waist).
 
 ## Texture pack (`TexturePack`, `Blocks`, `tests/build_textures`, client `Rendering/TextureLooks`)
 
@@ -3345,7 +3533,8 @@ Client modules ask Shared/GameMode's abilities of the local player's mode
   their effects (`SpectatorRules.HIDDEN_CLASSES`) get LocalTransparencyModifier 1 for players who
   don't spectate, and their name and health display is hidden (DisplayDistanceType None, locally);
   spectators see the head and what is worn on it at 0.85 (Minecraft's alpha 0.15). Values are
-  only ever raised above what the camera's first person fade set, and put back once the player
+  only ever raised above what the camera's first person fade (or `Player/FirstPersonBody`, at
+  Camera + 2, before this at + 3) set, and put back once the player
   stops spectating. Spectators hold nothing (`Player/HeldItems`, which also hides any player's
   held item while the camera fades their head: one's own in first person, and the spectated
   player's), have no minimap dot where they are hidden (`Map/Minimap`) and make no movement
@@ -6484,18 +6673,22 @@ alone as a refused record with no pellets, its jam flag set when the reason is "
   field of view, recoil and its recovery, the model's kick, the sway's growing in, the
   first-person hip pose, the third-person arms and gun, the melee guard's and wind-up's poses
   (`meleeArms`, `meleeView`), the aim's ray tests.
-- **`Player/AimCamera`** works on Roblox's camera scripts: the shoulder offset
-  (`MovementController.setShoulder`), the mouse locked to the centre at Camera + 1, zoom
-  (`setAimZoom`) and the turn's share (`MouseLook.setZoomSensitivity`), the sway after the view
-  bob, recoil through Roblox's camera input (`MouseLook.kick`, a passing turn without the hook),
-  third-person sights from the eyes, and the slowness (`MovementController.setAimSlow`, set only
-  when the posture or a melee guard changes).
+- **`Player/AimCamera`** works on Roblox's camera scripts: it tells the camera rig the posture
+  every frame (`CameraRig.setPosture`: the raised profiles, no Toggle Perspective while raised, the
+  sights from the eyes; see Camera), zoom (`setAimZoom`) and the turn's share
+  (`MouseLook.setZoomSensitivity`), the sway after the view bob, recoil through Roblox's camera input
+  (`MouseLook.kick`, a passing turn without the hook), and the slowness
+  (`MovementController.setAimSlow`, set only when the posture or a melee guard changes). With the
+  rig off (`Config.Camera.Enabled = false`) also the shoulder offset
+  (`MovementController.setShoulder`), the mouse locked to the centre at Camera + 1 and the
+  third-person sights from the focus, as before.
 - **`Player/WeaponPoses`** turns every character's shoulders (Motor6D C0) for a gun lowered or
   raised, a melee guard and a heavy wind-up; **`Player/HeldItems`** holds dressed guns
-  (`Rendering/ItemModels.buildFirearm`) at the posed hand, draws the first-person gun across the
-  whole screen at the world camera's field of view (eased between the hip and the sights), lays a
-  guarding melee weapon across the view and draws it back while a heavy attack winds up
-  (`MeleeInput.guarding`, `charge`), and gives the muzzle's place (`muzzle`). Other players'
+  (`Rendering/ItemModels.buildFirearm`) at the posed hand, draws the first-person gun (in true
+  first person the world model at the camera, held by the body's hands: see Camera; otherwise
+  across the whole screen at the world camera's field of view), eased between the hip and the
+  sights, lays a guarding melee weapon across the view and draws it back while a heavy attack
+  winds up (`MeleeInput.guarding`, `charge`), and gives the muzzle's place (`muzzle`). Other players'
   postures come from `AIM_ATTRIBUTE`, their guns' looks from `HELD_LOOK_ATTRIBUTE`.
 - **`Rendering/ShotView`** draws every shot near from pools (flashes, tracers, dust and blood
   impacts) and plays the fire sounds by **`Rendering/ShotRules`** (pure): near, far, suppressed,

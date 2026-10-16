@@ -489,7 +489,8 @@ FluidFog.start(
 	end
 )
 CharacterAnimator.start()
-HeldItems.start()
+-- (The world's blocks for the first-person item's wall check: pulled back, then lifted.)
+HeldItems.start(world)
 -- The body seen in first person and every character's turning body (after the hands they pose).
 FirstPersonBody.start()
 BodyTwist.start()

@@ -14,7 +14,8 @@
 	               distance its sights are zeroed at (blocks), the ticks of a magazine swap, of
 	               chambering and of loading one round by hand, whether it jams, which attachment
 	               mounts it has, its `scale` and its `look`: where the hand holds it, the barrel's
-	               end, the sight line and the mounts (pixels in the item's model space, x along the
+	               end, the sight line, the mounts and (optionally) where the left hand holds a
+	               long gun in first person (pixels in the item's model space, x along the
 	               barrel, y up; ItemModels dresses and aims it with them). `scale` (default 1) is the
 	               share of the design's pixels the gun is drawn at: Items/ItemList scales its boxes
 	               and Shared/Weapons its look by it, so a long gun fits the icon's cube (10 pixels
@@ -65,6 +66,8 @@ export type Look = {
 	mag: Point?,
 	optic: Point?,
 	light: Point?,
+	-- Where the left hand holds a long gun (nil: under the barrel, 40 % from the grip to the muzzle).
+	fore: Point?,
 }
 
 export type FireModeKind = "semi" | "auto"

@@ -672,9 +672,9 @@ local function foreOf(spec: Weapons.FirearmSpec): Vector3
 		return cached
 	end
 	local look = spec.look
-	local own = (look :: any).fore
+	local own = look.fore
 	local point: Vector3
-	if type(own) == "table" then
+	if own then
 		point = Vector3.new(own[1], own[2], own[3] or 0)
 	else
 		local grip, muzzle = look.grip, look.muzzle

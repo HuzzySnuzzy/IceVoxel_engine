@@ -191,6 +191,7 @@ local function scaledLook(look: Look, scale: number): Look
 		mag = scaledPoint(look.mag, scale),
 		optic = scaledPoint(look.optic, scale),
 		light = scaledPoint(look.light, scale),
+		fore = scaledPoint(look.fore, scale),
 	})
 end
 
