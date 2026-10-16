@@ -1031,9 +1031,9 @@ local function refreshCache(player: Player, selected: Selected, progress: boolea
 	end
 end
 
--- Applies `look` onto a body Roblox made itself (the title screen off: see the header).
-local function applyLook(humanoid: Humanoid, look: Appearance.Appearance)
-	local description = CharacterLooks.description(look)
+-- Applies `look` onto `player`'s body Roblox made itself (the title screen off: see the header).
+local function applyLook(player: Player, humanoid: Humanoid, look: Appearance.Appearance)
+	local description = CharacterLooks.description(look, player.Name)
 	local anyHumanoid = humanoid :: any
 	local ok, err = pcall(function()
 		local method = anyHumanoid.ApplyDescriptionResetAsync or anyHumanoid.ApplyDescriptionReset
@@ -1091,7 +1091,7 @@ local function onCharacter(player: Player, character: Model)
 	end)
 	if not Config.MainMenu.Enabled then
 		-- (Roblox made this body from the user's avatar: the character's look goes onto it.)
-		task.spawn(applyLook, humanoid, selected.record.appearance)
+		task.spawn(applyLook, player, humanoid, selected.record.appearance)
 	end
 	local health = selected.pendingHealth
 	selected.pendingHealth = nil

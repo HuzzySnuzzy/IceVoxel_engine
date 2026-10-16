@@ -196,7 +196,7 @@ local function spawnCharacter(player: Player): (boolean, unknown)
 	if look then
 		local load = method(player, "LoadCharacterWithHumanoidDescriptionAsync", "LoadCharacterWithHumanoidDescription")
 		if load then
-			local description = CharacterLooks.description(look)
+			local description = CharacterLooks.description(look, player.Name)
 			local ok, err = pcall(load, player, description)
 			if ok then
 				return true, nil

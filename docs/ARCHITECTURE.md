@@ -7522,7 +7522,16 @@ stays: a non-operator joins the one running.
 - **Looks** (`Players/CharacterLooks`): the snapshot is
   `GetHumanoidDescriptionFromUserIdAsync` read into an Appearance (cached per session; the
   default look when it fails, e.g. Studio's negative ids); `fields` / `fromFields` are the pure
-  mapping to HumanoidDescription properties (specs). Preview rigs are built on the server with
+  mapping to HumanoidDescription properties (specs). Accessories go on with
+  `SetAccessories(list, true)`, which files an entry without `Order` under the rigid property of
+  its AccessoryType (`HatAccessory`...) and one with `Order` as layered clothing
+  (`AccessoryBlob`): `fields` gives a rigid one as `{AssetId, AccessoryType, IsLayered = false}`
+  only, a layered one with its `Order` and `Puffiness`, and leaves out (named in `skipped`) a
+  rigid one of a type with no rigid property and an asset worn twice. When Roblox refuses the
+  list, `setAccessories` puts them on one at a time, keeping each one it takes, so one bad
+  accessory never takes the others off; each refused or skipped one is warned about with why.
+  Saved records need no rewrite: the rule is applied at every spawn and preview, and only worn
+  accessories are sent, so a player's "not worn" stays. Preview rigs are built on the server with
   `CreateHumanoidModelFromDescriptionAsync(desc, R15)`, scripts removed and parts anchored, and
   parented to `PlayerGui.IceVoxelPreviews` as `c<id>` or `editor` (only that client receives
   them), debounced `PreviewDelay`, one build at a time per player, not rebuilt for the same look.

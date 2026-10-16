@@ -15,11 +15,20 @@
 	             ids; the web call can fail) the look is Appearance.default(): a plain blocky R15.
 	  Spawning   `description(look)`: a new HumanoidDescription with the look's colours, scales,
 	             its worn parts, face, clothing and animations (a body part not worn is 0: the
-	             plain blocky part) and its worn accessories (SetAccessories, rigid ones
-	             included). Players/WorldMenu spawns with it (Player
+	             plain blocky part) and its worn accessories (SetAccessories(list, true)).
+	             Players/WorldMenu spawns with it (Player
 	             :LoadCharacterWithHumanoidDescriptionAsync), and with the title screen off
 	             Players/CharacterStore applies it once (Humanoid:ApplyDescriptionResetAsync).
 	             `fields` / `fromFields` are the same mapping without Roblox (the specs run them).
+	  Accessories  SetAccessories files an entry without Order under the rigid property of its
+	             AccessoryType (HatAccessory, HairAccessory... RIGID_PROPERTY) and one with Order
+	             as layered clothing (AccessoryBlob), so `fields` gives a rigid accessory (not
+	             `layered`) as { AssetId, AccessoryType, IsLayered = false } only and a layered one
+	             with its Order and Puffiness (Puffiness within WrapLayer's 0..1). A rigid one of
+	             a type no rigid property holds, or an asset worn twice, is left out (`skipped`).
+	             Roblox refusing the list never takes every accessory off: `setAccessories` then
+	             puts them on one at a time, keeping each one Roblox takes with those before, and
+	             each refused one (and each skipped one) is warned about with why.
 	  Previews   `preview(player, name, look)`: a rig built on the server with
 	             Players:CreateHumanoidModelFromDescriptionAsync(description, R15) (Roblox only
 	             builds avatars there), its scripts taken out and its parts anchored, put in a
@@ -45,14 +54,24 @@ local Types = require(Shared.Inventory.Types)
 
 type Appearance = Appearance.Appearance
 
--- An accessory as HumanoidDescription:SetAccessories takes it (AccessoryType as its number).
+--[[
+	An accessory as HumanoidDescription:SetAccessories(list, true) takes it and GetAccessories(true)
+	gives it (AccessoryType as its number): a rigid one has no Order and no Puffiness (see the
+	header), a layered one has both.
+]]
 export type AccessoryField = {
 	AssetId: number,
 	AccessoryType: number,
 	IsLayered: boolean,
-	Order: number,
-	Puffiness: number,
+	Order: number?,
+	Puffiness: number?,
 }
+
+-- A worn accessory `fields` leaves out, and why.
+export type Skipped = { AssetId: number, AccessoryType: number, why: string }
+
+-- An entry Roblox refused (`setAccessories`), with its error.
+export type Refused<T> = { entry: T, why: string }
 
 -- A look as HumanoidDescription's properties (colours 0xRRGGBB).
 export type Fields = {
@@ -60,6 +79,8 @@ export type Fields = {
 	scales: { [string]: number },
 	properties: { [string]: number },
 	accessories: { AccessoryField },
+	-- (From `fields`.) Worn accessories left out of `accessories` (see the header).
+	skipped: { Skipped }?,
 }
 
 local CharacterLooks = {}
@@ -68,8 +89,57 @@ local CharacterLooks = {}
 CharacterLooks.FOLDER = "IceVoxelPreviews"
 -- The avatar editor's rig's name (a listed character's is "c<id>").
 CharacterLooks.EDITOR = "editor"
+-- HumanoidDescription's rigid accessory property of each Enum.AccessoryType value that has one
+-- (Hat 1 .. Waist 8); the other types are layered clothing only.
+CharacterLooks.RIGID_PROPERTY = table.freeze({
+	"HatAccessory",
+	"HairAccessory",
+	"FaceAccessory",
+	"NeckAccessory",
+	"ShouldersAccessory",
+	"FrontAccessory",
+	"BackAccessory",
+	"WaistAccessory",
+})
 
 --[[ The mapping (pure) ]]
+
+-- The worn accessories of `look` as SetAccessories takes them, and those left out (see the header).
+local function accessoryFields(look: Appearance): ({ AccessoryField }, { Skipped })
+	local accessories: { AccessoryField } = {}
+	local skipped: { Skipped } = {}
+	local taken: { [number]: boolean } = {}
+	for _, asset in look.assets do
+		local accessoryType = Appearance.accessoryType(asset.kind)
+		if not asset.worn or accessoryType == nil then
+			continue
+		end
+		local why: string? = nil
+		if taken[asset.id] then
+			why = "worn twice"
+		elseif not asset.layered and CharacterLooks.RIGID_PROPERTY[accessoryType] == nil then
+			why = "a rigid accessory of a type with no rigid property"
+		end
+		if why then
+			table.insert(skipped, { AssetId = asset.id, AccessoryType = accessoryType, why = why })
+			continue
+		end
+		taken[asset.id] = true
+		if asset.layered then
+			table.insert(accessories, {
+				AssetId = asset.id,
+				AccessoryType = accessoryType,
+				IsLayered = true,
+				Order = math.clamp(math.floor(asset.order), 0, 255),
+				Puffiness = math.clamp(asset.puffiness, 0, 1),
+			})
+		else
+			-- (No Order: SetAccessories would take it for layered clothing.)
+			table.insert(accessories, { AssetId = asset.id, AccessoryType = accessoryType, IsLayered = false })
+		end
+	end
+	return accessories, skipped
+end
 
 -- `look` as HumanoidDescription's properties (see the header).
 function CharacterLooks.fields(look: Appearance): Fields
@@ -92,19 +162,50 @@ function CharacterLooks.fields(look: Appearance): Fields
 			end
 		end
 	end
-	local accessories: { AccessoryField } = {}
-	for _, asset in look.assets do
-		if asset.worn and Appearance.isAccessory(asset.kind) then
-			table.insert(accessories, {
-				AssetId = asset.id,
-				AccessoryType = asset.kind - Appearance.ACCESSORY,
-				IsLayered = asset.layered,
-				Order = asset.order,
-				Puffiness = asset.puffiness,
-			})
+	local accessories, skipped = accessoryFields(look)
+	return {
+		colors = colors,
+		scales = scales,
+		properties = properties,
+		accessories = accessories,
+		skipped = skipped,
+	}
+end
+
+--[[
+	Puts `accessories` on a description with `set` (SetAccessories(list, true) under pcall: whether
+	Roblox took the list, and its error): all together; when Roblox refuses the list, one at a
+	time, each kept when Roblox takes it with those kept before, so one it refuses never takes the
+	others off. The description is left holding exactly the ones kept. Returns the refused ones,
+	each with Roblox's error (none: all on).
+]]
+function CharacterLooks.setAccessories<T>(accessories: { T }, set: ({ T }) -> (boolean, unknown)): { Refused<T> }
+	local refused: { Refused<T> } = {}
+	if set(accessories) then
+		return refused
+	end
+	local kept: { T } = {}
+	local lastTaken = true
+	for _, entry in accessories do
+		table.insert(kept, entry)
+		local taken, why = set(kept)
+		lastTaken = taken
+		if not taken then
+			table.remove(kept)
+			table.insert(refused, { entry = entry, why = tostring(why) })
 		end
 	end
-	return { colors = colors, scales = scales, properties = properties, accessories = accessories }
+	if not lastTaken then
+		-- (The last try was refused: the description back to the ones kept.)
+		local taken, why = set(kept)
+		if not taken then
+			for _, entry in kept do
+				table.insert(refused, { entry = entry, why = tostring(why) })
+			end
+			set({})
+		end
+	end
+	return refused
 end
 
 local function wholeId(value: unknown): number?
@@ -250,8 +351,8 @@ function CharacterLooks.fromDescription(description: HumanoidDescription): Appea
 				AssetId = entry.AssetId,
 				AccessoryType = if typeof(kind) == "EnumItem" then kind.Value else 0,
 				IsLayered = entry.IsLayered == true,
-				Order = tonumber(entry.Order) or 0,
-				Puffiness = tonumber(entry.Puffiness) or 1,
+				Order = tonumber(entry.Order),
+				Puffiness = tonumber(entry.Puffiness),
 			})
 		end
 	end
@@ -263,8 +364,8 @@ function CharacterLooks.fromDescription(description: HumanoidDescription): Appea
 	})
 end
 
--- A new HumanoidDescription of `look` (see the header).
-function CharacterLooks.description(look: Appearance): HumanoidDescription
+-- A new HumanoidDescription of `look` (see the header); `who` names it in warnings.
+function CharacterLooks.description(look: Appearance, who: string?): HumanoidDescription
 	local fields = CharacterLooks.fields(look)
 	local description = Instance.new("HumanoidDescription")
 	local desc = description :: any
@@ -279,24 +380,37 @@ function CharacterLooks.description(look: Appearance): HumanoidDescription
 			desc[property] = value
 		end)
 	end
-	local accessories = {}
+	local whose = if who then `{who}'s character` else "a character"
+	local accessories: { { [string]: any } } = {}
 	for _, accessory in fields.accessories do
 		local kind = accessoryType(accessory.AccessoryType)
 		if kind then
-			table.insert(accessories, {
-				AssetId = accessory.AssetId,
-				AccessoryType = kind,
-				IsLayered = accessory.IsLayered,
-				Order = accessory.Order,
-				Puffiness = accessory.Puffiness,
-			})
+			-- (The same keys: a rigid one still without Order and Puffiness.)
+			local entry: { [string]: any } = table.clone(accessory) :: any
+			entry.AccessoryType = kind
+			table.insert(accessories, entry)
+		else
+			warn(
+				`[IceVoxel] {whose}: accessory {accessory.AssetId} left off: no AccessoryType {accessory.AccessoryType}`
+			)
 		end
 	end
-	local ok, err = pcall(function()
-		description:SetAccessories(accessories, true)
+	local skippedList: { Skipped } = fields.skipped or {}
+	for _, skipped in skippedList do
+		warn(`[IceVoxel] {whose}: accessory {skipped.AssetId} (type {skipped.AccessoryType}) left off: {skipped.why}`)
+	end
+	local refused = CharacterLooks.setAccessories(accessories, function(list: { { [string]: any } }): (boolean, unknown)
+		return pcall(function()
+			description:SetAccessories(list, true)
+		end)
 	end)
-	if not ok then
-		warn(`[IceVoxel] a character's accessories could not be set: {err}`)
+	for _, item in refused do
+		warn(
+			`[IceVoxel] {whose}: Roblox refused accessory {item.entry.AssetId} ({item.entry.AccessoryType}): {item.why}`
+		)
+	end
+	if #refused > 0 then
+		warn(`[IceVoxel] {whose} wears {#accessories - #refused} of its {#accessories} accessories`)
 	end
 	return description
 end
@@ -375,7 +489,7 @@ end
 
 -- Builds one preview rig of `look` as `name` in `player`'s folder, wearing `dressed` (yields).
 local function build(player: Player, name: string, look: Appearance, dressed: string?): boolean
-	local description = CharacterLooks.description(look)
+	local description = CharacterLooks.description(look, player.Name)
 	local ok, model = callAsync(
 		Players,
 		"CreateHumanoidModelFromDescriptionAsync",

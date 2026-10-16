@@ -21,7 +21,9 @@
 	              11..18  the Idle, Walk, Run, Jump, Fall, Climb, Swim and Mood animations
 	              33..63  accessories: ACCESSORY + Enum.AccessoryType's value (33 Hat, 34 Hair,
 	                      35 Face, ... 51 Eyelash); `layered` (layered clothing), `order` and
-	                      `puffiness` are HumanoidDescription:SetAccessories' Order and Puffiness
+	                      `puffiness` are HumanoidDescription:SetAccessories' Order and Puffiness,
+	                      a layered one's only (a rigid one is set without them: server
+	                      Players/CharacterLooks)
 	            At most one worn of each kind below ACCESSORY (one face, one shirt...).
 	  Bytes     u8 VERSION, 6 x (u8 r, g, b), 6 x u16 scale x 10000, u8 n (at most MAX_ASSETS),
 	            n x (u8 kind, f64 asset id (whole, 1..2^53), u8 flags (bit 0 worn, bit 1 layered),
