@@ -2,7 +2,8 @@
 --[[
 	Decorated block faces: chests, crafting tables, furnaces, Mekanism's Creative Energy Cube,
 	Heat Generator, Electric Furnace and Batteries (Energy Cubes), the Oil Refinery and the
-	Combustion Generator, Minecraft's structure blocks, jigsaw blocks and TNT, and the Nuke, drawn
+	Combustion Generator, the seasons' Wood Stove, Oil Heater, Electric Heater, Air Conditioner
+	and Electric Fan, Minecraft's structure blocks, jigsaw blocks and TNT, and the Nuke, drawn
 	like Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
@@ -713,20 +714,221 @@ local NUKE_FACES: Faces = {
 
 --[[
 	The seasons' heaters, coolers and stoves (BlockList WoodStove, OilHeater, ElectricHeater,
-	AirConditioner, ElectricFan): placeholder faces until their own are drawn (a casing edge and a
-	window in the machine's colour on every face).
+	AirConditioner, ElectricFan; Shared/Machines kinds "stove", "oilheater", "heater", "cooler").
+	Each window is drawn dark here; while the machine works the client lights it
+	(Rendering/TransmitterModel.machineBoxes: a glowing pane over exactly the window, orange for the
+	stove's fire and the oil heater's burner, red for the heater's element, cyan for the air
+	conditioner's cold strip), and a working stove or oil heater casts a warm light
+	(TransmitterModel.machineLight). Item models show the windows and the fan's blades on the front
+	pair only, like the furnace's mouth; their tops are the same turned by a quarter.
+
+	  Wood Stove        a black iron stove (the block's dark iron shows): a lighter hob plate along
+	                    the top, the fire door with its window (STOVE_WINDOW) and a handle, four
+	                    short legs, and the stovepipe's collar on top.
+	  Oil Heater        a rust red column radiator: fins down its upper part, a steel base with the
+	                    burner's window (OIL_HEATER_WINDOW), the filler cap on top.
+	  Electric Heater   a light steel casing with osmium bolts, the element's grille
+	                    (ELECTRIC_HEATER_WINDOW) with its coils dark while cold, a knob and a
+	                    green light; a grille on top.
+	  Air Conditioner   a white casing: the intake's slats over the cold air strip
+	                    (AIR_CONDITIONER_WINDOW), a fan grille on top.
+	  Electric Fan      a box fan: a ring, the dark guard and four light blades round the hub on
+	                    each side, vents on top.
 ]]
-local function placeholderFaces(edge: { number }, window: { number }): Faces
-	local side = join(outline(edge, true), { rect(4, 4, 8, 8, window) })
-	return { Top = side, Bottom = outline(edge, true), Front = side, Back = side, Left = side, Right = side }
+-- (Filled in a block of its own, so the module's main chunk stays within Luau's 200 registers.)
+local SEASON_FACES: { [string]: Faces } = {}
+do
+	local STOVE_TOP = { 84, 80, 78 }
+	local STOVE_SHADE = { 30, 28, 28 }
+	local STOVE_FRAME = { 98, 92, 88 }
+	local STOVE_GLASS = { 58, 26, 16 }
+	local STOVE_BAR = { 72, 68, 66 }
+	local STOVE_HANDLE = { 170, 170, 176 }
+	local STOVE_LEG = { 22, 20, 20 }
+	local STOVE_PIPE = { 40, 38, 38 }
+	local STOVE_FLUE = { 14, 12, 12 }
+	-- The fire door's window on every side (pixels from the face's top left; the glow covers exactly
+	-- it).
+	BlockDecor.STOVE_WINDOW = table.freeze({ x = 5, y = 7, w = 6, h = 4 })
+	local STOVE = BlockDecor.STOVE_WINDOW
+
+	local function stoveSide(doorSurfaceOnly: boolean): { Rect }
+		local w = STOVE
+		return {
+			rect(0, 0, 16, 2, STOVE_TOP),
+			rect(0, 2, 16, 1, STOVE_SHADE, true),
+			rect(3, 5, 10, 8, STOVE_FRAME, doorSurfaceOnly),
+			rect(w.x, w.y, w.w, w.h, STOVE_GLASS, doorSurfaceOnly),
+			rect(w.x + 2, w.y, 1, w.h, STOVE_BAR, true),
+			rect(w.x + 4, w.y, 1, w.h, STOVE_BAR, true),
+			rect(11, 8, 1, 3, STOVE_HANDLE, true),
+			rect(3, 14, 10, 1, STOVE_SHADE, true),
+			rect(1, 14, 2, 2, STOVE_LEG, doorSurfaceOnly),
+			rect(13, 14, 2, 2, STOVE_LEG, doorSurfaceOnly),
+		}
+	end
+
+	SEASON_FACES.WoodStove = {
+		Top = join(outline(STOVE_SHADE, true), {
+			rect(5, 5, 6, 6, STOVE_PIPE),
+			rect(6, 6, 4, 4, STOVE_FLUE),
+		}),
+		Bottom = outline(STOVE_SHADE, true),
+		Front = stoveSide(false),
+		Back = stoveSide(false),
+		Left = stoveSide(true),
+		Right = stoveSide(true),
+	}
+
+	local OIL_EDGE = { 70, 36, 24 }
+	local OIL_FIN = { 88, 44, 30 }
+	local OIL_BASE = { 62, 62, 66 }
+	local BURNER_GLASS = { 64, 30, 18 }
+	local OIL_CAP = { 150, 154, 162 }
+	local OIL_CAP_TOP = { 98, 102, 110 }
+	-- The burner's window on every side (pixels from the face's top left; the glow covers exactly it).
+	BlockDecor.OIL_HEATER_WINDOW = table.freeze({ x = 5, y = 11, w = 6, h = 2 })
+	local BURNER = BlockDecor.OIL_HEATER_WINDOW
+
+	local function oilHeaterSide(windowSurfaceOnly: boolean): { Rect }
+		local w = BURNER
+		return join(outline(OIL_EDGE, true), {
+			rect(3, 1, 1, 8, OIL_FIN, true),
+			rect(6, 1, 1, 8, OIL_FIN, true),
+			rect(9, 1, 1, 8, OIL_FIN, true),
+			rect(12, 1, 1, 8, OIL_FIN, true),
+			rect(1, 9, 14, 6, OIL_BASE),
+			rect(w.x - 1, w.y - 1, w.w + 2, w.h + 2, WINDOW_FRAME, windowSurfaceOnly),
+			rect(w.x, w.y, w.w, w.h, BURNER_GLASS, windowSurfaceOnly),
+		})
+	end
+
+	SEASON_FACES.OilHeater = {
+		Top = join(outline(OIL_EDGE, true), {
+			rect(6, 6, 4, 4, OIL_CAP),
+			rect(7, 7, 2, 2, OIL_CAP_TOP),
+		}),
+		Bottom = outline(OIL_EDGE, true),
+		Front = oilHeaterSide(false),
+		Back = oilHeaterSide(false),
+		Left = oilHeaterSide(true),
+		Right = oilHeaterSide(true),
+	}
+
+	local HEATER_EDGE = { 96, 100, 108 }
+	local HEATER_GRILLE = { 40, 40, 44 }
+	local HEATER_COIL = { 110, 56, 44 }
+	local HEATER_KNOB = { 60, 62, 68 }
+	local HEATER_LED = { 90, 210, 100 }
+	-- The element's grille on every side (pixels from the face's top left; the glow covers exactly
+	-- it).
+	BlockDecor.ELECTRIC_HEATER_WINDOW = table.freeze({ x = 3, y = 3, w = 10, h = 8 })
+	local ELEMENT = BlockDecor.ELECTRIC_HEATER_WINDOW
+
+	local function heaterSide(grilleSurfaceOnly: boolean): { Rect }
+		local w = ELEMENT
+		return join(outline(HEATER_EDGE, true), smelterBolts(), {
+			rect(w.x - 1, w.y - 1, w.w + 2, w.h + 2, CHAMBER_FRAME, grilleSurfaceOnly),
+			rect(w.x, w.y, w.w, w.h, HEATER_GRILLE, grilleSurfaceOnly),
+			rect(w.x, w.y + 1, w.w, 1, HEATER_COIL, true),
+			rect(w.x, w.y + 3, w.w, 1, HEATER_COIL, true),
+			rect(w.x, w.y + 5, w.w, 1, HEATER_COIL, true),
+			rect(w.x, w.y + 7, w.w, 1, HEATER_COIL, true),
+			rect(11, 12, 2, 2, HEATER_KNOB, grilleSurfaceOnly),
+			rect(4, 13, 1, 1, HEATER_LED, true),
+		})
+	end
+
+	SEASON_FACES.ElectricHeater = {
+		Top = join(outline(HEATER_EDGE, true), smelterBolts(), {
+			rect(4, 4, 8, 8, HEATER_GRILLE),
+			rect(4, 6, 8, 1, VENT_SLAT, true),
+			rect(4, 9, 8, 1, VENT_SLAT, true),
+		}),
+		Bottom = outline(HEATER_EDGE, true),
+		Front = heaterSide(false),
+		Back = heaterSide(false),
+		Left = heaterSide(true),
+		Right = heaterSide(true),
+	}
+
+	local AC_EDGE = { 150, 158, 166 }
+	local AC_SLAT = { 124, 132, 140 }
+	local AC_VENT = { 70, 78, 86 }
+	local AC_PANEL = { 96, 104, 114 }
+	local AC_COLD = { 34, 52, 70 }
+	local AC_BUTTON = { 60, 66, 74 }
+	-- The cold air strip on every side (pixels from the face's top left; the glow covers exactly it).
+	BlockDecor.AIR_CONDITIONER_WINDOW = table.freeze({ x = 3, y = 11, w = 10, h = 2 })
+	local COLD = BlockDecor.AIR_CONDITIONER_WINDOW
+
+	local function acSide(ventSurfaceOnly: boolean): { Rect }
+		local w = COLD
+		return join(outline(AC_EDGE, true), {
+			rect(2, 2, 12, 7, AC_VENT, ventSurfaceOnly),
+			rect(2, 3, 12, 1, AC_SLAT, true),
+			rect(2, 5, 12, 1, AC_SLAT, true),
+			rect(2, 7, 12, 1, AC_SLAT, true),
+			rect(w.x - 1, w.y - 1, w.w + 2, w.h + 2, AC_PANEL, ventSurfaceOnly),
+			rect(w.x, w.y, w.w, w.h, AC_COLD, ventSurfaceOnly),
+			rect(11, 14, 2, 1, AC_BUTTON, true),
+		})
+	end
+
+	SEASON_FACES.AirConditioner = {
+		-- (Its fan's grille, centred: the same turned by a quarter.)
+		Top = join(outline(AC_EDGE, true), {
+			rect(4, 4, 8, 8, AC_VENT),
+			rect(5, 5, 6, 6, AC_SLAT),
+			rect(7, 5, 2, 6, AC_VENT, true),
+			rect(5, 7, 6, 2, AC_VENT, true),
+		}),
+		Bottom = outline(AC_EDGE, true),
+		Front = acSide(false),
+		Back = acSide(false),
+		Left = acSide(true),
+		Right = acSide(true),
+	}
+
+	local FAN_RING = { 88, 92, 100 }
+	local FAN_GUARD = { 30, 32, 36 }
+	local FAN_BLADE = { 206, 210, 216 }
+	local FAN_HUB = { 60, 64, 70 }
+	local FAN_WIRE = { 120, 124, 132 }
+
+	local function fanSide(bladesSurfaceOnly: boolean): { Rect }
+		return join(outline(FAN_RING, true), {
+			rect(2, 2, 12, 12, FAN_RING, bladesSurfaceOnly),
+			rect(3, 3, 10, 10, FAN_GUARD, bladesSurfaceOnly),
+			rect(7, 4, 2, 8, FAN_BLADE, bladesSurfaceOnly),
+			rect(4, 7, 8, 2, FAN_BLADE, bladesSurfaceOnly),
+			rect(7, 7, 2, 2, FAN_HUB, bladesSurfaceOnly),
+			-- The guard's wires across the blades.
+			rect(3, 5, 10, 1, FAN_WIRE, true),
+			rect(3, 10, 10, 1, FAN_WIRE, true),
+		})
+	end
+
+	SEASON_FACES.ElectricFan = {
+		Top = join(outline(FAN_RING, true), {
+			rect(4, 4, 8, 8, FAN_GUARD),
+			rect(4, 6, 8, 1, FAN_WIRE, true),
+			rect(4, 9, 8, 1, FAN_WIRE, true),
+		}),
+		Bottom = outline(FAN_RING, true),
+		Front = fanSide(false),
+		Back = fanSide(false),
+		Left = fanSide(true),
+		Right = fanSide(true),
+	}
 end
 
 local DECORS: { [string]: Faces } = {
-	WoodStove = placeholderFaces({ 34, 32, 32 }, { 196, 96, 36 }),
-	OilHeater = placeholderFaces({ 80, 40, 28 }, { 220, 120, 44 }),
-	ElectricHeater = placeholderFaces({ 92, 96, 104 }, { 200, 60, 48 }),
-	AirConditioner = placeholderFaces({ 120, 126, 132 }, { 90, 196, 220 }),
-	ElectricFan = placeholderFaces({ 84, 88, 96 }, { 60, 64, 70 }),
+	WoodStove = SEASON_FACES.WoodStove,
+	OilHeater = SEASON_FACES.OilHeater,
+	ElectricHeater = SEASON_FACES.ElectricHeater,
+	AirConditioner = SEASON_FACES.AirConditioner,
+	ElectricFan = SEASON_FACES.ElectricFan,
 	Tnt = TNT_FACES,
 	Nuke = NUKE_FACES,
 	Chest = CHEST,

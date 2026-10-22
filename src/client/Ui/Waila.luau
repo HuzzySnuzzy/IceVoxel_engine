@@ -26,7 +26,9 @@
 	            time, light, fluid level, render kind, menu. Mekanism's transmitters, tanks and
 	            machines add what Rendering/TransmitterRenderer knows (the side the Configurator
 	            points at, BlockInteraction.targetSide, and its mode; colour, items inside, water,
-	            a cable's capacity; a machine's energy and status from its Machines record), and
+	            a cable's capacity; a machine's energy and status from its Machines record, none
+	            for a fuel-only one; a heater's, cooler's or stove's room line from the viewer's
+	            own room, Player/SurvivalState.room: "Room +1 (out -9)"), and
 	            with F3 their packed modes, connections and network, a machine's energy numbers.
 	            Structure blocks add their mode and name, jigsaws their name, target and pool,
 	            from Net/StructureNet's records (with F3 a structure block's region and LOAD
@@ -84,6 +86,7 @@ local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local DebugOverlay = require(script.Parent.Parent.Debug.DebugOverlay)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
+local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
@@ -615,8 +618,16 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		-- (The break time at the player's own speed, as BlockInteraction mines: Haste, Mining
 		-- Fatigue, the mining perks.)
 		local factor = Mining.playerFactor(EffectState.levels(), ProgressionState.perks(), held)
+		-- (A heater, cooler or stove says the room the viewer stands in, rounded as it reads.)
+		local room: WailaInfo.RoomFacts? = nil
+		local roomKey = ""
+		if WailaInfo.isHeatMachine(hit.block) then
+			local air, outside = SurvivalState.room()
+			room = { room = air, outside = outside }
+			roomKey = WailaInfo.roomReading(air, outside)
+		end
 		local key =
-			`b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey} {lightKey} {factor}`
+			`b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey} {lightKey} {factor} {roomKey}`
 		show(key, extended, function()
 			local biome = if extended then biomeAt(hit.x, hit.z) else nil
 			return WailaInfo.block(hit.block, held, hit.x, hit.y, hit.z, extended, {
@@ -629,6 +640,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				structure = structure,
 				jigsaw = jigsaw,
 				light = light,
+				room = room,
 			})
 		end)
 		setProgress(progress)

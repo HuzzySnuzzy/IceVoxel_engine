@@ -459,17 +459,11 @@ return function(t, shared, require, _server, client)
 		-- swings: Interaction/Firearms, Rendering/ShotRules and ShotView, Interaction/MeleeInput,
 		-- Ui/InventoryScreen). It stays for the next client sound added ahead of its player, which
 		-- comes off with the code that plays it.
-		-- The seasons' machines' loops and the thermostat's click (Audio/Ambience, Ui/MenuLayout) wait
-		-- for their players; the turns' stingers came off with Ui/SeasonLine's names, which
-		-- Ui/SeasonHud plays through Ui/SurvivorHud's toast queue.
-		local pending: { [string]: boolean } = {
-			["block.electric_heater.hum"] = true,
-			["block.air_conditioner.hum"] = true,
-			["block.fan.loop"] = true,
-			["block.wood_stove.crackle"] = true,
-			["block.oil_heater.burn"] = true,
-			["ui.thermostat.click"] = true,
-		}
+		-- The seasons' sounds came off with their players too (the turns' stingers: Ui/SeasonLine's
+		-- names, played by Ui/SeasonHud through Ui/SurvivorHud's toast queue; the machines' loops:
+		-- Audio/Ambience by Rendering/TransmitterModel.machineLoop's names; the thermostat's click:
+		-- Ui/MenuLayout.BUTTON_SOUND).
+		local pending: { [string]: boolean } = {}
 		-- A firearm's shot is played by its class through its FirearmSpec `sound` (Rendering/
 		-- ShotRules.fireSound, called by Interaction/Firearms for the player's own shot and by
 		-- Rendering/ShotView for others'), never as a literal; every other weapon sound is one

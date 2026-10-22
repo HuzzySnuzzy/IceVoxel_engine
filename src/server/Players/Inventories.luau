@@ -47,6 +47,12 @@
 	             (Transmitters/Transport, through Containers), and furnaces and machines push their
 	             results into chests (Transmitters/Eject); `containerChanged` then sends the
 	             viewers a snapshot and lets a furnace cook.
+	  Buttons    a click on a machine panel's button (Inventory Action "button": Minecraft's
+	             ServerboundContainerButtonClickPacket; the thermostats' "-", "+" and "Mode")
+	             goes to Shared/Machines.button for the machine whose window the player has open
+	             (the action's window id must be it; spectators can't: Menu.allows), which runs
+	             the kind's onButton on the container's data; its viewers get the change with the
+	             machine's next data snapshot (Machines/Machines). Menu.apply predicts nothing.
 	  Death      everything drops where the player died (scattered), unless
 	             Config.Gameplay.KeepInventory or they were spectating (GameModeRules.keepsInventory).
 	  Snapshots  a player whose inventory changed (their own actions, pickups, a viewer of the same
@@ -106,6 +112,7 @@ local SharedSounds = require(Shared.Sounds)
 local Types = require(Shared.Inventory.Types)
 local Menu = require(Shared.Inventory.Menu)
 local Accessories = require(Shared.Items.Accessories)
+local Machines = require(Shared.Machines)
 local Weapons = require(Shared.Weapons)
 local WeaponState = require(Shared.Weapons.WeaponState)
 
@@ -553,6 +560,24 @@ local function weaponTarget(player: Player, action: Types.Action): Stack?
 	return if window then Items.copyStack(Menu.get(window, action.slot)) else nil
 end
 
+--[[
+	A panel button clicked (Inventory Action "button", see the header): the kind's onButton on the
+	machine in the player's open window `window`, if the action names it and the game mode allows.
+]]
+local function pressButton(player: Player, action: Types.Action, window: Types.Window?)
+	if action.kind ~= "button" or window == nil or window.id ~= action.window then
+		return
+	end
+	local container = window.container
+	if container == nil or not Machines.isContainer(container) or not Menu.allows(action, GameMode.of(player)) then
+		return
+	end
+	local ok, err = pcall(Machines.button, container, container.block, action.button)
+	if not ok then
+		warn(`[IceVoxel] machine button {action.button} failed: {err}`)
+	end
+end
+
 local function onInventory(player: Player, payload: buffer)
 	local seq, action = Protocol.decodeInventoryAction(payload)
 	if seq == nil or action == nil then
@@ -593,6 +618,7 @@ local function onInventory(player: Player, payload: buffer)
 	local thrown = state:applyAs(player, seq, action, GameMode.of(player))
 	actor = nil
 	throw(player, thrown, false)
+	pressButton(player, action, window)
 	if hooks and hooks.applied then
 		hooks.applied(player, action, before, weaponTarget(player, action))
 	end

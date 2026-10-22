@@ -31,7 +31,10 @@
 	`uses(item)` those that take it: as an ingredient (tags included), as a smelting or boiling
 	input, as a fuel or as a fluid. A catalyst (CATALYSTS: the block a category's recipes are made in) also uses every entry
 	of its categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace lists
-	them. Both return groups by category, only the categories that have entries.
+	them (`catalystTakes`: the seasons' Wood Stove only the fuels its slot takes, not a Lava
+	Bucket, which leaves its bucket; it burns each StoveBurnFactor times as long). Both return
+	groups by category, only the categories that have entries. `heaterLines(item)` says what the
+	seasons' heaters, coolers and stoves do, for a recipe view's or a tooltip's info.
 
 	Progression (Shared/Progression) locks crafting and smelting results of a later Age, or of a
 	skill not unlocked: `lockText(entry, state)` says what such an entry needs ("Requires the Iron
@@ -53,6 +56,7 @@ local Progression = require(Shared.Progression)
 local Recipes = require(Shared.Crafting.Recipes)
 local Smelting = require(Shared.Crafting.Smelting)
 local Drinks = require(Shared.ToughAsNails.Drinks)
+local Config = require(Shared.Config)
 
 type Stack = Items.Stack
 
@@ -112,13 +116,75 @@ JeiData.CATALYSTS = {
 	crafting = { "CraftingTable" },
 	-- (Mekanism's Energized Smelter, the Electric Furnace, smelts the same recipes.)
 	smelting = { "Furnace", "ElectricFurnace" },
-	-- (Mekanism Generators' Heat Generator burns the same fuel.)
-	fuel = { "Furnace", "HeatGenerator" },
+	-- (Mekanism Generators' Heat Generator burns the same fuel, the seasons' Wood Stove the fuels
+	-- that leave nothing behind.)
+	fuel = { "Furnace", "HeatGenerator", "WoodStove" },
 	refining = { "OilRefinery" },
 	heating = { "HeatGenerator" },
 	combustion = { "CombustionGenerator" },
 	boiling = { "Campfire" },
 } :: { [Category]: { string } }
+--[[
+	Does catalyst `name` (CATALYSTS) take `entry` of its category? The Wood Stove only the fuels its
+	fuel slot takes (Shared/Machines.mayPlace: furnace fuel that leaves nothing behind); every other
+	catalyst all of them.
+]]
+function JeiData.catalystTakes(name: string, entry: Entry): boolean
+	if name ~= "WoodStove" then
+		return true
+	end
+	local stove = Blocks.id.WoodStove
+	local fuels = entry.inputs[1]
+	if fuels == nil then
+		return false
+	end
+	for _, item in fuels do
+		if Machines.mayPlace(stove, 1, item) then
+			return true
+		end
+	end
+	return false
+end
+
+--[[
+	What one of the seasons' heaters, coolers or stoves does (Shared/Machines `info`, Config.Seasons
+	.Heat), a line each: its heat, what it burns or draws, where it works; empty for other items.
+]]
+function JeiData.heaterLines(item: number): { string }
+	local heat = Config.Seasons.Heat
+	local name = Items.isValid(item) and (Items.get(item) :: any).name or ""
+	if name == "WoodStove" then
+		return {
+			`{heat.WoodStove} HU while it burns`,
+			`Burns furnace fuel {heat.StoveBurnFactor} times as long`,
+		}
+	elseif name == "OilHeater" then
+		return {
+			`Up to {heat.OilHeater} HU, holding its set point`,
+			`At most a mB of Oil per {heat.OilTicks} ticks, of Fuel per {heat.FuelTicks}`,
+			"Rooms only",
+		}
+	elseif name == "ElectricHeater" then
+		return {
+			`Up to {heat.ElectricHeater} HU, holding its set point`,
+			`{heat.HeaterJoules} J/t per HU`,
+			`Outdoors: {heat.SpaceHeater} HU to whoever stands close`,
+		}
+	elseif name == "AirConditioner" then
+		return {
+			`Down to {heat.AirConditioner} HU, holding its set point`,
+			`{heat.CoolerJoules} J/t per HU`,
+			"Rooms only",
+		}
+	elseif name == "ElectricFan" then
+		return {
+			`{heat.ElectricFan} HU above its set point`,
+			`{heat.FanJoules} J/t while it runs`,
+		}
+	end
+	return {}
+end
+
 -- What a boiling entry says under it: how it is done.
 JeiData.BOIL_TEXT = "Right click"
 -- JEI's ingredient cycle: one item per second.
@@ -424,7 +490,7 @@ local function build()
 				listed[entry] = true
 			end
 			for _, entry in all do
-				if entry.category == category and not listed[entry] then
+				if entry.category == category and not listed[entry] and JeiData.catalystTakes(name, entry) then
 					table.insert(list, entry)
 				end
 			end

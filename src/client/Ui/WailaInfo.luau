@@ -28,6 +28,13 @@
 	            Machines.status, from the record's numbers and its kind's state code), then its
 	            tanks ("Oil: 3,000 / 10,000 mB", `MachineFacts.tanks`: the record's, Protocol's
 	            MachineRecord `tanks` from Machines.tankContents; empty without a record).
+	            A fuel-only machine (the Wood Stove, the Oil Heater) has no energy line. The
+	            seasons' heaters, coolers and stoves (`isHeatMachine`) say what they do from their
+	            state and rate ("Heating 32 HU", "At set point", "No power", "No fuel", "No room")
+	            and, while the viewer stands in a room (BlockContext `room`: the Survival
+	            message's, Player/SurvivalState.room), that room's air and the outside: "Room +1
+	            (out -9)" (`roomLine`). The Thermometer's reading in the HUD (Ui/Hud) is
+	            `roomReading`'s "Room +1 · Out -9" ("Out -9" outdoors).
 	  structures  structure blocks: their mode and structure name ("Mode: Save", "Name: hut");
 	            jigsaws: name, target and pool (their records, Net/StructureNet). Creative only
 	            blocks (structure blocks, structure voids, jigsaws) say "Creative only" where
@@ -83,6 +90,7 @@ local Mining = require(Shared.Mining)
 local MobList = require(Shared.Entities.MobList)
 local Settings = require(Shared.Structures.Settings)
 local Transmitters = require(Shared.Transmitters)
+local Rooms = require(Shared.Seasons.Rooms)
 
 export type Colour = "white" | "gray" | "darkGray" | "blue" | "green" | "red" | "yellow" | "gold"
 
@@ -162,7 +170,13 @@ export type BlockContext = {
 	-- The player's own mining speed with the held item (Mining.playerFactor: Haste, Mining
 	-- Fatigue, the mining perks), for the break time; nil: 1.
 	miningFactor: number?,
+	-- The room the viewer stands in (the seasons' heaters, coolers and stoves say it).
+	room: RoomFacts?,
 }
+
+-- The viewer's room as the server last said (Protocol Survival, Player/SurvivalState.room): its
+-- air temperature (nil: not in one) and the outside value, Temperature's scale.
+export type RoomFacts = { room: number?, outside: number? }
 
 -- Minecraft's light parts at a cell, 0..15 each.
 export type LightFacts = { block: number, sky: number }
@@ -523,11 +537,15 @@ function WailaInfo.energyText(energy: number, capacity: number): string
 end
 
 --[[
-	The lines of a machine: its energy, then its status (Machines.status) when it has one, then
-	each tank's contents when the facts carry them ("Lava: 5,000 / 24,000 mB").
+	The lines of a machine: its energy (none for a fuel-only machine, which holds none: the Wood
+	Stove, the Oil Heater), then its status (Machines.status) when it has one, then each tank's
+	contents when the facts carry them ("Lava: 5,000 / 24,000 mB").
 ]]
 function WailaInfo.machineLines(block: number, facts: MachineFacts): { Line }
-	local lines: { Line } = { labelled("Energy: ", WailaInfo.energyText(facts.energy, facts.capacity)) }
+	local lines: { Line } = {}
+	if not Machines.isFuelOnly(block) then
+		table.insert(lines, labelled("Energy: ", WailaInfo.energyText(facts.energy, facts.capacity)))
+	end
 	local status = Machines.status(block, viewOf(block, facts))
 	if status then
 		table.insert(lines, { segment(status, "white") })
@@ -540,6 +558,50 @@ function WailaInfo.machineLines(block: number, facts: MachineFacts): { Line }
 		end
 	end
 	return lines
+end
+
+--[[ The seasons' rooms ]]
+
+-- The machine kinds that heat or cool a room (Shared/Machines kinds: the seasons').
+local HEAT_KINDS: { [string]: boolean } = { heater = true, cooler = true, stove = true, oilheater = true }
+
+-- Is `block` one of the seasons' heaters, coolers or stoves?
+function WailaInfo.isHeatMachine(block: number): boolean
+	local kind = Machines.kindOf(block)
+	return kind ~= nil and HEAT_KINDS[kind.name] == true
+end
+
+-- A temperature on the HUD's scale as its numbers read: "+1", "0", "-9" (rounded).
+local function signed(value: number): string
+	local whole = math.floor(value + 0.5)
+	return if whole == 0 then "0" else string.format("%+d", whole)
+end
+
+--[[
+	WAILA's room line on a heater, cooler or stove: "Room +1 (out -9)" while the viewer stands in a
+	room (`room`, its air; `outside` the outdoor value), nil when not.
+]]
+function WailaInfo.roomLine(room: number?, outside: number?): Line?
+	if room == nil or room ~= room then
+		return nil
+	end
+	local line: Line = { segment(`Room {signed(room)}`, "white") }
+	if outside and outside == outside then
+		table.insert(line, segment(` (out {signed(outside)})`, "gray"))
+	end
+	return line
+end
+
+--[[
+	The Thermometer's room reading (Ui/Hud, after the body temperature): "Room +1 · Out -9" in a room,
+	"Out -9" outdoors, "" when the server said nothing.
+]]
+function WailaInfo.roomReading(room: number?, outside: number?): string
+	local out = if outside and outside == outside then `Out {signed(outside)}` else nil
+	if room and room == room then
+		return if out then `Room {signed(room)} · {out}` else `Room {signed(room)}`
+	end
+	return out or ""
 end
 
 -- "Light 15" for a fluid that gives light (lava), nil for any other block.
@@ -568,12 +630,17 @@ function WailaInfo.lightLine(facts: LightFacts, extended: boolean): Line
 	return line
 end
 
--- The extended (F3) lines of a machine.
+-- The extended (F3) lines of a machine (a fuel-only one's heat in place of its energy numbers).
 function WailaInfo.machineDetails(block: number, facts: MachineFacts): { Line }
 	local kind = Machines.kindOf(block)
 	local energy = Machines.energyOf(block)
 	local role = Machines.role(block) or "no energy flow"
 	local lines: { Line } = { gray(`Machine {if kind then kind.name else "?"} ({role})`) }
+	if Machines.isFuelOnly(block) then
+		local working = if facts.active then "burning" else "out"
+		table.insert(lines, gray(`Fuel only, {Rooms.huText(facts.rate)} HU, {working}, state {facts.state}`))
+		return lines
+	end
 	if energy then
 		local input = if energy.input then `{Items.formatEnergy(energy.input)}/t` else "none"
 		local output = if energy.output then `{Items.formatEnergy(energy.output)}/t` else "none"
@@ -841,6 +908,13 @@ function WailaInfo.block(
 	elseif machine then
 		for _, line in WailaInfo.machineLines(block, machine) do
 			table.insert(lines, line)
+		end
+		local room = context and context.room
+		local roomText = if room and WailaInfo.isHeatMachine(block)
+			then WailaInfo.roomLine(room.room, room.outside)
+			else nil
+		if roomText then
+			table.insert(lines, roomText)
 		end
 	elseif Blocks.isStructureBlock(block) then
 		for _, line in WailaInfo.structureLines(block, context and context.structure) do

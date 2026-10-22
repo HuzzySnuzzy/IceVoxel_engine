@@ -11,6 +11,12 @@
 	           listener (its Machines record says it works: Rendering/TransmitterRenderer
 	           .activeMachines; the client knows these without opening them) crackles the same
 	           way, at the generator.
+	  Seasons  the seasons' heaters, coolers and stoves that work (their records say so) within
+	           LOOP_RANGE blocks of the listener play their loop at the machine
+	           (Rendering/TransmitterModel.machineLoop: the heater's and the air conditioner's
+	           hum, the fan's whirr, the stove's crackle, the oil heater's roar; SoundPlayer
+	           .setLoop), the MAX_LOOPS nearest only, looked at LOOP_HZ times a second; a loop
+	           stops as soon as its machine stops, goes or is out of range.
 	  Lava     lava with air above it within 32 blocks of the listener pops and bubbles now and
 	           then (SoundRules.lavaTick: Minecraft's LavaFluid.animateTick on its random display
 	           ticks, sampled), at the lava.
@@ -44,6 +50,7 @@ local LightingController = require(script.Parent.Parent.Rendering.LightingContro
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local SoundPlayer = require(script.Parent.SoundPlayer)
 local SoundRules = require(script.Parent.SoundRules)
+local TransmitterModel = require(script.Parent.Parent.Rendering.TransmitterModel)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
 
 local TICK = 1 / Mining.TICK_RATE
@@ -51,6 +58,11 @@ local TICK = 1 / Mining.TICK_RATE
 local MAX_TICKS_PER_FRAME = 5
 -- The player's eyes above their feet (blocks), where Minecraft's mood looks from.
 local EYE = PlayerPhysics.dimensions("standing").eye
+-- The seasons' machines' loops: how far they are heard from, how many play at once, and how often
+-- (a second) the machines around are looked at.
+local LOOP_RANGE = 16
+local MAX_LOOPS = 6
+local LOOP_HZ = 4
 
 local Ambience = {}
 
@@ -97,6 +109,43 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 		end
 	end
 
+	-- The loops playing (SoundPlayer.setLoop keys, one per machine position).
+	local looping: { [string]: boolean } = {}
+	local loopClock = 0
+	local function hasLoop(block: number): boolean
+		return TransmitterModel.machineLoop(block) ~= nil
+	end
+	local function updateLoops(listener: Vector3?)
+		local now: { [string]: boolean } = {}
+		if listener and getBlock then
+			local lx, ly, lz = listener.X, listener.Y, listener.Z
+			local working = TransmitterRenderer.activeMachines(lx, ly, lz, LOOP_RANGE, hasLoop)
+			local function distance(record: any): number
+				local dx, dy, dz = record.x + 0.5 - lx, record.y + 0.5 - ly, record.z + 0.5 - lz
+				return dx * dx + dy * dy + dz * dz
+			end
+			table.sort(working, function(a: any, b: any): boolean
+				return distance(a) < distance(b)
+			end)
+			for i = 1, math.min(#working, MAX_LOOPS) do
+				local record = working[i]
+				local block = getBlock(record.x, record.y, record.z)
+				local name = if block then TransmitterModel.machineLoop(block) else nil
+				if name then
+					local key = `machine {record.x},{record.y},{record.z}`
+					now[key] = true
+					SoundPlayer.setLoop(key, name, record.x + 0.5, record.y + 0.5, record.z + 0.5)
+				end
+			end
+		end
+		for key in looping do
+			if not now[key] then
+				SoundPlayer.endLoop(key)
+			end
+		end
+		looping = now
+	end
+
 	local clock = 0
 	local random = Random.new()
 	local function nextInt(n: number): number
@@ -128,7 +177,15 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 
 	RunService.Heartbeat:Connect(function(dt: number)
 		if not SoundPlayer.isEnabled() then
+			if next(looping) then
+				updateLoops(nil)
+			end
 			return
+		end
+		loopClock += dt
+		if loopClock >= 1 / LOOP_HZ then
+			loopClock = 0
+			updateLoops(SoundPlayer.listener())
 		end
 		clock = math.min(clock + dt, TICK * MAX_TICKS_PER_FRAME)
 		while clock >= TICK do

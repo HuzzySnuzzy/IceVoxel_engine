@@ -18,7 +18,12 @@
 	                            edge), a fluid gauge per tank (GuiFluidGauge: Machines.gauges, the
 	                            Heat Generator's lava, the Oil Refinery's oil and fuel, the
 	                            Combustion Generator's fuel), optionally an arrow, a flame, a status
-	                            line and more lines under it (a battery's input and output)
+	                            line and more lines under it (a battery's input and output, as
+	                            many as fit above its buttons), and its buttons (Machines.buttons:
+	                            Minecraft's container buttons, the thermostats' "-", "+" and
+	                            "Mode") with the set point's text between "-" and "+". A
+	                            fuel-only machine (Machines.isFuelOnly: the Wood Stove, the Oil
+	                            Heater) has no energy bar
 	  gauges        the furnace's flame and arrow (AbstractFurnaceMenu.getLitProgress /
 	                getBurnProgress), a machine's (from the data fields its panel names), the
 	                energy bar (stored over capacity, red when empty to green when full, "x / y"
@@ -35,6 +40,14 @@
 	A slot's (x, y) is its item's top left corner, as in Minecraft's menus: the 18 x 18 slot frame
 	(and the hit area) is one pixel up and left of it, a large frame five.
 
+	  buttons       a machine panel's buttons (`buttons`; `buttonAt` for a click or a tap): their
+	                labels (`buttonLabel`: the on / off button says which it is, "On" or "Off"),
+	                the set point's text ("Set +1", `setPointText`) and the Inventory Action a
+	                click sends (`buttonAction`, data only: the server runs the kind's onButton,
+	                Players/Inventories), with the click's sound (BUTTON_SOUND, overridable by a
+	                same-named Sound in SoundService.IceVoxelSounds). Ui/ContainerPanel draws
+	                them.
+
 	  armor eye     the button hiding a vanity armor slot's armor look (Ui/InventoryScreen's
 	                equipment panel): its 6 x 6 art in the item's top right corner, and the button
 	                that size too, or on touch screens 8 x 8 out to the frame's corner; never over
@@ -49,6 +62,7 @@ local Drinks = require(Shared.ToughAsNails.Drinks)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
+local HeatStates = require(Shared.Seasons.HeatStates)
 local Types = require(Shared.Inventory.Types)
 
 type Container = Types.Container
@@ -72,6 +86,9 @@ export type TankSpot = {
 	fluid: number,
 	fluidIndex: number?,
 }
+
+-- A machine panel's button (Machines.ButtonSpec): its id, place and size in GUI pixels, label.
+export type ButtonSpot = { id: number, x: number, y: number, w: number, h: number, label: string }
 
 -- The player panel's crafting area (window 0 only).
 export type Grid = {
@@ -107,6 +124,10 @@ export type Panel = {
 	lines: { { x: number, y: number } },
 	-- Its tanks' gauges (none for other panels).
 	tanks: { TankSpot },
+	-- Its buttons (none for other panels) and where its set point's text goes (between "-" and
+	-- "+"; nil: none).
+	buttons: { ButtonSpot },
+	setPoint: Rect?,
 }
 
 local MenuLayout = {}
@@ -191,6 +212,8 @@ local function chestPanel(container: Container): Panel
 		status = nil,
 		lines = {},
 		tanks = {},
+		buttons = {},
+		setPoint = nil,
 	}
 end
 
@@ -220,6 +243,8 @@ local function craftingPanel(container: Container): Panel
 		status = nil,
 		lines = {},
 		tanks = {},
+		buttons = {},
+		setPoint = nil,
 	}
 end
 
@@ -247,6 +272,8 @@ local function furnacePanel(container: Container): Panel
 		status = nil,
 		lines = {},
 		tanks = {},
+		buttons = {},
+		setPoint = nil,
 	}
 end
 
@@ -280,10 +307,53 @@ local function tankSpots(block: number): { TankSpot }
 	return spots
 end
 
+-- Does a line at height y..y + LINE_TEXT, from x to the panel's right, run into a button?
+local function overlapsButton(x: number, y: number, buttons: { ButtonSpot }): boolean
+	for _, button in buttons do
+		if y < button.y + button.h and y + MenuLayout.LINE_TEXT > button.y and button.x + button.w > x then
+			return true
+		end
+	end
+	return false
+end
+
+-- The buttons of machine `block` (Machines.buttons) as the panel draws them.
+local function buttonSpots(block: number): { ButtonSpot }
+	local spots: { ButtonSpot } = {}
+	for _, spec in Machines.buttons(block) do
+		table.insert(spots, { id = spec.id, x = spec.x, y = spec.y, w = spec.w, h = spec.h, label = spec.label })
+	end
+	return spots
+end
+
+--[[
+	Where the set point's text goes: between the "-" and "+" buttons (Seasons/HeatStates
+	BUTTON_DOWN and BUTTON_UP) of a kind with a `setPoint` field, as tall as they are; nil without.
+]]
+local function setPointRect(block: number, buttons: { ButtonSpot }): Rect?
+	if Machines.field(block, "setPoint") == nil then
+		return nil
+	end
+	local down, up = nil :: ButtonSpot?, nil :: ButtonSpot?
+	for _, button in buttons do
+		if button.id == HeatStates.BUTTON_DOWN then
+			down = button
+		elseif button.id == HeatStates.BUTTON_UP then
+			up = button
+		end
+	end
+	if down == nil or up == nil or up.x <= down.x + down.w then
+		return nil
+	end
+	return { x = down.x + down.w, y = down.y, w = up.x - down.x - down.w, h = down.h }
+end
+
 --[[
 	A Mekanism machine's panel (Shared/Machines.panel): its kind's slots at their places, the
 	title centred, the energy bar (Mekanism's GuiVerticalPowerBar at (164, 15) unless the kind puts
-	it elsewhere), a gauge per tank, the arrow, flame and status line the kind asks for.
+	it elsewhere; none for a fuel-only machine, which holds no energy), a gauge per tank, the
+	arrow, flame and status line the kind asks for, the lines that fit above its buttons, its
+	buttons and the set point's place.
 ]]
 local function machinePanel(container: Container): Panel
 	local block = container.block
@@ -304,13 +374,14 @@ local function machinePanel(container: Container): Panel
 	local at = spec.energy
 	local progress, flame = spec.progress, spec.flame
 	local height = spec.height or Machines.PANEL_HEIGHT
-	-- (As many lines as fit above the panel's bottom border.)
+	local buttons = buttonSpots(block)
+	-- (As many lines as fit above the panel's bottom border and its buttons.)
 	local lines: { { x: number, y: number } } = {}
 	local first = spec.lines
 	if first then
 		for i = 1, Machines.MAX_LINES do
 			local y = first.y + (i - 1) * MenuLayout.LINE_HEIGHT
-			if y + MenuLayout.LINE_TEXT > height - MenuLayout.LINE_MARGIN then
+			if y + MenuLayout.LINE_TEXT > height - MenuLayout.LINE_MARGIN or overlapsButton(first.x, y, buttons) then
 				break
 			end
 			table.insert(lines, { x = first.x, y = y })
@@ -334,10 +405,14 @@ local function machinePanel(container: Container): Panel
 			else nil,
 		progressSource = if progress then sourceOf(block, progress) else nil,
 		flameSource = if flame then sourceOf(block, flame) else nil,
-		energy = { x = if at then at.x else bar.x, y = if at then at.y else bar.y, w = bar.w, h = bar.h },
+		energy = if Machines.hasEnergy(block)
+			then { x = if at then at.x else bar.x, y = if at then at.y else bar.y, w = bar.w, h = bar.h }
+			else nil,
 		status = spec.status,
 		lines = lines,
 		tanks = tankSpots(block),
+		buttons = buttons,
+		setPoint = setPointRect(block, buttons),
 	}
 end
 
@@ -546,6 +621,61 @@ function MenuLayout.lineTexts(container: Container?): { string }
 		return {}
 	end
 	return Machines.lines(container.block, viewOf(container))
+end
+
+--[[ Buttons (Minecraft's container buttons: Shared/Machines.buttons) ]]
+
+-- The sound a panel button's click plays (Shared/Sounds/SoundList; a same-named Sound in
+-- SoundService.IceVoxelSounds replaces it).
+MenuLayout.BUTTON_SOUND = "ui.thermostat.click"
+
+-- The button of `panel` under GUI point (x, y) of the panel, nil when none.
+function MenuLayout.buttonAt(panel: Panel, x: number, y: number): ButtonSpot?
+	for _, button in panel.buttons do
+		if x >= button.x and x < button.x + button.w and y >= button.y and y < button.y + button.h then
+			return button
+		end
+	end
+	return nil
+end
+
+--[[
+	What a button says: its label, but the on / off button (Seasons/HeatStates BUTTON_MODE of a kind
+	with an `on` field) says which it is from the window's data, "On" or "Off" (its label until data
+	came).
+]]
+function MenuLayout.buttonLabel(container: Container?, button: ButtonSpot): string
+	if container == nil or button.id ~= HeatStates.BUTTON_MODE or not Machines.isContainer(container) then
+		return button.label
+	end
+	local index = Machines.field(container.block, "on")
+	local data = container.data
+	if index == nil or data == nil or type(data[index]) ~= "number" then
+		return button.label
+	end
+	return if data[index] ~= 0 then "On" else "Off"
+end
+
+-- The set point's text from the window's data: "Set +1", "Set 0", "Set -3" ("" without one).
+function MenuLayout.setPointText(container: Container?): string
+	if container == nil or not Machines.isContainer(container) then
+		return ""
+	end
+	local index = Machines.field(container.block, "setPoint")
+	if index == nil then
+		return ""
+	end
+	local point = math.round(value(container.data, index))
+	return if point == 0 then "Set 0" else string.format("Set %+d", point)
+end
+
+--[[
+	The Inventory Action a click on `button` sends from `window` (Types' "button": its window id and
+	the button's id). The client sends it as it is (Inventory/Menu predicts nothing); the server
+	runs the kind's onButton (Players/Inventories).
+]]
+function MenuLayout.buttonAction(window: Types.Window, button: ButtonSpot): Types.Action
+	return { kind = "button", window = window.id, button = button.id }
 end
 
 --[[ Durability bar ]]

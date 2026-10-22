@@ -3,8 +3,11 @@
 	"stove", "oilheater"): the fuel-only binding (no energy: cables and networks never see them), the
 	frozen data layouts (saved items depend on them), panel buttons (Machines.button, the Inventory
 	Action "button" and its codec, data only in the menu), the set point kept in the item, what
-	their slots and tanks take, their idle ticks until the rooms land, and their recipes, Ages,
-	lore and sounds.
+	their slots and tanks take; their ticks: the thermostats over a room (Rooms.thermostat with
+	the room's heat less their own), energy per HU and the share delivered on too little ("Low
+	power"), the space heater outdoors and its standby, the fan's band, the stove's fuel x4 held
+	when off, the oil heater's oil and fuel by output, every state and status line; and their
+	recipes, Ages, lore and sounds.
 ]]
 
 return function(t, shared, require)
@@ -25,6 +28,8 @@ return function(t, shared, require)
 	local B = Blocks.id
 	local I = Items.id
 	local HEADER = Machines.HEADER
+	local HEAT = require(shared.Config).Seasons.Heat
+	local Rooms = require(shared.Seasons.Rooms)
 
 	local function ctx(block: number): any
 		return {
@@ -114,8 +119,58 @@ return function(t, shared, require)
 		end
 	end)
 
-	t.test("heaters: a fresh one is on at set point 0; until the rooms land it stays idle", function()
-		for _, name in { "ElectricHeater", "AirConditioner", "ElectricFan", "WoodStove", "OilHeater" } do
+	-- A context for `container` with a room (`sample`: a Shared/Seasons/Rooms.Sample, nil outdoors;
+	-- its heat, as server RoomWorld sums it for the call, its `others` and the machine's own) and
+	-- whether a player is near (nil: no `near` at all).
+	local function roomCtx(container: any, sample: any?, near: boolean?): any
+		local context = ctx(container.block)
+		context.climate = function(): (any, number)
+			if sample then
+				sample.heat = sample.others + Machines.get(container, "heat")
+			end
+			return sample, if sample then sample.outside else -6.7
+		end
+		if near ~= nil then
+			context.near = function(_x: number, _y: number, _z: number, radius: number): boolean
+				t.eq(radius, HEAT.StandbyRadius, "asked within StandbyRadius")
+				return near
+			end
+		end
+		return context
+	end
+
+	-- The design's plank house in a winter night (Rooms' worked numbers), `others` HU from other
+	-- sources.
+	local function house(temperature: number, others: number?): any
+		return {
+			id = 1,
+			temperature = temperature,
+			outside = -6.7,
+			uaOut = 2.465,
+			uaGround = 0.5,
+			volume = 75,
+			heat = 0,
+			others = others or 0,
+		}
+	end
+
+	local function status(container: any): string?
+		return Machines.status(container.block, Machines.view(container))
+	end
+
+	local function charge(container: any)
+		Machines.set(container, "energy", Machines.capacity(container))
+	end
+
+	t.test("heaters: a fresh one is on at set point 0; with no room, power or fuel it says why", function()
+		local expected = {
+			ElectricHeater = { HeatStates.NO_POWER, "No power" },
+			AirConditioner = { HeatStates.NO_ROOM, "No room" },
+			ElectricFan = { HeatStates.NO_POWER, "No power" },
+			WoodStove = { HeatStates.NO_FUEL, "No fuel" },
+			OilHeater = { HeatStates.NO_ROOM, "No room" },
+		}
+		for name, want in expected do
 			local block = B[name]
 			local container = Machines.newContainer(block)
 			t.eq(Machines.get(container, "on"), 1, `{name} starts on`)
@@ -123,15 +178,271 @@ return function(t, shared, require)
 				t.eq(Machines.get(container, "setPoint"), 0)
 			end
 			t.ok(Machines.tick(container, ctx(block)))
-			t.eq(Machines.get(container, "heat"), 0, "no heat yet")
-			t.eq(Machines.view(container).rate, 0, "no power drawn")
+			t.eq(Machines.get(container, "heat"), 0, `{name}: no heat`)
+			t.eq(Machines.view(container).rate, 0, "nothing drawn")
 			t.eq(Machines.view(container).active, false)
-			t.eq(Machines.state(container), HeatStates.IDLE)
-			t.eq(Machines.status(block, Machines.view(container)), "Idle")
+			t.eq(Machines.state(container), want[1], name)
+			t.eq(status(container), want[2])
 			Machines.set(container, "on", 0)
 			Machines.tick(container, ctx(block))
 			t.eq(Machines.state(container), HeatStates.OFF)
-			t.eq(Machines.status(block, Machines.view(container)), "Off")
+			t.eq(status(container), "Off")
+		end
+	end)
+
+	t.test("heaters: the Electric Heater's thermostat, its power and the space heater outdoors", function()
+		local block = B.ElectricHeater
+		local heater = Machines.newContainer(block)
+		Machines.set(heater, "setPoint", 1)
+		charge(heater)
+		-- Cold air: the need at +1 and the proportional part.
+		local cold = house(-5.57)
+		local want = Rooms.thermostat(1, -5.57, cold, -6.7, 0, 0, HEAT.ElectricHeater)
+		Machines.tick(heater, roomCtx(heater, cold))
+		t.near(Machines.get(heater, "heat"), want, 1e-9)
+		t.near(-Machines.view(heater).rate, want * HEAT.HeaterJoules, 0.001, "4 J a tick per HU")
+		t.near(Machines.energy(heater), 16000 - want * HEAT.HeaterJoules, 0.001, "taken from its store")
+		t.eq(Machines.state(heater), HeatStates.HEATING)
+		t.eq(status(heater), `Heating {Rooms.huText(want)} HU`)
+		t.eq(Machines.view(heater).active, true)
+		t.eq(Machines.lines(block, Machines.view(heater))[1], `{Rooms.huText(want)} HU, 156 J/t`)
+		-- The room counts its own heat (RoomWorld's sample.heat): the same again, no runaway.
+		Machines.tick(heater, roomCtx(heater, cold))
+		t.near(cold.heat, want, 1e-9, "its own heat in the room's")
+		t.near(Machines.get(heater, "heat"), want, 1e-9, "others = the room's heat less its own")
+		-- At its set point: what holding it takes; above: less, then nothing.
+		Machines.tick(heater, roomCtx(heater, house(1)))
+		t.near(Machines.get(heater, "heat"), 19.48, 0.01)
+		t.eq(Machines.state(heater), HeatStates.AT_SET_POINT)
+		t.eq(status(heater), "At set point")
+		Machines.tick(heater, roomCtx(heater, house(12)))
+		t.eq(Machines.get(heater, "heat"), 0)
+		t.eq(Machines.view(heater).rate, 0)
+		t.eq(Machines.state(heater), HeatStates.AT_SET_POINT)
+		-- A campfire beside it (others): it gives what is missing.
+		Machines.tick(heater, roomCtx(heater, house(1, 15)))
+		t.near(Machines.get(heater, "heat"), 19.48 - 15, 0.01)
+		-- Never above its most.
+		charge(heater)
+		Machines.tick(heater, roomCtx(heater, house(-15)))
+		t.eq(Machines.get(heater, "heat"), HEAT.ElectricHeater)
+		t.eq(-Machines.view(heater).rate, HEAT.ElectricHeater * HEAT.HeaterJoules)
+		-- Too little stored: all of it, for that share.
+		Machines.set(heater, "energy", 40)
+		Machines.tick(heater, roomCtx(heater, house(-15)))
+		t.near(Machines.get(heater, "heat"), HEAT.ElectricHeater * 40 / 160, 1e-9)
+		t.eq(Machines.energy(heater), 0)
+		t.eq(Machines.state(heater), HeatStates.LOW_POWER)
+		t.eq(status(heater), "Low power: 10 HU")
+		Machines.tick(heater, roomCtx(heater, house(-15)))
+		t.eq(Machines.state(heater), HeatStates.NO_POWER)
+		t.eq(Machines.get(heater, "heat"), 0)
+		-- Mekanism's deactivation delay: it shows it works a while after it stopped.
+		t.eq(Machines.view(heater).active, true, "held on")
+		for _ = 1, Machines.DEACTIVATION_DELAY do
+			Machines.tick(heater, roomCtx(heater, house(-15)))
+		end
+		t.eq(Machines.view(heater).active, false, "dark after the delay")
+		-- Outdoors: a space heater while a player is near, else it stands by.
+		charge(heater)
+		Machines.tick(heater, roomCtx(heater, nil, true))
+		t.eq(Machines.get(heater, "heat"), HEAT.SpaceHeater)
+		t.eq(-Machines.view(heater).rate, HEAT.SpaceHeater * HEAT.HeaterJoules)
+		t.eq(status(heater), "Heating 20 HU")
+		Machines.tick(heater, roomCtx(heater, nil, false))
+		t.eq(Machines.get(heater, "heat"), 0)
+		t.eq(Machines.view(heater).rate, 0, "standby draws nothing")
+		t.eq(status(heater), "Standby")
+		Machines.tick(heater, roomCtx(heater, nil))
+		t.eq(Machines.get(heater, "heat"), HEAT.SpaceHeater, "a context without `near`: a player counts as near")
+		-- Item data from elsewhere: the set point within its range.
+		Machines.set(heater, "setPoint", 99)
+		Machines.tick(heater, roomCtx(heater, house(5)))
+		t.near(Machines.get(heater, "heat"), Rooms.thermostat(5, 5, house(5), -6.7, 0, 0, 40), 1e-9)
+	end)
+
+	t.test("heaters: the Air Conditioner cools rooms only; the fan runs above its set point", function()
+		local block = B.AirConditioner
+		local ac = Machines.newContainer(block)
+		charge(ac)
+		local desert = {
+			id = 2,
+			temperature = 7.85,
+			outside = 10.4,
+			uaOut = 3.02,
+			uaGround = 0.98,
+			volume = 147,
+			heat = 0,
+			others = 0,
+		}
+		Machines.tick(ac, roomCtx(ac, desert))
+		t.eq(Machines.get(ac, "heat"), HEAT.AirConditioner, "its most: -40 HU")
+		t.eq(-Machines.view(ac).rate, 40 * HEAT.CoolerJoules, "5 J a tick per HU")
+		t.eq(Machines.state(ac), HeatStates.COOLING)
+		t.eq(status(ac), "Cooling 40 HU")
+		t.eq(Machines.lines(block, Machines.view(ac))[1], "-40 HU, 200 J/t")
+		desert.temperature = 0
+		Machines.tick(ac, roomCtx(ac, desert))
+		t.near(Machines.get(ac, "heat"), -3.02 * 10.4, 1e-9, "holding 0")
+		t.eq(Machines.state(ac), HeatStates.AT_SET_POINT)
+		Machines.tick(ac, roomCtx(ac, nil))
+		t.eq(Machines.get(ac, "heat"), 0)
+		t.eq(Machines.state(ac), HeatStates.NO_ROOM)
+		t.eq(Machines.view(ac).rate, 0, "nothing drawn outdoors")
+		-- The fan: on above its set point (0) by half a step, off below it by half a step.
+		local fanBlock = B.ElectricFan
+		local fan = Machines.newContainer(fanBlock)
+		charge(fan)
+		local room = house(5)
+		local function run(temperature: number): number
+			room.temperature = temperature
+			Machines.tick(fan, roomCtx(fan, room))
+			return Machines.get(fan, "heat")
+		end
+		t.eq(run(5), HEAT.ElectricFan)
+		t.eq(-Machines.view(fan).rate, HEAT.FanJoules)
+		t.eq(status(fan), "Cooling 10 HU")
+		t.eq(run(0.3), HEAT.ElectricFan, "running: on down to -0.5")
+		t.eq(run(-0.6), 0, "off")
+		t.eq(Machines.state(fan), HeatStates.AT_SET_POINT)
+		t.eq(run(0.3), 0, "stopped: off up to +0.5")
+		t.eq(run(0.6), HEAT.ElectricFan, "on again")
+		-- Outdoors it runs while on: a cold source near it (Players/Climate).
+		Machines.tick(fan, roomCtx(fan, nil))
+		t.eq(Machines.get(fan, "heat"), HEAT.ElectricFan)
+		Machines.set(fan, "energy", 15)
+		Machines.tick(fan, roomCtx(fan, nil))
+		t.near(Machines.get(fan, "heat"), HEAT.ElectricFan / 2, 1e-9, "half its J, half its cooling")
+		t.eq(Machines.state(fan), HeatStates.LOW_POWER)
+	end)
+
+	t.test("heaters: the Wood Stove burns furnace fuel four times as long, and holds it when off", function()
+		local block = B.WoodStove
+		local stove = Machines.newContainer(block)
+		stove.slots[1] = Items.newStack(I.Coal, 2)
+		Machines.tick(stove, ctx(block))
+		t.eq(stove.slots[1] and stove.slots[1].count, 1, "one coal lit")
+		t.eq(Machines.get(stove, "burnTotal"), 1600 * HEAT.StoveBurnFactor, "320 s")
+		t.eq(Machines.get(stove, "burnTime"), 6400 - 1)
+		t.eq(Machines.get(stove, "heat"), HEAT.WoodStove)
+		t.eq(Machines.view(stove).rate, HEAT.WoodStove, "RATE carries its HU")
+		t.eq(Machines.view(stove).active, true)
+		t.eq(status(stove), "Heating 30 HU")
+		t.eq(Machines.energy(stove), 0, "no energy, ever")
+		-- Off: it holds what burns.
+		Machines.set(stove, "on", 0)
+		for _ = 1, 100 do
+			Machines.tick(stove, ctx(block))
+		end
+		t.eq(Machines.get(stove, "burnTime"), 6399, "held")
+		t.eq(Machines.get(stove, "heat"), 0)
+		t.eq(Machines.view(stove).active, false)
+		Machines.set(stove, "on", 1)
+		-- The next coal lights as the last one runs out: no tick without fire.
+		Machines.set(stove, "burnTime", 1)
+		Machines.tick(stove, ctx(block))
+		t.eq(Machines.get(stove, "heat"), HEAT.WoodStove)
+		Machines.tick(stove, ctx(block))
+		t.eq(Machines.get(stove, "heat"), HEAT.WoodStove, "lit at once")
+		t.eq(stove.slots[1], nil, "the second coal")
+		Machines.set(stove, "burnTime", 1)
+		Machines.tick(stove, ctx(block))
+		Machines.tick(stove, ctx(block))
+		t.eq(Machines.get(stove, "heat"), 0)
+		t.eq(Machines.state(stove), HeatStates.NO_FUEL)
+		t.eq(Machines.get(stove, "burnTotal"), 0, "the flame out")
+		-- A log: 60 s.
+		stove.slots[1] = Items.newStack(I.OakLog, 1)
+		Machines.tick(stove, ctx(block))
+		t.eq(Machines.get(stove, "burnTotal"), 1200)
+		-- Item data from elsewhere: never more than the longest fuel.
+		Machines.set(stove, "burnTime", 1e9)
+		Machines.tick(stove, ctx(block))
+		t.ok(Machines.get(stove, "burnTime") <= Machines.info(block).maxBurn)
+	end)
+
+	t.test("heaters: the Oil Heater burns oil and fuel by its output, in rooms only", function()
+		local block = B.OilHeater
+		local heater = Machines.newContainer(block)
+		Machines.tankInsert(heater, "fuel", Fluids.OIL, 1000)
+		local freezing = house(-15)
+		-- Full output: a mB of oil every OilTicks.
+		for _ = 1, 30 * 10 do
+			Machines.tick(heater, roomCtx(heater, freezing))
+		end
+		t.eq(Machines.get(heater, "heat"), HEAT.OilHeater)
+		t.eq(Machines.view(heater).rate, HEAT.OilHeater)
+		t.eq(status(heater), "Heating 35 HU")
+		t.eq(Machines.view(heater).active, true)
+		local left = Machines.tankAmount(heater, "fuel")
+		t.ok(math.abs(left - 990) <= 1, `oil left {left}`)
+		-- Half output: half the oil.
+		local half = Machines.newContainer(block)
+		Machines.tankInsert(half, "fuel", Fluids.OIL, 1000)
+		Machines.set(half, "setPoint", 1)
+		local mild = house(1)
+		mild.uaOut = 17.5 / 7.7
+		mild.uaGround = 0
+		for _ = 1, 60 * 10 do
+			Machines.tick(half, roomCtx(half, mild))
+		end
+		t.near(Machines.get(half, "heat"), 17.5, 1e-9)
+		t.eq(Machines.state(half), HeatStates.AT_SET_POINT)
+		t.ok(math.abs(Machines.tankAmount(half, "fuel") - 990) <= 1, "a mB every 60 ticks")
+		-- Fuel lasts twice as long.
+		local fuel = Machines.newContainer(block)
+		Machines.tankInsert(fuel, "fuel", Fluids.FUEL, 1000)
+		for _ = 1, 60 * 10 do
+			Machines.tick(fuel, roomCtx(fuel, freezing))
+		end
+		t.ok(math.abs(Machines.tankAmount(fuel, "fuel") - 990) <= 1, "fuel: a mB every FuelTicks")
+		-- Dry: what still burns, then nothing.
+		local dry = Machines.newContainer(block)
+		Machines.tankInsert(dry, "fuel", Fluids.OIL, 1)
+		for _ = 1, 30 do
+			Machines.tick(dry, roomCtx(dry, freezing))
+		end
+		t.ok(Machines.get(dry, "heat") > 0, "the last mB")
+		Machines.tick(dry, roomCtx(dry, freezing))
+		Machines.tick(dry, roomCtx(dry, freezing))
+		t.eq(Machines.get(dry, "heat"), 0)
+		t.eq(Machines.state(dry), HeatStates.NO_FUEL)
+		t.eq(status(dry), "No fuel")
+		-- Outdoors nothing burns.
+		local outdoors = Machines.newContainer(block)
+		Machines.tankInsert(outdoors, "fuel", Fluids.OIL, 1000)
+		for _ = 1, 100 do
+			Machines.tick(outdoors, roomCtx(outdoors, nil))
+		end
+		t.eq(Machines.tankAmount(outdoors, "fuel"), 1000)
+		t.eq(Machines.state(outdoors), HeatStates.NO_ROOM)
+	end)
+
+	t.test("heaters: heaters never cool and coolers never heat (Climate's heat and cold sources)", function()
+		for _, name in { "ElectricHeater", "AirConditioner", "ElectricFan", "WoodStove", "OilHeater" } do
+			local container = Machines.newContainer(B[name])
+			Machines.tankInsert(container, "fuel", Fluids.OIL, 1000)
+			if name == "WoodStove" then
+				container.slots[1] = Items.newStack(I.Coal, 1)
+			end
+			local cooler = name == "AirConditioner" or name == "ElectricFan"
+			for _, setPoint in { -5, 0, 5 } do
+				if Machines.field(container.block, "setPoint") then
+					Machines.set(container, "setPoint", setPoint)
+				end
+				for temperature = -15, 15, 3 do
+					for _, room in { house(temperature), false } do
+						charge(container)
+						Machines.tick(container, roomCtx(container, if room then room else nil, true))
+						local heat = Machines.get(container, "heat")
+						if cooler then
+							t.ok(heat <= 0, `{name} at {temperature}: {heat}`)
+						else
+							t.ok(heat >= 0, `{name} at {temperature}: {heat}`)
+						end
+					end
+				end
+			end
 		end
 	end)
 

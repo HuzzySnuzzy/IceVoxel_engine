@@ -1,7 +1,7 @@
 --[[
 	WAILA's content (Ui/WailaInfo): names, icons, the harvest line with its check / cross for the
-	held item, the extended (F3) lines, fluids, dropped items, players, and the ray / box test used
-	to aim at entities.
+	held item, the extended (F3) lines, fluids, dropped items, players, the ray / box test used to
+	aim at entities, and the seasons' machines (no energy line without energy, the viewer's room).
 ]]
 
 return function(t, shared, require, _server, client)
@@ -428,5 +428,30 @@ return function(t, shared, require, _server, client)
 		t.ok(birch ~= nil, "a birch forest exists")
 		t.eq(WailaInfo.biomeName(birch :: number), "Birch Forest", "spaced")
 		t.eq(WailaInfo.biomeName(10000), "?", "unknown")
+	end)
+
+	t.test("waila: the seasons' machines: no energy line without energy, the viewer's room", function()
+		local HeatStates = require(shared.Seasons.HeatStates)
+		for _, name in { "WoodStove", "OilHeater", "ElectricHeater", "AirConditioner", "ElectricFan" } do
+			local block = B[name]
+			local facts = WailaInfo.machineDefaults(block)
+			for _, extended in { false, true } do
+				local info = WailaInfo.block(block, nil, 0, 64, 0, extended, { machine = facts })
+				if facts.capacity == 0 then
+					hasNot(info, "Energy:", `{name}: fuel only`)
+					hasNot(info, "0 J / 0 J", name)
+				else
+					has(info, `Energy: 0 J / {Items.formatEnergy(facts.capacity)}`, name)
+				end
+			end
+			facts.state = HeatStates.OFF
+			has(WailaInfo.block(block, nil, 0, 64, 0, false, { machine = facts }), "Off", name)
+			local room = { room = 2.4, outside = -12.2 }
+			has(
+				WailaInfo.block(block, nil, 0, 64, 0, false, { machine = facts, room = room }),
+				"Room +2 (out -12)",
+				name
+			)
+		end
 	end)
 end

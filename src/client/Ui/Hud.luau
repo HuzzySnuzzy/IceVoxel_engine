@@ -28,7 +28,10 @@
 	             Nails' temperature on, survival and adventure), with its reading after the name:
 	             the body temperature and its target, each in its zone's colour (Theme.Zone), an
 	             arrow between them in the way it is going (warming orange, cooling blue, white on
-	             target). The text has a faint dark outline for bright skies. Held too while a
+	             target), and with the seasons the room the player stands in and the outside in
+	             soft text ("Room +1 · Out -9", "Out -9" outdoors: Player/SurvivalState.room,
+	             WailaInfo.roomReading; the name gives way when it doesn't fit). The text has a
+	             faint dark outline for bright skies. Held too while a
 	             firearm or a magazine is the held item (Shared/Weapons): as in DayZ no rounds are
 	             counted there; Ui/WeaponHud draws its small raise, reload and jam indicator and
 	             the reload bar on the box's weapon anchor (`weaponAnchor`: a frame over the box,
@@ -79,6 +82,7 @@ local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local PlayerSettings = require(Shared.PlayerSettings)
 local Temperature = require(Shared.ToughAsNails.Temperature)
+local Calendar = require(Shared.Seasons.Calendar)
 local Types = require(Shared.Inventory.Types)
 local Weapons = require(Shared.Weapons)
 
@@ -97,6 +101,7 @@ local Style = require(script.Parent.Style)
 local SurvivalHud = require(script.Parent.SurvivalHud)
 local Theme = require(script.Parent.Theme)
 local UiScale = require(script.Parent.UiScale)
+local WailaInfo = require(script.Parent.WailaInfo)
 
 export type Mode = "play" | "creative" | "hidden"
 
@@ -323,6 +328,8 @@ type NameBox = {
 	value: TextLabel,
 	arrow: Frame,
 	target: TextLabel,
+	-- The seasons' room reading after it ("Room +1 · Out -9").
+	room: TextLabel,
 	-- (The texts and the arrow's frames, for the fade.)
 	labels: { TextLabel },
 	arrowParts: { Frame },
@@ -352,6 +359,8 @@ local function buildNameBox(hotbar: Frame, scaled: Style.Scaled): NameBox
 	arrow.Parent = root
 	local arrowParts = Dayz.glyph(arrow, 0, 0, Dayz.Art.readingArrow, Dayz.Colour.Text, 1)
 	local name, value, target = nameLabel(root, scaled), nameLabel(root, scaled), nameLabel(root, scaled)
+	local room = nameLabel(root, scaled)
+	room.TextColor3 = Dayz.Colour.TextSoft
 	-- The weapon anchor (see `weaponAnchor`).
 	local anchor = Instance.new("Frame")
 	anchor.Name = "Weapon"
@@ -368,7 +377,8 @@ local function buildNameBox(hotbar: Frame, scaled: Style.Scaled): NameBox
 		value = value,
 		arrow = arrow,
 		target = target,
-		labels = { name, value, target },
+		room = room,
+		labels = { name, value, target, room },
 		arrowParts = arrowParts,
 	}
 end
@@ -385,9 +395,11 @@ end
 
 --[[
 	Lays the item box out for `lines` (Theme.handsLines; nil: nothing held) and a Thermometer's
-	reading (`reading`: the body temperature and its target, rounded; nil: none).
+	reading (`reading`: the body temperature and its target, rounded; nil: none) with the seasons'
+	room reading after it (`room`: WailaInfo.roomReading, "" for none). The name gives way first
+	when they don't all fit.
 ]]
-local function layoutNameBox(box: NameBox, lines: Theme.HandsLines?, reading: { number }?)
+local function layoutNameBox(box: NameBox, lines: Theme.HandsLines?, reading: { number }?, room: string?)
 	local Size = Theme.Size
 	local NAME_H = Size.NAME_H
 	local x = Size.NAME_PAD
@@ -399,7 +411,16 @@ local function layoutNameBox(box: NameBox, lines: Theme.HandsLines?, reading: { 
 	end
 	local text = if lines then lines.name else ""
 	box.name.Text = text
-	local nameW = math.min(measure(text), WIDTH - 2 * Size.NAME_PAD)
+	local roomText = if reading and room then room else ""
+	local roomW = if roomText ~= "" then measure(roomText) + Size.READING_GAP else 0
+	-- (What follows the name: the reading and the room's, which the name makes room for.)
+	local valueText = if reading then StatusLayout.valueText("temperature", reading[1]) else ""
+	local targetText = if reading then StatusLayout.valueText("temperature", reading[2]) else ""
+	local readingW = if reading
+		then Size.READING_GAP + measure(valueText) + 2 * Size.READING_ARROW_GAP + 3 + measure(targetText)
+		else 0
+	local nameW =
+		math.max(0, math.min(measure(text), WIDTH - 2 * Size.NAME_PAD - (x - Size.NAME_PAD) - readingW - roomW))
 	place(box.name, x, nameW + 1, NAME_H)
 	x += nameW
 	box.value.Visible = reading ~= nil
@@ -407,8 +428,6 @@ local function layoutNameBox(box: NameBox, lines: Theme.HandsLines?, reading: { 
 	box.target.Visible = reading ~= nil
 	if reading then
 		local value, target = reading[1], reading[2]
-		local valueText = StatusLayout.valueText("temperature", value)
-		local targetText = StatusLayout.valueText("temperature", target)
 		x += Size.READING_GAP
 		local w = measure(valueText)
 		box.value.Text = valueText
@@ -423,6 +442,14 @@ local function layoutNameBox(box: NameBox, lines: Theme.HandsLines?, reading: { 
 		box.target.Text = targetText
 		box.target.TextColor3 = Style.Dayz.Zone[Temperature.zone(target)]
 		place(box.target, x, w + 1, NAME_H)
+		x += w
+	end
+	box.room.Visible = roomText ~= ""
+	if roomText ~= "" then
+		x += Size.READING_GAP
+		local w = roomW - Size.READING_GAP
+		box.room.Text = roomText
+		place(box.room, x, w + 1, NAME_H)
 		x += w
 	end
 	local width = math.min(x + Size.NAME_PAD, WIDTH)
@@ -602,6 +629,7 @@ function Hud.start()
 	local boxCount, boxDamage = -1, -1
 	local boxData: Items.Data? = nil
 	local boxValue, boxTarget = -99, -99
+	local boxRoom = ""
 	local reading = { 0, 0 }
 	local lines: Theme.HandsLines? = nil
 	local shown = true
@@ -640,9 +668,15 @@ function Hud.start()
 		local data = if held then held.data else nil
 		local thermometer = item == THERMOMETER and status ~= nil and status.temperatureOn
 		local value, target = -99, -99
+		local room = ""
 		if thermometer and status then
 			value = math.round(math.clamp(status.temperature, Temperature.MIN, Temperature.MAX))
 			target = math.round(math.clamp(status.target, Temperature.MIN, Temperature.MAX))
+			-- (The seasons' room and the outside, while the calendar counts: Seasons/Calendar's
+			-- state, from the server's attributes.)
+			if Calendar.state().enabled then
+				room = WailaInfo.roomReading(SurvivalState.room())
+			end
 		end
 		if
 			item ~= boxItem
@@ -651,14 +685,15 @@ function Hud.start()
 			or data ~= boxData
 			or value ~= boxValue
 			or target ~= boxTarget
+			or room ~= boxRoom
 		then
 			if item ~= boxItem or count ~= boxCount or damage ~= boxDamage or data ~= boxData then
 				lines = Theme.handsLines(held)
 			end
 			boxItem, boxCount, boxDamage, boxData = item, count, damage, data
-			boxValue, boxTarget = value, target
+			boxValue, boxTarget, boxRoom = value, target, room
 			reading[1], reading[2] = value, target
-			layoutNameBox(nameBox, lines, if thermometer then reading else nil)
+			layoutNameBox(nameBox, lines, if thermometer then reading else nil, room)
 			shownAlpha = -1
 		end
 		-- Shown for a while when the selection or the item in it changes; held with a Thermometer,
