@@ -181,6 +181,15 @@ return table.freeze({
 	ReinforcedBarricade = "Boards and scrap steel. The dead will be at it a long time.",
 	BunkerHatch = "A steel hatch over a ladder shaft. The dead can't break it.",
 	CeilingLamp = "A caged lamp that hangs from the ceiling. Still glowing.",
+	SnowLayer1 = "A thin cover of snow. Use it on snow to pile it higher; deep snow slows you.",
+	WoodStove = "Burns furnace fuel four times as long to heat the room it stands in.",
+	OilHeater = "Burns oil or fuel to hold a room at its set point.",
+	ElectricHeater = "Holds a room at its set point on power. Outdoors it warms whoever stands close.",
+	AirConditioner = "Cools a room to its set point on power. Useless outdoors.",
+	ElectricFan = "Takes the edge off a hot room. Cheap to run.",
+	InsulatedPlanks = "Wool-lined boards. A room of them keeps its warmth far longer.",
+	InsulatedGlass = "Double panes in iron: a window that keeps the cold out.",
+	InsulatedDoor = "A padded door. Closed, it keeps a room's warmth in.",
 
 	-- Armor -------------------------------------------------------------------------------------
 	LeatherHelmet = "Warm hide. Leather keeps the frost off.",

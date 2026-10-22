@@ -70,7 +70,13 @@
 	  * the zombie apocalypse: how long an ordinary zombie takes to break a block (BlockList
 	    `zombieBreak`: `zombieBreak`, `zombieBreakLut`, u16 ticks, 0 = never) and the blocks a
 	    use swaps for another (`toggle`, `menu` "Toggle": the bunker hatch; `toggleOf`, checked
-	    when this module loads: the target exists and toggles back).
+	    when this module loads: the target exists and toggles back);
+	  * the seasons (Shared/Seasons): snow layers' layers (`layer`; per appearance `layerLut`,
+	    the renderer lowering such a box's top to 2n pixels; each height is an appearance of its
+	    own), a block's U as a room's wall face (`insulation`, nil where a room's air passes:
+	    defaults by kind and material, BlockList's header) and what walking on it multiplies the
+	    speed by (`speedFactor`), also as `insulationLut` and `speedFactorLut` (f32). A machine's
+	    energy may have capacity 0 (a fuel-only kind: Shared/Machines `fuelOnly`).
 ]]
 
 local BlockList = require(script.BlockList)
@@ -187,6 +193,12 @@ export type BlockDef = {
 	-- use swaps it for (`toggle`: the block's name and the sound; see Blocks.toggleOf).
 	zombieBreak: number,
 	toggle: ToggleSpec?,
+	-- Seasons (BlockList `layer`, `insulation`, `speedFactor`): snow layers (1..8, 0 for anything
+	-- else), the U of a face of it for rooms (nil: a room's air passes; see Blocks.insulation) and
+	-- what walking on it multiplies the speed by (1 for most).
+	layer: number,
+	insulation: number?,
+	speedFactor: number,
 	appearance: number,
 }
 
@@ -219,6 +231,9 @@ export type Appearance = {
 	scatter: boolean,
 	upperHalf: boolean,
 	foliage: boolean,
+	-- A snow layer's layers (1..8; 0: none): each n is an appearance of its own, its box's top
+	-- lowered to 2n pixels (Blocks.layerLut; client Rendering/ChunkRenderer).
+	layer: number,
 }
 
 export type ShapeBox = BlockList.ShapeBox
@@ -538,6 +553,29 @@ local function texturedOf(faces: TextureFaces?): boolean
 	return false
 end
 
+--[[
+	The U of a room's wall face of a block by material (BlockList `insulation`'s default for solid
+	blocks without collision boxes of their own: see BlockList).
+]]
+local INSULATION_BY_MATERIAL: { [string]: number } = {
+	Glass = 0.12,
+	Ice = 0.06,
+	Glacier = 0.06,
+	Metal = 0.06,
+	DiamondPlate = 0.06,
+	CorrodedMetal = 0.06,
+	Foil = 0.06,
+	Fabric = 0.008,
+	Snow = 0.015,
+	WoodPlanks = 0.025,
+	LeafyGrass = 0.3,
+}
+-- Fluids' and machines' U, and every other solid block's.
+local FLUID_INSULATION = 0.05
+local DEFAULT_INSULATION = 0.02
+-- The most layers a snow layer has.
+Blocks.MAX_LAYERS = 8
+
 local defs: { [number]: BlockDef } = {}
 local ids: { [string]: number } = {}
 local appearances: { Appearance } = {}
@@ -631,8 +669,24 @@ for index, spec in BlockList do
 		stuck = if spec.stuck then table.freeze(table.clone(spec.stuck)) else nil,
 		zombieBreak = spec.zombieBreak or 0,
 		toggle = if spec.toggle then table.freeze(table.clone(spec.toggle)) else nil,
+		layer = spec.layer or 0,
+		insulation = if spec.insulation ~= nil
+			then spec.insulation
+			elseif kind == Blocks.KIND_NONE then nil
+			elseif spec.fluid ~= nil or spec.machine ~= nil then FLUID_INSULATION
+			elseif solid and spec.collision == nil then INSULATION_BY_MATERIAL[spec.material or "SmoothPlastic"]
+				or DEFAULT_INSULATION
+			else nil,
+		speedFactor = spec.speedFactor or 1,
 		appearance = 0,
 	}
+	assert(
+		def.layer == math.floor(def.layer) and def.layer >= 0 and def.layer <= Blocks.MAX_LAYERS,
+		`Block {spec.name} has a bad layer`
+	)
+	assert(def.layer == 0 or spec.shape == nil, `Snow layer {spec.name} must have no shape (its box is lowered)`)
+	assert(def.insulation == nil or def.insulation > 0, `Block {spec.name} has a bad insulation`)
+	assert(def.speedFactor > 0 and def.speedFactor <= 1, `Block {spec.name} has a bad speedFactor`)
 	assert(
 		def.zombieBreak >= 0 and def.zombieBreak <= 65535 and def.zombieBreak == math.floor(def.zombieBreak),
 		`Block {spec.name} has a bad zombieBreak`
@@ -675,9 +729,11 @@ for index, spec in BlockList do
 		energy == nil
 			or (
 				type(energy.capacity) == "number"
-				and energy.capacity > 0
+				and energy.capacity >= 0
 				and (energy.input == nil or energy.input >= 0)
 				and (energy.output == nil or energy.output >= 0)
+				-- (A fuel-only machine holds none and moves none: BlockList `energy`.)
+				and (energy.capacity > 0 or ((energy.input or 0) == 0 and (energy.output or 0) == 0))
 			),
 		`Block {spec.name} has bad energy`
 	)
@@ -741,7 +797,8 @@ for index, spec in BlockList do
 		-- (Plants never share one with anything else: the mesher and renderer treat them apart.)
 		local upperHalf = spec.plant ~= nil and spec.plant.bottom ~= nil
 		local foliage = `{spec.plant ~= nil},{def.tinted},{def.scatter},{upperHalf}`
-		local key = `{look}|{if solid then 1 else 0}|{texture}|{def.decor or ""}|{glow}|{foliage}`
+		-- (Each snow layer height is its own appearance: its box is lowered by it.)
+		local key = `{look}|{if solid then 1 else 0}|{texture}|{def.decor or ""}|{glow}|{foliage}|{def.layer}`
 		local appearance = appearanceByKey[key]
 		if appearance == nil then
 			appearance = #appearances + 1
@@ -765,6 +822,7 @@ for index, spec in BlockList do
 				scatter = def.scatter,
 				upperHalf = upperHalf,
 				foliage = spec.plant ~= nil,
+				layer = def.layer,
 			})
 		end
 		def.appearance = appearance
@@ -974,6 +1032,47 @@ for id, def in defs do
 		local height = if fluid.level == 0 then 8 elseif fluid.level >= 8 then Blocks.FLUID_FULL else 8 - fluid.level
 		buffer.writeu8(Blocks.fluidHeightLut, id, height)
 	end
+end
+
+--[[
+	Seasons: snow layers, rooms' insulation and walking speed (BlockList `layer`, `insulation`,
+	`speedFactor`). `layerLut` is per *appearance* id (u8: a snow layer appearance's layers, 0 for
+	anything else; the renderer lowers such a box's top to 2n pixels); `insulationLut` and
+	`speedFactorLut` per block (f32, for hot loops; insulation -1 for none). The accessors below
+	give the exact values.
+]]
+Blocks.layerLut = buffer.create(#appearances + 1)
+for _, appearance in appearances do
+	buffer.writeu8(Blocks.layerLut, appearance.id, appearance.layer)
+end
+Blocks.insulationLut = buffer.create(Blocks.count * 4)
+Blocks.speedFactorLut = buffer.create(Blocks.count * 4)
+for id, def in defs do
+	buffer.writef32(Blocks.insulationLut, id * 4, def.insulation or -1)
+	buffer.writef32(Blocks.speedFactorLut, id * 4, def.speedFactor)
+end
+
+-- A snow layer's layers (1..8), 0 for anything else.
+function Blocks.layer(id: number): number
+	local def = defs[id]
+	return if def then def.layer else 0
+end
+
+--[[
+	The U of one face of the block for a room (Shared/Seasons/Rooms: a wall face; see BlockList
+	`insulation`), nil when a room's air passes through it (air, plants, torches, open doors,
+	fences, snow layers 1-7: the flood fill goes on through it).
+]]
+function Blocks.insulation(id: number): number?
+	local def = defs[id]
+	return if def then def.insulation else nil
+end
+
+-- What walking on (or in) the block multiplies the ground speed by (BlockList `speedFactor`; 1
+-- for most, 0.75..1 in snow).
+function Blocks.speedFactor(id: number): number
+	local def = defs[id]
+	return if def then def.speedFactor else 1
 end
 
 -- Light given off by each block (u8, 0..15; Minecraft's luminance).

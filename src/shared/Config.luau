@@ -576,6 +576,216 @@ local Config = {
 		Cycle = true,
 	},
 
+	-- Seasons (shared calendar and climate, server clock, snow, rooms) -------------------------------
+
+	--[[
+		Don't Starve's seasons: Autumn, Winter, Spring and Summer, each Lengths days, one calendar
+		every machine works out from the day time and a published offset (Shared/Seasons/Calendar;
+		server World/SeasonClock keeps it and saves it with the world). A world starts in Autumn.
+		Every quantity a season changes (the climate, the weather's biases, the sun's day share,
+		plant growth, foliage colours) blends over BlendDays centred on the turn, so nothing
+		steps. Winter's days are shorter and summer's longer by warping the sun (DaylightScale),
+		never the clock. false: none of it, the game as it was without seasons.
+	]]
+	Seasons = {
+		Enabled = true,
+		-- Days of Autumn, Winter, Spring and Summer (whole days, each at least BlendDays).
+		Lengths = { 8, 8, 8, 8 },
+		-- Days a season's quantities blend over, centred on the turn (the old season's last day and
+		-- the new one's first). At most the shortest length.
+		BlendDays = 2,
+		-- The sun's day half as a share of half the day, per season (Autumn, Winter, Spring,
+		-- Summer), a solar day (midnight to midnight) at a time; 0.6..1.4. Winter's 0.8 is about
+		-- 9 minutes of day in 20, summer's 1.2 about 12.7.
+		DaylightScale = { 1.0, 0.8, 1.0, 1.2 },
+		--[[
+			The climate per season (Autumn, Winter, Spring, Summer; Shared/Seasons/SeasonClimate):
+			  DayShift      added to the biome's climate by day and night (Tough As Nails' units),
+			                times the biome class's Amplitude
+			  NightDrop     outdoors and under a roof at night, colder by this (replaces 0.3)
+			  WeatherShift  added to Minecraft's biome temperature before the snow test (0.15)
+			  WetBias       lowers the moisture rain needs (more rain), raises it when negative
+			  ThunderBias   lowers the moisture thunder needs; -1: none
+			  Growth        plants' random-tick chance factor (saplings, herbs, grass)
+			Heat waves: a summer day is one with Chance (never two in a row), adding Shift (times
+			the Amplitude) between From and To ticks into the day, ramping over Ramp ticks.
+			Snow melts where Minecraft's temperature is at least Weather's 0.15 + MeltMargin.
+			SnowCover (the far landscape's white, Shared/Seasons/Foliage): temperate biomes over
+			winter's first RampDays and back over spring's first; cold ones from ColdEarlyDays
+			before winter to spring's ColdLateDays.
+		]]
+		Climate = {
+			DayShift = { -0.10, -0.40, -0.05, 0.30 },
+			NightDrop = { 0.30, 0.35, 0.30, 0.25 },
+			WeatherShift = { -0.20, -0.80, -0.10, 0.20 },
+			WetBias = { 0, 0.02, 0.06, -0.08 },
+			ThunderBias = { 0, -1, 0.04, 0.02 },
+			Growth = { 0.5, 0, 1.5, 1.0 },
+			Amplitude = { cold = 1, temperate = 1, dry = 0.75, tropical = 0.5 },
+			HeatWave = { Chance = 0.3, Shift = 0.30, From = 3000, To = 12000, Ramp = 1000 },
+			MeltMargin = 0.05,
+			SnowCover = { RampDays = 2, ColdEarlyDays = 2, ColdLateDays = 4 },
+		},
+		--[[
+			Snow layers (server Seasons/SnowWorld, Shared/Seasons/SnowLayers): each active chunk is
+			visited with TileChance a tick (at most MaxTilesPerTick visits a tick), one of its 4 x 4
+			tiles; snow rises evenly up to the column's cap (Caps by biome class, +1 every
+			CapPerBlocks above CapAltitude, a drift of +-1 over DriftWavelength blocks, at most 8)
+			and melts a layer at a time (times MeltClear by a clear day, MeltRain in rain,
+			MeltNight at night). Every HeatMeltSeconds a lit heat source melts a layer within
+			HeatMeltRadius; a room at RoomMelt or warmer melts what is in or on it. Ice: still
+			water freezes from its edges in winter and thaws in spring.
+		]]
+		Snow = {
+			Enabled = true,
+			TileChance = 1 / 250,
+			MaxTilesPerTick = 8,
+			Caps = { cold = 6, temperate = 3, tropical = 1, dry = 0 },
+			CapAltitude = 160,
+			CapPerBlocks = 64,
+			DriftWavelength = 32,
+			MeltClear = 2,
+			MeltRain = 2,
+			MeltNight = 0.5,
+			HeatMeltSeconds = 5,
+			HeatMeltRadius = 2,
+			RoomMelt = 3,
+			Ice = true,
+		},
+		--[[
+			Rooms (enclosed, insulated spaces: Shared/Seasons/Rooms, server Seasons/RoomWorld): a
+			flood fill from the player's feet over passable cells, given up past MaxVolume cells,
+			MaxExtent blocks across or MaxOpenings faces open to the sky (then the roof rule
+			holds). An opening face loses OpeningU; the air holds HeatCapacity per cell. At most
+			FillsPerFrame fills and FillMs a frame; seeds come from players every SeedSeconds and
+			from room-source machines every MachineSeedSeconds within Range blocks of a player; a
+			room unvisited for ForgetSeconds with no live source is forgotten, a failed seed is not
+			tried again for NotRoomSeconds. The outdoor value a room loses to is kept within
+			+-OutsideLimit.
+		]]
+		Rooms = {
+			Enabled = true,
+			MaxVolume = 1024,
+			MaxExtent = 32,
+			MaxOpenings = 6,
+			OpeningU = 1.0,
+			HeatCapacity = 2,
+			FillsPerFrame = 2,
+			FillMs = 2,
+			SeedSeconds = 1,
+			MachineSeedSeconds = 5,
+			Range = 128,
+			ForgetSeconds = 60,
+			NotRoomSeconds = 5,
+			OutsideLimit = 15,
+		},
+		--[[
+			Heat and cold in heat units (HU) a second, what each source gives a room (Players/
+			Climate's room sources) and what the heaters, coolers and stoves cost (Shared/Machines
+			kinds "heater", "cooler", "stove", "oilheater"): a Campfire, each Fire (at most
+			FireMax), each Lava block (at most LavaMax), a lit Furnace, a working Heat or
+			Combustion Generator, each player inside. The Wood Stove burns furnace fuel for
+			StoveBurnFactor x its burn time; the Oil Heater's tank holds OilTank mB, a mB of Oil
+			lasting OilTicks at full output, of Fuel FuelTicks. Electric heaters take
+			HeaterJoules a tick per HU, coolers CoolerJoules, the fan FanJoules while it runs.
+			Outdoors an electric heater warms players within SpaceHeaterRadius (a SpaceHeater HU
+			source) and a running fan cools within FanRadius; a heater with no player within
+			StandbyRadius stands by. Thermostats hold SetPointMin..SetPointMax.
+		]]
+		Heat = {
+			Campfire = 20,
+			Fire = 15,
+			FireMax = 3,
+			Lava = 10,
+			LavaMax = 6,
+			Furnace = 8,
+			Generator = 10,
+			Player = 1,
+			WoodStove = 30,
+			OilHeater = 35,
+			ElectricHeater = 40,
+			ElectricFan = -10,
+			AirConditioner = -40,
+			StoveBurnFactor = 4,
+			OilTank = 4000,
+			OilTicks = 30,
+			FuelTicks = 60,
+			HeaterJoules = 4,
+			CoolerJoules = 5,
+			FanJoules = 30,
+			SpaceHeater = 20,
+			SpaceHeaterRadius = 5,
+			FanRadius = 3,
+			StandbyRadius = 16,
+			SetPointMin = -5,
+			SetPointMax = 5,
+		},
+		--[[
+			Foliage colours by season (Shared/Seasons/Foliage, client Rendering/SeasonTint):
+			keyframes over the year's progress p (Autumn 0..0.25, Winter, Spring, Summer
+			0.75..1), each { at, colour, keep }: the colour drawn is lerp(colour, authored,
+			keep) in linear light (keep 1: the authored colour). Classes: grass, deciduous (oak,
+			acacia), birch, evergreen (spruce), tropical (jungle). Dust: how far snow cover
+			whitens a class (towards SnowColour). The sweep writes at most SweepWrites parts and
+			SweepMs a frame; far meshes are rebuilt when their palette moved more than FarDeltaE
+			(a step every FarStepDays).
+		]]
+		Foliage = {
+			Enabled = true,
+			SnowColour = { 236, 240, 246 },
+			Dust = { grass = 0.85, leaves = 0.5, evergreen = 0.45, tropical = 0 },
+			Keyframes = {
+				deciduous = {
+					{ at = 0.00, colour = { 150, 140, 50 }, keep = 0.4 },
+					{ at = 0.10, colour = { 210, 110, 40 }, keep = 0 },
+					{ at = 0.20, colour = { 170, 90, 50 }, keep = 0 },
+					{ at = 0.27, colour = { 110, 90, 70 }, keep = 0 },
+					{ at = 0.48, colour = { 110, 90, 70 }, keep = 0 },
+					{ at = 0.55, colour = { 130, 200, 90 }, keep = 0.3 },
+					{ at = 0.68, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.85, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.95, colour = { 110, 130, 50 }, keep = 0.6 },
+				},
+				birch = {
+					{ at = 0.00, colour = { 190, 170, 60 }, keep = 0.4 },
+					{ at = 0.10, colour = { 230, 190, 60 }, keep = 0 },
+					{ at = 0.20, colour = { 190, 150, 60 }, keep = 0 },
+					{ at = 0.27, colour = { 110, 90, 70 }, keep = 0 },
+					{ at = 0.48, colour = { 110, 90, 70 }, keep = 0 },
+					{ at = 0.55, colour = { 130, 200, 90 }, keep = 0.3 },
+					{ at = 0.68, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.85, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.95, colour = { 110, 130, 50 }, keep = 0.6 },
+				},
+				grass = {
+					{ at = 0.05, colour = { 176, 150, 72 }, keep = 0 },
+					{ at = 0.30, colour = { 128, 118, 92 }, keep = 0 },
+					{ at = 0.45, colour = { 128, 118, 92 }, keep = 0 },
+					{ at = 0.58, colour = { 120, 190, 80 }, keep = 0 },
+					{ at = 0.70, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.85, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.95, colour = { 150, 165, 70 }, keep = 0.4 },
+				},
+				evergreen = {
+					{ at = 0.10, colour = { 50, 80, 70 }, keep = 0.8 },
+					{ at = 0.35, colour = { 50, 80, 70 }, keep = 0.7 },
+					{ at = 0.60, colour = { 50, 80, 70 }, keep = 0.8 },
+					{ at = 0.85, colour = { 0, 0, 0 }, keep = 1 },
+				},
+				tropical = {
+					{ at = 0.00, colour = { 0, 0, 0 }, keep = 1 },
+				},
+			},
+			SweepWrites = 1500,
+			SweepMs = 0.75,
+			FarStepDays = 0.5,
+			FarDeltaE = 6,
+		},
+		-- The season clock (client Ui/SeasonHud, beside the minimap; Options > HUD "Season Clock")
+		-- and the season's toasts. false: neither.
+		Clock = { Enabled = true, Toasts = true },
+	},
+
 	-- Weather (shared model, server clock and gameplay) ----------------------------------------------
 
 	--[[
@@ -1339,6 +1549,14 @@ local Config = {
 		-- Thirst exhaustion each tick in the HOT zone (sweating): 0.005 is a thirst point (half a
 		-- droplet) every 40 s once the hydration is gone, a whole droplet every 80 s.
 		HotExhaustion = 0.005,
+		-- Food exhaustion each tick in the COLD zone and below (shivering) while seasons are on
+		-- (Config.Seasons): 0.005 is a food point every 40 s once the saturation is gone.
+		ColdExhaustion = 0.005,
+		-- A leather (freeze immune, ItemList `tan.freezeImmune`) piece stops hypothermia
+		-- (Minecraft's freeze_immune_wearables). Only read while seasons are on: without them a
+		-- piece always does, as before; with them (false) clothes slow freezing but never stop
+		-- it, as Don't Starve's.
+		LeatherFreezeImmunity = false,
 		-- Ticks between two steps of the body temperature (-10..10) away from neutral (0) towards
 		-- its target: 140 is 7 s a step, so from neutral the icy edge (-8) takes 56 s in the
 		-- coldest place, and the hot edge (8) as long in the hottest.
@@ -1587,6 +1805,8 @@ local Config = {
 			-- The taker's factors: louder at night, muffled by rain at the source.
 			NightFactor = 1.25,
 			RainFactor = 0.7,
+			-- (Seasons) muffled by snowfall at the source.
+			SnowFactor = 0.85,
 			-- Ticks a zombie investigates a noise; noises kept a tick, and merged within Merge.
 			InvestigateTicks = 400,
 			MaxPerTick = 32,

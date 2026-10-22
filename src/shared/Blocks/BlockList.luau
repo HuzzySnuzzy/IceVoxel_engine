@@ -222,7 +222,24 @@
 	                most it takes from / gives to an energy network per tick (Universal Cables
 	                and directly adjacent energy blocks). Output only: a producer (generators);
 	                input only: a consumer (machines); both: storage (batteries, the backup).
-	                `math.huge` is Mekanism's creative infinity.
+	                `math.huge` is Mekanism's creative infinity. `capacity = 0` (no input or
+	                output) for a fuel-only kind (Machines `fuelOnly`: the Wood Stove, the Oil
+	                Heater): it holds no energy, and cables never connect to it.
+
+	Seasons (Shared/Seasons; server Seasons/RoomWorld, Seasons/SnowWorld):
+	  layer         1..8: a snow layer of that many layers (Minecraft's SnowLayerBlock: 2 pixels
+	                each). Its appearance is its own (Blocks.layerLut), and the renderer lowers its
+	                box's top to the layers' height (client Rendering/ChunkRenderer).
+	  insulation    U, the heat a room loses through one face of the block per degree (Shared/
+	                Seasons/Rooms: a wall face). Default by kind and material (Blocks.insulation):
+	                fluids and machines 0.05; solid blocks without their own collision boxes by
+	                material (glass 0.12, ice and metal 0.06, wool 0.008, snow 0.015, planks
+	                0.025, leaves 0.3, anything else: logs, stone, brick, concrete, ground 0.02);
+	                everything else (air, plants, torches, open doors, fences, snow layers 1-7)
+	                none: a room's air flows through it. Closed doors, barricades and the closed
+	                bunker hatch set theirs (0.1, 0.15, 0.06).
+	  speedFactor   what walking on (or in) it multiplies the ground speed by (Minecraft's
+	                getBlockSpeedFactor: snow layers 0.75..1). Default 1. Blocks.speedFactor.
 
 	Directions are Minecraft's: North = -Z, South = +Z, West = -X, East = +X.
 
@@ -328,6 +345,9 @@ export type BlockSpec = {
 	stuck: { number }?,
 	zombieBreak: number?,
 	toggle: ToggleSpec?,
+	layer: number?,
+	insulation: number?,
+	speedFactor: number?,
 }
 
 local list: { BlockSpec } = {
@@ -3176,6 +3196,14 @@ end
 	sides (TexturePack Blocks OakDoor / OakDoorTop `Front`: blank, so the boxes show), in place of
 	the other boxes. The design is drawn for a left hinge and mirrored for a right one.
 ]]
+-- A door's wood (see the doors above): its name, planks colour, upper half's frame and, closed, its
+-- insulation (Blocks `insulation`; default a wooden door's 0.1).
+type DoorWood = { wood: string, color: { number }, upper: (c: { number }) -> { ShapeBox }, insulation: number? }
+-- Appends a door of `wood` (all 32 halves), set below; the seasons' Insulated Door reuses it.
+local addDoor: (wood: DoorWood) -> () = nil :: any
+-- A box of a door half's design (see `piece` below), for doors made after the doors' block.
+local doorPiece: (u0: number, u1: number, v0: number, v1: number, thick: number?, color: { number }?) -> ShapeBox =
+	nil :: any
 do
 	-- Pixels across the door (u: -8 at the hinge .. 8), up the half (v: -8 .. 8): a box filling
 	-- that much of the panel, `thick` pixels thick (3: the panel; more stands proud on both sides),
@@ -3191,10 +3219,11 @@ do
 	local function darker(c: { number }, by: number): { number }
 		return { math.floor(c[1] * by), math.floor(c[2] * by), math.floor(c[3] * by) }
 	end
+	doorPiece = piece
 	local HANDLE = { 72, 72, 76 }
 	-- Each wood: its planks' colour and the frame around its upper half's windows (left and right
 	-- stiles, rails and mullions; the windows are what they leave open).
-	local WOODS: { { wood: string, color: { number }, upper: (c: { number }) -> { ShapeBox } } } = {
+	local WOODS: { DoorWood } = {
 		{
 			wood = "Oak",
 			color = { 170, 134, 84 },
@@ -3266,7 +3295,7 @@ do
 		copy.offset = { -box.offset[1], box.offset[2], box.offset[3] }
 		return copy
 	end
-	for _, wood in WOODS do
+	addDoor = function(wood: DoorWood)
 		local base = wood.wood .. "Door"
 		local plate: ShapeBox = { size = { 16, 16, 3 }, offset = { 0, 0, 6.5 }, transparency = 1 }
 		local lower: { ShapeBox } = {
@@ -3324,6 +3353,8 @@ do
 							door = { facing = facing, hinge = hinge, open = open, upper = isUpper },
 							-- (BreakDoorGoal's 240 ticks, every half: ZOMBIE_BREAK below.)
 							zombieBreak = 240,
+							-- (Closed, a room's wall face; open, its air flows through.)
+							insulation = if open then nil else wood.insulation or 0.1,
 						}
 						if item then
 							-- (The item: the whole door at half size, upright, as Minecraft's
@@ -3345,6 +3376,9 @@ do
 				end
 			end
 		end
+	end
+	for _, wood in WOODS do
+		addDoor(wood)
 	end
 end
 
@@ -3549,6 +3583,8 @@ do
 				bounds = { min = { 0, 0, 0 }, max = { 16, 16, 16 } },
 				axis = axis,
 				flammable = if reinforced then { ignite = 5, burn = 5 } else { ignite = 5, burn = 20 },
+				-- (Boards with gaps: a draughty wall.)
+				insulation = 0.15,
 			})
 		end
 	end
@@ -3585,6 +3621,8 @@ do
 			toggle = if open
 				then { to = "BunkerHatch", sound = "block.bunker_hatch.close" }
 				else { to = "BunkerHatchOpen", sound = "block.bunker_hatch.open" },
+			-- (Shut, a steel floor face; open, the shaft's air flows through.)
+			insulation = if open then nil else 0.06,
 		})
 	end
 
@@ -3709,5 +3747,126 @@ for _, name in { "CeilingLamp" } do
 	twin.caveTwin = name
 	table.insert(list, twin)
 end
+
+--[[
+	The seasons (Shared/Seasons; Config.Seasons), after everything else (ids are append-only).
+
+	Snow layers (Minecraft's SnowLayerBlock): SnowLayer1 .. SnowLayer8 (`layer` n), 2 pixels a
+	layer (`bounds`), drawn as transparent boxes that hide nothing and merge like glass (no
+	`shape`: one part per box, not per cell), their tops lowered to the layers' height by the
+	renderer. Layer 1 has no collision box and is replaceable (Minecraft's); layers 2..8 collide
+	one layer lower than they look ({0, 0, 0} .. {16, 2 (n - 1), 16}), so they stop rain (Weather
+	.blocksRain) and only the eighth is a sturdy block. SnowLayer1 is the item ("Snow Layer");
+	2..8 drop and are placed as it (`item`), and the Snow Layer used on a layer below 8 adds one
+	(Shared/Seasons/SnowLayers.stackOnto). Each drops n Snowballs by hand; a shovel digs it fast.
+	Walking in deep snow is slower (`speedFactor`: 1 for 1-2 layers, 0.9 for 3-4, 0.8 for 5-6,
+	0.75 for 7-8); a full layer of 8 is a wall face (`insulation` 0.02), fewer let a room's air
+	through. The server's SnowLayer behaviour drops a layer whose support goes, and Seasons/
+	SnowWorld piles and melts them. Not a Tough As Nails cold source: the season brings the cold.
+]]
+local SNOW_SPEED = { 1, 1, 0.9, 0.9, 0.8, 0.8, 0.75, 0.75 }
+for n = 1, 8 do
+	local layered = n >= 2
+	table.insert(list, {
+		name = `SnowLayer{n}`,
+		displayName = "Snow Layer",
+		color = { 238, 242, 248 },
+		material = "Snow",
+		sound = "snow",
+		render = "Transparent",
+		transparency = 0,
+		layer = n,
+		solid = layered,
+		sturdy = n == 8,
+		replaceable = n == 1,
+		placeable = n == 1,
+		item = if n == 1 then nil else "SnowLayer1",
+		hardness = 0.1,
+		tool = "shovel",
+		blastResistance = 0.1,
+		drops = "Snowball" :: string,
+		dropCount = n,
+		bounds = { min = { 0, 0, 0 }, max = { 16, 2 * n, 16 } },
+		collision = if layered then { { min = { 0, 0, 0 }, max = { 16, 2 * (n - 1), 16 } } } else nil,
+		speedFactor = SNOW_SPEED[n],
+		insulation = if n == 8 then 0.02 else nil,
+		behaviour = "SnowLayer",
+		-- (The item: a single layer, as Minecraft's snow item.)
+		icon = { { size = { 16, 2, 16 }, offset = { 0, -7, 0 } } },
+	})
+end
+
+--[[
+	Heaters, coolers and stoves (Shared/Machines kinds "stove", "oilheater", "heater" and "cooler";
+	their room heat: server Seasons/RoomWorld through Players/Climate's room sources): Mekanism
+	style machine blocks (hardness 3.5, a pickaxe to drop anything, metal sounds), drawn with
+	their BlockDecor faces and window panes (never textured), which zombies never break.
+	  Wood Stove        fuel only (no energy: `capacity = 0`): furnace fuel burns 4 times its
+	                    furnace time for 30 HU; radiant.
+	  Oil Heater        fuel only: a tank of Oil or Fuel, a thermostat, up to 35 HU; radiant.
+	  Electric Heater   4 J a tick per HU, up to 40 HU, a thermostat (16 kJ, 400 J/t in).
+	  Air Conditioner   5 J a tick per HU, down to -40 HU, a thermostat (20 kJ, 500 J/t in).
+	  Electric Fan      30 J a tick while it runs: -10 HU in a room (2 kJ, 100 J/t in).
+]]
+local function heatMachine(name: string, kind: string, colour: { number }, energy: EnergySpec)
+	table.insert(list, {
+		name = name,
+		color = colour,
+		material = "Metal",
+		sound = "metal",
+		hardness = 3.5,
+		tool = "pickaxe",
+		toolLevel = 0,
+		decor = name,
+		machine = { kind = kind },
+		energy = energy,
+	})
+end
+heatMachine("WoodStove", "stove", { 56, 54, 54 }, { capacity = 0 })
+heatMachine("OilHeater", "oilheater", { 120, 64, 44 }, { capacity = 0 })
+heatMachine("ElectricHeater", "heater", { 150, 154, 162 }, { capacity = 16000, input = 400 })
+heatMachine("AirConditioner", "cooler", { 196, 204, 210 }, { capacity = 20000, input = 500 })
+heatMachine("ElectricFan", "cooler", { 132, 138, 146 }, { capacity = 2000, input = 100 })
+
+--[[
+	Insulation (Shared/Seasons/Rooms): Insulated Planks (planks and wool, U 0.006: a room of them
+	keeps its heat four times longer than planks), Insulated Glass (double panes in an iron
+	frame, U 0.04: a window that loses a third of glass's) and the Insulated Door (the doors'
+	32 halves of a padded oak door, U 0.03 closed).
+]]
+table.insert(list, {
+	name = "InsulatedPlanks",
+	displayName = "Insulated Planks",
+	color = { 214, 196, 160 },
+	material = "WoodPlanks",
+	sound = "wood",
+	hardness = 2,
+	tool = "axe",
+	insulation = 0.006,
+	flammable = { ignite = 5, burn = 20 },
+})
+table.insert(list, {
+	name = "InsulatedGlass",
+	displayName = "Insulated Glass",
+	render = "Transparent",
+	color = { 196, 222, 232 },
+	material = "Glass",
+	transparency = 0.5,
+	hardness = 0.6,
+	tool = "pickaxe",
+	insulation = 0.04,
+})
+addDoor({
+	wood = "Insulated",
+	color = { 206, 196, 172 },
+	insulation = 0.03,
+	upper = function(c: { number }): { ShapeBox }
+		-- (No windows: a padded panel in a frame.)
+		return {
+			doorPiece(-8, 8, -8, 8),
+			doorPiece(-5, 5, -5, 5, 4, { math.floor(c[1] * 0.9), math.floor(c[2] * 0.9), math.floor(c[3] * 0.9) }),
+		}
+	end,
+})
 
 return list

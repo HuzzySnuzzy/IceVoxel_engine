@@ -564,6 +564,123 @@ return function(t, shared, require, server)
 		t.eq(Weather.kindAt(dryPlace(field, 1000), 64, 0, 1000, 0.8), Weather.CLEAR, "clear")
 	end)
 
+	--[[ Seasons (Shared/Seasons/SeasonClimate's biases in the Moment) ]]
+
+	local function moment(time: number, season: any?): any
+		local state = Weather.newState(0, 0, true, true)
+		local m = Weather.momentAt(state, 0, nil, season)
+		m.time = time
+		return m
+	end
+
+	t.test("weather (seasons): with no biases the field is the calibrated one, to the bit", function()
+		local zero = { weatherShift = 0, wetBias = 0, thunderBias = 0 }
+		local random = lcg(5)
+		for _ = 1, 400 do
+			local x, z, time = random() * 80000 - 40000, random() * 80000 - 40000, random() * 2e6
+			local p1, th1, c1 = field:at(x, z, time)
+			local p2, th2, c2 = field:at(x, z, moment(time, zero))
+			local p3, th3, c3 = field:at(x, z, moment(time, nil))
+			t.ok(p1 == p2 and th1 == th2 and c1 == c2, "a season of 0s changes nothing")
+			t.ok(p1 == p3 and th1 == th3 and c1 == c3, "nor no season")
+		end
+		local plain = field:grid(33333, -1000, 500, 37, 9, 7)
+		local zeroed = field:grid(moment(33333, zero), -1000, 500, 37, 9, 7)
+		t.eq(buffer.tostring(plain), buffer.tostring(zeroed), "the grid too")
+		local winter = { weatherShift = -0.8, wetBias = 0.02, thunderBias = -1 }
+		local m = moment(1000, winter)
+		t.eq(m.weatherShift, -0.8, "the Moment carries the season")
+		t.eq(m.wetBias, 0.02)
+		t.eq(m.thunderBias, -1)
+		-- The grid follows the biases as `at` does.
+		local grid = field:grid(m, -1000, 500, 37, 9, 7)
+		for row = 0, 6 do
+			for col = 0, 8 do
+				local p, th, c = field:at(-1000 + col * 37, 500 + row * 37, m)
+				local index = (row * 9 + col) * 3
+				t.eq(buffer.readu8(grid, index), math.floor(p * 255 + 0.5))
+				t.eq(buffer.readu8(grid, index + 1), math.floor(th * 255 + 0.5))
+				t.eq(buffer.readu8(grid, index + 2), math.floor(c * 255 + 0.5))
+			end
+		end
+	end)
+
+	t.test("weather (seasons): rain shares by season (autumn 24 %, winter 27, spring 32, summer 15)", function()
+		local climate = Config.Seasons.Climate
+		local RANGES = { { 0.2, 0.27 }, { 0.22, 0.3 }, { 0.27, 0.36 }, { 0.11, 0.19 } }
+		for _, seed in { 12345, 777, 4242 } do
+			local seedField = Weather.new(seed)
+			local shares = {}
+			for season = 1, 4 do
+				local m = moment(0, {
+					weatherShift = 0,
+					wetBias = climate.WetBias[season],
+					thunderBias = climate.ThunderBias[season],
+				})
+				local random = lcg(99)
+				local rainy, thunder, samples = 0, 0, 0
+				for _ = 1, 64 do
+					local x, z = random() * 120000 - 60000, random() * 120000 - 60000
+					for time = 0, 40 * 24000, 400 do
+						m.time = time
+						local p, th = seedField:at(x, z, m)
+						samples += 1
+						if p > RAINING then
+							rainy += 1
+						end
+						if th > 0.5 then
+							thunder += 1
+						end
+					end
+				end
+				shares[season] = rainy / samples
+				local range = RANGES[season]
+				t.ok(
+					shares[season] > range[1] and shares[season] < range[2],
+					`seed {seed}, season {season}: raining {shares[season] * 100}%`
+				)
+				if season == 2 then
+					t.eq(thunder, 0, "winter never thunders")
+				else
+					t.ok(thunder > 0, "the other seasons do")
+				end
+			end
+			t.ok(
+				shares[4] < shares[1] and shares[1] < shares[2] and shares[2] < shares[3],
+				"summer < autumn < winter < spring"
+			)
+		end
+	end)
+
+	t.test("weather (seasons): a winter plain snows, a jungle still rains, by the class's amplitude", function()
+		local Calendar = require(shared.Seasons.Calendar)
+		local SeasonClimate = require(shared.Seasons.SeasonClimate)
+		local s = Calendar.newState()
+		s.enabled = true
+		local winter = SeasonClimate.sample(12 * 24000, "temperate", 1, s)
+		local m = moment(0, winter)
+		local plains = assert(Biomes.byName("Plains"))
+		local jungle = assert(Biomes.byName("Jungle"))
+		local taiga = assert(Biomes.byName("Taiga"))
+		t.near(Weather.seasonShift(m, plains.index), -0.8, 1e-9)
+		t.near(Weather.seasonShift(m, jungle.index), -0.4, 1e-9, "the tropics: half")
+		t.eq(Weather.seasonShift(nil, plains.index), 0)
+		local function form(biome: any): string
+			return Weather.formAt(Weather.biomeTemperature(biome.index), 0, 64, 0, Weather.seasonShift(m, biome.index))
+		end
+		t.eq(form(plains), Weather.SNOW, "plains: 0.8 - 0.8")
+		t.eq(form(jungle), Weather.RAIN, "jungle: 0.95 - 0.4")
+		t.eq(form(taiga), Weather.SNOW)
+		t.eq(Weather.formAt(0.8, 0, 64, 0), Weather.RAIN, "no shift: rain as ever")
+		local summer = moment(0, SeasonClimate.sample(28 * 24000, "temperate", 1, s))
+		t.eq(Weather.formAt(0.25, 0, 64, 0, Weather.seasonShift(summer, taiga.index)), Weather.RAIN, "a taiga summer")
+		-- kindAt takes the shift too.
+		Weather.setSeed(SEED)
+		local wet = rainyPlace(field, 1000, 0.5)
+		t.eq(Weather.kindAt(wet, 64, 0, 1000, 0.8, -0.8), Weather.SNOW)
+		t.eq(Weather.kindAt(wet, 64, 0, 1000, 0.8), Weather.RAIN)
+	end)
+
 	--[[ The sky ]]
 
 	t.test("weather: Minecraft's darkening, colours, fog and sounds", function()

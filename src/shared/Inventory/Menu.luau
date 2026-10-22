@@ -1251,6 +1251,9 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 	elseif action.kind == "weapon" then
 		-- (Reloading, a round by hand, a jam, the fire mode, the light, detaching: Weapons/Loading.)
 		return Loading.apply(window, action, creative, OPS)
+	elseif action.kind == "button" then
+		-- A machine panel's button: data only, the server's (Machines.button); nothing to predict.
+		return {}
 	elseif action.kind == "fire" then
 		-- One shot of the held firearm (Weapons/WeaponState.fire); refused, nothing changes.
 		local selected = inventory.selected
@@ -1275,7 +1278,8 @@ end
 	read only: they may only close a window and pick a hotbar slot (Minecraft's
 	handleContainerClick sends a spectator the menu again instead of clicking, Q drops nothing,
 	handleSetCreativeModeSlot wants creative). Creative slots need instabuild. The rest (the
-	weapons' `weapon` and `fire` among them) is up to `apply`'s rules.
+	weapons' `weapon` and `fire` among them, and a machine panel's `button`, which `apply` leaves
+	to the server) is up to `apply`'s rules.
 ]]
 function Menu.allows(action: Action, mode: string): boolean
 	if action.kind == "close" or action.kind == "select" then

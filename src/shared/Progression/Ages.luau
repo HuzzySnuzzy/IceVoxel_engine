@@ -23,17 +23,20 @@
 	                  Potion and Top Hat are the Stone Age's); the apocalypse's Nails, Reinforced
 	                  Barricade, Spiked Bat, Machete, Crowbar, Ceiling Lamp and Bunker Hatch (its
 	                  Rag, Bandage, Medkit, Herbal Poultice, Barricade, Baseball Bat, Supply
-	                  Crate and aged bricks are the Stone Age's; loot ignores Ages).
+	                  Crate and aged bricks are the Stone Age's; loot ignores Ages); the seasons'
+	                  Wood Stove, Insulated Glass and Insulated Door (the Snow Layer and
+	                  Insulated Planks are the Stone Age's).
 	  Industrial Age  (level 15, an Osmium Ingot smelted, a Bucket crafted) diamond tools and
 	                  armor, diamond, emerald and osmium blocks, osmium nuggets, Mekanism's basic
 	                  and advanced transporters, pipes and fluid tanks, the Configurator, the
 	                  Heat Generator, Gunpowder and TNT (with the Demolition skill too), the
-	                  potions' strong (II) and long variants, and Concrete (cracked and mossy
-	                  too).
+	                  potions' strong (II) and long variants, Concrete (cracked and mossy
+	                  too) and the Oil Heater.
 	  Electric Age    (level 25, a Heat Generator crafted) basic and advanced
 	                  Universal Cables, the Electric Furnace, basic and advanced Batteries, the
 	                  upgrade cards, the Oil Refinery and the Combustion Generator, elite
-	                  transporters, pipes and tanks.
+	                  transporters, pipes and tanks, the Electric Heater, the Air Conditioner
+	                  and the Electric Fan.
 	  Atomic Age      (level 40, an Oil Refinery and a Basic Battery crafted) the Solar Panel,
 	                  elite and ultimate cables and Batteries, ultimate transporters, pipes and
 	                  tanks, and the Nuke (with the Fission skill too).
@@ -129,6 +132,10 @@ for _, name in
 		"BunkerHatch",
 		-- (The weapons' iron: crossbow bolts.)
 		"CrossbowBolt",
+		-- (The seasons' iron: the stove, insulated glass and doors.)
+		"WoodStove",
+		"InsulatedGlass",
+		"InsulatedDoor",
 	}
 do
 	table.insert(iron, name)
@@ -164,6 +171,8 @@ for _, name in
 		"Concrete",
 		"CrackedConcrete",
 		"MossyConcrete",
+		-- (The seasons: the Oil Heater.)
+		"OilHeater",
 	}
 do
 	table.insert(industrial, name)
@@ -185,6 +194,10 @@ local electric: { string } = {
 	"EliteLogisticalTransporter",
 	"EliteMechanicalPipe",
 	"EliteFluidTank",
+	-- (The seasons: electric heating and cooling.)
+	"ElectricHeater",
+	"AirConditioner",
+	"ElectricFan",
 }
 
 local atomic: { string } = {

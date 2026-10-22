@@ -573,6 +573,12 @@ local Textures: { [string]: Texture } = {
 	-- bunker hatch. Barricades take "planks" and the ceiling lamp none (a light).
 	["rusty metal"] = { Color = "", Material = "CorrodedMetal", Tint = false },
 	["bunker hatch"] = { Color = "", Material = "DiamondPlate", Tint = false },
+	-- The seasons' insulation (snow layers take "snow", above): wool-lined planks, double glass
+	-- in iron, and the padded door's two halves (on its plate, as the other doors').
+	["insulated planks"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["insulated glass"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	["insulated door bottom"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["insulated door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
 }
 
 -- Block name (BlockList) -> the texture of each face.
@@ -746,6 +752,13 @@ local Blocks: { [string]: Faces } = {
 	Barricade = { All = "planks" },
 	ReinforcedBarricade = { All = "planks" },
 	BunkerHatch = { All = "bunker hatch" },
+
+	-- The seasons (an entry covers a variant group: every snow layer, both door halves' groups)
+	SnowLayer1 = { All = "snow" },
+	InsulatedPlanks = { All = "insulated planks" },
+	InsulatedGlass = { All = "insulated glass" },
+	InsulatedDoor = { Front = "insulated door bottom" },
+	InsulatedDoorTop = { Front = "insulated door top" },
 }
 
 -- Item name (ItemList) -> its inventory icon ("" = not made yet; see the header).

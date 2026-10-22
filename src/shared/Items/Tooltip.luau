@@ -253,7 +253,8 @@ local function blockLines(lines: { Line }, block: number)
 		add("Cools you when you are close")
 	end
 	local energy = Machines.energyOf(block)
-	if energy then
+	-- (A fuel-only machine holds none: no line.)
+	if energy and energy.capacity > 0 then
 		add(if energy.capacity == math.huge then "Energy: Infinite" else `Stores {Items.formatEnergy(energy.capacity)}`)
 	end
 	local tank = def.tank

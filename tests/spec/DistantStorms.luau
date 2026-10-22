@@ -626,7 +626,9 @@ return function(t, shared, require, _server, client)
 		t.eq(list[wind + 12].name, "entity.generic.drinking", "then the two loops")
 		-- (Was `wind + 12`, the last, before the weapons' 22.)
 		t.eq(list[wind + 13].name, "item.firearm.pistol.fire", "then the weapons'")
-		t.eq(#list, wind + 12 + 22)
+		-- (Then the seasons' 11.)
+		t.eq(list[wind + 12 + 22 + 1].name, "block.electric_heater.hum", "then the seasons'")
+		t.eq(#list, wind + 12 + 22 + 11)
 		for _, name in { "entity.lightning_bolt.thunder.far", "weather.rain.far" } do
 			local event = Sounds.get(Sounds.id[name]) :: any
 			t.eq(event.side, "client")

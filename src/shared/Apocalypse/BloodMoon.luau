@@ -18,6 +18,10 @@
 	            days to the next.
 	`/time set` moves the clock, and the schedule with it: everything derived from it is worked
 	out again every tick. With `Enabled` false there is none.
+	Seasons: the night's day and ticks are the sun's (DayCycle.solarDay, solarTimeInDay: the
+	season's warp of the day), so a winter blood moon still rises after the seasonal sunset and
+	its night ends after the sunrise, the same night's however the seasons stretch it; with the
+	seasons off they are the day time's.
 ]]
 
 local DayCycle = require(script.Parent.Parent.DayCycle)
@@ -45,10 +49,11 @@ end
 
 -- How strong the blood moon is at `dayTime` (0..1; see the header).
 function BloodMoon.intensity(dayTime: number, s: Settings): number
-	if not BloodMoon.isBloodDay(DayCycle.day(dayTime), s) then
+	local solar = DayCycle.solarTime(dayTime)
+	if not BloodMoon.isBloodDay(DayCycle.day(solar), s) then
 		return 0
 	end
-	local t = DayCycle.timeInDay(dayTime)
+	local t = DayCycle.timeInDay(solar)
 	if t < s.Start or t > s.End then
 		return 0
 	end
@@ -61,6 +66,12 @@ end
 -- Is a blood moon up at `dayTime` (its intensity above 0)?
 function BloodMoon.active(dayTime: number, s: Settings): boolean
 	return BloodMoon.intensity(dayTime, s) > 0
+end
+
+-- The day whose night is up at `dayTime` (DayCycle.solarDay: see the header), for `isBloodDay`
+-- and `number`.
+function BloodMoon.nightOf(dayTime: number): number
+	return DayCycle.solarDay(dayTime)
 end
 
 -- Which blood moon the night of day `day` has (1, 2, 3...), 0 when it has none.
@@ -77,8 +88,9 @@ function BloodMoon.daysUntil(dayTime: number, s: Settings): number
 	if s.Enabled == false or not (s.Every >= 1) then
 		return math.huge
 	end
-	local day = DayCycle.day(dayTime)
-	if BloodMoon.isBloodDay(day, s) and DayCycle.timeInDay(dayTime) <= s.End then
+	local solar = DayCycle.solarTime(dayTime)
+	local day = DayCycle.day(solar)
+	if BloodMoon.isBloodDay(day, s) and DayCycle.timeInDay(solar) <= s.End then
 		return 0
 	end
 	-- (The next one is at most First + Every nights away.)

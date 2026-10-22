@@ -1215,6 +1215,23 @@ local ENTRIES: { Entry } = {
 		tooltip = "Hold: look around while the Freelook key is held. Toggle: press it once to look "
 			.. "around, again to stop.",
 	},
+	-- The seasons' clock (client Ui/SeasonHud): the year's dial and the day's beside the minimap,
+	-- with the season's days left. Off with Config.Seasons.Clock.Enabled whatever this says.
+	{
+		id = 64,
+		key = "seasonClock",
+		name = "Season Clock",
+		kind = "toggle",
+		page = "hud",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = 1,
+		effect = "hud",
+		preset = false,
+		format = "plain",
+		tooltip = "The season, the time of day and the days left of the season, beside the minimap.",
+	},
 }
 
 -- The key bindings (Shared/KeyBindings), generated: one per action, ids from KEY_BASE in the

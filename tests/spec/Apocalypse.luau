@@ -123,7 +123,9 @@ return function(t, shared, require, server)
 		for index, name in BLOCKS do
 			t.eq(B[name], 418 + index, `{name}'s id`)
 		end
-		t.eq(Blocks.count, 439, "the Ceiling Lamp's twin is the last block")
+		-- (The seasons' 47 came after: snow layers, heaters, insulation. Was 439.)
+		t.eq(B.CaveCeilingLamp, 438, "the Ceiling Lamp's twin was the last block before the seasons")
+		t.eq(Blocks.count, 486)
 		t.eq(Blocks.caveTwinFor(B.CeilingLamp), B.CaveCeilingLamp)
 		t.ok(Blocks.isCaveTwin(B.CaveCeilingLamp), "a cave twin")
 		for index, name in ITEMS do
@@ -261,7 +263,8 @@ return function(t, shared, require, server)
 				t.eq(Blocks.zombieBreak(id), 300, `{name}: a fence's 300`)
 			end
 		end
-		t.eq(doors, 160, "five doors' 32 halves")
+		-- (And the seasons' Insulated Door's.)
+		t.eq(doors, 192, "six doors' 32 halves")
 		t.eq(fences, 17, "the fence's 16 and its cave twin")
 		-- Never: ores, metal, obsidian, machines, containers, the hatch, lights, plants, fluids.
 		for _, name in

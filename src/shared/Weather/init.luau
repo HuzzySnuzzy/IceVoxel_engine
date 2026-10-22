@@ -53,12 +53,22 @@
 	  Saving    `encodeState` / `decodeState`: the clock's value, doWeatherCycle and the override
 	            with the time it has left, as a short string (server World/WeatherServer's encode
 	            and decode for the world's save).
+	  Seasons   `momentAt(state, now, into, season)` copies a season's biases (Shared/Seasons/
+	            SeasonClimate's Sample: `weatherShift`, `wetBias`, `thunderBias`) into the Moment;
+	            the server (World/WeatherServer) and the clients (Weather/WeatherState) pass the
+	            season of their day time, a forecast the season then, so both build the same
+	            Moments. The field's rain and thunder follow the biases (WeatherModel); what falls
+	            follows the shift (`formAt`'s `shift`: `seasonShift(moment, biome)`, the season's
+	            shift times the biome class's amplitude), so a winter plain snows (0.8 - 0.8) and a
+	            jungle still rains (0.95 - 0.8 x 0.5). Without a season (or 0s) everything is as
+	            calibrated.
 ]]
 
 local Biomes = require(script.Parent.Biomes)
 local Blocks = require(script.Parent.Blocks)
 local Config = require(script.Parent.Config)
 local DayCycle = require(script.Parent.DayCycle)
+local SeasonClimate = require(script.Parent.Seasons.SeasonClimate)
 local WeatherModel = require(script.WeatherModel)
 
 export type Field = WeatherModel.Field
@@ -201,9 +211,15 @@ local function weights(state: State, now: number): (number, number)
 	return min(rampIn, rampOut), rampIn
 end
 
--- The clock and the override's weights at server time `now` (see Moment), written into `into`
--- when given (the client's visuals ask every frame).
-function Weather.momentAt(state: State, now: number, into: Moment?): Moment
+-- What a Moment takes of a season (Shared/Seasons/SeasonClimate's Sample has these).
+export type Season = { weatherShift: number, wetBias: number, thunderBias: number }
+
+--[[
+	The clock and the override's weights at server time `now` (see Moment), written into `into`
+	when given (the client's visuals ask every frame), with `season`'s biases (nil: none; see the
+	header).
+]]
+function Weather.momentAt(state: State, now: number, into: Moment?, season: Season?): Moment
 	local weight, rampIn = weights(state, now)
 	local moment: Moment = into
 		or {
@@ -217,6 +233,9 @@ function Weather.momentAt(state: State, now: number, into: Moment?): Moment
 	moment.enabled = state.enabled
 	moment.override = state.override
 	moment.weight = weight
+	moment.weatherShift = if season then season.weatherShift else 0
+	moment.wetBias = if season then season.wetBias else 0
+	moment.thunderBias = if season then season.thunderBias else 0
 	-- (What it replaced fades out as it blends in; `into`'s entries are reused: no garbage a frame.)
 	local list = moment.previous
 	local count = 0
@@ -554,12 +573,14 @@ function Weather.forecastAt(
 	z: number,
 	now: number,
 	steps: number,
-	stepSeconds: number
+	stepSeconds: number,
+	season: ((seconds: number) -> Season?)?
 ): { Forecast }
 	local list: { Forecast } = table.create(max(steps, 0))
 	for i = 0, steps - 1 do
 		local seconds = i * stepSeconds
-		local p, th, c = field:at(x, z, Weather.momentAt(state, now + seconds))
+		local moment = Weather.momentAt(state, now + seconds, nil, if season then season(seconds) else nil)
+		local p, th, c = field:at(x, z, moment)
 		list[i + 1] = { seconds = seconds, precipitation = p, thunder = th, cover = c }
 	end
 	return list
@@ -628,13 +649,27 @@ function Weather.temperatureAt(temperature: number, x: number, y: number, z: num
 	return temperature - max(0, y - Weather.LAPSE_START + wobble) * Weather.LAPSE
 end
 
--- What falls at (x, y, z) in a biome of Minecraft `temperature` (nil: no precipitation): "rain",
--- "snow" or "" (nothing).
-function Weather.formAt(temperature: number?, x: number, y: number, z: number): string
+--[[
+	What falls at (x, y, z) in a biome of Minecraft `temperature` (nil: no precipitation): "rain",
+	"snow" or "" (nothing). `shift` (a season's, already times the biome's amplitude:
+	`seasonShift`) is added to the temperature before the test.
+]]
+function Weather.formAt(temperature: number?, x: number, y: number, z: number, shift: number?): string
 	if temperature == nil then
 		return Weather.NONE
 	end
-	return if Weather.temperatureAt(temperature, x, y, z) < Weather.SNOW_BELOW then Weather.SNOW else Weather.RAIN
+	local value = Weather.temperatureAt(temperature, x, y, z) + (shift or 0)
+	return if value < Weather.SNOW_BELOW then Weather.SNOW else Weather.RAIN
+end
+
+-- The season's temperature shift of `moment` for biome `biome` (a Biomes index): its
+-- `weatherShift` times the biome class's amplitude (Shared/Seasons/SeasonClimate); 0 without one.
+function Weather.seasonShift(moment: Moment?, biome: number): number
+	local shift = if moment then moment.weatherShift else nil
+	if shift == nil or shift == 0 then
+		return 0
+	end
+	return shift * SeasonClimate.amplitude(SeasonClimate.classOf(biome))
 end
 
 -- 1 for every block that stops rain (built on first use).
@@ -673,14 +708,21 @@ end
 --[[
 	"clear", "rain" or "snow" at (x, y, z) at `time` (a clock value or a Moment) in the world's
 	field, for a biome of Minecraft `biomeTemperature` (`biomeTemperature(index)`; nil: nothing
-	falls there).
+	falls there), `shift` its season's (`seasonShift`).
 ]]
-function Weather.kindAt(x: number, y: number, z: number, time: number | Moment, biomeTemperature: number?): string
+function Weather.kindAt(
+	x: number,
+	y: number,
+	z: number,
+	time: number | Moment,
+	biomeTemperature: number?,
+	shift: number?
+): string
 	if biomeTemperature == nil then
 		return Weather.CLEAR
 	end
 	local precipitation = world():at(x, z, time)
-	return Weather.kindOf(precipitation, Weather.formAt(biomeTemperature, x, y, z))
+	return Weather.kindOf(precipitation, Weather.formAt(biomeTemperature, x, y, z, shift))
 end
 
 --[[ Sky, light, fog and sound ]]

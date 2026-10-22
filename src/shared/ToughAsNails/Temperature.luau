@@ -75,6 +75,31 @@
 	two levels of 10 s, frozen in 7 s, a hurt every 2 s: 67 s.)
 	Creative and spectator players (GameMode.invulnerable): the temperature stands still, both
 	extremes clear at once and the clemency waits.
+
+	Seasons (Config.Seasons, Shared/Seasons/SeasonClimate; every field below is optional, and
+	without them every rule above holds as it is):
+	  seasonShift  the season's shift (its class's amplitude in), added to the climate outdoors
+	               and under a roof, never underground;
+	  nightDrop    the season's night drop, in place of NIGHT; with it given, a night reaches under
+	               a roof too (before the shelter's pull), as the seasons' tables have it: a bare
+	               roof leaves a winter plain COLD (-7) and a birch forest ICY;
+	  room         the temperature (continuous, on the scale) of the room the player stands in
+	               (server Seasons/RoomWorld): step 1 is round(clamp(room, -10, 10)) instead of the
+	               climate, and in a room the heated (+3), near heat (+5) and cooled (-3)
+	               proximity modifiers are dropped (the room's air already counts those sources):
+	               a radiant source (fire, lava, a campfire, a stove) within NEAR gives
+	               RADIANT_IN_ROOM (+2) instead (`radiant`);
+	  snowedOn     snow falling on the player (feet or head, open to the sky): MODIFIERS.snowedOn
+	               (-1), which chills without wetting (Tough As Nails' snow does not wet).
+	The order: step 1 (room or climate), wet, sprinting, heat (radiant, or the proximity's, or
+	burning: the larger), cooled, snowed on, armor, the effects. With the seasons on, a freeze
+	immune piece no longer stops hypothermia unless Config.ToughAsNails.LeatherFreezeImmunity
+	(`freezeImmune`): leather keeps its warmth (1 a piece), so a full set turns a plains winter
+	night (-9) into -5, survivable but no longer immune, and the COLD zone and below cost food
+	(`coldExhaustion`, Config.ToughAsNails.ColdExhaustion: shivering). So a winter night outdoors
+	without gear is ICY in every temperate biome: from neutral the icy edge in 56 s, frozen
+	through 20 s later, death about 3 minutes after leaving the clemency
+	(tests/spec/ToughAsNails).
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -101,6 +126,15 @@ export type Environment = {
 	-- Steps of insulation the armor worn gives (ItemList `tan`, Players/Climate.insulation).
 	armorWarmth: number,
 	armorCooling: number,
+	-- Seasons (see the header; nil: none). The season's shift and night drop
+	-- (Shared/Seasons/SeasonClimate), the room's temperature on the scale (server
+	-- Seasons/RoomWorld), a radiant heat source within NEAR (read in a room only), snow falling on
+	-- the player.
+	seasonShift: number?,
+	nightDrop: number?,
+	room: number?,
+	radiant: boolean?,
+	snowedOn: boolean?,
 }
 
 export type State = {
@@ -169,7 +203,10 @@ Temperature.MODIFIERS = table.freeze({
 	nearHeat = 5,
 	burning = 5,
 	cooled = -3,
+	snowedOn = -1,
 })
+-- A radiant heat source within NEAR in a room (see the header), in steps.
+Temperature.RADIANT_IN_ROOM = 2
 Temperature.NEAR = 2
 -- Internal Warmth and Internal Chill: steps, and the bound they never push past.
 Temperature.EFFECT_STEPS = 5
@@ -213,12 +250,18 @@ function Temperature.climateValue(env: Environment): number
 	if Temperature.underground(env) then
 		return Temperature.UNDERGROUND_CLIMATE
 	end
-	local value = env.climate - math.max(0, env.y - Temperature.ALTITUDE_START) * Temperature.ALTITUDE_LAPSE
+	local value = env.climate + (env.seasonShift or 0)
+	value -= math.max(0, env.y - Temperature.ALTITUDE_START) * Temperature.ALTITUDE_LAPSE
+	local drop = env.nightDrop
 	if env.skyOpen then
 		if env.night then
-			value -= Temperature.NIGHT
+			value -= drop or Temperature.NIGHT
 		end
 	else
+		-- (The seasons' nights reach under a roof too: see the header.)
+		if env.night and drop ~= nil then
+			value -= drop
+		end
 		-- (Towards NEUTRAL's middle, never past it.)
 		local middle, shelter = Temperature.UNDERGROUND_CLIMATE, Temperature.SHELTER
 		value = if value > middle then math.max(middle, value - shelter) else math.min(middle, value + shelter)
@@ -254,20 +297,35 @@ end
 ]]
 function Temperature.target(env: Environment, state: State?): number
 	local modifiers = Temperature.MODIFIERS
-	local value = Temperature.levelOf(Temperature.climateValue(env))
+	local room = env.room
+	local value
+	if room ~= nil then
+		-- (A room's air, on the scale: step 1 instead of the climate.)
+		value = clampValue(math.floor(math.clamp(room, Temperature.MIN, Temperature.MAX) + 0.5))
+	else
+		value = Temperature.levelOf(Temperature.climateValue(env))
+	end
 	if env.wet then
 		value = clampValue(value + modifiers.wet)
 	end
 	if env.sprinting then
 		value = clampValue(value + modifiers.sprinting)
 	end
-	local source = if env.nearHeat then modifiers.nearHeat elseif env.heated then modifiers.heated else 0
+	local source
+	if room ~= nil then
+		source = if env.radiant then Temperature.RADIANT_IN_ROOM else 0
+	else
+		source = if env.nearHeat then modifiers.nearHeat elseif env.heated then modifiers.heated else 0
+	end
 	local heat = math.max(source, if env.burning then modifiers.burning else 0)
 	if heat > 0 then
 		value = clampValue(value + heat)
 	end
-	if env.cooled and not env.nearHeat then
+	if room == nil and env.cooled and not env.nearHeat then
 		value = clampValue(value + modifiers.cooled)
+	end
+	if env.snowedOn then
+		value = clampValue(value + modifiers.snowedOn)
 	end
 	if value < 0 and env.armorWarmth > 0 then
 		value = math.min(0, value + env.armorWarmth)
@@ -278,6 +336,33 @@ function Temperature.target(env: Environment, state: State?): number
 		value = Temperature.adjusted(state, value)
 	end
 	return value
+end
+
+--[[
+	The outdoor value where the player stands, on the scale, unrounded: step 1's climate without
+	a room (exposed outdoors, sheltered under a roof, underground's middle). The HUD's thermometer
+	shows it beside a room's ("Room +1 · Out -9"; Protocol Survival's outside).
+]]
+function Temperature.outside(env: Environment): number
+	return Temperature.scaleOf(Temperature.climateValue(env))
+end
+
+--[[
+	Does wearing a freeze immune piece (`wearing`: Minecraft's freeze_immune_wearables, ItemList
+	`tan.freezeImmune`) stop hypothermia? Always without the seasons (`seasons` false); with them
+	only while Config.ToughAsNails.LeatherFreezeImmunity (see the header).
+]]
+function Temperature.freezeImmune(wearing: boolean, seasons: boolean): boolean
+	return wearing and (not seasons or Config.ToughAsNails.LeatherFreezeImmunity == true)
+end
+
+-- Food exhaustion a tick for a body at `value` (shivering in the COLD zone and below, with the
+-- seasons on: Config.ToughAsNails.ColdExhaustion), 0 otherwise.
+function Temperature.coldExhaustion(value: number, seasons: boolean): number
+	if not seasons or Temperature.zone(value) > Temperature.COLD then
+		return 0
+	end
+	return math.max(Config.ToughAsNails.ColdExhaustion, 0)
 end
 
 --[[

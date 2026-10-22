@@ -400,7 +400,8 @@ return function(t, shared, require, server, client)
 			t.eq(NoiseRules.radius(name, Config.Apocalypse.Noise), 0, `{name} is no noise of NoiseRules'`)
 		end
 		t.eq(count, 22)
-		t.eq(Sounds.count, first + 21, "the weapons' are the last events")
+		-- (Then the seasons' 11.)
+		t.eq(Sounds.count, first + 21 + 11, "the weapons' are the last events before the seasons'")
 		t.eq(Sounds.get("item.firearm.rifle.fire").category, "item.firearm.fire", "a Sound replaces every class")
 		t.eq(Sounds.get("item.firearm.heavy.fire").maxDistance, 224)
 		t.eq(Sounds.get("item.firearm.far").maxDistance, 256)
@@ -1109,7 +1110,7 @@ return function(t, shared, require, server, client)
 	--[[ Recipes and Ages ]]
 
 	t.test("weapons: an improvised suppressor and crossbow bolts are made; bolts in the Iron Age", function()
-		t.eq(#Crafting.recipes, 215, "213 and the weapons' two")
+		t.eq(#Crafting.recipes, 224, "213 and the weapons' two (then the seasons' 9)")
 		local suppressor = Crafting.match({
 			[1] = { item = I.GlassBottle, count = 1 },
 			[2] = { item = I.DuctTape, count = 1 },

@@ -38,6 +38,8 @@
 	            Transmitters/Transport and Eject)
 	  fields    data names after the header (letters, digits, "_": they double as item data keys)
 	  keep      fields kept in the item when the machine is broken (energy and tanks always are)
+	  defaults  { [field]: number }: what a fresh machine's fields start at (default 0; a
+	            thermostat's "on" 1)
 	  tanks     { TankSpec }: fluid tanks (Mekanism's machine fluid tanks), each with a `name`, a
 	            `capacity` (mB), the `fluids` it takes (Shared/Fluids ids) and a `role`: "input"
 	            (pipes and full buckets fill it; the kind's tick drains it) or "output" (the tick
@@ -67,6 +69,16 @@
 	  creative  infinite energy (the Creative Energy Cube): never drains, keeps nothing
 	  info      numbers recipe browsers and tooltips show about the kind (JEI: a refinery's ticks
 	            per bucket, a generator's J per mB), read with `info(block)`
+	  fuelOnly  the kind burns fuel and holds no energy (the Wood Stove, the Oil Heater): its
+	            blocks' BlockList `energy` is `{ capacity = 0 }`, `hasEnergy` is false for them,
+	            so cables never connect and the energy networks never see them; the panel draws
+	            no energy bar and WAILA no energy line (Ui/MenuLayout, Ui/WailaInfo)
+	  buttons   { ButtonSpec }: buttons on its panel (Minecraft's container buttons,
+	            ServerboundContainerButtonClickPacket): { id (0..MAX_BUTTON), x, y, w, h, label }
+	            in GUI pixels, drawn by Ui/MenuLayout. A click is Inventory Action
+	            { kind = "button", window, button } (data only: Inventory/Menu predicts nothing);
+	            the server (Players/Inventories) calls `button(container, block, id)`, which runs
+	            the kind's `onButton(container, id)` (change data in place, as a tick does)
 
 	Energy is kept in multiples of QUANTUM (1/1024 J), so the networks' sums and differences are
 	exact (doubles hold every such value below 2^43 J): energy is never made or lost by rounding.
@@ -114,12 +126,18 @@
 	                    energyColour (the energy bar's colour, also on items and batteries'
 	                    gauges), info (JEI)
 	  sustained data    save, restore (server MachineWorld.blockDataHooks)
+	  seasons           isFuelOnly (capacity 0: `hasEnergy` false), buttons, button,
+	                    MAX_BUTTONS, MAX_BUTTON (panel buttons and their clicks), TickContext
+	                    `climate` (the room next to a machine: server Seasons/RoomWorld), KindSpec
+	                    `defaults`
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
 local Fluids = require(script.Parent.Parent.Fluids)
 local Items = require(script.Parent.Parent.Items)
 local Types = require(script.Parent.Parent.Inventory.Types)
+-- (Its Sample type: what TickContext.climate gives. Rooms requires only Config.)
+local Rooms = require(script.Parent.Parent.Seasons.Rooms)
 
 type Container = Types.Container
 export type EnergySpec = Blocks.EnergySpec
@@ -255,7 +273,14 @@ export type TickContext = {
 	-- it per cell, looks again when a block above changes and never generates terrain for it
 	-- (server Machines/SkyCheck). nil (a test's context): treat the sky as open.
 	sky: ((x: number, y: number, z: number) -> boolean)?,
+	-- The room next to the machine at (x, y, z) (server Seasons/RoomWorld.climateAt; nil: none,
+	-- outdoors) and the outdoor value there (Temperature's scale). nil (a test's context, or no
+	-- seasons): no room, outside 0. Kinds work out heat with Shared/Seasons/Rooms.thermostat.
+	climate: ((x: number, y: number, z: number) -> (Rooms.Sample?, number))?,
 }
+
+-- A panel button (see the header): its id (sent with the click), place, size and label.
+export type ButtonSpec = { id: number, x: number, y: number, w: number, h: number, label: string }
 
 -- What `define` takes (see the header).
 export type KindSpec = {
@@ -272,6 +297,10 @@ export type KindSpec = {
 	state: string?,
 	tanks: { TankSpec }?,
 	info: { [string]: number }?,
+	fuelOnly: boolean?,
+	buttons: { ButtonSpec }?,
+	onButton: ((container: Container, button: number) -> ())?,
+	defaults: { [string]: number }?,
 }
 
 -- A defined kind (read only).
@@ -305,6 +334,12 @@ export type Kind = {
 	outputTanks: { number },
 	-- Numbers recipe browsers show (KindSpec `info`; empty without).
 	info: { [string]: number },
+	-- No energy (KindSpec `fuelOnly`), the panel's buttons and what a click does.
+	fuelOnly: boolean,
+	buttons: { ButtonSpec },
+	onButton: ((container: Container, button: number) -> ())?,
+	-- A fresh machine's field values by data index (KindSpec `defaults`).
+	defaults: { [number]: number },
 }
 
 export type Role = "producer" | "consumer" | "storage"
@@ -337,6 +372,9 @@ Machines.ENERGY_BAR = table.freeze({ x = 164, y = 15, w = 6, h = 52 })
 Machines.PANEL_HEIGHT = 78
 -- The most lines a kind's `lines` gives its panel.
 Machines.MAX_LINES = 4
+-- The most buttons a panel has, and the largest button id (a byte on the wire: Protocol).
+Machines.MAX_BUTTONS = 8
+Machines.MAX_BUTTON = 255
 -- A tank's panel gauge (Mekanism's GaugeType.STANDARD: a 16 x 58 fluid area in a 1 pixel frame).
 Machines.TANK_GAUGE = table.freeze({ w = 18, h = 60 })
 -- Ticks a machine that stopped keeps showing it works (Mekanism's blockDeactivationDelay;
@@ -625,6 +663,37 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		table.freeze(insertFaces[face])
 		table.freeze(extractFaces[face])
 	end
+	local buttons: { ButtonSpec } = spec.buttons or {}
+	assert(#buttons <= Machines.MAX_BUTTONS, `Machine kind {name} has too many buttons`)
+	local buttonIds: { [number]: boolean } = {}
+	for i, button in buttons do
+		local id = button.id
+		assert(
+			type(id) == "number" and id == math.floor(id) and id >= 0 and id <= Machines.MAX_BUTTON,
+			`Machine kind {name}: button {i} needs an id 0..{Machines.MAX_BUTTON}`
+		)
+		assert(not buttonIds[id], `Machine kind {name}: button id {id} twice`)
+		buttonIds[id] = true
+		assert(
+			type(button.x) == "number"
+				and type(button.y) == "number"
+				and type(button.w) == "number"
+				and button.w > 0
+				and type(button.h) == "number"
+				and button.h > 0
+				and type(button.label) == "string",
+			`Machine kind {name}: button {id} needs a place, a size and a label`
+		)
+		table.freeze(button)
+	end
+	assert(#buttons == 0 or spec.onButton ~= nil, `Machine kind {name} has buttons but no onButton`)
+	local defaults: { [number]: number } = {}
+	local specDefaults: { [string]: number } = spec.defaults or {}
+	for field, value in specDefaults do
+		assert(table.find(fields, field), `Machine kind {name}: default for {field}, which is no field`)
+		assert(type(value) == "number" and value == value, `Machine kind {name}: default {field} is no number`)
+		defaults[index[field]] = value
+	end
 	local panel: PanelSpec = spec.panel or {}
 	local kind: Kind = {
 		name = name,
@@ -649,6 +718,10 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		inputTanks = if #inputTanks > 0 then table.freeze(inputTanks) else NO_IDS,
 		outputTanks = if #outputTanks > 0 then table.freeze(outputTanks) else NO_IDS,
 		info = table.freeze(info),
+		fuelOnly = spec.fuelOnly == true,
+		buttons = table.freeze(table.clone(buttons)),
+		onButton = spec.onButton,
+		defaults = table.freeze(defaults),
 	}
 	for _, tank in tanks do
 		describeTank(tank.name)
@@ -673,7 +746,11 @@ function Machines.bind(block: number, kindName: string, energy: EnergySpec?): ()
 	local kind = kinds[kindName]
 	assert(kind, `Unknown machine kind {kindName} (define it in Machines/Kinds)`)
 	local spec = energy or Blocks.get(block).energy
-	assert(spec and spec.capacity > 0, `Machine {Blocks.get(block).name} needs energy`)
+	-- (A fuel-only kind's blocks hold none: `{ capacity = 0 }`.)
+	assert(
+		spec and (spec.capacity > 0 or (kind.fuelOnly and spec.capacity == 0)),
+		`Machine {Blocks.get(block).name} needs energy`
+	)
 	local previous = bindings[block]
 	bindings[block] = { kind = kind, energy = spec }
 	return function()
@@ -710,9 +787,17 @@ function Machines.energyOf(block: number): EnergySpec?
 	return if binding then binding.energy else nil
 end
 
--- Does `block` hold energy (Universal Cables connect to it, energy blocks next to it share)?
+-- Does `block` hold energy (Universal Cables connect to it, energy blocks next to it share)? A
+-- fuel-only machine (capacity 0) doesn't.
 function Machines.hasEnergy(block: number): boolean
-	return bindings[block] ~= nil
+	local binding = bindings[block]
+	return binding ~= nil and binding.energy.capacity > 0
+end
+
+-- Is `block` a fuel-only machine (KindSpec `fuelOnly`: no energy, no energy bar)?
+function Machines.isFuelOnly(block: number): boolean
+	local binding = bindings[block]
+	return binding ~= nil and binding.kind.fuelOnly
 end
 
 --[[
@@ -756,6 +841,9 @@ function Machines.newData(block: number): { number }
 	local binding = bindings[block]
 	assert(binding, `Block {block} is no machine`)
 	local data = table.create(binding.kind.size, 0)
+	for index, value in binding.kind.defaults do
+		data[index] = value
+	end
 	data[CAPACITY] = binding.energy.capacity
 	if binding.kind.creative then
 		data[ENERGY] = math.huge
@@ -1570,6 +1658,58 @@ end
 function Machines.panel(block: number): PanelSpec?
 	local binding = bindings[block]
 	return if binding then binding.kind.panel else nil
+end
+
+local NO_BUTTONS: { ButtonSpec } = table.freeze({})
+
+-- The panel buttons of the machine `block` (its kind's; empty for other blocks).
+function Machines.buttons(block: number): { ButtonSpec }
+	local binding = bindings[block]
+	return if binding then binding.kind.buttons else NO_BUTTONS
+end
+
+--[[
+	A click on panel button `button` of the machine `block` whose container is `container` (the
+	server's, from Inventory Action "button"): its kind's `onButton`. false (nothing changed) when
+	the container is no machine's of that block, the kind has no such button, or `onButton` errors
+	(which is reported again for the caller, after the data was kept sane as a tick's).
+]]
+function Machines.button(container: Container, block: number, button: number): boolean
+	local binding = bindings[block]
+	if binding == nil or container.block ~= block or not Machines.isContainer(container) then
+		return false
+	end
+	local kind = binding.kind
+	local onButton = kind.onButton
+	if onButton == nil or type(button) ~= "number" then
+		return false
+	end
+	local known = false
+	for _, spec in kind.buttons do
+		if spec.id == button then
+			known = true
+			break
+		end
+	end
+	if not known then
+		return false
+	end
+	local ok, err = pcall(function(): any
+		onButton(container, button)
+		return nil
+	end)
+	-- (No NaN reaches the records or the change checks.)
+	local data = dataOf(container)
+	for i = 1, kind.size do
+		local value = data[i]
+		if value ~= value or type(value) ~= "number" then
+			data[i] = 0
+		end
+	end
+	if not ok then
+		error(err, 0)
+	end
+	return true
 end
 
 --[[ Sustained data (Mekanism keeps a machine's energy in its item) ]]

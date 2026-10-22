@@ -1523,4 +1523,138 @@ do
 	table.insert(SoundList.EVENTS, event)
 end
 
+--[[
+	The seasons (Shared/Seasons), after the rest so no other event's number changed. Stand-ins on
+	the shipped files, each replaced by a Sound of its name in SoundService.IceVoxelSounds (or the
+	override folder):
+	  block.electric_heater.hum      a working Electric Heater: the falling wind pitched down, low
+	  block.air_conditioner.hum      a working Air Conditioner: the same, a little higher
+	  block.fan.loop                 a running Electric Fan: the wind pitched up
+	  block.wood_stove.crackle       a burning Wood Stove: the furnace's crackle, deeper
+	  block.oil_heater.burn          a burning Oil Heater: the wind pitched far down, a roar
+	  ui.thermostat.click            a thermostat's button: the volume tick
+	  ambient.season.autumn | winter | spring | summer   a season's turn: a long low boom, flat
+	                                 (category ambient.season)
+	  ambient.season.heat_wave       a heat wave's dawn
+	The machines' loops play at the machine while it works (client Audio/Ambience, from the
+	machines' records: TransmitterRenderer.activeMachines); the turns' stingers with their toasts.
+]]
+for _, event in
+	{
+		{
+			name = "block.electric_heater.hum",
+			id = FALLING,
+			volume = 0.25,
+			pitch = 0.45,
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "block.air_conditioner.hum",
+			id = FALLING,
+			volume = 0.25,
+			pitch = 0.6,
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "block.fan.loop",
+			id = FALLING,
+			volume = 0.2,
+			pitch = 1.4,
+			maxDistance = 10,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "block.wood_stove.crackle",
+			id = STEPS,
+			volume = 0.35,
+			pitch = 1.8,
+			pitchVariance = 0.3,
+			duration = 0.1,
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "block.oil_heater.burn",
+			id = FALLING,
+			volume = 0.3,
+			pitch = 0.3,
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "ui.thermostat.click",
+			id = TICK,
+			volume = 0.5,
+			pitch = 1.3,
+			ui = true,
+			source = "ui",
+			side = "client",
+		},
+		{
+			name = "ambient.season.autumn",
+			category = "ambient.season",
+			id = EXPLOSION,
+			volume = 0.5,
+			pitch = 0.4,
+			duration = 3.0,
+			ui = true,
+			source = "ambient",
+			side = "client",
+		},
+		{
+			name = "ambient.season.winter",
+			category = "ambient.season",
+			id = EXPLOSION,
+			volume = 0.5,
+			pitch = 0.32,
+			duration = 3.0,
+			ui = true,
+			source = "ambient",
+			side = "client",
+		},
+		{
+			name = "ambient.season.spring",
+			category = "ambient.season",
+			id = EXPLOSION,
+			volume = 0.5,
+			pitch = 0.5,
+			duration = 3.0,
+			ui = true,
+			source = "ambient",
+			side = "client",
+		},
+		{
+			name = "ambient.season.summer",
+			category = "ambient.season",
+			id = EXPLOSION,
+			volume = 0.5,
+			pitch = 0.45,
+			duration = 3.0,
+			ui = true,
+			source = "ambient",
+			side = "client",
+		},
+		{
+			name = "ambient.season.heat_wave",
+			category = "ambient.season",
+			id = FALLING,
+			volume = 0.5,
+			pitch = 0.5,
+			duration = 3.0,
+			ui = true,
+			source = "ambient",
+			side = "client",
+		},
+	} :: { EventSpec }
+do
+	table.insert(SoundList.EVENTS, event)
+end
+
 return SoundList

@@ -30,6 +30,8 @@
 	                   8 weapon    u8 op (1..6), i16 slot (-1: the held weapon), u8 part (0..6):
 	                               a weapon action (Shared/Weapons/Loading: reload, a round by
 	                               hand, a jam cleared, the fire mode, the light, detaching)
+	                   9 button    u8 window, u8 button: a machine panel's button (Shared/
+	                               Machines KindSpec `buttons`: a thermostat's -, + and Mode)
 	                 (The `fire` action is never sent here: its number rides a Fire message.)
 	  Use            i32 x, u16 y, i32 z: right click on a usable block (opens a chest)
 	  UseItem        i32 x, u16 y, i32 z, u8 side (0..5), u8 flags (bit 0: sneaking): a right click
@@ -212,7 +214,10 @@
 	                 (0..Temperature.EXTREME_TICKS), u16 Thirst effect ticks, u16 Climate
 	                 Clemency seconds left (rounded up), u8 food (0..20), u8 saturation x 10
 	                 (0..200: the HUD only asks whether any is left, F3 prints it), u8 food
-	                 exhaustion x 50 (clamped to 255): 17 bytes, the player's own thirst, body
+	                 exhaustion x 50 (clamped to 255), i8 room and i8 outside in half steps
+	                 (the seasons' room air the player stands in, -128 when in none, and the
+	                 outdoor value where they stand, both on Temperature's scale, within +-63.5):
+	                 19 bytes, the player's own thirst, body
 	                 temperature (Shared/ToughAsNails) and hunger (Shared/Hunger; Minecraft's
 	                 Hunger effect is in their Effects message, as every effect), sent to them
 	                 alone when it changes (at most every few ticks, and at once on joining and
@@ -695,6 +700,7 @@ end
 local ACTION_CLICK, ACTION_DRAG, ACTION_SELECT, ACTION_DROP, ACTION_CREATIVE, ACTION_CLOSE = 1, 2, 3, 4, 5, 6
 local ACTION_HIDE = 7
 local ACTION_WEAPON = 8
+local ACTION_BUTTON = 9
 -- A weapon action's ops and parts (Shared/Weapons/Loading.Op, .Part).
 Protocol.WEAPON_OPS = 6
 Protocol.WEAPON_PARTS = 6
@@ -754,6 +760,11 @@ function Protocol.encodeInventoryAction(seq: number, action: InventoryTypes.Acti
 		buffer.writeu8(b, 5, action.op)
 		buffer.writei16(b, 6, action.slot)
 		buffer.writeu8(b, 8, action.part)
+	elseif action.kind == "button" then
+		b = buffer.create(7)
+		buffer.writeu8(b, 4, ACTION_BUTTON)
+		buffer.writeu8(b, 5, action.window)
+		buffer.writeu8(b, 6, action.button)
 	else
 		error(`Inventory action {action.kind} is not sent on its own`)
 	end
@@ -825,6 +836,8 @@ function Protocol.decodeInventoryAction(b: buffer): (number?, InventoryTypes.Act
 			return nil, nil
 		end
 		return seq, { kind = "weapon", op = op, slot = buffer.readi16(b, 6), part = part }
+	elseif kind == ACTION_BUTTON and len == 7 then
+		return seq, { kind = "button", window = buffer.readu8(b, 5), button = buffer.readu8(b, 6) }
 	end
 	return nil, nil
 end
@@ -2512,10 +2525,26 @@ export type SurvivalStatus = {
 	food: number,
 	saturation: number,
 	foodExhaustion: number,
+	-- The seasons (server Seasons/RoomWorld): the air temperature of the room the player stands in
+	-- (nil: none) and the outdoor value where they stand (Temperature.outside), Temperature's
+	-- scale, in half steps on the wire (nil: 0).
+	room: number?,
+	outside: number?,
 }
 
--- (14 before Minecraft's hunger.)
-Protocol.SURVIVAL_BYTES = 17
+-- (14 before Minecraft's hunger, 17 before the seasons' room and outside.)
+Protocol.SURVIVAL_BYTES = 19
+-- The room byte's "in no room", and the half steps either byte reaches.
+Protocol.NO_ROOM = -128
+Protocol.HALF_STEP_LIMIT = 127
+
+-- `value` (Temperature's scale) in half steps within the byte's range.
+local function halfSteps(value: number?): number
+	if value == nil or value ~= value then
+		return 0
+	end
+	return math.clamp(math.round(value * 2), -Protocol.HALF_STEP_LIMIT, Protocol.HALF_STEP_LIMIT)
+end
 
 function Protocol.encodeSurvival(status: SurvivalStatus): buffer
 	local b = buffer.create(Protocol.SURVIVAL_BYTES)
@@ -2539,6 +2568,8 @@ function Protocol.encodeSurvival(status: SurvivalStatus): buffer
 	buffer.writeu8(b, 14, math.clamp(math.round(status.food), 0, 20))
 	buffer.writeu8(b, 15, math.clamp(math.round(status.saturation * 10), 0, 200))
 	buffer.writeu8(b, 16, math.clamp(math.round(status.foodExhaustion * 50), 0, 255))
+	buffer.writei8(b, 17, if status.room == nil then Protocol.NO_ROOM else halfSteps(status.room))
+	buffer.writei8(b, 18, halfSteps(status.outside))
 	return b
 end
 
@@ -2552,6 +2583,7 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 	local temperature, target = buffer.readu8(b, 4), buffer.readu8(b, 5)
 	local frozen, heat = buffer.readu16(b, 6), buffer.readu16(b, 8)
 	local food, saturation = buffer.readu8(b, 14), buffer.readu8(b, 15)
+	local room, outside = buffer.readi8(b, 17), buffer.readi8(b, 18)
 	local span, extreme = Temperature.MAX - Temperature.MIN, Temperature.EXTREME_TICKS
 	if
 		flags > 63
@@ -2563,6 +2595,7 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 		or heat > extreme
 		or food > 20
 		or saturation > 200
+		or outside == Protocol.NO_ROOM
 	then
 		return nil
 	end
@@ -2585,6 +2618,8 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 		food = food,
 		saturation = saturation / 10,
 		foodExhaustion = buffer.readu8(b, 16) / 50,
+		room = if room == Protocol.NO_ROOM then nil else room / 2,
+		outside = outside / 2,
 	}
 end
 

@@ -19,9 +19,18 @@
 	workspace:GetServerTimeNow() (ATTRIBUTE_SYNC) and the speed in ticks a second (ATTRIBUTE_RATE,
 	0 while the cycle is stopped) as workspace attributes. Everyone computes the time from those
 	(`now`), so the clock costs no network traffic while it runs.
+
+	Seasons (Shared/Seasons/Calendar): the sun goes by the solar time (`solarTime`, Calendar's
+	warp of the time within each solar day: noon and midnight fixed, winter's day half shorter
+	and summer's longer), so `timeOfDay` and everything built on it (ClockTime, the sun's height,
+	sky light, isDay, the glow) follow the season while the clock itself (`now`, `day`,
+	`timeInDay`, /time) never changes. With the seasons off, or a sun share of 1, the solar time is
+	the day time. What goes by the night's ticks rather than the sun (the blood moon's Start and
+	End) reads `solarDay` and `solarTimeInDay`, so it still begins after the seasonal sunset.
 ]]
 
 local Config = require(script.Parent.Config)
+local Calendar = require(script.Parent.Seasons.Calendar)
 
 local DayCycle = {}
 
@@ -84,11 +93,38 @@ function DayCycle.now(base: number, syncedAt: number, serverNow: number, rate: n
 	return base + math.max(serverNow - syncedAt, 0) * rate
 end
 
--- Minecraft's celestial angle (DimensionType.timeOfDay), 0..1: 0 noon, 0.25 sunset, 0.5 midnight.
-function DayCycle.timeOfDay(dayTime: number): number
-	local d0 = frac(dayTime / DayCycle.TICKS_PER_DAY - 0.25)
+-- Minecraft's celestial angle (DimensionType.timeOfDay) of `ticks` as they are, 0..1: 0 noon,
+-- 0.25 sunset, 0.5 midnight.
+function DayCycle.celestialAngle(ticks: number): number
+	local d0 = frac(ticks / DayCycle.TICKS_PER_DAY - 0.25)
 	local d1 = 0.5 - math.cos(d0 * math.pi) / 2
 	return (d0 * 2 + d1) / 3
+end
+
+--[[
+	The solar time of `dayTime` (ticks): the season's warp of the time within its solar day
+	(Shared/Seasons/Calendar.solarTime with the calendar's state; the day time itself with the
+	seasons off). Continuous, never decreasing; noon and midnight stay.
+]]
+function DayCycle.solarTime(dayTime: number): number
+	return Calendar.solarTime(dayTime)
+end
+
+-- The day the sun is in at `dayTime` (DayCycle.day of the solar time; a winter night's last
+-- ticks before the seasonal sunrise are still the night before's).
+function DayCycle.solarDay(dayTime: number): number
+	return DayCycle.day(Calendar.solarTime(dayTime))
+end
+
+-- The solar time within its day, 0..23999 (what the blood moon's Start and End are measured on).
+function DayCycle.solarTimeInDay(dayTime: number): number
+	return DayCycle.timeInDay(Calendar.solarTime(dayTime))
+end
+
+-- Minecraft's celestial angle (DimensionType.timeOfDay) of the sun at `dayTime` (its solar time),
+-- 0..1: 0 noon, 0.25 sunset, 0.5 midnight.
+function DayCycle.timeOfDay(dayTime: number): number
+	return DayCycle.celestialAngle(Calendar.solarTime(dayTime))
 end
 
 --[[

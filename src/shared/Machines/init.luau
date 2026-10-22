@@ -9,7 +9,10 @@
 
 	The kinds: Creative (the Creative Energy Cube), Generator (the Heat Generator: furnace fuel and
 	lava), Smelter (the Electric Furnace), Solar (the Solar Panel), Battery (the Energy Cubes),
-	Refinery (the Oil Refinery: oil into fuel) and Combustion (the Combustion Generator: fuel).
+	Refinery (the Oil Refinery: oil into fuel) and Combustion (the Combustion Generator: fuel);
+	the seasons' Heater (the Electric Heater), Cooler (the Air Conditioner and the Electric Fan),
+	Stove (the Wood Stove, fuel only) and OilHeater (the Oil Heater, fuel only), thermostats
+	and burners for rooms (Shared/Seasons/Rooms).
 
 	A new machine:
 	  1. BlockList: a block with `machine = { kind = "name" }` and `energy = { capacity, input?,
@@ -37,6 +40,7 @@ export type TankSpec = Core.TankSpec
 export type Tank = Core.Tank
 export type TankGauge = Core.TankGauge
 export type TankContents = Core.TankContents
+export type ButtonSpec = Core.ButtonSpec
 
 -- Every machine kind (append one line per kind module).
 require(script.Kinds.Creative)
@@ -46,6 +50,11 @@ require(script.Kinds.Solar)
 require(script.Kinds.Battery)
 require(script.Kinds.Refinery)
 require(script.Kinds.Combustion)
+-- (The seasons' heaters, coolers and stoves: Shared/Seasons.)
+require(script.Kinds.Heater)
+require(script.Kinds.Cooler)
+require(script.Kinds.Stove)
+require(script.Kinds.OilHeater)
 
 Core.bindBlocks()
 

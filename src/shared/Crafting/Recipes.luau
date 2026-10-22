@@ -534,6 +534,38 @@ smelt("ScrapMetal", "IronNugget")
 mix({ "GlassBottle", "DuctTape" }, "ImprovisedSuppressor")
 shape({ "N", "S", "F" }, { N = "IronNugget", S = "Stick", F = "Feather" }, "CrossbowBolt", 4)
 
+--[[
+	The seasons (Shared/Seasons; Progression/Ages: the Snow Layer and Insulated Planks are the Stone
+	Age's, the Wood Stove, Insulated Glass and Insulated Door the Iron Age's, the Oil Heater the
+	Industrial Age's, the Electric Heater, Air Conditioner and Electric Fan the Electric Age's):
+	  Snow Layer       three Snow blocks in a row make six (Minecraft's)
+	  Insulated Planks planks and White Wool in a checker make four
+	  Insulated Glass  glass between Iron Nuggets makes two
+	  Insulated Door   an Oak Door padded with two White Wool
+	  Wood Stove       iron round a Furnace, an iron chimney on top
+	  Oil Heater       a Furnace and a Bucket in iron over osmium and glass
+	  Electric Heater  iron round Glow Dust and a Universal Cable
+	  Air Conditioner  Packed Ice over cables and Glow Dust in iron
+	  Electric Fan     iron blades round a Universal Cable
+]]
+shape({ "SSS" }, { S = "Snow" }, "SnowLayer1", 6)
+shape({ "PW", "WP" }, { P = "#planks", W = "WhiteWool" }, "InsulatedPlanks", 4)
+shape({ "NGN", "NGN" }, { N = "IronNugget", G = "Glass" }, "InsulatedGlass", 2)
+mix({ "OakDoor", "WhiteWool", "WhiteWool" }, "InsulatedDoor")
+shape({ " I ", "IFI", "III" }, { I = "IronIngot", F = "Furnace" }, "WoodStove")
+shape(
+	{ "IBI", "IFI", "OGO" },
+	{ I = "IronIngot", B = "Bucket", F = "Furnace", O = "OsmiumIngot", G = "Glass" },
+	"OilHeater"
+)
+shape({ "ICI", "IDI", "III" }, { I = "IronIngot", C = "BasicUniversalCable", D = "GlowDust" }, "ElectricHeater")
+shape(
+	{ "IPI", "CDC", "III" },
+	{ I = "IronIngot", P = "PackedIce", C = "BasicUniversalCable", D = "GlowDust" },
+	"AirConditioner"
+)
+shape({ "I I", " C ", "I I" }, { I = "IronIngot", C = "BasicUniversalCable" }, "ElectricFan")
+
 Recipes.fuel = {
 	Coal = 1600,
 	Charcoal = 1600,

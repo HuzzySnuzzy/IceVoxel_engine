@@ -143,6 +143,10 @@ export type Window = {
 	            empties, wear, the next round fed, `jam` when the server rolled one); like
 	            `place`, never sent on its own: its number rides the Fire message
 	            (Net/WeaponSync), and only the server knows `jam`
+	  button    a click on panel button `button` (0..255) of the machine in window `window`
+	            (Minecraft's ServerboundContainerButtonClickPacket; Shared/Machines KindSpec
+	            `buttons`): data only, so Inventory/Menu predicts nothing; the server runs the
+	            kind's onButton (Machines.button)
 ]]
 export type Action =
 	{ kind: "click", window: number, slot: number, clickType: number, button: number }
@@ -163,6 +167,7 @@ export type Action =
 	| { kind: "hide", slot: number, hidden: boolean }
 	| { kind: "weapon", op: number, slot: number, part: number }
 	| { kind: "fire", item: number, jam: boolean? }
+	| { kind: "button", window: number, button: number }
 
 -- The server's state of a player's inventory, after the player's action number `ack`.
 export type Snapshot = {

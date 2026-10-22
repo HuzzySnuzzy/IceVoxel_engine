@@ -233,6 +233,7 @@ Pages.list = {
 			setting("minimap"),
 			setting("waila"),
 			setting("dayCounter"),
+			setting("seasonClock"),
 			setting("attackIndicator", true),
 			setting("guiScale"),
 		},

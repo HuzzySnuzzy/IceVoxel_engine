@@ -962,6 +962,119 @@ return function(t, shared, require, server)
 		t.ok(alone >= 2.5 * before, "two and a half times as long as before at least")
 	end)
 
+	--[[ Seasons (Shared/Seasons/SeasonClimate's sample in the environment; see Temperature's header) ]]
+
+	local SeasonClimate = require(shared.Seasons.SeasonClimate)
+	local Calendar = require(shared.Seasons.Calendar)
+	local seasons = Calendar.newState()
+	seasons.enabled = true
+	-- The season's sample for a biome `name` at `dayTime` (seasons on).
+	local function season(name: string, dayTime: number): any
+		local biome = assert(Biomes.byName(name))
+		return SeasonClimate.sample(dayTime, SeasonClimate.classOf(biome.index), 1, seasons)
+	end
+	local WINTER_NIGHT = 12 * 24000 + 18000
+
+	t.test("temperature (seasons): without the seasons' fields every rule is as before", function()
+		for _, biome in Biomes.list do
+			for _, night in { false, true } do
+				for _, skyOpen in { false, true } do
+					for _, overrides in
+						{ {}, { wet = true }, { heated = true }, { nearHeat = true, heated = true }, { cooled = true } }
+					do
+						local plain = table.clone(overrides) :: any
+						plain.climate, plain.night, plain.skyOpen = biome.temperature, night, skyOpen
+						local seasonless = table.clone(plain)
+						seasonless.seasonShift, seasonless.snowedOn, seasonless.radiant = 0, false, false
+						t.eq(target(seasonless), target(plain), `{biome.name} night {night} sky {skyOpen}`)
+					end
+				end
+			end
+		end
+	end)
+
+	t.test("temperature (seasons): a room's air is step 1; its sources count there, radiant +2", function()
+		t.eq(target({ room = -5.6 }), -6, "rounded half up")
+		t.eq(target({ room = 1.2 }), 1)
+		t.eq(target({ room = 1.5 }), 2, "a half belongs to the warmer side")
+		t.eq(target({ room = -30 }), Temperature.MIN, "kept on the scale")
+		t.eq(target({ room = 30 }), Temperature.MAX)
+		t.eq(target({ room = 0, climate = climate("Tundra"), night = true }), 0, "the room, not the tundra")
+		-- In a room the proximity modifiers are dropped (the air counts those sources)...
+		t.eq(target({ room = 0, heated = true }), 0, "no +3")
+		t.eq(target({ room = 0, heated = true, nearHeat = true }), 0, "no +5")
+		t.eq(target({ room = 0, cooled = true }), 0, "no -3")
+		-- ...but a radiant source close by warms (+2), and burning is burning.
+		t.eq(target({ room = 0, radiant = true }), Temperature.RADIANT_IN_ROOM)
+		t.eq(Temperature.RADIANT_IN_ROOM, 2)
+		t.eq(target({ room = 0, radiant = true, burning = true }), 5, "the larger, not both")
+		t.eq(target({ radiant = true }), 0, "radiant counts only in a room")
+		t.eq(target({ room = -2, wet = true, sprinting = true }), -3, "wet and sprinting as ever")
+		t.eq(target({ room = -6, armorWarmth = 2 }), -4, "and the armor")
+		-- The outside value beside it (the thermometer's "Out"), with no room in it.
+		t.near(Temperature.outside(env({ climate = climate("Plains") })), Temperature.scaleOf(0.1), 1e-9)
+	end)
+
+	t.test("temperature (seasons): snow falling on you chills by one; the night reaches under roofs", function()
+		t.eq(Temperature.MODIFIERS.snowedOn, -1)
+		t.eq(target({ snowedOn = true }), -1)
+		t.eq(target({ snowedOn = true, wet = true }), -4, "on top of being wet")
+		-- With the seasons' night drop a roof no longer keeps the night out (the shelter still pulls).
+		local winter = season("Plains", WINTER_NIGHT)
+		local base = { climate = climate("Plains"), night = true, skyOpen = false }
+		t.eq(target(base), 0, "without seasons a plains house is neutral at night")
+		local seasonal = table.clone(base) :: any
+		seasonal.seasonShift, seasonal.nightDrop = winter.shift, winter.nightDrop
+		t.eq(target(seasonal), -7, "a bare roof on a winter night: cold")
+		seasonal.skyOpen = true
+		t.eq(target(seasonal), -9, "outdoors: icy")
+		-- Underground the season never reaches.
+		seasonal.skyOpen, seasonal.y, seasonal.surface = false, 30, 80
+		t.eq(target(seasonal), 0, "underground: neutral")
+	end)
+
+	t.test("temperature (seasons): leather slows freezing but no longer stops it; shivering costs food", function()
+		t.eq(Temperature.freezeImmune(true, false), true, "without seasons a leather piece is immune")
+		t.eq(Temperature.freezeImmune(false, false), false)
+		t.eq(settings.LeatherFreezeImmunity, false, "Config: no immunity with seasons on")
+		t.eq(Temperature.freezeImmune(true, true), false, "with seasons, freezing goes on")
+		with({ LeatherFreezeImmunity = true }, function()
+			t.eq(Temperature.freezeImmune(true, true), true, "unless the knob says so")
+		end)
+		t.eq(settings.ColdExhaustion, 0.005)
+		t.eq(Temperature.coldExhaustion(-3, true), 0.005, "COLD shivers")
+		t.eq(Temperature.coldExhaustion(-10, true), 0.005, "ICY too")
+		t.eq(Temperature.coldExhaustion(-2, true), 0, "NEUTRAL doesn't")
+		t.eq(Temperature.coldExhaustion(-9, false), 0, "nothing without seasons")
+		-- A full set of leather (1 a piece) turns a plains winter night (-9) into -5: cold, not icy.
+		local winter = season("Plains", WINTER_NIGHT)
+		local night: any = { climate = climate("Plains"), night = true, seasonShift = winter.shift }
+		night.nightDrop = winter.nightDrop
+		t.eq(target(night), -9)
+		local dressed = table.clone(night) :: any
+		dressed.armorWarmth = 4
+		t.eq(target(dressed), -5)
+	end)
+
+	t.test("temperature (seasons): a winter night outdoors without gear kills in about 3 minutes", function()
+		local winter = season("Plains", WINTER_NIGHT)
+		local where = env({ climate = climate("Plains"), night = true })
+		where.seasonShift, where.nightDrop = winter.shift, winter.nightDrop
+		t.eq(Temperature.zone(Temperature.target(where)), ICY, "plains: icy")
+		local ticks = timeToDeath(where, false)
+		print(`         (a plains winter night, from neutral: {clock(ticks)} ({ticks / 20} s))`)
+		t.ok(ticks >= 170 * 20 and ticks <= 190 * 20, `about 3 minutes ({clock(ticks)})`)
+		-- Every temperate biome is icy then; a full leather set keeps one alive.
+		for _, name in { "Plains", "Forest", "BirchForest", "Meadow", "WindsweptHills" } do
+			local sample = season(name, WINTER_NIGHT)
+			local outdoors = env({ climate = climate(name), night = true })
+			outdoors.seasonShift, outdoors.nightDrop = sample.shift, sample.nightDrop
+			t.eq(Temperature.zone(Temperature.target(outdoors)), ICY, `{name} on a winter night`)
+		end
+		where.armorWarmth = 4
+		t.eq(timeToDeath(where, false), math.huge, "leather: cold, survivable")
+	end)
+
 	--[[ Surroundings ]]
 
 	t.test("climate: heat and cold sources around the player, their distance, and checks", function()
@@ -1074,8 +1187,8 @@ return function(t, shared, require, server)
 			foodExhaustion = 2.5,
 		}
 		local payload = Protocol.encodeSurvival(status)
-		-- (14 before the food bar's three bytes.)
-		t.eq(buffer.len(payload), 17, "17 bytes")
+		-- (14 before the food bar's three bytes, 17 before the seasons' room and outside.)
+		t.eq(buffer.len(payload), 19, "19 bytes")
 		local decoded = assert(Protocol.decodeSurvival(payload))
 		for key, value in status do
 			if type(value) == "number" then
@@ -1109,6 +1222,20 @@ return function(t, shared, require, server)
 		broken(8, buffer.writeu16, Temperature.EXTREME_TICKS + 1, "heat over full")
 		t.eq(Protocol.decodeSurvival(buffer.create(10)), nil, "an old size")
 		t.eq(Protocol.decodeSurvival(buffer.create(14)), nil, "the size before hunger")
+		t.eq(Protocol.decodeSurvival(buffer.create(17)), nil, "the size before the seasons")
+		-- The seasons' room (nil: none) and outside, in half steps.
+		t.eq(decoded.room, nil, "no room")
+		t.eq(decoded.outside, 0)
+		local seasonal: any = status
+		seasonal.room, seasonal.outside = -5.6, -9.2
+		decoded = assert(Protocol.decodeSurvival(Protocol.encodeSurvival(status)))
+		t.eq(decoded.room, -5.5, "half steps")
+		t.eq(decoded.outside, -9)
+		seasonal.room, seasonal.outside = 100, -100
+		decoded = assert(Protocol.decodeSurvival(Protocol.encodeSurvival(status)))
+		t.eq(decoded.room, 63.5, "clamped to the byte")
+		t.eq(decoded.outside, -63.5)
+		broken(18, buffer.writei8, Protocol.NO_ROOM, "an outside of -128")
 		t.ok(Protocol.ServerMessage.Survival ~= nil and Protocol.ClientMessage.Drink ~= Protocol.ClientMessage.Exertion)
 	end)
 end

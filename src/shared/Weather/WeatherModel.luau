@@ -45,6 +45,15 @@
 	everywhere: a Moment carries the weather clock and the override's weight (`at`, `grid` and
 	`forecast` take a Moment or a plain clock value).
 
+	Seasons (Shared/Seasons/SeasonClimate through Weather.momentAt): a Moment may carry a
+	season's biases. `wetBias` lowers the low thresholds of the rain and the clouds (RAIN_LOW,
+	CLOUD_LOW; the high ones stay, so the drizzle's ramp widens or narrows: more rain and the
+	clouds that go with it, or less when negative), `thunderBias` the thunder's (THUNDER_LOW; -1:
+	never thunder). Measured as the calibration above (seeds 12345, 777 and 4242, 64 places, 40
+	days): it rains 22-24 % of the time in autumn (no bias), 24-27 % in winter, 30-32 % in spring
+	and 13-15 % in summer (the seasons' design: 24, 27, 32 and 15), and winter never thunders. Without them (a plain clock value, or 0s)
+	the field is the calibrated one above, to the bit.
+
 	Precision: math.noise works in single precision and its lattice repeats every 256 units, so
 	every noise coordinate is reduced modulo 256 in double precision first: storms stay smooth
 	however far from the origin and however long the clock has run.
@@ -75,6 +84,12 @@ export type Moment = {
 	override: Kind,
 	weight: number,
 	previous: { Blend },
+	-- The season's biases (Shared/Weather.momentAt; nil or 0: none): added to Minecraft's biome
+	-- temperature before the snow test (times the biome's amplitude: Weather.seasonShift), to the
+	-- moisture before the rain and cloud thresholds, and before the thunder threshold.
+	weatherShift: number?,
+	wetBias: number?,
+	thunderBias: number?,
 }
 
 -- One step of a forecast: the weather clock and the weather then.
@@ -162,6 +177,9 @@ local RAIN_LOW, RAIN_SCALE = WeatherModel.RAIN_LOW, 1 / (WeatherModel.RAIN_HIGH 
 local THUNDER_LOW, THUNDER_SCALE = WeatherModel.THUNDER_LOW, 1 / (WeatherModel.THUNDER_HIGH - WeatherModel.THUNDER_LOW)
 local INSTABLE_LOW, INSTABLE_SCALE =
 	WeatherModel.INSTABLE_LOW, 1 / (WeatherModel.INSTABLE_HIGH - WeatherModel.INSTABLE_LOW)
+
+-- The narrowest a threshold's span gets when a season's bias moves its low end up to its high one.
+local MIN_SPAN = 0.01
 
 local F1, F2, F3 = 1 / WeatherModel.LAYERS[1][1], 1 / WeatherModel.LAYERS[2][1], 1 / WeatherModel.LAYERS[3][1]
 local E1, E2, E3 = 1 / WeatherModel.LAYERS[1][2], 1 / WeatherModel.LAYERS[2][2], 1 / WeatherModel.LAYERS[3][2]
@@ -251,19 +269,50 @@ local function moistureAt(self: Field, u: number, w: number, t1: number, t2: num
 		+ W3 * noise((u * F3 + ox[3]) % 256, (w * F3 + oz[3]) % 256, t3)
 end
 
--- Precipitation, thunder and cover from moisture `m` at air-frame (u, w), instability time `ti`.
-local function shape(self: Field, m: number, u: number, w: number, ti: number): (number, number, number)
-	local p = smooth((m - RAIN_LOW) * RAIN_SCALE)
-	local c = smooth((m - CLOUD_LOW) * CLOUD_SCALE)
+--[[
+	Precipitation, thunder and cover from moisture `m` at air-frame (u, w), instability time `ti`,
+	with a season's biases (`wet` on the rain and clouds, `storm` on the thunder; 0: none).
+]]
+local function shape(
+	self: Field,
+	m: number,
+	u: number,
+	w: number,
+	ti: number,
+	wet: number,
+	storm: number
+): (number, number, number)
+	local p, c
+	if wet == 0 then
+		p = smooth((m - RAIN_LOW) * RAIN_SCALE)
+		c = smooth((m - CLOUD_LOW) * CLOUD_SCALE)
+	else
+		-- (The low thresholds move, the high ones stay: see the header.)
+		local rainLow, cloudLow = RAIN_LOW - wet, CLOUD_LOW - wet
+		p = smooth((m - rainLow) / max(WeatherModel.RAIN_HIGH - rainLow, MIN_SPAN))
+		c = smooth((m - cloudLow) / max(WeatherModel.CLOUD_HIGH - cloudLow, MIN_SPAN))
+	end
 	local th = 0
-	if m > THUNDER_LOW then
+	local thunderLow = THUNDER_LOW - storm
+	if m > thunderLow then
 		local instability = noise((u * FI + self._ox[4]) % 256, (w * FI + self._oz[4]) % 256, ti)
-		th = smooth((m - THUNDER_LOW) * THUNDER_SCALE) * smooth((instability - INSTABLE_LOW) * INSTABLE_SCALE)
+		local rise = if storm == 0
+			then (m - THUNDER_LOW) * THUNDER_SCALE
+			else (m - thunderLow) / max(WeatherModel.THUNDER_HIGH - thunderLow, MIN_SPAN)
+		th = smooth(rise) * smooth((instability - INSTABLE_LOW) * INSTABLE_SCALE)
 		if th > p then
 			th = p
 		end
 	end
 	return p, th, c
+end
+
+-- A moment's biases (0 without a moment or one without them).
+local function biases(moment: Moment?): (number, number)
+	if moment == nil then
+		return 0, 0
+	end
+	return moment.wetBias or 0, moment.thunderBias or 0
 end
 
 -- The values an override of `kind` blends towards, from the natural ones.
@@ -331,7 +380,8 @@ function Field.at(self: Field, x: number, z: number, time: number | Moment): (nu
 	local ot = self._ot
 	local u, w = x - dx, z - dz
 	local m = moistureAt(self, u, w, (clock * E1 + ot[1]) % 256, (clock * E2 + ot[2]) % 256, (clock * E3 + ot[3]) % 256)
-	local p, th, c = shape(self, m, u, w, (clock * EI + ot[4]) % 256)
+	local wet, storm = biases(moment)
+	local p, th, c = shape(self, m, u, w, (clock * EI + ot[4]) % 256, wet, storm)
 	if moment then
 		return blend(moment, p, th, c)
 	end
@@ -364,12 +414,13 @@ function Field.grid(
 	local ot = self._ot
 	local t1, t2, t3 = (clock * E1 + ot[1]) % 256, (clock * E2 + ot[2]) % 256, (clock * E3 + ot[3]) % 256
 	local ti = (clock * EI + ot[4]) % 256
+	local wet, storm = biases(moment)
 	local index = 0
 	for row = 0, rows - 1 do
 		local w = z0 + row * step - dz
 		for col = 0, cols - 1 do
 			local u = x0 + col * step - dx
-			local p, th, c = shape(self, moistureAt(self, u, w, t1, t2, t3), u, w, ti)
+			local p, th, c = shape(self, moistureAt(self, u, w, t1, t2, t3), u, w, ti, wet, storm)
 			if blending then
 				p, th, c = blend(moment :: Moment, p, th, c)
 			end

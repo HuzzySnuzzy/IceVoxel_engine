@@ -711,7 +711,22 @@ local NUKE_FACES: Faces = {
 	Right = nukeSide(true),
 }
 
+--[[
+	The seasons' heaters, coolers and stoves (BlockList WoodStove, OilHeater, ElectricHeater,
+	AirConditioner, ElectricFan): placeholder faces until their own are drawn (a casing edge and a
+	window in the machine's colour on every face).
+]]
+local function placeholderFaces(edge: { number }, window: { number }): Faces
+	local side = join(outline(edge, true), { rect(4, 4, 8, 8, window) })
+	return { Top = side, Bottom = outline(edge, true), Front = side, Back = side, Left = side, Right = side }
+end
+
 local DECORS: { [string]: Faces } = {
+	WoodStove = placeholderFaces({ 34, 32, 32 }, { 196, 96, 36 }),
+	OilHeater = placeholderFaces({ 80, 40, 28 }, { 220, 120, 44 }),
+	ElectricHeater = placeholderFaces({ 92, 96, 104 }, { 200, 60, 48 }),
+	AirConditioner = placeholderFaces({ 120, 126, 132 }, { 90, 196, 220 }),
+	ElectricFan = placeholderFaces({ 84, 88, 96 }, { 60, 64, 70 }),
 	Tnt = TNT_FACES,
 	Nuke = NUKE_FACES,
 	Chest = CHEST,

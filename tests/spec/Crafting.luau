@@ -181,8 +181,9 @@ return function(t, shared, require)
 		-- Crystal, two mana potions, Emerald Staff, Top Hat, Tuxedo Shirt and Tuxedo Pants; 191
 		-- before the five doors; 196 before the zombie apocalypse's medical supplies, barricades,
 		-- bats, blades, the hatch and concrete; 213 before the weapons' Improvised Suppressor and
-		-- Crossbow Bolts.)
-		t.eq(#Crafting.recipes, 215, "recipes compiled")
+		-- Crossbow Bolts; 215 before the seasons' Snow Layer, insulation, stoves, heaters and
+		-- coolers.)
+		t.eq(#Crafting.recipes, 224, "recipes compiled")
 	end)
 
 	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()
