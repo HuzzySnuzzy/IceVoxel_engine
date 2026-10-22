@@ -3483,16 +3483,21 @@ calendar); publishes when something changes and again every 60 s, as TimeOfDay. 
 publish disabled. `setSeason(season, day)`, `setLocked(on)`, `keepCalendar(old, new)` and a
 `changed` event; `/season query|set` and `/gamerule doSeasonCycle` (`Players/SeasonCommand`, pure,
 and its glue) use them, and `/time set` keeps the calendar through them. Saved as WorldSave's
-section `"seasons"`: `{ v = 2, offset, lock, lengths, day }` (`Calendar.encode`; version 1's
-whole held day still reads, held at its middle as it was); `decode` re-anchors a save made with
-other lengths (the season kept, its first day still its first and its last its last, the days
-between in proportion; the offset worked out again from the saved day alone, so the sections'
-decode order never matters). A world without seasons saves no calendar of its own (it keeps the
-section it was loaded with, or has none), so neither the days played without them nor a hold set
-then carry over. A world whose calendar was not read back (a new world, one saved before the
-seasons or without them, or a section that can't be read) gets `Calendar.fresh` in
-`SeasonClock.restored`, once every section, the day clock's too, is back: Autumn's first day at
-that moment, so every world has the same 8 mild days before its first winter.
+section `"seasons"`: `{ v, offset, lock, lengths, day }` (`Calendar.encode`): version 1 whenever
+it can say it (running, or held at a day's middle: that whole day its lock), byte for byte what
+the builds before the exact hold wrote, so a server rolled back to one still reads it; version 2
+only for a hold at another time of day (its exact time; version 1's whole held day still reads,
+held at its middle as it was). `decode` re-anchors a save made with other lengths (the season
+kept, its first day still its first and its last its last, the days between in proportion; the
+offset worked out again from the saved day alone, so the sections' decode order never matters).
+A world without seasons saves no calendar of its own (it keeps the section it was loaded with,
+or has none), so neither the days played without them nor a hold set then carry over:
+`SeasonClock.restored`, once every section, the day clock's too, is back, puts a calendar read
+back on the day it was saved on at the restored time (`Calendar.decode` with the day time), so a
+world played 20 days without seasons comes back on its saved day, not 20 days on. A world whose
+calendar was not read back (a new world, one saved before the seasons or only ever without
+them, or a section that can't be read) gets `Calendar.fresh` there: Autumn's first day at that
+moment, so every world has the same 8 mild days before its first winter.
 
 **The climate** (`Shared/Seasons/SeasonClimate`, pure). Biome classes: cold (tundra, taigas,
 grove, snowy slopes, jagged and frozen peaks), dry (desert, savannas), tropical (jungle,
@@ -3528,15 +3533,20 @@ U to `uaOut`, or to `uaGround` for a floor on solid ground), every passable neig
 its column's sky height an opening (U 1.0, not entered). An open door leaks its two faces, a
 broken window one, a porch's roof carries the fill on to where the sky starts. A hole in the
 roof costs what a hole in a wall does: an open-sky cell with three or four of its sideways
-neighbour columns covered above it is entered (a roof hole or a chimney a block wide), the face
-where the sky starts one opening; a roofless house, a hole three wide, or a fill that never
-enters a cell under a roof (a pit dug in the open) is no room. Only faces towards the outside
-lose: a block standing inside the room (furniture, a pillar, the heater itself: going on from
-its face through blocks with an insulation, within the room's bounds, reaches the room again)
-loses nothing, and one on the floor stands in for the floor face it covers. Universal Cables,
-Mechanical Pipes and Logistical Transporters are wall faces (0.05, as machines): a cable through
-a wall leaves it shut. Past MaxVolume (1024) cells, MaxExtent (32) blocks or MaxOpenings (6), or
-at a cell nobody knows, there is no room and the roof rule holds. The air:
+neighbour columns covered above it, one of them with air under its cover beside the cell or
+covering it by at most 3 blocks (a roof and a chimney two over it), is entered (a roof hole or a
+chimney a block wide), the face where the sky starts (or 3 blocks over the air beside it) one
+opening; an open shaft up from a cellar or a mine is not climbed past the air it leaves from
+(its cells there are in the ground, under more than a roof's cover), so a base 10 or 100 blocks
+down with a ladder shaft is a room, the face up the shaft's foot its opening; a roofless house,
+a hole three wide, or a fill that never enters a cell under a roof (a pit dug in the open) is no
+room. Only faces towards the outside lose: a block standing inside the room (furniture, a
+pillar, the heater itself: going on from its face through blocks with an insulation, within the
+room's bounds, reaches the room again within 3 blocks) loses nothing, and one on the floor
+stands in for the floor face it covers. Universal Cables, Mechanical Pipes and Logistical
+Transporters are wall faces (0.05, as machines): a cable through a wall leaves it shut. Past
+MaxVolume (1024) cells, MaxExtent (32) blocks or MaxOpenings (6), or at a cell nobody knows,
+there is no room and the roof rule holds. The air:
 `C dT/dt = P - uaOut (T - outside) - uaGround T`, C = 2 x
 volume, stepped once a second with the exact exponential (`Rooms.step`, stable at any step),
 `outside` the sheltered outdoor value at the room's seed (Temperature.outside under a roof, the
@@ -3550,11 +3560,13 @@ tests/spec/Rooms).
   save heats a house nobody is in) and each room source placed (a campfire, a furnace, a
   generator; not fire or lava), the machines' every 5 s while a player is within 128
   blocks. Fills run in `step` after the machines, at most 2 and 2 ms a frame (players' and
-  refills first); a fill is at most 1 024 x 6 block reads (1.2-2.1 ms in Lune). A fill that finds
-  no room marks every cell it went through as none for 5 s (one open, too big or unloaded space),
-  unless a block in it changes. A room nobody visited (a player in it, a machine asking) for 60 s
-  whose sources give nothing is forgotten. Nothing else runs per frame; the air's step is O(rooms
-  + sources + players) a second.
+  refills first); a fill reads about 6 blocks a cell (1.2-2.1 ms in Lune for 1 024 cells): where
+  the room is again past a block in it is looked up in its cells, and the blocks between read
+  only while all its reads stay within 1 024 x 6 (one a block thick needs none), the same
+  whatever its seed. A fill that finds no room marks every cell it went through as none for 5 s
+  (one open, too big or unloaded space), unless a block in it changes. A room nobody visited (a
+  player in it, a machine asking) for 60 s whose sources give nothing is forgotten. Nothing else
+  runs per frame; the air's step is O(rooms + sources + players) a second.
 - *Cache and changes.* `roomOf` maps interior cells, `wallsOf` wall and opening cells and the
   eaves (the blocks over the walls' tops, for `temperatureAt` only: no U; a wall between two rooms
   to both). A change there (every edit, a door toggled) refills the room from its seed, unless it
@@ -3574,9 +3586,9 @@ tests/spec/Rooms).
 - *Answers.* `sample` (Tough As Nails: the feet's room, or the head's), `climateAt` (a machine's
   cell or a neighbour's room and the outside), `temperatureAt` (snow: a lookup only, a cell's room
   or the warmest room it walls, its eaves too, nil for none), `playerNear` (a space heater's
-  standby; true with no rooms). Rooms are the server's alone; players learn of theirs in the
-  Survival message (`room`, `outside`: the Thermometer's "Room +1 · Out -9", WAILA's
-  "Room +1 (out -9)" on a heater).
+  standby; with no rooms, Players/PlayerPositions' now). Rooms are the server's alone; players
+  learn of theirs in the Survival message (`room`, `outside`: the Thermometer's "Room +1 · Out
+  -9", WAILA's "Room +1 (out -9)" on a heater).
 
 **Heaters, coolers and stoves** (Shared/Machines kinds "stove", "oilheater", "heater",
 "cooler"; `Seasons/HeatStates`). Each tick a thermostat asks its room (`TickContext.climate`)
@@ -3587,8 +3599,8 @@ passes Pmax.
 - *Electric Heater*: up to 40 HU at 4 J/t per HU (Machines `use`); on too little energy it takes
   all there is for that share ("Low power"), none "No power". Outdoors it is a 20 HU space heater
   (Tough As Nails' +3 within SpaceHeaterRadius, 5 blocks) while a player is within 16
-  (TickContext `near`), else "Standby"; with the rooms off no position is known and it always
-  warms. Convective: no warmth in a room besides the air's.
+  (TickContext `near`), else "Standby", with the rooms off too (by the players' positions then).
+  Convective: no warmth in a room besides the air's.
 - *Air Conditioner*: down to -40 HU at 5 J/t per HU, in rooms only ("No room").
 - *Electric Fan*: 30 J/t for -10 HU while it runs: in a room while the air is over its set point
   (on half a step above it, off half a step below), outdoors whenever it is on (a cold source
@@ -3622,11 +3634,12 @@ is sturdy and a wall face. Players and mobs multiply their ground acceleration b
 layers, 0.8 for 5-6, 0.75 for 7-8); a player's 1.0625 step walks onto any depth, a mob's 0.6 onto
 five layers and it jumps onto more; both land on the box's top and never sink in (MC-257266; specs
 Movement, Mobs): snow never grows into a player's or a mob's hull either (SnowWorld's `occupied`,
-the placements' rule: `ServerNet.intersectsCharacter` and `Mobs.occupied`; that column waits for a
-later visit), nor does ice. The Snow Layer stacks onto a layer below 8 (`stackOnto`: its top
-clicked, or placed into a layer's cell; EditRules places a layer of 2..8 only that way) and lies
-only on `supports` (a sturdy top, leaves, a full layer; never ice); n layers drop n Snowballs; a
-layer whose support goes vanishes without drops. Each tick every active chunk is visited with
+the placements' rule: `ServerNet.intersectsCharacter` and `Mobs.occupied`; only that column waits
+for a later visit, the rest of its tile rising on: `accumulate`'s least leaves it out), nor does
+ice. The Snow Layer stacks onto a layer below 8 (`stackOnto`: its top clicked, or placed into a
+layer's cell; EditRules places a layer of 2..8 only that way) and lies only on `supports` (a
+sturdy top, leaves, a full layer; never ice); n layers drop n Snowballs; a layer whose support
+goes vanishes without drops. Each tick every active chunk is visited with
 `TileChance` (at most `MaxTilesPerTick`): one 4 x 4 tile, its columns from `WeatherRules.top` (only
 the open sky takes snow), each with the weather at its own top cell (the biome and the precipitation
 are the tile centre's; what falls is `WeatherRules.snowingAt`'s: a tower's top may snow while the
@@ -3640,7 +3653,8 @@ fourth days with its far cover, windswept hills' autumn snow melts in the next c
 (`melt`); above Minecraft's own snow line it goes by the temperature alone. Snow beside a heat
 source that heats, or in or on a room at `RoomMelt` or warmer (`RoomWorld.temperatureAt`), loses a
 layer every visit and takes none; every `HeatMeltSeconds` each indexed heat source (onChanged and
-each chunk's saved edits) melts a layer and thaws the weather's ice within `HeatMeltRadius`, spread
+each chunk's saved edits) melts a layer within `HeatMeltRadius` and thaws the weather's ice beside
+it (as far as a visit's warmth keeps water from freezing, so nothing goes to water and back), spread
 over frames, at most 256 a round from where the last round stopped (so every source gets its turn).
 With `Ice`, still water sources with a side that is no water freeze where it is cold enough to snow
 (not while the season's snow goes, never beside a heat source that heats); the weather's ice thaws
@@ -7731,8 +7745,8 @@ frame), `decode(value)` runs once when a saved world starts (after every part st
 the world is published), or at once when registered later. "time" is the day clock's (day time
 and doDaylightCycle); "weather" the weather's (`WeatherServer.encode`'s text: its clock,
 doWeatherCycle and a `/weather` override with its time left; see Weather); "seasons" the
-calendar's (see Seasons: a world without a readable one starts on Autumn's first day once every
-section, the day clock's too, is back).
+calendar's (see Seasons: once every section, the day clock's too, is back, a calendar read back is
+on the day it was saved on and a world without a readable one starts on Autumn's first day).
 
 **Feedback.** WorldSave messages (Protocol): "saving" and "saved" to everyone (Ui/SaveIndicator:
 Bedrock's saving icon, a grass block bobbing in the bottom right corner with "Saving...", while a

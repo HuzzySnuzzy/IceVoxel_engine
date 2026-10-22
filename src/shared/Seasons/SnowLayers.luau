@@ -24,10 +24,11 @@
 	             torch or water there takes none).
 	  Tiles      what one visit of a 4 x 4 tile (TILE; server Seasons/SnowWorld) changes, so
 	             tiles rise and fall evenly and same-height cells merge into one box:
-	               snowfall  `accumulate(columns)`: every column that takes snow, has the tile's
-	                         least layers among those below their cap and is below its own cap
-	                         gets one more (a first layer in its top cell, else the layer block
-	                         one higher in place). A column at its cap never holds the rest back.
+	               snowfall  `accumulate(columns, held)`: every column that takes snow, has the
+	                         tile's least layers among those below their cap and is below its own
+	                         cap gets one more (a first layer in its top cell, else the layer block
+	                         one higher in place). A column at its cap never holds the rest back,
+	                         nor does one that waits (`held`: someone in the way of its layer).
 	               thaw      `melt(columns)`: the columns with the tile's most layers lose one
 	                         (a single layer goes back to air), one layer at a time (Bedrock's
 	                         melting), so roofs drain gradually.
@@ -162,23 +163,25 @@ end
 --[[
 	One snowfall visit of a tile's `columns` (TILE x TILE of them): the blocks to set. Every
 	column that takes snow, whose layers equal the least of those below their cap and are below
-	its own cap gets one more (see the header). Nothing for a tile with no room left.
+	its own cap gets one more (see the header). `held[i]` true: column i waits (someone is in the
+	way of its next layer: server Seasons/SnowWorld's Bodies), neither counted for the least nor
+	given a layer, so it holds nobody back. Nothing for a tile with no room left.
 ]]
-function SnowLayers.accumulate(columns: { Column }): { Change }
+function SnowLayers.accumulate(columns: { Column }, held: { boolean }?): { Change }
 	local changes: { Change } = {}
 	local least = math.huge
-	for _, column in columns do
+	for i, column in columns do
 		local n, _, takes = SnowLayers.column(column)
-		if takes and n < column.cap and n < SnowLayers.MAX and n < least then
+		if takes and n < column.cap and n < SnowLayers.MAX and n < least and not (held and held[i]) then
 			least = n
 		end
 	end
 	if least == math.huge then
 		return changes
 	end
-	for _, column in columns do
+	for i, column in columns do
 		local n, y, takes = SnowLayers.column(column)
-		if takes and n == least and n < column.cap and n < SnowLayers.MAX then
+		if takes and n == least and n < column.cap and n < SnowLayers.MAX and not (held and held[i]) then
 			table.insert(changes, { x = column.x, y = y, z = column.z, block = byLayers[n + 1] })
 		end
 	end

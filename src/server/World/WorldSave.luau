@@ -94,10 +94,11 @@
 	             time and doDaylightCycle), "weather" the weather's (World/WeatherServer: its
 	             clock, doWeatherCycle and a /weather override with its time left, so storms go on
 	             where they were; a world saved without it starts clear at spawn, as a new one),
-	             "seasons" the calendar's (World/SeasonClock: { v = 2, offset, lock, lengths,
-	             day }; a world saved without it or with one that can't be read, and a new world,
-	             starts on Autumn's first day once every section is back, the day clock's too:
-	             SeasonClock.restored).
+	             "seasons" the calendar's (World/SeasonClock: { v, offset, lock, lengths, day },
+	             version 1 unless held at another time of day than a day's middle; once every
+	             section is back, the day clock's too, SeasonClock.restored puts it on the day it
+	             was saved on, and a world saved without it or with one that can't be read, and a
+	             new world, starts on Autumn's first day).
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -1108,8 +1109,9 @@ end)
 
 --[[
 	The seasons' calendar (World/SeasonClock: its offset, lock and lengths, and the calendar day
-	when saved, so it reads back whatever order the sections decode in). A world without it, or
-	with one that can't be read, gets Autumn's first day at the end of `restore`, after the clock.
+	when saved, so it reads back whatever order the sections decode in). At the end of `restore`,
+	after the clock, it is put on that day; a world without it, or with one that can't be read,
+	gets Autumn's first day.
 ]]
 WorldSave.registerSection("seasons", function(): any
 	return SeasonClock.encode()
@@ -1189,8 +1191,8 @@ function WorldSave.restore(parts: WorldSnapshot.Systems)
 		end
 	end
 	restoredSections = true
-	-- (A new world, one saved before the seasons or a calendar that can't be read: Autumn's first
-	-- day now, after the clock.)
+	-- (After the clock: a calendar read back on the day it was saved on; a new world, one saved
+	-- before the seasons or a calendar that can't be read: Autumn's first day now.)
 	SeasonClock.restored()
 	local ticker = parts.ticker
 	if ticker then

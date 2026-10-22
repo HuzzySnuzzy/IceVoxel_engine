@@ -4,17 +4,19 @@
 	runs on at that time of day), the offset kept over /time set and moved by /season set, the
 	smooth blends at the turns, the sun's warp (Shared/DayCycle.solarTime: monotonic, continuous at
 	midnight, the identity with the seasons off or a share of 1, winter's and summer's day shares),
-	saves (re-anchored when the lengths change: a season's first day stays its first, its last its
-	last; version 1's whole held day still read back) and the attributes, a world without a "seasons"
-	save starting at Autumn's first day, and a world played without seasons saving none. Then
-	server World/SeasonClock itself, loaded with a fake day clock and workspace: holding moves
-	nothing, a world without seasons keeps the section it had (or saves none), and a calendar that
-	can't be read starts on Autumn's first day only once the day clock is back. The module's state
-	is shared by every spec: each test puts it back.
+	saves (version 1 whenever it can say it, byte for byte the build before's; re-anchored when the
+	lengths change: a season's first day stays its first, its last its last; version 1's whole held
+	day still read back) and the attributes, a world without a "seasons" save starting at Autumn's
+	first day, a world played without seasons saving none and one that had them back on its saved
+	day. Then server World/SeasonClock itself, loaded with a fake day clock and workspace: holding
+	moves nothing, a world without seasons keeps the section it had (or saves none) and comes back
+	on its saved day with them, and a calendar that can't be read starts on Autumn's first day only
+	once the day clock is back. The module's state is shared by every spec: each test puts it back.
 ]]
 
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
+local serde = require("@lune/serde")
 
 -- World/SeasonClock, loaded here with its Roblox globals as arguments (after the --! lines).
 local CLOCK = "src/server/World/SeasonClock.luau"
@@ -320,7 +322,7 @@ return function(t, shared, require)
 		local s = state(nil, 5)
 		local dayTime = 30 * DAY + 1234
 		local saved = assert(Calendar.encode(s, dayTime))
-		t.eq(saved.v, Calendar.VERSION)
+		t.eq(saved.v, 1, "running: version 1")
 		t.eq(saved.offset, 5)
 		t.eq(saved.day, 35)
 		t.eq(saved.lock, nil)
@@ -369,6 +371,81 @@ return function(t, shared, require)
 			t.eq(Calendar.decode(bad, state()), nil)
 		end
 		t.eq(Calendar.decode({ v = 1, offset = 0, day = 0, lengths = { 8, 8, 0, 8 } }, state()), nil, "a 0 day season")
+	end)
+
+	t.test("seasons: a save is version 1 whenever version 1 can say it, as the build before wrote it", function()
+		-- The build before the exact hold (cd6318e^), word for word: its save (the lock a whole day,
+		-- held at its middle) and whether it reads one back.
+		local function oldEncode(s: any, dayTime: number): any
+			return {
+				v = 1,
+				offset = s.offset,
+				lock = s.lock,
+				lengths = table.clone(s.lengths),
+				day = if s.lock ~= nil then s.lock else math.floor(dayTime / DAY) + s.offset,
+			}
+		end
+		local function oldReads(v: any): boolean
+			local function whole(x: any): boolean
+				return type(x) == "number" and x == x and math.abs(x) ~= math.huge and x == math.floor(x)
+			end
+			return type(v) == "table"
+				and v.v == 1
+				and whole(v.offset)
+				and whole(v.day)
+				and (v.lock == nil or whole(v.lock))
+				and Calendar.validLengths(v.lengths)
+		end
+		local function json(v: any): string
+			return serde.encode("json", v)
+		end
+		-- Running, and held at a day's middle (a hold version 1 made): version 1, the same bytes.
+		for _, case in { { 0, nil, nil }, { 5, nil, nil }, { -30, nil, nil }, { 0, 13.5, 13 }, { 4, 9.5, 9 } } do
+			local offset, lock, oldLock = case[1], case[2], case[3]
+			local dayTime = 40 * DAY + 3000
+			local saved = assert(Calendar.encode(state({ 8, 8, 8, 8 }, offset, lock), dayTime))
+			t.eq(saved.v, 1, `offset {offset}, lock {lock}`)
+			t.eq(json(saved), json(oldEncode(state({ 8, 8, 8, 8 }, offset, oldLock), dayTime)), "byte for byte")
+			t.ok(oldReads(saved), "the build before reads it")
+			-- And this build reads it back as it was.
+			local back = assert(Calendar.decode(saved, state()))
+			t.eq(back.offset, offset)
+			t.eq(back.lock, lock)
+		end
+		-- Held at another time of day: version 2, its exact time (the build before refuses it and
+		-- starts on Autumn's first day, as it did any save it could not read).
+		local held = assert(Calendar.encode(state(nil, 0, 13.3), 0))
+		t.eq(held.v, 2)
+		t.eq(held.lock, 13.3)
+		t.ok(not oldReads(held))
+		t.eq(assert(Calendar.decode(held, state())).lock, 13.3)
+		t.eq(Calendar.encode(state(nil, 0, 13), 0).v, 2, "held at a sunrise")
+	end)
+
+	t.test("seasons: a world that had seasons, played without them, comes back on its saved day", function()
+		-- Saved on calendar day 10 (Winter's third) at the day clock's day 10.
+		local on = state()
+		local kept = assert(Calendar.encode(on, 10 * DAY + 6000))
+		-- Played 20 days without seasons: the section kept as it was.
+		local off = assert(Calendar.decode(kept, state()))
+		off.enabled = false
+		t.eq(Calendar.encode(off, 30 * DAY + 6000, kept), kept)
+		-- On again, the day clock restored at day 30: day 10, not 30 (the days without them gone).
+		local now = 30 * DAY + 6000
+		local back = assert(Calendar.decode(kept, state(), now))
+		local p = Calendar.position(now, back)
+		t.eq(p.calendarDay, 10)
+		t.ok(p.season == Calendar.WINTER and p.day == 2, "Winter's third day")
+		t.eq(Calendar.position(now + DAY, back).calendarDay, 11, "and on from there")
+		-- Whatever the day clock did, and with other lengths too (re-anchored, then on that day).
+		t.eq(Calendar.position(DAY, assert(Calendar.decode(kept, state(), DAY))).calendarDay, 10)
+		local wider = assert(Calendar.decode(kept, state({ 16, 16, 16, 16 }), now))
+		local q = Calendar.position(now, wider)
+		t.ok(q.season == Calendar.WINTER and q.day == math.floor(2 * 15 / 7 + 0.5), "the same share of Winter")
+		-- A save read back at the clock it was made with: as it was.
+		t.eq(assert(Calendar.decode(kept, state(), 10 * DAY + 6000)).offset, 0)
+		-- A world that never had them still starts on Autumn's first day (no section: fresh).
+		t.eq(Calendar.decode(nil, state(), now), nil)
 	end)
 
 	t.test("seasons: re-anchored to other lengths, a season's first day stays its first, its last its last", function()
@@ -651,8 +728,47 @@ return function(t, shared, require)
 				local p = SeasonClock.position()
 				t.ok(p.season == Calendar.AUTUMN and p.day == 0, "Autumn's first day")
 				local saved = SeasonClock.encode()
-				t.eq(saved.v, Calendar.VERSION)
+				t.eq(saved.v, 1)
 				t.eq(saved.day, 0)
+			end)
+		end
+	)
+
+	t.test(
+		"seasons (World/SeasonClock): a world that had seasons comes back on its saved day after days without",
+		function()
+			-- Played with seasons to calendar day 10 (Winter's third) at the day clock's day 10.
+			local kept: any = nil
+			withClock(Config.Time.StartTime, function(SeasonClock, clock)
+				SeasonClock.start()
+				t.eq(SeasonClock.decode(Calendar.encode(state(), 10 * DAY + 6000)), true)
+				clock.now = 10 * DAY + 6000
+				SeasonClock.restored()
+				t.eq(SeasonClock.position().calendarDay, 10)
+				kept = SeasonClock.encode()
+			end)
+			-- Then 20 days without them (sections in any order: the calendar before the clock).
+			withClock(Config.Time.StartTime, function(SeasonClock, clock)
+				SeasonClock.start(false)
+				t.eq(SeasonClock.decode(kept), true)
+				clock.now = 10 * DAY + 6000
+				SeasonClock.restored()
+				clock.now = 30 * DAY + 6000
+				t.eq(SeasonClock.encode(), kept, "the section it had")
+			end)
+			-- With them again: day 10, the 20 days without them not counted, and on from there.
+			withClock(Config.Time.StartTime, function(SeasonClock, clock)
+				SeasonClock.start()
+				t.eq(SeasonClock.decode(kept), true)
+				clock.now = 30 * DAY + 6000
+				SeasonClock.restored()
+				local p = SeasonClock.position()
+				t.eq(p.calendarDay, 10, "its saved day")
+				t.ok(p.season == Calendar.WINTER and p.day == 2)
+				t.eq(clock.attributes[Calendar.ATTRIBUTE_OFFSET], -20, "published")
+				clock.now += DAY
+				t.eq(SeasonClock.position().calendarDay, 11)
+				t.eq(SeasonClock.encode().day, 11, "saved from there")
 			end)
 		end
 	)

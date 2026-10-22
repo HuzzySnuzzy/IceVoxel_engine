@@ -45,15 +45,22 @@
 	                it: the server's World/SeasonClock at its start, the client's
 	                Rendering/LightingController from the attributes (`readAttributes`, which says
 	                disabled before the server published anything).
-	  Saving        `encode(s, dayTime, kept)`: { v = 2, offset, lock, lengths, day } (the calendar
-	                day when saved); a world without seasons (`s.enabled` false) saves nothing of its
-	                own but `kept`, what it had saved (nil: nothing), so the first time its seasons
-	                are on it starts on Autumn's first day. `decode(v, s)` gives it back (version 1's
-	                lock, a whole day, held at that day's middle as it was), re-anchored when
-	                Config's lengths changed since: the season is kept, its first day stays its
-	                first and its last its last (the days between in proportion), and the offset is
-	                worked out again from the saved day alone, so it does not depend on the order
-	                World/WorldSave's sections decode in.
+	  Saving        `encode(s, dayTime, kept)`: { v, offset, lock, lengths, day } (the calendar day
+	                when saved): version 1 whenever it can say it (running, or held at a day's
+	                middle: that whole day its lock), byte for byte what the builds before the exact
+	                hold wrote, so they read it back; version 2 only for a hold at another time of
+	                day (its exact calendar time). A world without seasons (`s.enabled` false) saves
+	                nothing of its own but `kept`, what it had saved (nil: nothing), so neither the
+	                days played without them nor a hold set then count: one that never had them
+	                starts on Autumn's first day the first time they are on, one that had them on
+	                the day it was saved on. `decode(v, s, dayTime)` gives it back (version 1's lock,
+	                a whole day, held at that day's middle as it was), re-anchored when Config's
+	                lengths changed since: the season is kept, its first day stays its first and its
+	                last its last (the days between in proportion), and the offset is worked out
+	                again from the saved day alone, so it does not depend on the order
+	                World/WorldSave's sections decode in; with `dayTime` (the day clock restored:
+	                World/SeasonClock.restored) it puts that on the day the save was made on, however
+	                far the day clock ran on since.
 	  Attributes    `writeAttributes(s, set)` / `readAttributes(get)`: ATTRIBUTE_ENABLED (bool),
 	                ATTRIBUTE_OFFSET (days), ATTRIBUTE_LOCK (the held calendar time, absent while
 	                running) and ATTRIBUTE_LENGTHS ("8,8,8,8").
@@ -88,7 +95,8 @@ Calendar.MIN_SCALE = 0.6
 Calendar.MAX_SCALE = 1.4
 -- The longest season (days) a state may have.
 Calendar.MAX_LENGTH = 1000
--- The save's version (`encode`; version 1's lock was a whole day, held at its middle).
+-- The save's newest version (`encode` writes 1 whenever it can: running, or held at a day's
+-- middle, version 1's lock being that whole day).
 Calendar.VERSION = 2
 
 export type State = {
@@ -459,10 +467,13 @@ function Calendar.encode(s: State, dayTime: number, kept: any?): Saved?
 	if not s.enabled then
 		return kept
 	end
+	local lock = s.lock
+	-- (What version 1 can say, it says: running, or held at a whole day's middle, its day.)
+	local old = lock == nil or whole(lock - 0.5)
 	return {
-		v = Calendar.VERSION,
+		v = if old then 1 else Calendar.VERSION,
 		offset = s.offset,
-		lock = s.lock,
+		lock = if lock ~= nil and old then lock - 0.5 else lock,
 		lengths = table.clone(s.lengths),
 		day = Calendar.day(dayTime, s),
 	}
@@ -482,10 +493,11 @@ end
 
 --[[
 	The state a save `v` (`encode`) gives back over `s` (Config's: its switch and lengths are
-	kept): its offset and lock, re-anchored when the saved lengths differ (see the header). nil
-	when `v` is no save of this version or the one before.
+	kept): its offset and lock, re-anchored when the saved lengths differ (see the header). With
+	`dayTime`, the day clock it is restored to, the offset puts that on the calendar day the save
+	was made on. nil when `v` is no save of this version or the one before.
 ]]
-function Calendar.decode(v: any, s: State): State?
+function Calendar.decode(v: any, s: State, dayTime: number?): State?
 	if type(v) ~= "table" or (v.v ~= Calendar.VERSION and v.v ~= 1) then
 		return nil
 	end
@@ -505,15 +517,23 @@ function Calendar.decode(v: any, s: State): State?
 			same = false
 		end
 	end
+	-- (The calendar day it was saved on, in Config's lengths.)
+	local anchored = day
 	if not same then
 		local saved = { lengths[1], lengths[2], lengths[3], lengths[4] }
+		anchored = reanchor(day, saved, s.lengths)
 		-- (The world's own day when saved stays: day - offset.)
-		state.offset = offset + reanchor(day, saved, s.lengths) - day
+		state.offset = offset + anchored - day
 		if lock ~= nil then
 			-- (The held day moves, its time of day stays.)
 			local heldDay = floor(lock)
 			state.lock = reanchor(heldDay, saved, s.lengths) + (lock - heldDay)
 		end
+	end
+	if dayTime ~= nil then
+		-- (On that day again, however far the day clock ran on since the section was written: a
+		-- world played without seasons keeps the one it had.)
+		state.offset = anchored - floor(dayTime / TICKS)
 	end
 	return state
 end

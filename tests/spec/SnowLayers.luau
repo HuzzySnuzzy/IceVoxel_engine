@@ -4,8 +4,9 @@
 	eighth sturdy), their appearances (one each, never single: they merge), drops, the Snow Layer
 	item and its recipe, stacking, what snow lies on, speed factors and where a column's layers are,
 	and the tile rules server Seasons/SnowWorld visits with: snowfall raising a tile evenly to its
-	caps (never into plants, torches or water, never past a column's cap, a capped column holding
-	nobody back) and the thaw taking a layer off its deepest columns, back to air.
+	caps (never into plants, torches or water, never past a column's cap, a capped column or one
+	someone is in the way of holding nobody back) and the thaw taking a layer off its deepest
+	columns, back to air.
 ]]
 
 return function(t, shared, require)
@@ -264,7 +265,7 @@ return function(t, shared, require)
 		t.eq(#SnowLayers.accumulate(tile({ 0, 0 }, 0)), 0, "a cap of 0 (dry biomes): none")
 	end)
 
-	t.test("snow layers: the least column rises first; a capped column holds nobody back", function()
+	t.test("snow layers: the least column rises first; a capped or a waiting column holds nobody back", function()
 		-- A drift: caps 2..4; a column already at 3 waits for the others.
 		local columns = tile({ 0, 1, 3, 0 }, { 4, 4, 4, 2 })
 		local history = {}
@@ -276,6 +277,15 @@ return function(t, shared, require)
 		t.eq(history[3], "3,3,3,2", "the column capped at 2 stops")
 		t.eq(history[4], "4,4,4,2", "and holds the rest back no longer")
 		t.eq(history[5], "4,4,4,2", "every cap reached")
+		-- A column that waits (someone in the way of its layer) holds nobody back either, and is
+		-- the least again once they go.
+		local waiting = tile({ 0, 1, 1, 1 }, 4)
+		local held = { true, false, false, false }
+		t.eq(table.concat(apply(waiting, SnowLayers.accumulate(waiting, held)), ","), "0,2,2,2")
+		t.eq(table.concat(apply(waiting, SnowLayers.accumulate(waiting, held)), ","), "0,3,3,3")
+		held[1] = false
+		t.eq(table.concat(apply(waiting, SnowLayers.accumulate(waiting, held)), ","), "1,3,3,3", "it catches up")
+		t.eq(#SnowLayers.accumulate(tile({ 1, 1 }, 4), { true, true }), 0, "all of them waiting: none")
 		-- Never past 8, whatever the cap.
 		local deep = tile({ 7, 8 }, { 8, 8 })
 		local changes = SnowLayers.accumulate(deep)

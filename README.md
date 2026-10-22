@@ -847,16 +847,17 @@ A fast, Minecraft-style voxel engine for Roblox.
     yellowing in summer; evergreens and jungles keep theirs, and so do the vines in mineshafts.
     The distant terrain turns with them, each chunk by its own biome.
   - **Rooms and heating:** walls, a roof and a floor around you make a room (up to 1,024 cells, 32
-    blocks across, a few openings: a missing roof block leaks like a broken window) whose air has
-    its own temperature: warmed by campfires, lit furnaces, working generators, players and the
-    heaters below, and lost through its walls by their insulation (Insulated Planks hold heat
-    best, Insulated Glass and the Insulated Door far better than glass and a door; glass and metal
-    lose it; an open door leaks; furniture loses nothing, and a cable through a wall leaves it
-    shut). The thermometer reads "Room +1 · Out -9", and WAILA a heater's room. The **Wood Stove**
-    burns furnace fuel four times as long for 30 HU, anywhere; the **Oil Heater** burns Oil or
-    Fuel; the **Electric Heater** (up to 40 HU) and the **Air Conditioner** (down to -40) hold a
-    room at their set point on electricity; the **Electric Fan** cools a little. Their panels have
-    "-", "+" and On / Off buttons; working, their windows glow and they hum, crackle or whirr.
+    blocks across, a few openings: a missing roof block leaks like a broken window, and so does a
+    ladder shaft at its foot, however deep the base it goes down to) whose air has its own
+    temperature: warmed by campfires, lit furnaces, working generators, players and the heaters
+    below, and lost through its walls by their insulation (Insulated Planks hold heat best,
+    Insulated Glass and the Insulated Door far better than glass and a door; glass and metal lose
+    it; an open door leaks; furniture loses nothing, and a cable through a wall leaves it shut).
+    The thermometer reads "Room +1 · Out -9", and WAILA a heater's room. The **Wood Stove** burns
+    furnace fuel four times as long for 30 HU, anywhere; the **Oil Heater** burns Oil or Fuel; the
+    **Electric Heater** (up to 40 HU) and the **Air Conditioner** (down to -40) hold a room at
+    their set point on electricity; the **Electric Fan** cools a little. Their panels have "-",
+    "+" and On / Off buttons; working, their windows glow and they hum, crackle or whirr.
 - **Weather.** Regional, not Minecraft's one switch for the whole world: storms a few hundred to a
   few thousand blocks across drift over the world with a wind that slowly turns (about 1 to 3
   blocks a second), grow and die out, and leave clear stretches between them, so you can see one
@@ -2790,11 +2791,11 @@ for performance:
 | `Time.DayLength`          | 1200    | Real seconds per in-game day (Minecraft's 20 minutes).              |
 | `Time.StartTime`          | 1000    | Day time when the server starts (ticks; 6000 noon, 13000 night).    |
 | `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
-| `Seasons.Enabled`         | true    | Don't Starve's seasons: Autumn, Winter, Spring, Summer (false: the game as without them; the debug worlds have none either). A world starts on Autumn's first day, and so does a world saved before the seasons or played without them, the next time it is loaded with them on. |
+| `Seasons.Enabled`         | true    | Don't Starve's seasons: Autumn, Winter, Spring, Summer (false: the game as without them; the debug worlds have none either). A world starts on Autumn's first day, and so does a world saved before the seasons or only ever played without them, the next time it is loaded with them on; one that had them comes back on the calendar day it was saved on, however long it was played without them. |
 | `Seasons.Lengths` / `BlendDays` | 8, 8, 8, 8 / 2 | Days each season lasts (a year of 32 days, about 10.7 hours of play); every season quantity blends over BlendDays centred on each turn (at most the shortest season). |
 | `Seasons.DaylightScale`   | 1, 0.8, 1, 1.2 | The sun's day share per season: winter's days are shorter (about 9 of 20 minutes) and summer's longer (12.7), the day length itself unchanged. |
 | `Seasons.Climate`         | see Config | Per season (Autumn, Winter, Spring, Summer): DayShift -0.1 / -0.4 / -0.05 / +0.3 and NightDrop 0.3 / 0.35 / 0.3 / 0.25 (Tough As Nails' climate units, times a biome class's Amplitude: cold 1, temperate 1, dry 0.75, tropical 0.5); WeatherShift -0.2 / -0.8 / -0.1 / +0.2 on Minecraft's temperature (a winter plain snows); WetBias 0 / +0.02 / +0.06 / -0.08 and ThunderBias 0 / -1 / +0.04 / +0.02 (rain about 23 % / 26 % / 31 % / 14 % of the time, no thunder in winter); Growth 0.5 / 0 / 1.5 / 1 (plants' random ticks); HeatWave: a summer day is one with Chance 0.3 (never two in a row), +0.3 from 09:00 to 18:00. |
-| `Seasons.Snow`            | see Config | Snow layers: each chunk near a player is visited 1 tick in 250 (TileChance; at most MaxTilesPerTick 8 visits a tick), one 4 x 4 tile that rises a layer evenly where it snows (chance: the precipitation) up to its cap (cold 6, temperate 3, tropical 1, dry 0; +1 every 64 blocks above y 160, a drift of one) and melts a layer at a time where it is warm (MeltChance 0.5 a visit, x MeltClear 2 on a clear day, MeltRain 2 in rain, MeltNight 0.5 at night), each column by the weather at its own top; the season's own snow also melts once the distant landscape's does (a taiga's spring), and snow never grows under a player or a mob; fire beside snow and a room at RoomMelt 3 or warmer melt it at every visit, heat sources within HeatMeltRadius 2 every HeatMeltSeconds 5 (each in turn, however many); `Ice`: still water freezes from its edges where it is cold enough to snow (never beside heat) and the weather's ice thaws back to the water it froze when warm (a player's pond too; ice a player places never thaws). Deep snow slows walking (0.9 / 0.8 / 0.75 from 3 / 5 / 7 layers); the Snow Layer stacks onto a layer; plants grow by the season (Climate.Growth); falling snow muffles zombies (Apocalypse.Noise.SnowFactor 0.85). |
+| `Seasons.Snow`            | see Config | Snow layers: each chunk near a player is visited 1 tick in 250 (TileChance; at most MaxTilesPerTick 8 visits a tick), one 4 x 4 tile that rises a layer evenly where it snows (chance: the precipitation) up to its cap (cold 6, temperate 3, tropical 1, dry 0; +1 every 64 blocks above y 160, a drift of one) and melts a layer at a time where it is warm (MeltChance 0.5 a visit, x MeltClear 2 on a clear day, MeltRain 2 in rain, MeltNight 0.5 at night), each column by the weather at its own top; the season's own snow also melts once the distant landscape's does (a taiga's spring), and snow never grows under a player or a mob (only their column waits); fire beside snow and a room at RoomMelt 3 or warmer melt it at every visit, heat sources within HeatMeltRadius 2 every HeatMeltSeconds 5 (each in turn, however many); `Ice`: still water freezes from its edges where it is cold enough to snow (never beside heat) and the weather's ice thaws back to the water it froze when warm (beside heat, or in spring; a player's pond too; ice a player places never thaws). Deep snow slows walking (0.9 / 0.8 / 0.75 from 3 / 5 / 7 layers); the Snow Layer stacks onto a layer; plants grow by the season (Climate.Growth); falling snow muffles zombies (Apocalypse.Noise.SnowFactor 0.85). |
 | `Seasons.Rooms`           | see Config | Enclosed, insulated rooms: at most MaxVolume 1024 cells, 32 blocks across and 6 openings; FillsPerFrame 2 and FillMs 2 a frame. |
 | `Seasons.Heat`            | see Config | Heat units a second each source gives a room (Campfire 20, Fire 15, Lava 10, lit Furnace 8, a working generator 10, a player 1, Wood Stove 30, Oil Heater 35, Electric Heater 40, Fan -10, Air Conditioner -40), the stove's StoveBurnFactor 4, the oil heater's tank and burn rates, the electric ones' J a tick per HU and the thermostats' -5..5. |
 | `Seasons.Foliage` / `Clock` | see Config | Foliage colours through the year (keyframes per class, the snow dust, the sweep's budget: SweepWrites 1,500 colours and SweepMs 0.75 a frame; far meshes rebuilt when their palette moved past FarDeltaE 6) and the season clock beside the minimap (`Clock.Enabled`; Options > HUD > Season Clock; `Clock.Toasts`: the turns' and heat waves' toasts). |

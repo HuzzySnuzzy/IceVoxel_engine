@@ -15,12 +15,13 @@
 	the SnowLayer behaviour (a layer whose support goes vanishes, no drops); placing (stacking,
 	support, drops); the season's growth factor; and what it costs (ms a visit, a tick, a heat
 	melt round; a winter's region bytes). And the review's cases: snow never grows into a player
-	or a mob standing on it; the weather's ice on a player's pond thaws back to it, a player's ice
-	never; every heat source gets its turn past MAX_SOURCES; each column's own weather (a tower's
-	top snows, the ground around it is rained on); the season's own snow and ice go with the far
-	landscape's cover (a taiga's spring, windswept hills' autumn), the snow line's stays; water
-	beside a fire never freezes and heat thaws the weather's ice; a dug cave mouth's layer leaves
-	the seed's cave air.
+	or a mob standing on it (only their columns wait, the rest of the tile rising on to its caps);
+	the weather's ice on a player's pond thaws back to it, a player's ice never; every heat source
+	gets its turn past MAX_SOURCES; each column's own weather (a tower's top snows, the ground
+	around it is rained on); the season's own snow and ice go with the far landscape's cover (a
+	taiga's spring, windswept hills' autumn), the snow line's stays; water beside a fire never
+	freezes and heat thaws the weather's ice beside it, no farther (nothing flips between ice and
+	water); a dug cave mouth's layer leaves the seed's cave air.
 ]]
 
 return function(t, shared, require, server)
@@ -416,11 +417,23 @@ return function(t, shared, require, server)
 		stand()
 		t.near(player.y, top, 1e-9, "the player still on the box's top, not in it")
 		t.near(mob.body.y, top, 1e-9, "the zombie too")
-		t.eq(h.visit(64, 0), 0, "the rest of the tile waits for them (it rises evenly)")
-		-- They go: their columns catch up, then the tile piles on to its caps.
+		-- Only their columns wait: the rest of the tile rises on to its caps around them (they hold
+		-- it back no more than a column at its cap would: an idle body keeps no tile low all winter).
+		t.eq(h.visit(64, 0), 14, "the rest of the tile rises")
+		t.eq(tileDepths(world, 64, 0), "4,4,4,4,4,2,4,4,4,4,2,4,4,4,4,4")
+		h.until_(64, 0)
+		for z = 0, 3 do
+			for x = 64, 67 do
+				local under = (x == 65 and z == 1) or (x == 66 and z == 2)
+				local cap = SeasonClimate.snowCap("cold", x, FLOOR, z, SEED)
+				t.eq(depth(world, x, z), if under then 2 else cap, if under then "under them" else "at its cap")
+			end
+		end
+		stand()
+		t.near(player.y, top, 1e-9, "the player still on two layers")
+		-- They go: their columns catch up, a layer a visit, to their caps.
 		there = false
-		h.visit(64, 0)
-		t.eq(tileDepths(world, 64, 0), "3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3")
+		t.eq(h.visit(64, 0), 2, "theirs, the least")
 		h.until_(64, 0)
 		for z = 0, 3 do
 			for x = 64, 67 do
@@ -850,7 +863,7 @@ return function(t, shared, require, server)
 		t.eq(h.snow.cursor, 2 * SnowWorld.MAX_SOURCES - 301)
 	end)
 
-	t.test("snow world: still water beside a fire never freezes; heat thaws the weather's ice", function()
+	t.test("snow world: still water beside a fire never freezes; heat thaws the weather's ice beside it", function()
 		local h = newSnow()
 		local world = h.world
 		h.precipitation = 0
@@ -874,26 +887,36 @@ return function(t, shared, require, server)
 		world:setBlock(12, FLOOR - 1, 5, Blocks.fluidId("Lava", 0))
 		h.visit(8, 4)
 		t.eq(world:getBlock(11, FLOOR - 1, 5), ICE, "generated ice stays")
-		-- The heat melt round thaws the weather's ice within HeatMeltRadius, winter or not.
+		-- The heat melt round thaws the weather's ice beside a lit source, winter or not, and no
+		-- farther: as far as a visit's warmth keeps water from freezing, so nothing it thaws freezes
+		-- again (ice two blocks from a campfire went to water and back every round and visit).
 		world:setBlock(3, FLOOR - 1, 5, GRASS)
+		h.visit(4, 4)
+		t.eq(world:getBlock(4, FLOOR - 1, 5), ICE, "put out again: ice")
 		world:setBlock(5, FLOOR, 2, CAMPFIRE)
+		world:setBlock(3, FLOOR - 1, 6, CAMPFIRE)
 		h.roll = function()
 			return 0.99
 		end
 		SnowWorld.tickWith(h.snow, { world:getChunk(0, 0) })
 		SnowWorld.advance(h.snow, Config.Seasons.Snow.HeatMeltSeconds)
-		local radius = Config.Seasons.Snow.HeatMeltRadius
-		for z = 4, 7 do
-			for x = 4, 7 do
-				local within = math.max(math.abs(x - 5), math.abs(z - 2), 1) <= radius
-				local block = world:getBlock(x, FLOOR - 1, z)
-				if x == 4 and z == 5 then
-					t.eq(block, WATER, "(thawed before)")
-				else
-					t.eq(block, if within then WATER else ICE, `the round at {x}, {z}`)
+		local function pond(): string
+			local out = {}
+			for z = 4, 7 do
+				for x = 4, 7 do
+					table.insert(out, if world:getBlock(x, FLOOR - 1, z) == ICE then "I" else "W")
 				end
 			end
+			return table.concat(out)
 		end
+		t.eq(pond(), "IIIIIIIIWIIIIIII", "the round: only the ice beside the bank's campfire")
+		local writes = h.snow.writes
+		for _ = 1, 10 do
+			SnowWorld.advance(h.snow, Config.Seasons.Snow.HeatMeltSeconds)
+			h.visit(4, 4)
+		end
+		t.eq(pond(), "IIIIIIIIWIIIIIII", "rounds and visits: as it was")
+		t.eq(h.snow.writes, writes, "nothing written back and forth")
 	end)
 
 	--[[ Ice ]]

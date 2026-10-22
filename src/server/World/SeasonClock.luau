@@ -17,15 +17,18 @@
 	              the calendar at the exact time it is, so nothing moves; true runs on from the held
 	              day: Calendar.hold), `keepCalendar(old, new)` (/time set: the offset takes the day
 	              count's jump back). `changed` fires after each with the new state.
-	  Saving      World/WorldSave's "seasons" section: `encode()` (Calendar.encode: { v = 2,
-	              offset, lock, lengths, day }; a world without seasons keeps the section it was
-	              read with, or saves none, so neither the days played without them nor a hold set
-	              then are kept) and `decode(value)` (re-anchored when Config's lengths changed).
-	              A world whose calendar was not read back (a new world, one saved before the
-	              seasons or without them, or a section that can't be read) gets `fresh()` in
-	              `restored()`, once every section is back (the day clock's too): Autumn's first
-	              day at that moment (Calendar.fresh), so every world has the same 8 mild days
-	              before its first winter.
+	  Saving      World/WorldSave's "seasons" section: `encode()` (Calendar.encode: { v, offset,
+	              lock, lengths, day }, version 1 unless held at another time of day than a day's
+	              middle; a world without seasons keeps the section it was read with, or saves
+	              none, so neither the days played without them nor a hold set then are kept) and
+	              `decode(value)` (re-anchored when Config's lengths changed). `restored()`, once
+	              every section is back (the day clock's too), puts a calendar read back on the day
+	              it was saved on at the restored time (so one carried through a world played
+	              without seasons for a while comes back on its day, not as many days on), and
+	              gives a world whose calendar was not read back (a new world, one saved before the
+	              seasons or only ever without them, or a section that can't be read) `fresh()`:
+	              Autumn's first day at that moment (Calendar.fresh), so every world has the same 8
+	              mild days before its first winter.
 	Starts before World/WeatherServer (the weather's season Moment reads the calendar).
 ]]
 
@@ -153,12 +156,18 @@ function SeasonClock.decode(value: any): boolean
 end
 
 --[[
-	World/WorldSave once every section is back, the day clock's too: a world whose calendar was not
-	read back gets `fresh()` at the restored time (see the header).
+	World/WorldSave once every section is back, the day clock's too: a calendar read back is put on
+	the day it was saved on at the restored time, a world whose calendar was not read back gets
+	`fresh()` then (see the header).
 ]]
 function SeasonClock.restored()
 	if not read then
 		SeasonClock.fresh()
+		return
+	end
+	local s = Calendar.decode(saved, Calendar.newState(), TimeOfDay.get())
+	if s then
+		adopt(s)
 	end
 end
 

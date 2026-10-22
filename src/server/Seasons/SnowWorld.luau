@@ -28,7 +28,9 @@
 	  Bodies     snow never grows into a player or a mob (env `occupied`: the new layer's box would
 	             overlap a player's standing hull, as a placement's rule in Network/ServerNet, or a
 	             mob's, Mobs/Mobs.occupied): that column waits for a later visit, so nobody stands
-	             inside a box, Hull's way of letting them sink in. The same for ice.
+	             inside a box, Hull's way of letting them sink in. Only it waits: the rest of its
+	             tile goes on rising (SnowLayers.accumulate's `held`), and it catches up once they
+	             go. The same for ice.
 	  Thaw       on a column where it does not snow and SeasonClimate.melts there, or where the
 	             season's own snow goes (the biome would not snow there without the season, and
 	             SeasonClimate.thawing says the far landscape's white is going or gone at the
@@ -58,15 +60,17 @@
 	             most MAX_WRITES (16: a change a column) a visit, sent with the frame's edits (the
 	             boot's net.flush).
 	  Heat       every HeatMeltSeconds (`step`) each heat source in an active chunk that heats now
-	             melts a layer of every snow cell and thaws the weather's ice within HeatMeltRadius
-	             sideways and up or down (5 x 5 x 5 cells). The sources are indexed by chunk
-	             (`blockChanged`: a heating block placed or gone; a chunk's saved edits are looked
-	             through once, the first time it is active, at most SCANS_PER_TICK chunks a tick);
-	             the round is spread over the frames, at most SOURCES_PER_FRAME sources or
-	             HEAT_WRITES writes a frame, and at most MAX_SOURCES a round, from where the last
-	             round stopped (`cursor`), so with more sources than that each gets its turn (a
-	             round not done when the next is due goes on instead). Lava and fire the seed made
-	             melt snow next to them when their tile is visited (Warm).
+	             melts a layer of every snow cell within HeatMeltRadius sideways and up or down
+	             (5 x 5 x 5 cells) and thaws the weather's ice beside it (as far as Warm reaches:
+	             water farther off freezes, so ice there would flip back and forth). The sources
+	             are indexed by chunk (`blockChanged`: a heating block placed or gone; a chunk's
+	             saved edits are looked through once, the first time it is active, at most
+	             SCANS_PER_TICK chunks a tick); the round is spread over the frames, at most
+	             SOURCES_PER_FRAME sources or HEAT_WRITES writes a frame, and at most MAX_SOURCES a
+	             round, from where the last round stopped (`cursor`), so with more sources than
+	             that each gets its turn (a round not done when the next is due goes on instead).
+	             Lava and fire the seed made melt snow next to them when their tile is visited
+	             (Warm).
 	  Growth     `growth()`: the season's plant growth factor (SeasonClimate's sample: Autumn 0.5,
 	             Winter 0, Spring 1.5, Summer 1, blended) at the server's day time, which
 	             Behaviours/Sapling, Herb and Grass multiply their random-tick chances by; 1 with
@@ -155,12 +159,14 @@ export type Snow = {
 	queueBlocks: { number },
 	cursor: number,
 	-- A visit's columns and each one's weather (reused): snow falls on it, it thaws (after the
-	-- roll), it may freeze, rain falls on it; and the columns that thaw.
+	-- roll), it may freeze, rain falls on it, someone is in the way of its next layer; and the
+	-- columns that thaw.
 	columns: { SnowLayers.Column },
 	snowing: { boolean },
 	thaws: { boolean },
 	freezes: { boolean },
 	raining: { boolean },
+	held: { boolean },
 	thawing: { SnowLayers.Column },
 	-- Counts (specs, measurements): tile visits, weather writes, heat sources melted around.
 	visits: number,
@@ -253,6 +259,7 @@ function SnowWorld.new(env: Env): Snow
 		thaws = table.create(count, false),
 		freezes = table.create(count, false),
 		raining = table.create(count, false),
+		held = table.create(count, false),
 		thawing = {},
 		visits = 0,
 		writes = 0,
@@ -473,14 +480,21 @@ function SnowWorld.visit(snow: Snow, chunk: Chunk, tx: number, tz: number): numb
 		end
 	end
 	if piling then
-		for _, change in SnowLayers.accumulate(columns) do
+		-- (A column someone stands on waits, and holds the rest of the tile back no more than a
+		-- capped one: see the header's Bodies.)
+		local held = snow.held
+		for i, column in columns do
+			local n, y, takes = SnowLayers.column(column)
+			held[i] = takes
+				and n < column.cap
+				and n < SnowLayers.MAX
+				and inTheWay(env, SnowLayers.block(n + 1) :: number, column.x, y, column.z)
+		end
+		for _, change in SnowLayers.accumulate(columns, held) do
 			local i = (change.z - z0) * TILE + (change.x - x0) + 1
 			if not changed[i] then
 				changed[i] = true
-				-- (A column someone stands on waits: see the header's Bodies.)
-				if not inTheWay(env, change.block, change.x, change.y, change.z) then
-					table.insert(changes, change)
-				end
+				table.insert(changes, change)
 			end
 		end
 	end
@@ -583,8 +597,9 @@ end
 --[[ The heat melt ]]
 
 --[[
-	One layer off every snow cell, and the weather's ice thawed, within HeatMeltRadius of (x, y,
-	z). Returns the writes made.
+	One layer off every snow cell within HeatMeltRadius of (x, y, z), and the weather's ice beside
+	it thawed (as far as a visit's `warm` reaches, which keeps water there from freezing: ice
+	farther off would freeze again at the next visit). Returns the writes made.
 ]]
 local function meltAround(snow: Snow, x: number, y: number, z: number): number
 	local world = snow.env.world
@@ -596,7 +611,9 @@ local function meltAround(snow: Snow, x: number, y: number, z: number): number
 				local block = peek(world, x + dx, y + dy, z + dz)
 				local less = nil
 				if block == ICE then
-					less = WorldServer.thawAt(world, x + dx, y + dy, z + dz)
+					if math.abs(dx) + math.abs(dy) + math.abs(dz) == 1 then
+						less = WorldServer.thawAt(world, x + dx, y + dy, z + dz)
+					end
 				elseif block ~= nil then
 					less = SnowLayers.lessOne(block)
 				end

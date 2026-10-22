@@ -278,8 +278,8 @@ export type TickContext = {
 	-- seasons): no room, outside 0. Kinds work out heat with Shared/Seasons/Rooms.thermostat.
 	climate: ((x: number, y: number, z: number) -> (Rooms.Sample?, number))?,
 	-- Is a player within `radius` blocks of cell (x, y, z) (server Seasons/RoomWorld.playerNear,
-	-- the positions of its last 1 Hz step, true with the rooms off: a space heater's standby)? nil
-	-- (a test's context): a player counts as near.
+	-- the positions of its last 1 Hz step, with the rooms off Players/PlayerPositions' now: a space
+	-- heater's standby)? nil (a test's context): a player counts as near.
 	near: ((x: number, y: number, z: number, radius: number) -> boolean)?,
 }
 

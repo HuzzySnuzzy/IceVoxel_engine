@@ -12,8 +12,8 @@
 	heat summed for the call) and Rooms.thermostat for its set point, with `others` the room's heat
 	less its own (`heat`), so several thermostats in one room share the load without fighting
 	(each sees what the others give now); outdoors the space heater's HU while a player is near
-	(TickContext `near`, server RoomWorld.playerNear, which says yes with the rooms off; a
-	context without it counts a player near).
+	(TickContext `near`, server RoomWorld.playerNear, by the players' positions with the rooms off
+	too; a context without it counts a player near).
 	It takes P x HeaterJoules J (Shared/Machines `use`); with less stored it takes all there is
 	and delivers that share ("Low power"), with none nothing ("No power").
 

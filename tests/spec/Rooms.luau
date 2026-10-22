@@ -1,11 +1,14 @@
 --[[
 	The seasons' rooms (Shared/Seasons/Rooms), pure over a fake world (tests/lib/FakeRooms): the
 	flood fill of sealed rooms, open doors, porches, igloos, leaking, open, too big and unloaded
-	spaces, a hole in the roof (one opening, as in a wall; a roofless house and a pit no room),
-	per-face U values, the ground's faces, furniture and pillars (no loss), cables through a wall
-	(shut), the eaves, heat sources in the cells and the walls; the design's worked numbers (a 5 x 5 x 3 plank house in a winter night, a taiga, a desert room); the
-	air's exact exponential and its time constant; the thermostat never above its maximum and
-	settling within half a step, alone, beside a campfire, two in one room, and a cooler.
+	spaces, a hole in the roof (one opening, as in a wall; a roofless house and a pit no room), an
+	open shaft down to a cellar or a mine (one opening at its foot, however deep), a fill's block
+	reads (about six a cell, the walks through what stands inside within its budget), per-face U
+	values, the ground's faces, furniture and pillars (no loss), cables through a wall (shut), the
+	eaves, heat sources in the cells and the walls; the design's worked numbers (a 5 x 5 x 3 plank
+	house in a winter night, a taiga, a desert room); the air's exact exponential and its time
+	constant; the thermostat never above its maximum and settling within half a step, alone,
+	beside a campfire, two in one room, and a cooler.
 ]]
 
 local FakeRooms = require("../lib/FakeRooms")
@@ -267,6 +270,144 @@ return function(t, shared, require)
 		t.eq(tunnel.openings, 1)
 		t.eq(tunnel.volume, 3 + 6)
 		t.ok(tunnel.cells[Coords.posKey(30, G - 1, 10)], "the pit, up to the ground")
+		-- A chimney five blocks over the roof: not climbed past the roof's cover (ROOF), the face up
+		-- into the hole one opening all the same.
+		for y = G + 6, G + 8 do
+			roof.set(1, y, 2, B.Brick)
+			roof.set(3, y, 2, B.Brick)
+			roof.set(2, y, 1, B.Brick)
+			roof.set(2, y, 3, B.Brick)
+		end
+		local tall = assert(fill(roof, 0, G, 0))
+		t.eq(tall.openings, 1)
+		t.eq(tall.volume, 75)
+		t.ok(tall.walls[Coords.posKey(2, G + 3, 2)], "the hole in the roof, its opening")
+	end)
+
+	t.test("rooms: an open shaft down to a cellar or a mine is one opening at its foot, however deep", function()
+		-- A 5 x 5 x 3 room dug `depth` below the surface (on a mound of dirt where the ground is too
+		-- shallow), a 1-wide, 2-high passage west from its middle and an open 1 x 1 shaft (a
+		-- ladder's) from the passage's end up to the surface. Returns the world, the room's floor
+		-- and the surface.
+		local function mine(depth: number): (any, number, number)
+			local world = FakeRooms.new(Blocks, Rooms)
+			local surface = math.max(G, depth + 10)
+			if surface > G then
+				world.fill(-10, G, -5, 8, surface - 1, 9, B.Dirt)
+			end
+			local floor = surface - depth
+			world.fill(0, floor, 0, 4, floor + 2, 4, B.Air)
+			world.fill(-2, floor, 2, -1, floor + 1, 2, B.Air)
+			world.fill(-3, floor, 2, -3, surface - 1, 2, B.Air)
+			return world, floor, surface
+		end
+		for _, depth in { 10, 40, 100 } do
+			local world, floor, surface = mine(depth)
+			local room, why = fill(world, 2, floor, 2)
+			assert(room, `{depth} deep: {why}`)
+			-- The shaft's two cells beside the passage are the room's (open to the sky, under the
+			-- ground's cover), the face up from them its one opening: not climbed to the surface.
+			t.eq(room.volume, 75 + 4 + 2, `{depth} deep`)
+			t.eq(room.openings, 1, `{depth} deep`)
+			t.ok(room.cells[Coords.posKey(-3, floor + 1, 2)], "the shaft's foot")
+			t.ok(room.walls[Coords.posKey(-3, floor + 2, 2)], "the opening up it")
+			t.eq(room.maxY, floor + 2, "nothing of the shaft over the room's height")
+			-- Seeded at the shaft's foot: the same room; a player up the ladder is outside.
+			t.eq((assert(fill(world, -3, floor, 2))).volume, room.volume)
+			t.eq(select(2, fill(world, -3, floor + 8, 2)), Rooms.OPEN, "up the ladder")
+			-- Another shaft down through its ceiling: the face up into it one more opening.
+			world.fill(2, floor + 3, 2, 2, surface - 1, 2, B.Air)
+			local both = assert(fill(world, 2, floor, 2))
+			t.eq(both.volume, room.volume)
+			t.eq(both.openings, 2)
+		end
+		-- A shaft straight up from the end of a tunnel 40 deep, and one two wide (1 x 2).
+		local floor = G - 40
+		local above = FakeRooms.new(Blocks, Rooms)
+		above.fill(0, floor, 0, 4, floor + 2, 4, B.Air)
+		above.fill(-6, floor, 2, -1, floor + 1, 2, B.Air)
+		above.fill(-6, floor + 2, 2, -6, G - 1, 2, B.Air)
+		local ended = assert(fill(above, 2, floor, 2))
+		t.eq(ended.openings, 1)
+		t.eq(ended.volume, 75 + 12)
+		above.fill(-7, floor, 2, -7, G - 1, 2, B.Air)
+		local wide = assert(fill(above, 2, floor, 2))
+		-- (The second column has no air under a cover beside it: the two faces into it at the
+		-- tunnel's height, and the one up the first.)
+		t.eq(wide.openings, 3)
+		t.eq(wide.volume, 75 + 12)
+	end)
+
+	t.test("rooms: a fill reads about six blocks a cell, the walks through what stands inside in that", function()
+		-- Its reads (the view's getBlock) and its sky scans, counted apart.
+		local function counted(world: any, x: number, y: number, z: number, limits: any?): (any, number, number)
+			local reads, scans = 0, 0
+			local view = {
+				getBlock = function(bx: number, by: number, bz: number): number?
+					reads += 1
+					return world.getBlock(bx, by, bz)
+				end,
+				skyAbove = function(bx: number, bz: number): number
+					scans += 1
+					return world.skyAbove(bx, bz)
+				end,
+			}
+			return Rooms.fill(view, x, y, z, limits), reads, scans
+		end
+		local budget = Config.Seasons.Rooms.MaxVolume * 6
+		-- The review's: a 1-wide, 16-high L-shaped gallery dug in the ground, arms 31 long (976
+		-- cells), and a 2 x 3 L-shaped mine tunnel: every face of one arm looks across the ground
+		-- at the other (37 089 and 17 852 reads with the sky scans before; the walk now looks three
+		-- blocks on at most, by the room's cells, reading only when it finds the room there).
+		local gallery = FakeRooms.new(Blocks, Rooms)
+		gallery.fill(0, G - 40, 0, 30, G - 25, 0, B.Air)
+		gallery.fill(0, G - 40, 0, 0, G - 25, 30, B.Air)
+		local tunnel = FakeRooms.new(Blocks, Rooms)
+		tunnel.fill(0, G - 40, 0, 30, G - 38, 1, B.Air)
+		tunnel.fill(0, G - 40, 0, 1, G - 38, 30, B.Air)
+		for _, case in { { "the gallery", gallery, 976, 61 }, { "the tunnel", tunnel, 360, 120 } } do
+			local name, world, volume, columns = case[1], case[2], case[3], case[4]
+			local room, reads, scans = counted(world, 0, G - 40, 0)
+			assert(room, name)
+			t.eq(room.volume, volume, name)
+			t.ok(reads <= 6 * volume and reads <= budget, `{name}: {reads} reads`)
+			t.eq(scans, columns, `{name}: a sky scan a column`)
+		end
+		-- A block three thick standing in the room loses nothing (two reads a face).
+		local house = FakeRooms.new(Blocks, Rooms)
+		house.house(0, 0, 5, 5, 3, B.Planks)
+		local bare = assert(fill(house, 0, G, 0))
+		house.fill(1, G, 3, 3, G + 2, 3, B.Stone)
+		local thick = assert(fill(house, 0, G, 0))
+		t.near(thick.uaOut, bare.uaOut - 3 * 0.025, 1e-9, "only the roof faces it took")
+		t.near(thick.uaGround, bare.uaGround - 3 * 0.02, 1e-9, "and the floor's")
+		-- A maze of 1 x 1 tunnels two blocks apart (1018 cells), every face of each looking across
+		-- two blocks at another: those reads would pass the budget with the fill's own, so none is
+		-- made (the blocks between lose, as walls), whichever cell it is filled from.
+		local maze = FakeRooms.new(Blocks, Rooms)
+		local floor = G - 40
+		for layer = 0, 5 do
+			local y = floor + layer * 3
+			for row = 0, 9 do
+				local z = row * 3
+				maze.fill(0, y, z, 14, y, z, B.Air)
+				if row < 9 then
+					local x = if row % 2 == 0 then 14 else 0
+					maze.fill(x, y, z + 1, x, y, z + 2, B.Air)
+				end
+			end
+			if layer < 5 then
+				local x = if layer % 2 == 0 then 14 else 0
+				maze.fill(x, y + 1, 27, x, y + 2, 27, B.Air)
+			end
+		end
+		local first = assert((counted(maze, 0, floor, 0)))
+		local other = assert((counted(maze, 7, floor + 15, 27)))
+		t.eq(first.volume, 1018)
+		t.near(other.uaOut, first.uaOut, 1e-9, "the same room from another seed")
+		local roomy = { maxVolume = 4096, maxExtent = 32, maxOpenings = 6 }
+		local walked = assert((counted(maze, 0, floor, 0, roomy)))
+		t.ok(walked.uaOut < first.uaOut / 2, "with a budget for them, the blocks between lose nothing")
 	end)
 
 	t.test("rooms: blocks standing inside a room lose nothing to the outside", function()

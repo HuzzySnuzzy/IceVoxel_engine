@@ -29,17 +29,18 @@
 	             unless a block there changes. A room nobody visited (a player in it, a machine
 	             asking) for ForgetSeconds whose sources give nothing is forgotten.
 	  Budget     at most FillsPerFrame fills and FillMs a frame (`step`; dirty rooms and players'
-	             seeds before machines'); a fill is at most MaxVolume x 6 block reads and a sky
-	             scan per column. The air steps at 1 Hz (Rooms.step over the time since the last
-	             step): its heat the room sources' (Players/Climate.roomSource: what each block
-	             in the room or its walls gives, machines their `heat` field, at most a source's
-	             limit of each kind; a source in a wall between rooms gives to one, the room
-	             `climateAt` answers for its cell, so a thermostat heats the room it measures and
-	             is paid for once) and PLAYER_HU for each player whose feet are in it; its
-	             outside value (`outside`) the sheltered outdoor value at its seed's column
-	             (Tough As Nails' Temperature.outside under a roof, with the season's shift and
-	             night drop), kept within OutsideLimit. Nothing else runs per frame: O(rooms +
-	             sources + players) a second.
+	             seeds before machines'); a fill reads about 6 blocks a cell (the reads through
+	             what stands in a room only while all of its reads stay within MaxVolume x 6:
+	             Shared/Seasons/Rooms) and makes a sky scan per column. The air steps at 1 Hz
+	             (Rooms.step over the time since the last step): its heat the room sources'
+	             (Players/Climate.roomSource: what each block in the room or its walls gives,
+	             machines their `heat` field, at most a source's limit of each kind; a source in a
+	             wall between rooms gives to one, the room `climateAt` answers for its cell, so a
+	             thermostat heats the room it measures and is paid for once) and PLAYER_HU for
+	             each player whose feet are in it; its outside value (`outside`) the sheltered
+	             outdoor value at its seed's column (Tough As Nails' Temperature.outside under a
+	             roof, with the season's shift and night drop), kept within OutsideLimit. Nothing
+	             else runs per frame: O(rooms + sources + players) a second.
 	  Snow       `temperatureAt` (Seasons/SnowWorld: a snow cell and the block under it, up to 32
 	             a visit, several visits a tick) is a lookup only, never a fill and nothing made:
 	             the air of the room holding the cell, else of the warmest room it walls (a roof
@@ -50,8 +51,9 @@
 	             again for the call (so a thermostat's `others`, the room's heat less its own,
 	             is exact however often it changes), else nil and the outdoor value there
 	             (worked out once a second per machine). `playerNear` says whether a player
-	             stands within a radius of a cell (the positions of the last 1 Hz step): a space
-	             heater's standby (Machines' TickContext `near`; with no rooms, always).
+	             stands within a radius of a cell (the positions of the last 1 Hz step; with no
+	             rooms, Players/PlayerPositions' now): a space heater's standby (Machines'
+	             TickContext `near`).
 
 	The rooms' state is `RoomWorld.new(env)` (pure over its Env, so tests run it on a fake world);
 	`start(world)` makes the game's one over World/WorldServer (loaded chunks only, never
@@ -898,6 +900,31 @@ function RoomWorld.temperatureIn(world: RoomWorld, x: number, y: number, z: numb
 	return if warmest > -math.huge then warmest else nil
 end
 
+-- (`nearAmong`'s question and answer, so asking makes no closure.)
+local askX, askY, askZ, askLimit, askFound = 0, 0, 0, 0, false
+local function askOne(fx: number, fy: number, fz: number)
+	local dx, dy, dz = fx - askX, fy + 0.9 - askY, fz - askZ
+	if dx * dx + dy * dy + dz * dz <= askLimit then
+		askFound = true
+	end
+end
+
+--[[
+	Is a player's feet within `radius` blocks of cell (x, y, z)'s centre, of those `players` gives
+	now (an Env's `players`: with no rooms, `playerNear` asks Players/PlayerPositions so)?
+]]
+function RoomWorld.nearAmong(
+	players: (each: (x: number, y: number, z: number) -> ()) -> (),
+	x: number,
+	y: number,
+	z: number,
+	radius: number
+): boolean
+	askX, askY, askZ, askLimit, askFound = x + 0.5, y + 0.5, z + 0.5, radius * radius, false
+	players(askOne)
+	return askFound
+end
+
 -- Is a player's feet within `radius` blocks of cell (x, y, z)'s centre (at the last step)?
 function RoomWorld.nearIn(world: RoomWorld, x: number, y: number, z: number, radius: number): boolean
 	local feet = world.feet
@@ -922,6 +949,9 @@ end
 
 local current: RoomWorld? = nil
 local started = false
+-- Every player's feet now (Players/PlayerPositions, set by `start` whether the rooms run or not;
+-- nil before it): what `playerNear` goes by without rooms.
+local everyone: ((each: (x: number, y: number, z: number) -> ()) -> ())? = nil
 
 -- The game's rooms (nil before `start`, and with the rooms off).
 function RoomWorld.world(): RoomWorld?
@@ -932,12 +962,18 @@ end
 function RoomWorld.start(world: any)
 	assert(not started, "RoomWorld.start was already called")
 	started = true
+	-- (Roblox glue, required here so the tests load this module without it.)
+	local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions) :: any
+	local function players(each: (x: number, y: number, z: number) -> ())
+		for _, x, y, z in PlayerPositions.each() do
+			each(x, y, z)
+		end
+	end
+	everyone = players
 	if not (Config.Seasons.Enabled and settings.Enabled) then
 		return
 	end
-	-- (Roblox glue, required here so the tests load this module without it.)
 	local ChunkLayout = require(Shared.World.ChunkLayout)
-	local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions) :: any
 	local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay) :: any
 	local SIZE = ChunkLayout.SIZE
 	local get = ChunkLayout.get
@@ -966,11 +1002,7 @@ function RoomWorld.start(world: any)
 			return height, biome
 		end,
 		dayTime = TimeOfDay.get,
-		players = function(each: (x: number, y: number, z: number) -> ())
-			for _, x, y, z in PlayerPositions.each() do
-				each(x, y, z)
-			end
-		end,
+		players = players,
 		clock = os.clock,
 		seed = (world.generator :: any).seed or 0,
 	})
@@ -1024,13 +1056,19 @@ function RoomWorld.temperatureAt(x: number, y: number, z: number): number?
 end
 
 --[[
-	Is a player within `radius` blocks of cell (x, y, z) (a space heater's standby)? Without rooms
-	(Config.Seasons or its Rooms off) there are no positions to go by: true, as a TickContext
-	without `near` (an Electric Heater outdoors keeps warming the players beside it).
+	Is a player within `radius` blocks of cell (x, y, z) (a space heater's standby)? The positions
+	of the rooms' last step; without rooms (Config.Seasons or its Rooms off) Players/
+	PlayerPositions' now, so an Electric Heater outdoors still stands by with nobody near and warms
+	the players beside it. Before `start` there are none to go by: true, as a TickContext without
+	`near`.
 ]]
 function RoomWorld.playerNear(x: number, y: number, z: number, radius: number): boolean
 	local world = current
-	return world == nil or RoomWorld.nearIn(world, x, y, z, radius)
+	if world then
+		return RoomWorld.nearIn(world, x, y, z, radius)
+	end
+	local players = everyone
+	return players == nil or RoomWorld.nearAmong(players, x, y, z, radius)
 end
 
 return RoomWorld

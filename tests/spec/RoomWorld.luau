@@ -7,11 +7,29 @@
 	climateAt summing the heat for the call, temperatureAt in cells, walls and the eaves, sources'
 	limits, a source in a wall between two rooms heating one (and paid for once), two thermostats
 	sharing a room, a room whose roof is blown off going at once, a burning stove finding its room
-	alone, no rooms at all (a space heater beside players), the sheltered outside value, a heater's
-	thermostat holding a room through climateAt, and the fill's cost.
+	alone, no rooms at all (a space heater beside players, standing by with nobody near, by their
+	positions), the sheltered outside value, a heater's thermostat holding a room through
+	climateAt, and the fill's cost.
 ]]
 
+local fs = require("@lune/fs")
+local luau = require("@lune/luau")
+
 local FakeRooms = require("../lib/FakeRooms")
+
+-- Server Seasons/RoomWorld's source, loaded afresh with its Roblox globals as arguments (after the
+-- --! lines) where a test starts it.
+local SOURCE = "src/server/Seasons/RoomWorld.luau"
+
+local function withHeader(source: string): string
+	local lines = string.split(source, "\n")
+	local i = 1
+	while lines[i] and string.sub(lines[i], 1, 3) == "--!" do
+		i += 1
+	end
+	lines[i] = "local script, require, game = ...; " .. (lines[i] or "")
+	return table.concat(lines, "\n")
+end
 
 return function(t, shared, require, server)
 	local Biomes = require(shared.Biomes)
@@ -658,7 +676,7 @@ return function(t, shared, require, server)
 		t.eq(fake.rooms.count, 1, "kept past ForgetSeconds")
 	end)
 
-	t.test("roomworld: with no rooms (the seasons or their rooms off) a heater is a space heater", function()
+	t.test("roomworld: before start there are no rooms, and a heater is a space heater", function()
 		-- The module's own functions before (without) RoomWorld.start: what Machines/Machines' env
 		-- gives the kinds.
 		t.eq(RoomWorld.world(), nil, "no rooms world")
@@ -690,6 +708,86 @@ return function(t, shared, require, server)
 		end
 		t.eq(Machines.state(container), HeatStates.HEATING, "never Standby")
 		t.eq(Machines.get(container, "heat"), HEAT.SpaceHeater)
+	end)
+
+	t.test("roomworld: started with the rooms off, a heater stands by unless a player is near it", function()
+		-- RoomWorld loaded afresh (a module state of its own) and started as the server does, with
+		-- Config.Seasons.Rooms off and Players/PlayerPositions a stub giving `positions`.
+		local positions: { { number } } = {}
+		local stub = {
+			each = function(): () -> (number?, number, number, number)
+				local i = 0
+				return function(): (number?, number, number, number)
+					i += 1
+					local feet = positions[i]
+					if feet == nil then
+						return nil, 0, 0, 0
+					end
+					return i, feet[1], feet[2], feet[3]
+				end
+			end,
+		}
+		local players =
+			{ Name = "Players", PlayerPositions = { Name = "PlayerPositions" }, Climate = server.Players.Climate }
+		local script =
+			{ Name = "RoomWorld", Parent = { Name = "Seasons", Parent = { Name = "IceVoxel", Players = players } } }
+		local game = {
+			GetService = function(_, name: string): any
+				assert(name == "ReplicatedStorage", `no fake service {name}`)
+				return shared.Parent
+			end,
+		}
+		local fresh = luau.load(withHeader(fs.readFile(SOURCE)), { debugName = SOURCE })(
+			script,
+			function(node: any): any
+				return if node == players.PlayerPositions then stub else require(node)
+			end,
+			game
+		)
+		local settings = Config.Seasons.Rooms
+		local enabled = settings.Enabled
+		settings.Enabled = false
+		local ok, err = pcall(fresh.start, {})
+		settings.Enabled = enabled
+		assert(ok, err)
+		t.eq(fresh.world(), nil, "no rooms")
+		local container = Machines.newContainer(B.ElectricHeater)
+		local ctx: any = {
+			block = B.ElectricHeater,
+			x = 0,
+			y = G,
+			z = 0,
+			energy = assert(Machines.energyOf(B.ElectricHeater)),
+			tick = 0,
+			dayTime = 18000,
+			getBlock = function(): number
+				return B.Air
+			end,
+			climate = fresh.climateAt,
+			near = fresh.playerNear,
+		}
+		local function run()
+			for _ = 1, 40 do
+				ctx.tick += 1
+				Machines.set(container, "energy", Machines.capacity(container))
+				Machines.tick(container, ctx)
+			end
+		end
+		-- Nobody on the server, then one player past StandbyRadius: it stands by, drawing nothing.
+		run()
+		t.eq(Machines.state(container), HeatStates.STANDBY, "nobody near")
+		t.eq(Machines.get(container, "heat"), 0)
+		positions[1] = { HEAT.StandbyRadius + 4.5, G, 0.5 }
+		run()
+		t.eq(Machines.state(container), HeatStates.STANDBY, "a player far off")
+		-- One beside it: the space heater.
+		positions[2] = { 2.5, G, 0.5 }
+		run()
+		t.eq(Machines.state(container), HeatStates.HEATING, "a player beside it")
+		t.eq(Machines.get(container, "heat"), HEAT.SpaceHeater)
+		positions[2] = nil
+		run()
+		t.eq(Machines.state(container), HeatStates.STANDBY, "gone again")
 	end)
 
 	t.test("roomworld: the sheltered outside value (Tough As Nails under a roof), within OutsideLimit", function()

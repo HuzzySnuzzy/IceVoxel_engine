@@ -10,14 +10,20 @@
 	            `uaGround` (the ground's temperature, GROUND, is 0), any other to `uaOut`; but a
 	            block standing inside the room (furniture, a pillar, the heater itself, a wall
 	            jutting in: going on from it the way the face looks, through blocks with an
-	            insulation and within the room's bounds, reaches a cell of the room) loses nothing
-	            through that face, so only faces towards the outside count, and a block on the
-	            floor stands in for the floor face it covers. A passable cell at or above its
-	            column's `skyAbove` (the first height open to the sky) is outside: the face
-	            towards it is an opening (OPENING_U, counted in `openings`) and the fill does not
-	            enter it; unless three or four of its sideways neighbour columns are covered above
-	            it (a hole in the roof or a chimney a block wide: the fill goes up it to where the
-	            sky starts, so a missing roof block is one opening, as a missing wall block is).
+	            insulation and within the room's bounds, reaches a cell of the room at most INSIDE
+	            (3) blocks on) loses nothing through that face, so only faces towards the outside
+	            count, and a block on the floor stands in for the floor face it covers. (One a
+	            block thick costs no read; the blocks of a thicker one are read only while the
+	            fill's reads stay within BUDGET (6) a cell of `maxVolume`, sky scans aside.) A
+	            passable cell at or above its column's `skyAbove` (the first height open to the
+	            sky) is outside: the face towards it is an opening (OPENING_U, counted in
+	            `openings`) and the fill does not enter it; unless it is in a hole in a roof:
+	            three or four of its sideways neighbour columns covered above it, one of them with
+	            air under its cover beside it or covering it by at most ROOF (3) blocks (a hole in
+	            the roof or a chimney a block wide: the fill goes up it to where the sky starts,
+	            or ROOF blocks over the air beside it, so a missing roof block is one opening, as
+	            a missing wall block is; an open shaft up from a cellar or a mine is not climbed
+	            past the air it leaves from, its face up one opening).
 	            Gives up past `maxVolume` cells, `maxExtent` blocks across or `maxOpenings`
 	            openings, at an unknown cell, and when no cell it entered is under a roof (a pit
 	            dug in the open): nil and "too big", "open" or "unloaded" (then the roof rule
@@ -141,6 +147,15 @@ local SOUTH = 5
 local NORTH = 6
 local STEPS = { { 0, 1, 0 }, { 0, -1, 0 }, { 1, 0, 0 }, { -1, 0, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
 
+-- The most cover a hole in a roof is climbed through above the air beside it (a roof and a
+-- chimney two blocks over it), and how thick a block standing inside the room may be (furniture,
+-- a pillar).
+local ROOF = 3
+local INSIDE = 3
+-- Block reads a fill may make a cell of its maxVolume (sky scans aside), with the reads through
+-- what stands inside the room.
+local BUDGET = 6
+
 -- Every block's U (Blocks.insulation, -1 where a room's air passes), by id + 1: the fill's hot loop.
 local U: { number } = table.create(Blocks.count, -1)
 for id = 0, Blocks.count - 1 do
@@ -180,6 +195,8 @@ function Rooms.fillCells(
 	if seed == nil then
 		return nil, Rooms.UNLOADED
 	end
+	-- Blocks read (sky scans aside).
+	local reads = 1
 	-- (A column's sky height, once a fill.)
 	local columns: { [number]: number } = {}
 	local function sky(cx: number, cz: number): number
@@ -191,25 +208,37 @@ function Rooms.fillCells(
 		end
 		return top
 	end
-	-- Is a cell open to the sky still under a roof: three or four of its sideways neighbour
-	-- columns covered above it (a roof hole or a chimney a block wide)?
-	local function sheltered(cx: number, cy: number, cz: number): boolean
-		local covered = 0
-		if cy < sky(cx + 1, cz) then
-			covered += 1
+	-- Is a cell open to the sky still under a roof (a roof hole or a chimney a block wide)? Three
+	-- or four of its sideways neighbour columns are covered above it, and one of those has air
+	-- under its cover beside the cell or covers it by at most ROOF blocks: so the fill climbs a
+	-- hole through a roof and a chimney, not an open shaft up from a cellar or a mine (its cells
+	-- over the air beside them are in the ground, deeper than any roof: the face up is one
+	-- opening, wherever the shaft comes out).
+	local function near(nx: number, cy: number, nz: number, top: number): boolean
+		if top - cy <= ROOF then
+			return true
 		end
-		if cy < sky(cx - 1, cz) then
-			covered += 1
-		elseif covered == 0 then
+		reads += 1
+		local block = getBlock(nx, cy, nz)
+		return block ~= nil and (U[block + 1] or -1) < 0
+	end
+	local function sheltered(cx: number, cy: number, cz: number): boolean
+		local east, west = sky(cx + 1, cz), sky(cx - 1, cz)
+		if cy >= east and cy >= west then
 			return false
 		end
-		if cy < sky(cx, cz + 1) then
-			covered += 1
-		end
-		if cy < sky(cx, cz - 1) then
-			covered += 1
-		end
+		local south, north = sky(cx, cz + 1), sky(cx, cz - 1)
+		local covered = (if cy < east then 1 else 0)
+			+ (if cy < west then 1 else 0)
+			+ (if cy < south then 1 else 0)
+			+ (if cy < north then 1 else 0)
 		return covered >= 3
+			and (
+				(cy < east and near(cx + 1, cy, cz, east))
+				or (cy < west and near(cx - 1, cy, cz, west))
+				or (cy < south and near(cx, cy, cz + 1, south))
+				or (cy < north and near(cx, cy, cz - 1, north))
+			)
 	end
 	if not Rooms.passable(seed) or (y >= sky(x, z) and not sheltered(x, y, z)) then
 		return nil, Rooms.OPEN
@@ -242,6 +271,7 @@ function Rooms.fillCells(
 	-- `way`: false when the fill gives up (`reason`).
 	local reason: string? = nil
 	local function face(nk: number, nx: number, ny: number, nz: number, way: number): boolean
+		reads += 1
 		local block = getBlock(nx, ny, nz)
 		if block == nil then
 			reason = Rooms.UNLOADED
@@ -252,6 +282,7 @@ function Rooms.fillCells(
 			walls[nk] = true
 			if way == DOWN then
 				-- (A floor on anything insulating loses to the ground; one over air, to the outside.)
+				reads += 1
 				local under = getBlock(nx, ny - 1, nz)
 				if under ~= nil and (U[under + 1] or -1) >= 0 then
 					u = -u
@@ -352,12 +383,18 @@ function Rooms.fillCells(
 
 	-- The wall faces that lose heat: not those of a block standing inside the room (going on the
 	-- way the face looks, through blocks with an insulation and within the bounds, reaches a cell
-	-- of the room). And the eaves: over the top of a wall (a side face whose wall has no wall or
-	-- cell of the room above it), the block there and its two neighbours along the wall, when
-	-- they have an insulation (walls for the snow's lookup only: no U).
-	local eaves: { [number]: true } = {}
+	-- of the room at most INSIDE blocks on). Where the room is again along each face is looked up
+	-- first (`reach`: how far, 0 for not within INSIDE), without reading a block; the blocks
+	-- between are read only when all those reads fit in the fill's budget with its own (BUDGET
+	-- a cell of maxVolume), so the walks never take a fill past it, and whatever its seed the
+	-- answer is the same: a block one thick needs no read. And the eaves: over the top of a wall
+	-- (a side face whose wall has no wall or cell of the room above it), the block there and its
+	-- two neighbours along the wall, when they have an insulation (walls for the snow's lookup
+	-- only: no U).
+	local reach: { number } = table.create(last // 3, 0)
+	local walk = 0
 	for i = 1, last, 3 do
-		local key, way, u = faces[i], faces[i + 1], faces[i + 2]
+		local key, way = faces[i], faces[i + 1]
 		-- (The wall cell is beside a cell of the room: only the way the face looks can leave the
 		-- bounds, and most faces look out of them at once.)
 		local within: boolean
@@ -374,24 +411,43 @@ function Rooms.fillCells(
 		else
 			within = (key // STEP_Z) % SPAN - OFFSET > minZ
 		end
-		local inside = false
 		if within then
 			local step = STEPS[way]
 			local dx, dy, dz = step[1], step[2], step[3]
 			local xz = key // STEP_Z
-			local cx = xz // SPAN - OFFSET + dx
-			local cy = key % 1024 + dy
-			local cz = xz % SPAN - OFFSET + dz
-			while cx >= minX and cx <= maxX and cy >= minY and cy <= maxY and cz >= minZ and cz <= maxZ do
-				if cells[posKey(cx, cy, cz)] then
-					inside = true
+			local cx, cy, cz = xz // SPAN - OFFSET, key % 1024, xz % SPAN - OFFSET
+			for far = 1, INSIDE do
+				cx, cy, cz = cx + dx, cy + dy, cz + dz
+				if cx < minX or cx > maxX or cy < minY or cy > maxY or cz < minZ or cz > maxZ then
+					break
+				elseif cells[posKey(cx, cy, cz)] then
+					reach[(i + 2) // 3] = far
+					walk += far - 1
 					break
 				end
+			end
+		end
+	end
+	local walking = reads + walk <= maxVolume * BUDGET
+	local eaves: { [number]: true } = {}
+	for i = 1, last, 3 do
+		local key, way, u = faces[i], faces[i + 1], faces[i + 2]
+		local far = reach[(i + 2) // 3]
+		local inside = far == 1
+		if far > 1 and walking then
+			-- (Thicker than one block: the blocks between it and the room again all insulate.)
+			local step = STEPS[way]
+			local dx, dy, dz = step[1], step[2], step[3]
+			local xz = key // STEP_Z
+			local cx, cy, cz = xz // SPAN - OFFSET, key % 1024, xz % SPAN - OFFSET
+			inside = true
+			for _ = 2, far do
+				cx, cy, cz = cx + dx, cy + dy, cz + dz
 				local block = getBlock(cx, cy, cz)
 				if block == nil or (U[block + 1] or -1) < 0 then
+					inside = false
 					break
 				end
-				cx, cy, cz = cx + dx, cy + dy, cz + dz
 			end
 		end
 		if inside then
