@@ -943,10 +943,9 @@ local function checkStale(self: MeshOverlay, region: MeshRegions.Region, entry: 
 	if worst > judge.limit then
 		entry.stale = true
 		self.stats.stale += 1
-		-- (MeshRegions' own `touch`: a new version, changed now. A build running for it applies
-		-- with its version, still older, so the region stays a candidate.)
-		region.version += 1
-		region.changedAt = os.clock()
+		-- (A new version, changed now. A build running for it applies with its version, still
+		-- older, so the region stays a candidate.)
+		self.regions:stale(region, os.clock())
 	end
 end
 

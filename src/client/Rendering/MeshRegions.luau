@@ -80,6 +80,7 @@ export type MeshRegions = {
 	abort: (self: MeshRegions, job: Job) -> (),
 	regionOfNode: (self: MeshRegions, node: Node) -> Region?,
 	demoted: (self: MeshRegions, region: Region, now: number) -> (),
+	stale: (self: MeshRegions, region: Region, now: number) -> (),
 	meshedRegions: (self: MeshRegions) -> { Region },
 	stats: (self: MeshRegions) -> Stats,
 }
@@ -309,6 +310,12 @@ function MeshRegions.demoted(self: MeshRegions, region: Region, now: number)
 	if region.count == 0 and region.building == nil then
 		self.regions[region.key] = nil
 	end
+end
+
+-- A meshed region's mesh is out of date (its seasonal palette drifted): a new version, a
+-- candidate again after rebuildSeconds.
+function MeshRegions.stale(_self: MeshRegions, region: Region, now: number)
+	touch(region, now)
 end
 
 function MeshRegions.meshedRegions(self: MeshRegions): { Region }

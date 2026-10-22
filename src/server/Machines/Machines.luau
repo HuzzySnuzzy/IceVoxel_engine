@@ -197,8 +197,10 @@ function Machines.start(serverNet: Net, world: WorldServer.World)
 		transmitters = Transmitters.world(),
 		dayTime = TimeOfDay.get,
 		sky = seesSky,
-		-- (The seasons' rooms next to a machine: Shared/Machines TickContext.climate.)
+		-- (The seasons' rooms next to a machine and players near it: Shared/Machines
+		-- TickContext.climate and near.)
 		climate = RoomWorld.climateAt,
+		near = RoomWorld.playerNear,
 	})
 	state = simulation
 	-- A machine's energy stays in its item (Mekanism's sustained data).

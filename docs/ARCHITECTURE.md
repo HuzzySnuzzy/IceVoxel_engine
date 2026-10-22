@@ -3509,38 +3509,105 @@ season's shift times the biome's amplitude): a winter plain (0.8 - 0.8) snows, a
 `WeatherServer.snowingAt` is `rainingAt` for snow: snow on players chills by one step
 (Temperature `snowedOn`) without wetting them.
 
-**Rooms** (`Shared/Seasons/Rooms`, server `Seasons/RoomWorld`). An enclosed, insulated space
-(a flood fill over passable cells, every block's U a face from `Blocks.insulation`: BlockList
-`insulation`, by material by default) whose air has a temperature: `C dT/dt = P - uaOut (T -
-outside) - uaGround T`, `outside` the sheltered outdoor value. A player in one takes its air as
-step 1 of the target (Temperature `room`), where the proximity modifiers give way to a radiant
-source's +2. Heat (`P`) comes from room sources (`Players/Climate.addRoomSource`: a campfire 20
-HU, fire 15, lava 10, a lit furnace 8, a working generator 10, a player 1, and the heaters',
-coolers' and stoves' `heat` field), so RoomWorld never requires the machines. Machines see
-their room through `TickContext.climate` (`Machines.start`'s env: `RoomWorld.climateAt`); a
-thermostat's heat is `Rooms.thermostat` (proportional feed-forward). The rooms are the server's
-alone; players learn of theirs in the Survival message (`room`, `outside`: the thermometer's
-"Room +1 · Out -9").
+**Rooms** (`Shared/Seasons/Rooms`, server `Seasons/RoomWorld`). An enclosed, insulated space: a
+6-connected flood fill over passable cells (no `Blocks.insulation`: air, plants, torches, open
+doors, fences, snow layers 1-7) from a seed, every neighbour with an insulation a wall face (its
+U to `uaOut`, or to `uaGround` for a floor on solid ground), every passable neighbour at or above
+its column's sky height an opening (U 1.0, not entered). An open door leaks its two faces, a
+broken window one, a porch's roof carries the fill on to where the sky starts; past MaxVolume
+(1024) cells, MaxExtent (32) blocks or MaxOpenings (6), or at a cell nobody knows, there is no
+room and the roof rule holds. The air: `C dT/dt = P - uaOut (T - outside) - uaGround T`, C = 2 x
+volume, stepped once a second with the exact exponential (`Rooms.step`, stable at any step),
+`outside` the sheltered outdoor value at the room's seed (Temperature.outside under a roof, the
+season's shift and night drop in, within +-15). The design's house (5 x 5 x 3 planks, a door, two
+windows, on grass): uaOut 2.465, uaGround 0.5, tau 50.6 s; a winter night's -6.7 leaves it at
+-5.6, a campfire at +1.2, and an electric heater holds +1 with 19.5 HU (78 J/t,
+tests/spec/Rooms).
+- *Where rooms come from* (RoomWorld). Seeds are each player's feet (Tough As Nails' sample, once
+  a second while the calendar counts), each machine that asks for its climate (every tick:
+  `climateAt`, the heaters, coolers and stoves) and each room source placed (a campfire, a
+  furnace, a generator; not fire or lava), the machines' every 5 s while a player is within 128
+  blocks. Fills run in `step` after the machines, at most 2 and 2 ms a frame (players' and
+  refills first); a fill is at most 1 024 x 6 block reads (1.2-2.1 ms in Lune). A fill that finds
+  no room marks every cell it went through as none for 5 s (one open, too big or unloaded space),
+  unless a block in it changes. A room nobody visited (a player in it, a machine asking) for 60 s
+  whose sources give nothing is forgotten. Nothing else runs per frame; the air's step is O(rooms
+  + sources + players) a second.
+- *Cache and changes.* `roomOf` maps interior cells, `wallsOf` wall and opening cells (a wall
+  between two rooms to both). A change there (every edit, a door toggled) refills the room from
+  its seed, unless it keeps the cell's insulation and touches no source (a torch, stone for
+  cobblestone). The new room's air is the volume-weighted mean of the rooms it overlaps, the cells
+  no room had at the outside value; cells of the old room the new one did not take (a wall built
+  across) stay the old room's and are filled again, so both halves keep its air.
+- *Heat.* The room sources in the room or its walls (Players/Climate.roomSource: a campfire 20
+  HU, fire 15 (at most 3), lava 10 (at most 6), a lit furnace 8, a working generator 10, the
+  heaters', coolers' and stoves' `heat` field) and 1 HU per player whose feet are in it.
+  `climateAt` sums it again for each call, so a thermostat's `others` (the room's heat less its
+  own) is exact and several thermostats in one room share the load instead of hunting.
+- *Answers.* `sample` (Tough As Nails: the feet's room, or the head's), `climateAt` (a machine's
+  cell or a neighbour's room and the outside), `temperatureAt` (snow: a lookup only, a cell's room
+  or the warmest room it walls, nil for none), `playerNear` (a space heater's standby). Rooms are
+  the server's alone; players learn of theirs in the Survival message (`room`, `outside`: the
+  Thermometer's "Room +1 · Out -9", WAILA's "Room +1 (out -9)" on a heater).
 
 **Heaters, coolers and stoves** (Shared/Machines kinds "stove", "oilheater", "heater",
-"cooler"). The Wood Stove and the Oil Heater are fuel-only machines (`fuelOnly`, BlockList
-`energy = { capacity = 0 }`): `Machines.hasEnergy` is false for them, so cables never connect
-and the energy networks never see them (EnergyNet skips machines without energy, even touching
-ones). Panels may carry buttons (`KindSpec.buttons`, Minecraft's container buttons): a click is
-Inventory Action `{ kind = "button", window, button }`, data only (Inventory/Menu predicts
-nothing), and the server runs the kind's `onButton` (`Machines.button`). The data layouts are
-frozen (saved items keep the set point): heater and cooler `setPoint, heat, state, activeDelay,
-on`; stove `burnTime, burnTotal, on, heat, state`; oil heater `setPoint, heat, state, burning,
-on`, then its tank `fuel` and `fuelFluid`. Their state codes are `Seasons/HeatStates`.
+"cooler"; `Seasons/HeatStates`). Each tick a thermostat asks its room (`TickContext.climate`)
+and `Rooms.thermostat` for its set point (-5..+5, the "-" and "+" buttons, kept in the item):
+`P = uaOut (S - out) + uaGround S - others + UA (S - T)` within 0..Pmax, a proportional
+feed-forward that settles on S exactly when it can (the error times 2a - 1 a second) and never
+passes Pmax.
+- *Electric Heater*: up to 40 HU at 4 J/t per HU (Machines `use`); on too little energy it takes
+  all there is for that share ("Low power"), none "No power". Outdoors it is a 20 HU space heater
+  (Tough As Nails' +3 within 5 blocks) while a player is within 16 (TickContext `near`), else
+  "Standby". Convective: no warmth in a room besides the air's.
+- *Air Conditioner*: down to -40 HU at 5 J/t per HU, in rooms only ("No room").
+- *Electric Fan*: 30 J/t for -10 HU while it runs: in a room while the air is over its set point
+  (on half a step above it, off half a step below), outdoors whenever it is on (a cold source).
+- *Wood Stove* (fuel only): furnace fuel that leaves nothing behind, 4 times its furnace time
+  (coal 320 s, a log 60 s), 30 HU while it burns, anywhere (a radiant source like a campfire);
+  switched off it holds what burns.
+- *Oil Heater* (fuel only): up to 35 HU, its tank's Oil (a mB every 30 ticks at full output) or
+  Fuel (every 60), less as it gives less; rooms only. Radiant.
+Their `heat` field is what they deliver (negative cools): RoomWorld and Tough As Nails' heat and
+cold sources read it (heaters never cool, coolers never heat). RATE is a consumer's J/t taken,
+a fuel-only machine's HU, and with the state code it gives WAILA's line without the window
+("Heating 32 HU", "At set point", "Low power: 10 HU", "No power", "No fuel", "No room",
+"Standby", "Off"). The panel: the status, one line ("20 HU, 78 J/t"), the buttons ("-", "+",
+"On"/"Off": Ui/MenuLayout `buttons`, `buttonLabel`), the set point's "Set +1" between "-" and
+"+", no energy bar on a fuel-only machine. A click is Inventory Action "button", routed by
+Players/Inventories to `Machines.button`. The window of a working stove and oil heater glows
+orange, the heater's element red, the AC's strip cyan (BlockDecor windows,
+TransmitterModel.machineBoxes); a burning stove or oil heater casts a warm light
+(TransmitterModel.machineLight); each plays its loop while it works (TransmitterModel
+.machineLoop, Audio/Ambience: the 6 nearest within 16 blocks); the click is
+`ui.thermostat.click`. JEI lists the stove as a fuel catalyst for the fuels it takes.
 
-**Snow layers** (BlockList `SnowLayer1..8`, `Shared/Seasons/SnowLayers`, server
-`Seasons/SnowWorld`). Two pixels a layer, transparent boxes that merge (no `shape`), each height
+**Snow layers** (BlockList `SnowLayer1..8`, `Shared/Seasons/SnowLayers`, server `Seasons/SnowWorld`,
+`Behaviours/SnowLayer`). Two pixels a layer, transparent boxes that merge (no `shape`), each height
 an appearance of its own whose top the renderer lowers (`Blocks.layerLut`); layers 2+ collide a
-layer lower than they look and stop rain, layer 1 is walked through and replaceable, only the
-eighth is sturdy. `stackOnto`, `supports`, `speedFactor` (deep snow slows walking: Movement and
-mobs multiply the ground speed by `Blocks.speedFactor`). Snowfall and thaw visit 4 x 4 tiles of
-the active chunks (`SnowLayers.accumulate` / `melt`), the heat of fires and machines melts snow
-near them, and still water freezes from its edges in winter.
+layer lower than they look and stop rain, layer 1 is walked through and replaceable, only the eighth
+is sturdy and a wall face. Players and mobs multiply their ground acceleration by
+`Blocks.speedFactor` of the block at the feet cell, else of the one carrying them (0.9 for 3-4
+layers, 0.8 for 5-6, 0.75 for 7-8); a player's 1.0625 step walks onto any depth, a mob's 0.6 onto
+five layers and it jumps onto more; both land on the box's top and never sink in (MC-257266; specs
+Movement, Mobs). The Snow Layer stacks onto a layer below 8 (`stackOnto`: its top clicked, or placed
+into a layer's cell; EditRules places a layer of 2..8 only that way) and lies only on `supports` (a
+sturdy top, leaves, a full layer; never ice); n layers drop n Snowballs; a layer whose support goes
+vanishes without drops. Each tick every active chunk is visited with `TileChance` (at most
+`MaxTilesPerTick`): one 4 x 4 tile, its columns from `WeatherRules.top` (only the open sky takes
+snow). While it snows at the tile's centre a visit (chance: the precipitation) raises its least
+columns a layer up to `SeasonClimate.snowCap` (`accumulate`), so tiles rise evenly; plants, torches
+and water take none. Where `SeasonClimate.melts` and it does not snow, a visit (`MeltChance` 0.5, x2
+clear day, x2 rain, x0.5 night) takes a layer off the deepest (`melt`). Snow beside a heat source
+that heats, or in or on a room at `RoomMelt` or warmer (`RoomWorld.temperatureAt`), loses a layer
+every visit and takes none; every `HeatMeltSeconds` each indexed heat source (onChanged and each
+chunk's saved edits) melts a layer within `HeatMeltRadius`, spread over frames. With `Ice`, still
+water sources with a side that is no water freeze where it is cold enough to snow, and the weather's
+ice thaws back; generated ice stays. All of it goes through `world:setWeather` (at most 16 writes a
+visit), so a melt back to the seed's air or cave air leaves no edit. The season's
+`SnowWorld.growth()` (Autumn 0.5, Winter 0, Spring 1.5, Summer 1) multiplies saplings' and herbs'
+random-tick chances and grass's spread tries, and falling snow muffles zombies
+(`Apocalypse.Noise.SnowFactor`, ZombieDirector.hear).
 
 **The natural map** (`World/WorldServer`). A winter would leave thousands of edits (every snow
 layer, then every melt back to air, is an edit). So weather writes go through
@@ -3551,21 +3618,44 @@ saved as RegionCodec record 12 NATURAL beside the edits (`Save/WorldSnapshot`); 
 refuse the record, the documented "newer version" path.
 
 **Foliage colours** (`Shared/Seasons/Foliage`, client `Rendering/SeasonTint`; data
-`Config.Seasons.Foliage`). Grass tops, leaves, tinted plants and vines move through the year's
-keyframes; live parts are recoloured in place by ChunkRenderer's budgeted sweep (Part.Color, the
-top Texture's Color3, sprite Decals), new parts get the current colour at build, far meshes are
-rebuilt when their palette moved far enough. Items keep the authored colours.
+`Config.Seasons.Foliage`). Grass tops, every leaves block, tinted plants and vines follow
+per-foliage-class keyframes over the year's progress (keep in linear light, even CIELAB moves
+between keyframes), with biome-class overrides (dry grass yellows in summer, tropical biomes keep
+their colours) and snow dust by kind from `SeasonClimate.snowCover`. Steps of BlendDays/24 days
+never differ by more than ΔE76 2.5. SeasonTint hands ChunkRenderer a palette per step; colours
+become paints through `TextureLooks.seasonalTint`; each record keeps its parts' palette generations,
+so the budgeted sweep (nearest first, live records only, SweepWrites/SweepMs a frame) writes each
+changed colour once and skips unchanged ones. New and pooled parts are painted as they are built.
+Far meshes bake the far palette per member's biome class and are rebuilt (`MeshRegions.stale`),
+through MeshOverlay's usual ranking and gate, when it drifts past FarDeltaE. Items, icons and the
+map keep the authored colours. F3 has a foliage line (the palette, the last sweep's writes and
+frames, the far step, stale meshes).
 
-**The season clock** (client `Ui/SeasonClock`, `Ui/SeasonHud`, `Ui/SeasonLine`). A dial beside
-the minimap: the year's seasons around it, the day's 16 segments (by the warped sun) inside, the
-day number, and a caption ("WINTER · 3 DAYS LEFT", "HEAT WAVE"); toasts when a season turns and
-a heat wave dawns, through the HUD's one notice queue. Options > HUD > Season Clock (setting 64).
+**The season clock** (client `Ui/SeasonClock` face, `Ui/SeasonLine` words, both pure; `Ui/SeasonHud`
+glue). A Don't Starve dial left of the minimap (HudLayout `clock`: GAP left of the minimap or Map
+button, top-aligned, or in the corner; the column continues under it; within 40 % of the area's
+width the caption drops first, then the dial shrinks 40→32, then it goes): 32 year ticks by season
+(lengths in proportion, the current season bright) with a marker, 16 day segments from the warped
+sun's height (winter 6 day/2 dusk/8 night, summer 10/2/4) with a hand (noon top), the day number,
+and a caption ("WINTER · 3 DAYS LEFT", "LAST DAY OF AUTUMN", "HEAT WAVE"). Plain rotated Frames (no
+images); angles at 4 Hz, colours only when the season or day split changes. Hidden with
+`Seasons.Clock.Enabled`, the Season Clock setting (64), the calendar off or the world map, and then
+it tells UiScale so the corner is exactly as before. Toasts at the sunrise of a season's first day
+and a heat wave's dawn, with `ambient.season.*` stingers, go through `SurvivorHud.toast`, the HUD's
+one notice queue shared with the blood moon (`Seasons.Clock.Toasts`). **Commands:** `/season
+query|set` (`Players/SeasonCommand` + `SeasonCommands`, started by TimeCommands) move only the
+offset; `/time set` keeps the calendar (`keepCalendar`), `/time add` moves it, `/gamerule
+doSeasonCycle` holds it. **Sky:** `Rendering/SeasonSky` after BloodMoonSky: a cool winter (+0.05
+brightness), a warm autumn and a heat wave's glare in the colour shift, outdoor ambient and its
+`IceVoxelSeason` grading, scaled by sky exposure. F3 has a season line.
 
 **Who owns what.** The pure rules are `Shared/Seasons/*`, the rest is thin glue: SeasonClock
-(attributes, section), RoomWorld (cache, budget), SnowWorld (sampling), SeasonHud, SeasonTint
-(the sweep's driver), the commands' glue. `Shared/Seasons/*` require only Config, Blocks, Biomes,
-World/Coords, Util/Hash and each other, never Shared/Machines, Transmitters, Inventory/Menu,
-DayCycle or client modules (Weather and DayCycle require them).
+(attributes, section), RoomWorld (cache, budget), SnowWorld (an instance of rules over an
+environment, run on a world of their own by tests/spec/SnowWorld; `start` binds the server's
+weather, day, heat and rooms), SeasonHud, SeasonTint (the sweep's driver), the commands' glue.
+`Shared/Seasons/*` require only Config, Blocks, Biomes, World/Coords, Util/Hash and each other,
+never Shared/Machines, Transmitters, Inventory/Menu, DayCycle or client modules (Weather and
+DayCycle require them).
 
 ## Game modes (`GameMode`, server `Players/GameModes` and `Players/GameModeRules`)
 
@@ -6755,7 +6845,9 @@ medicine and the rising on a real world server).
   `Ui/SurvivorHud` draws them: the line in the pixel font, a row the coordinates line's height (two
   when HudLayout wraps it), both widths given to `UiScale.setDayLine`; the toasts as wide as their
   text in HudLayout's `notice` slot (`UiScale.setToast("notice", width)`), one at a time, waiting
-  while there is no room, the rise with `ambient.blood_moon.rise`. `Player/SurvivorState` keeps the
+  while there is no room, the rise with `ambient.blood_moon.rise`. The toast queue is shared
+  (`SurvivorHud.toast(text, colour, sound)`): the seasons' toasts wait their turn, and a toast's
+  sound plays when it first shows. `Player/SurvivorState` keeps the
   last Survivor message and counts the alive ticks on between messages. The Day Counter setting
   (PlayerSettings 59, HUD page) and `Apocalypse.Survivor.DayCounter` hide the line.
 - **The layout** (`Ui/HudLayout`) gains `Input.dayLine` / `dayWidth` / `dayWrap` / `notice` and
@@ -8287,7 +8379,7 @@ bottom of the screen and the saving icon sat on the minimap).
   desktops and 4K, every offered choice, the minimap on and off, touch on and off, toasts, effect
   icons and the saving icon showing or not). In screen pixels, from the screen, the insets, the
   scale, touch and what shows (each widget tells `UiScale`: `setMinimap`, `setToast`, `setEffects`,
-  `setSaving`, `setDebugRight`, `setStatus`; each places itself on `hudChanged`):
+  `setSaving`, `setDebugRight`, `setStatus`, `setClock`; each places itself on `hudChanged`):
   - the HUD's canvas (`CANVAS`, 182 × 46 GUI pixels, 230 wide on touch for the buttons beside the
     quickbar), centred at the bottom, one pixel and `lift` (5 % of the screen's height on a PC, 0
     on touch) above the safe area's bottom; the quickbar's cells (`quickHit`, `quickCell`,
@@ -8312,6 +8404,11 @@ bottom of the screen and the saving icon sat on the minimap).
     pixels, `touchSide`); the apocalypse's day line under the coordinates line (else the Map
     button, else in the corner), on one row or wrapped onto two (`setDayLine`; see Blood moon and
     the day counter), the column's bottom moving under it;
+  - the season clock (`setClock(shown, captionWidth)`): GAP left of the minimap or the Map button,
+    top-aligned, or in the corner; the column continues under the lower of the two and WAILA keeps
+    left of it; within `CLOCK_SHARE` (40 %) of the area's width the caption goes first, then the
+    dial shrinks from 40 to 32, then it hides (the sweep runs with the clock off and with its
+    longest caption);
   - the blood moon's toast in its own `notice` slot (`setToast("notice", width)`), under the
     lowest toast showing;
   - the toasts: slot 1 under that column is Now Playing's place, shown or not; "World saved" takes
@@ -8876,7 +8973,8 @@ Saving worlds).
   rebuilt in the background lane, never all at once. The one exception is a colour-only
   seasonal change (Seasons' foliage): ChunkRenderer's budgeted sweep applies it in place, with
   colours from TextureLooks, to parts live in a record only; materials, variants and images
-  never change that way.
+  never change that way. A part's palette generation is kept beside its record's parts (`tone`),
+  so the sweep writes a part at most once per palette and only when its colour changed.
 - Mob kinds (`Entities/MobList` positions) go on the wire as a u8: append, never reorder. Mobs
   only tick in the chunks World/Simulation keeps (loaded, near a player) and read blocks with
   `peekBlock`; spawning never generates terrain and never places a mob in a chunk that doesn't

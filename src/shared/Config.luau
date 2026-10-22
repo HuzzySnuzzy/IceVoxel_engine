@@ -631,8 +631,8 @@ local Config = {
 			visited with TileChance a tick (at most MaxTilesPerTick visits a tick), one of its 4 x 4
 			tiles; snow rises evenly up to the column's cap (Caps by biome class, +1 every
 			CapPerBlocks above CapAltitude, a drift of +-1 over DriftWavelength blocks, at most 8)
-			and melts a layer at a time (times MeltClear by a clear day, MeltRain in rain,
-			MeltNight at night). Every HeatMeltSeconds a lit heat source melts a layer within
+			and melts a layer at a time (a visit's MeltChance, times MeltClear by a clear day,
+			MeltRain in rain, MeltNight at night). Every HeatMeltSeconds a lit heat source melts a layer within
 			HeatMeltRadius; a room at RoomMelt or warmer melts what is in or on it. Ice: still
 			water freezes from its edges in winter and thaws in spring.
 		]]
@@ -644,6 +644,7 @@ local Config = {
 			CapAltitude = 160,
 			CapPerBlocks = 64,
 			DriftWavelength = 32,
+			MeltChance = 0.5,
 			MeltClear = 2,
 			MeltRain = 2,
 			MeltNight = 0.5,

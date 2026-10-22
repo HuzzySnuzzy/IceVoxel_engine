@@ -819,6 +819,39 @@ A fast, Minecraft-style voxel engine for Roblox.
   thinning out deep underground so cave walls never fade into a daylit sky (the view out of a
   tunnel's mouth stays hazed). Water, lava, oil, fuel and Blindness keep Minecraft's exact short
   fogs (the Atmosphere steps aside while they show).
+- **Seasons, as Don't Starve's.** Autumn, Winter, Spring and Summer, 8 days each (a year of 32
+  days, about 10.7 hours of play), a new world starting on Autumn's first day; every change blends
+  over the two days around a turn, so nothing steps.
+  - **The season clock:** a dial beside the minimap shows the year's seasons, today's day, dusk
+    and night segments, the day number and "WINTER · 3 DAYS LEFT" (or "LAST DAY OF AUTUMN",
+    "HEAT WAVE"); a toast and a low boom mark each season's turn and each heat wave. Options >
+    HUD > Season Clock hides the dial.
+  - **The sun and the climate:** winter's days are shorter (about 9 of the 20 minutes are day)
+    and summer's longer (12.7), the clock itself unchanged; winter's light is cooler, autumn's
+    warmer, a heat wave's glaring. Each season shifts the temperature (Tough As Nails: winter
+    nights freeze, a summer day may be a heat wave), the weather (more rain in spring, little in
+    summer, no thunder in winter; a winter plain snows) and how fast plants grow (not at all in
+    winter, half in autumn, one and a half times in spring). With the seasons on, clothes slow
+    freezing but never stop it, and shivering costs food.
+  - **Snow:** in winter snow piles up in layers wherever it snows (up to 6 in cold biomes, 3 in
+    temperate ones, 1 in tropical ones and none in deserts, more on high ground) and melts a layer
+    at a time when it warms; deep snow slows walking; fire and warm rooms melt it; still water
+    freezes from its edges. The Snow Layer (three Snow blocks make six) stacks onto a layer, and n
+    layers drop n Snowballs. Falling snow muffles zombies. A melted winter leaves nothing in the
+    save.
+  - **Foliage:** grass, leaves, tinted plants and vines turn through the year: autumn's reds,
+    oranges and browns, winter's bare and snow-dusted colours, spring's fresh green, dry grass
+    yellowing in summer; evergreens and jungles keep theirs. The distant terrain turns with them.
+  - **Rooms and heating:** walls, a roof and a floor around you make a room (up to 1,024 cells,
+    32 blocks across, a few openings) whose air has its own temperature: warmed by campfires, lit
+    furnaces, working generators, players and the heaters below, and lost through its walls by
+    their insulation (Insulated Planks hold heat best, Insulated Glass and the Insulated Door far
+    better than glass and a door; glass and metal lose it; an open door leaks). The thermometer
+    reads "Room +1 · Out -9", and WAILA a heater's room. The **Wood Stove** burns furnace fuel
+    four times as long for 30 HU, anywhere; the **Oil Heater** burns Oil or Fuel; the **Electric
+    Heater** (up to 40 HU) and the **Air Conditioner** (down to -40) hold a room at their set
+    point on electricity; the **Electric Fan** cools a little. Their panels have "-", "+" and
+    On / Off buttons; working, their windows glow and they hum, crackle or whirr.
 - **Weather.** Regional, not Minecraft's one switch for the whole world: storms a few hundred to a
   few thousand blocks across drift over the world with a wind that slowly turns (about 1 to 3
   blocks a second), grow and die out, and leave clear stretches between them, so you can see one
@@ -1757,8 +1790,8 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (operators). `/time set` keeps the season; `/time add 8d` moves it on | | |
-| Seasons       | `/season query` (anyone): "It is Winter, day 3 of 8 (6 days left), year 1"; `/season set winter 3` (`autumn`, `winter`, `spring`, `summer`, an optional day) keeps the time of day; `/gamerule doSeasonCycle false` holds the season (operators) | | |
-| Thermostat    | Right click an Electric Heater, Air Conditioner or Oil Heater: `-` / `+` move its set point (-5..5), Mode switches it on or off; the Wood Stove's On / Off holds its fuel | A on a button | Tap a button |
+| Seasons       | `/season query` (anyone): "It is Winter, day 3 of 8 (6 days left), year 1"; `/season set winter 3` (`autumn` or `fall`, `winter`, `spring`, `summer`, an optional day) keeps the time of day; `/gamerule doSeasonCycle false` holds the season (operators) | | |
+| Thermostat    | Right click an Electric Heater, Air Conditioner, Electric Fan or Oil Heater: `-` / `+` move its set point (-5..5, "Set +1"), On / Off switches it; the Wood Stove's On / Off holds its fuel | A on a button | Tap a button |
 | Weather       | `/weather clear`, `/weather rain`, `/weather thunder` with an optional duration (`300s`, `0.5d`, `6000` ticks; default Minecraft's random one: rain 10-20 minutes, thunder 3-13, clear 10-150), everywhere, blending in over 5 s (operators); `/weather query` (anyone) says what it is doing where you stand; `/gamerule doWeatherCycle false` stops the storms and holds the override's time (operators) | | |
 | Mobs          | `/summon zombie` (at your feet) or `/summon zombie_brute ~ ~ ~5`: every kind in snake case (`cow`, `sheep`, `pig`, `chicken`, `zombie`, `zombie_runner`, `zombie_brute`, `zombie_crawler`, `zombie_screamer`, `zombie_soldier`, `zombie_police`, `zombie_firefighter`, `zombie_worker`, `zombie_doctor`); `/kill @e[type=zombie_brute]`, `/kill @e` (every mob) (operators) | | |
 | Locate        | `/locate structure outpost` (or `city`, `bunker`, `#ruins`, `#mineshaft`, `mineshaft_entrance`, `oil_geyser`, `lava_lake`, `ravine`...), `/locate biome jungle` (or `#is_forest`...), `/locate poi chest` (or `medicine_cabinet`, `supply_crate`, `bunker_hatch`, `#scavenge`, `#machine`...) (operators); the answer's green coordinates type their `/tp` when clicked | | |
@@ -1789,7 +1822,7 @@ right) or A; buttons cycle their values. Done (on a sub-page: back to the page i
 | Controls        | Mouse Settings..., Key Binds... (the two pages below), Sneak (Hold / Toggle), Sprint (Toggle / Hold), Camera (Third Person / First Person), First-Person Body (ON / OFF), Shoulder (Right / Left), Freelook (Hold / Toggle), Touch Buttons (touch screens; Sprint and Sneak after rejoining, the camera's VIEW and LOOK at once) |
 | Mouse Settings  | Sensitivity (0-200%: "*yawn*" to "HYPERSPEED!!!", 100% Roblox's own feel), Scroll Sensitivity (0.01-10.00), Invert Mouse, Discrete Scrolling, Scroll Wheel (Hotbar / Zoom: nothing with the DayZ camera, which has no zoom); with a mouse |
 | Key Binds       | Every key binding (below): click its key, then press a key or a mouse button; Reset (per row), Reset Keys (all); with a keyboard |
-| HUD             | Minimap, WAILA, Day Counter (the day, the days survived and the blood moon's warnings under the minimap), Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1 .. the largest this screen allows: 4 at 1920 x 1080, 9 on a 4K window; Auto is always the largest, as in Minecraft) |
+| HUD             | Minimap, WAILA, Day Counter (the day, the days survived and the blood moon's warnings under the minimap), Season Clock (the year's dial beside the minimap), Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1 .. the largest this screen allows: 4 at 1920 x 1080, 9 on a 4K window; Auto is always the largest, as in Minecraft) |
 | Chat Settings   | Chat (Shown / Commands Only: no players' messages, and none sent / Hidden: no chat at all), Chat Text Opacity (10-100%), Text Background (0-100%), Text Size (OFF, 1-100%), Line Spacing (0-100%), Chat Delay (None, 0.5-6 s: other players' messages come out one per delay), Width (40-320 GUI pixels), Focused Height and Unfocused Height (20-180), Command Suggestions |
 | Accessibility Settings | View Bobbing, Distortion Effects (0-100%), FOV Effects (0-100%), Damage Tilt (0-100%) |
 | Weather         | Clouds (OFF / Fast / Fancy), Weather (rain and snow: OFF / Fast / Fancy) |
@@ -2001,7 +2034,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             module per kind: Creative, the Creative Energy Cube; Generator, the
                             Heat Generator; Smelter, the Electric Furnace; Solar, the Solar
                             Panel; Battery, the Batteries; Refinery, the Oil Refinery;
-                            Combustion, the Combustion Generator)
+                            Combustion, the Combustion Generator; the seasons' Stove, the Wood
+                            Stove; OilHeater; Heater, the Electric Heater; Cooler, the Air
+                            Conditioner and the Electric Fan)
   Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel; a
                             recipe may keep an ingredient's data), Crafting (grid matching),
                             Smelting (the furnace tick; the Lava Bucket's burn time)
@@ -2081,6 +2116,12 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
            WeatherModel     the storms: a field of noise drifting with a slowly turning wind
                             (closed form), precipitation, thunder and cloud cover anywhere at any
                             time, a grid sampler (minimap, far clouds) and forecasts
+  Seasons/                  the seasons' rules, all pure: Calendar (the calendar from the day
+                            time and one offset, blending, the sun's warp, the save), SeasonClimate
+                            (biome classes, the season's temperature shift, heat waves, snow caps
+                            and melting), Rooms (the flood fill, insulation, the air's step, the
+                            thermostat), SnowLayers (piling and melting a tile), Foliage (the
+                            foliage palettes through the year), HeatStates (the heaters' states)
   Biomes/  BiomeList        biome definitions and altitude bands (and Minecraft's temperature and
                             precipitation for the weather)
   Generation/
@@ -2170,6 +2211,8 @@ src/server   -> ServerScriptService.IceVoxel
                             Simulation (chunks kept generated around players, /genstats),
                             GenQueue (which, in what order, a slice of a frame at a time; pure),
                             TimeOfDay (the day clock, published as workspace attributes),
+                            SeasonClock (the calendar's offset and hold, published the same way;
+                            the save's "seasons" section),
                             WeatherServer (the weather clock and /weather's overrides, published
                             the same way; rain for fire, players and mobs; lightning near
                             players; the save's encode / decode), WeatherRules (where rain falls:
@@ -2190,7 +2233,11 @@ src/server   -> ServerScriptService.IceVoxel
                             Plant (plants need their soil and their other half), Fire
                             (spreading, burning blocks away, burning out, ages; lava lighting
                             fires; flint and steel), Tnt (lit TNT and Nukes: lighting, the fuse,
-                            falling, blowing up), Drops (block update logic)
+                            falling, blowing up), SnowLayer (a layer whose support goes),
+                            Drops (block update logic)
+  Seasons/                  RoomWorld (the rooms: seeds, the budgeted fills, the cache, the air's
+                            step, the machines' climate, the snow's lookup), SnowWorld (snowfall,
+                            thaw, heat melting and ice on the active chunks, the season's growth)
   Save/                     saved worlds, pure: SaveCodec (bytes, stacks, base85 text),
                             RegionCodec (a region's edits and block state), PlayerCodec,
                             WorldMeta (records, keys, sizes), SaveLock, SaveScheduler (requests
@@ -2263,7 +2310,8 @@ src/server   -> ServerScriptService.IceVoxel
                             the user's avatar read, HumanoidDescriptions, preview rigs), GameModes + GameModeCommand (/gamemode, the switcher's requests,
                             permissions, the previous mode), GameModeRules (what each mode may
                             do on the server; pure), TimeCommands + TimeCommand (/time,
-                            /gamerule), WeatherCommands + WeatherCommand (/weather; pure),
+                            /gamerule), SeasonCommands + SeasonCommand (/season; pure),
+                            WeatherCommands + WeatherCommand (/weather; pure),
                             Inventories + InventoryState (authoritative inventories),
                             Containers (chests, furnaces, generated structures' chests),
                             Characters (cosmetic characters: collision group, teleports, fall
@@ -2367,8 +2415,10 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             ChatFormat the messages' looks; all pure), HoverTip (every menu
                             button's tooltip) + ButtonHelp (their texts) + TooltipLayout
                             (wrapping and placement; pure), SurvivorHud (the day counter
-                            and the blood moon's toasts) + SurvivorLine (their texts, widths
-                            and timing; pure)
+                            and the HUD's toast queue: the blood moon's, the seasons') +
+                            SurvivorLine (their texts, widths and timing; pure), SeasonHud (the
+                            season clock beside the minimap and its toasts) + SeasonClock (the
+                            dial's face) + SeasonLine (its caption and toasts; both pure)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
@@ -2421,6 +2471,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/EffectView      Night Vision, Blindness and Nausea on the view
   Rendering/BloodMoonSky    the blood moon's red sky and bigger moon (the tint pure)
+  Rendering/SeasonSky       the season's light: winter's cool, autumn's warm, a heat wave's glare
+  Rendering/SeasonTint      the foliage colours through the year: the palettes to ChunkRenderer's
+                            budgeted sweep and the far meshes, the biome class of each chunk
   Player/SurvivorState      the server's Survivor record, the alive ticks counted on between
                             messages
   Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared
@@ -2736,10 +2789,10 @@ for performance:
 | `Seasons.Lengths` / `BlendDays` | 8, 8, 8, 8 / 2 | Days each season lasts (a year of 32 days, about 10.7 hours of play); every season quantity blends over BlendDays centred on each turn (at most the shortest season). |
 | `Seasons.DaylightScale`   | 1, 0.8, 1, 1.2 | The sun's day share per season: winter's days are shorter (about 9 of 20 minutes) and summer's longer (12.7), the day length itself unchanged. |
 | `Seasons.Climate`         | see Config | Per season (Autumn, Winter, Spring, Summer): DayShift -0.1 / -0.4 / -0.05 / +0.3 and NightDrop 0.3 / 0.35 / 0.3 / 0.25 (Tough As Nails' climate units, times a biome class's Amplitude: cold 1, temperate 1, dry 0.75, tropical 0.5); WeatherShift -0.2 / -0.8 / -0.1 / +0.2 on Minecraft's temperature (a winter plain snows); WetBias 0 / +0.02 / +0.06 / -0.08 and ThunderBias 0 / -1 / +0.04 / +0.02 (rain about 23 % / 26 % / 31 % / 14 % of the time, no thunder in winter); Growth 0.5 / 0 / 1.5 / 1 (plants' random ticks); HeatWave: a summer day is one with Chance 0.3 (never two in a row), +0.3 from 09:00 to 18:00. |
-| `Seasons.Snow`            | see Config | Snow layers: a chunk visited 1 tick in 250 (TileChance), caps by biome class (cold 6, temperate 3, tropical 1, dry 0; +1 every 64 blocks above y 160, a drift of one), melting a layer at a time; heat sources melt them within 2 blocks every 5 s; `Ice`: still water freezes from its edges in winter. |
+| `Seasons.Snow`            | see Config | Snow layers: each chunk near a player is visited 1 tick in 250 (TileChance; at most MaxTilesPerTick 8 visits a tick), one 4 x 4 tile that rises a layer evenly where it snows (chance: the precipitation) up to its cap (cold 6, temperate 3, tropical 1, dry 0; +1 every 64 blocks above y 160, a drift of one) and melts a layer at a time where it is warm (MeltChance 0.5 a visit, x MeltClear 2 on a clear day, MeltRain 2 in rain, MeltNight 0.5 at night); fire beside snow and a room at RoomMelt 3 or warmer melt it at every visit, heat sources within HeatMeltRadius 2 every HeatMeltSeconds 5; `Ice`: still water freezes from its edges where it is cold enough to snow and the weather's ice thaws when warm. Deep snow slows walking (0.9 / 0.8 / 0.75 from 3 / 5 / 7 layers); the Snow Layer stacks onto a layer; plants grow by the season (Climate.Growth); falling snow muffles zombies (Apocalypse.Noise.SnowFactor 0.85). |
 | `Seasons.Rooms`           | see Config | Enclosed, insulated rooms: at most MaxVolume 1024 cells, 32 blocks across and 6 openings; FillsPerFrame 2 and FillMs 2 a frame. |
 | `Seasons.Heat`            | see Config | Heat units a second each source gives a room (Campfire 20, Fire 15, Lava 10, lit Furnace 8, a working generator 10, a player 1, Wood Stove 30, Oil Heater 35, Electric Heater 40, Fan -10, Air Conditioner -40), the stove's StoveBurnFactor 4, the oil heater's tank and burn rates, the electric ones' J a tick per HU and the thermostats' -5..5. |
-| `Seasons.Foliage` / `Clock` | see Config | Foliage colours through the year (keyframes per class, the snow dust, the sweep's budget) and the season clock beside the minimap (`Clock.Enabled`; Options > HUD > Season Clock). |
+| `Seasons.Foliage` / `Clock` | see Config | Foliage colours through the year (keyframes per class, the snow dust, the sweep's budget: SweepWrites 1,500 colours and SweepMs 0.75 a frame; far meshes rebuilt when their palette moved past FarDeltaE 6) and the season clock beside the minimap (`Clock.Enabled`; Options > HUD > Season Clock; `Clock.Toasts`: the turns' and heat waves' toasts). |
 | `Weather.Enabled`         | true    | false: always clear (no clouds, rain, snow or lightning; the debug worlds have none either). |
 | `Weather.Cycle`           | true    | Minecraft's doWeatherCycle (false: the storms stand still and an override never runs out). |
 | `Weather.Speed`           | 1       | How fast the weather clock runs (2: storms drift and change twice as fast). |
@@ -3007,6 +3060,25 @@ local server):
   from behind on an unaware zombie; the feel of light attacks landing on release.
 - **Touch and gamepad:** the AIM, FIRE and RELOAD buttons (their places beside the jump button,
   AIM's toggle), L2 / R2 / X / D-pad / R3 / L3 on a controller; a touch heavy attack.
+- **The season clock:** the dial beside the minimap (and the Map button on touch screens) on a
+  phone, a tablet and a PC at every GUI scale: crisp rotated bars, the disc, the pixel day number,
+  the caption's real width (it drops before the dial shrinks on an iPad and a 1024 x 768 window);
+  `/season set winter 8` then `/time add 1d`: the toast, the boom and the blood moon's toast
+  waiting their turn; the winter grading on snow and at night beside the blood moon's.
+- **Snow:** a winter in a taiga and a plain (`/season set winter`, `/weather rain`, which snows
+  where it is cold): layers piling evenly on roofs and ground, walking slowed in deep snow, a
+  campfire and a warm room melting it, ponds freezing at their edges; a spring thaw leaving the
+  save no bigger.
+- **Foliage:** a year at speed (`/time add 2d` steps): grass, oak and birch leaves, vines and
+  plants turning without a visible sweep or long frames (F3's foliage line: writes and frames per
+  sweep; tune `Seasons.Foliage.SweepWrites` / `SweepMs`), far meshes rebuilding in waves through
+  autumn (tune `FarDeltaE`), autumn leaves through the "leaves" texture (a warning names it if it
+  is too dark to tint) and the grass tops and vine decals under the real MaterialVariants.
+- **Rooms and heaters:** a planks house in winter with a campfire, then an Electric Heater: the
+  thermometer's "Room +1 · Out -9", WAILA's room line, the panel's "-", "+" and On / Off buttons
+  with the mouse, touch and a gamepad, "Set +1", no energy bar on the stove; the stove's and oil
+  heater's glow and light, the loops (at most 6) and the click; the room fills' cost on a big
+  build and in a cave (the 2 ms budget).
 
 `Seed = nil` gives every server a random world; set a number for a fixed one. With the title
 screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"void"`,

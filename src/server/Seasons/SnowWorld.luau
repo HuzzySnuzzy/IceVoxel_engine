@@ -23,7 +23,7 @@
 	             faster): SnowLayers.accumulate, so a tile rises evenly to its caps. Plants,
 	             torches and water in a top cell take no snow (plants are never lost to it).
 	  Thaw       while it does not snow and SeasonClimate.melts there, a visit melts with chance
-	             MELT_BASE (0.5) x MeltClear (2) by a clear day, x MeltRain (2) in rain and x
+	             MeltChance (0.5) x MeltClear (2) by a clear day, x MeltRain (2) in rain and x
 	             MeltNight (0.5) at night (the sun's night, DayCycle.isDay): SnowLayers.melt, one
 	             layer off the tile's deepest columns, so roofs drain gradually.
 	  Warm       a column whose snow (or the cell a first layer would go into) has a heat source
@@ -143,8 +143,6 @@ export type Snow = {
 
 local SnowWorld = {}
 
--- A visit's melt chance before its weather's factors (see the header's Thaw).
-SnowWorld.MELT_BASE = 0.5
 -- The most writes of one visit (a change a column).
 SnowWorld.MAX_WRITES = TILE * TILE
 -- Chunks whose saved edits are looked through for heat sources, at most, a tick.
@@ -330,7 +328,7 @@ end
 -- The melt chance of a visit (see the header's Thaw).
 function SnowWorld.meltChance(raining: boolean, precipitating: boolean, night: boolean): number
 	local snow = Config.Seasons.Snow
-	local chance = SnowWorld.MELT_BASE
+	local chance = snow.MeltChance
 	if raining then
 		chance *= snow.MeltRain
 	elseif not precipitating and not night then

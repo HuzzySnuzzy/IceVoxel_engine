@@ -352,6 +352,23 @@ local function meshLine(stats: MeshOverlay.Stats): string
 	)
 end
 
+-- The seasons' foliage colours: the near palette's generation, the sweep (running or the last
+-- one) and the far meshes' palette step with how many meshes it left stale.
+local function foliageLine(renderer: ChunkRenderer.ChunkRenderer): string
+	local s = renderer:seasonStats()
+	local mesh = renderer.overlay:getStats()
+	return string.format(
+		"foliage palette %d%s, last sweep %d writes in %d frames (%d sweeps), far step %d, %d stale",
+		s.gen,
+		if s.sweeping then string.format(" sweeping %d writes, %d frames, %d late", s.writes, s.frames, s.late) else "",
+		s.lastWrites,
+		s.lastFrames,
+		s.sweeps,
+		mesh.seasonId,
+		mesh.stale
+	)
+end
+
 -- Parts, pooled parts and PointLights (glow lichen's and lava's: how many are on, near the camera).
 local function partsLine(renderer: ChunkRenderer.ChunkRenderer): string
 	local lights = renderer.lightCount - renderer.sparseCount + renderer.sparseOn
@@ -528,6 +545,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			partsLine(streamer.renderer),
 			caveLine(stats),
 			meshLine(streamer.renderer.overlay:getStats()),
+			foliageLine(streamer.renderer),
 			movementLine(),
 			mobsLine(),
 			originLine(),

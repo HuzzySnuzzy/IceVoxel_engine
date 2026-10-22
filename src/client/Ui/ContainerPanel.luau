@@ -8,8 +8,13 @@
 	  crafting  the 3 x 3 grid, a chevron, the result in its large frame
 	  furnace   the input over the fuel, the result; the flame and the progress as thin bars
 	  machine   a Mekanism machine (Shared/Machines): its kind's slots (an empty upgrade slot shows
-	            its card's outline), its gauges, the energy bar, a fluid gauge per tank, the status
-	            line and the lines under it (a battery's input and output)
+	            its card's outline), its gauges, the energy bar (none for a fuel-only machine), a
+	            fluid gauge per tank, the status line and the lines under it (a battery's input
+	            and output), and its buttons (MenuLayout `buttons`: the thermostats' "-", "+" and
+	            "On" / "Off", MenuLayout.buttonLabel) with the set point's text between "-" and
+	            "+" (MenuLayout.setPointText). A click (or tap) plays MenuLayout.BUTTON_SOUND and
+	            sends MenuLayout.buttonAction through Inventory/ClientInventory (nothing is
+	            predicted: the server runs the kind's onButton and the next snapshot shows it)
 
 	The gauges in this look, all from the window's container `data` like before (MenuLayout's
 	maths: flameRows, arrowColumns, the machines' sources, energyRows, tankRows):
@@ -38,6 +43,8 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Fluids = require(Shared.Fluids)
 local Types = require(Shared.Inventory.Types)
 
+local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local InventoryColumns = require(script.Parent.InventoryColumns)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotWidgets = require(script.Parent.SlotWidgets)
@@ -74,6 +81,9 @@ type Self = ContainerPanel & {
 	status: TextLabel?,
 	lines: { TextLabel },
 	tanks: { Tank },
+	-- The buttons' labels (by button), the set point's text.
+	buttonLabels: { [MenuLayout.ButtonSpot]: TextLabel },
+	setPoint: TextLabel?,
 	machineData: { number }?,
 	machineShown: boolean,
 }
@@ -127,6 +137,8 @@ function ContainerPanel.new(
 			status = nil,
 			lines = {},
 			tanks = {},
+			buttonLabels = {},
+			setPoint = nil,
 			machineData = nil,
 			machineShown = false,
 		}, ContainerPanel) :: any
@@ -240,6 +252,44 @@ function ContainerPanel.new(
 		table.insert(self.lines, label)
 		table.insert(parts, label)
 	end
+	-- The machine's buttons (Minecraft's container buttons): a click sends the button's action.
+	for _, spot in layout.buttons do
+		local button = Dayz.button(body, spot.label, spot.x, spot.y + cut, spot.w, spot.h, 5, scaled)
+		button.Name = `Button{spot.id}`
+		local label = button:FindFirstChild("Label")
+		if label and label:IsA("TextLabel") then
+			self.buttonLabels[spot] = label
+		end
+		button.Activated:Connect(function()
+			local window = ClientInventory.window()
+			if window.container == nil or not ClientInventory.allows(MenuLayout.buttonAction(window, spot)) then
+				return
+			end
+			if SoundPlayer.allows("interface") then
+				SoundPlayer.playFlat(MenuLayout.BUTTON_SOUND)
+			end
+			ClientInventory.apply(MenuLayout.buttonAction(window, spot))
+		end)
+		table.insert(parts, button)
+	end
+	local setPoint = layout.setPoint
+	if setPoint then
+		local label = Dayz.label(
+			body,
+			"",
+			setPoint.x,
+			setPoint.y + cut,
+			setPoint.w,
+			setPoint.h,
+			"small",
+			Dayz.Colour.Text,
+			5,
+			Enum.TextXAlignment.Center,
+			scaled
+		)
+		self.setPoint = label
+		table.insert(parts, label)
+	end
 	for _, spot in layout.tanks do
 		-- Mekanism's GuiFluidGauge: its frame shaded, the fluid filling its inside from the bottom.
 		local rect = spot.frame
@@ -326,6 +376,10 @@ function ContainerPanel.render(self: Self, window: Window)
 		renderEnergy(self, data)
 		renderTanks(self, data)
 		setText(self.status, MenuLayout.statusText(container))
+		setText(self.setPoint, MenuLayout.setPointText(container))
+		for spot, label in self.buttonLabels do
+			setText(label, MenuLayout.buttonLabel(container, spot))
+		end
 		if #self.lines > 0 then
 			local texts = MenuLayout.lineTexts(container)
 			for i, label in self.lines do
@@ -372,6 +426,8 @@ function ContainerPanel.destroy(self: Self)
 	table.clear(self.parts)
 	table.clear(self.tanks)
 	table.clear(self.lines)
+	table.clear(self.buttonLabels)
+	self.setPoint = nil
 end
 
 return ContainerPanel

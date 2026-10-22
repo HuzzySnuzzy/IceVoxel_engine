@@ -530,7 +530,7 @@ SurvivorHud.start()
 -- (The season clock beside the minimap and its toasts, after the day line; foliage colours
 -- follow the calendar the lighting reads.)
 SeasonHud.start()
-SeasonTint.start(renderer)
+SeasonTint.start(renderer, generator)
 -- (After the toast: the icons go under its place; after the camera and the fluid's fog.)
 EffectHud.start()
 EffectView.start()

@@ -55,8 +55,8 @@ end
 
 -- Is a player within `radius` blocks (TickContext `near`; without one: yes)?
 local function playerNear(ctx: Core.TickContext, radius: number): boolean
-	local near = (ctx :: any).near
-	if type(near) ~= "function" then
+	local near = ctx.near
+	if near == nil then
 		return true
 	end
 	return near(ctx.x, ctx.y, ctx.z, radius) == true

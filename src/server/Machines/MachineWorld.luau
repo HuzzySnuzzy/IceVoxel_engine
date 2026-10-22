@@ -113,6 +113,7 @@ function MachineWorld.new(env: Env): World
 			getBlock = env.getBlock,
 			sky = nil,
 			climate = env.climate,
+			near = env.near,
 		},
 	}
 	world.ctx.sky = function(x: number, y: number, z: number): boolean

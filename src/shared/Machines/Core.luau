@@ -128,8 +128,8 @@
 	  sustained data    save, restore (server MachineWorld.blockDataHooks)
 	  seasons           isFuelOnly (capacity 0: `hasEnergy` false), buttons, button,
 	                    MAX_BUTTONS, MAX_BUTTON (panel buttons and their clicks), TickContext
-	                    `climate` (the room next to a machine: server Seasons/RoomWorld), KindSpec
-	                    `defaults`
+	                    `climate` (the room next to a machine: server Seasons/RoomWorld) and `near`
+	                    (a player within a radius), KindSpec `defaults`
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -277,6 +277,10 @@ export type TickContext = {
 	-- outdoors) and the outdoor value there (Temperature's scale). nil (a test's context, or no
 	-- seasons): no room, outside 0. Kinds work out heat with Shared/Seasons/Rooms.thermostat.
 	climate: ((x: number, y: number, z: number) -> (Rooms.Sample?, number))?,
+	-- Is a player within `radius` blocks of cell (x, y, z) (server Seasons/RoomWorld.playerNear,
+	-- the positions of its last 1 Hz step: a space heater's standby)? nil (a test's context): a
+	-- player counts as near.
+	near: ((x: number, y: number, z: number, radius: number) -> boolean)?,
 }
 
 -- The room next to a machine (Shared/Seasons/Rooms.Sample: TickContext.climate's).

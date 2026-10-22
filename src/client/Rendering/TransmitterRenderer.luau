@@ -13,7 +13,8 @@
 	  fluids   in Mechanical Pipes (their network's fill) and in Fluid Tanks (amount / capacity),
 	           in each fluid's colour (lava glowing);
 	  items    moving through Logistical Transporters, small models of the item along their path;
-	  machines what their Machines record shows (TransmitterModel.machineBoxes): a burning Heat
+	  machines what their Machines record shows (TransmitterModel.machineBoxes; a burning Wood
+	           Stove's or Oil Heater's PointLight, TransmitterModel.machineLight): a burning Heat
 	           or Combustion Generator's glowing window, a smelting Electric Furnace's heating
 	           chamber, a working Oil Refinery's heater and a Battery's charge in its gauges.
 
@@ -154,6 +155,8 @@ type Cell = {
 	parts: { Part },
 	-- What the parts show (nil: nothing drawn yet).
 	signature: string?,
+	-- A burning stove's or oil heater's light (TransmitterModel.machineLight), on its first part.
+	light: PointLight?,
 }
 
 type TransmitterState = { modes: number, colour: number, fluid: number, fluidId: number }
@@ -320,8 +323,18 @@ local function wakeStarved()
 	table.clear(starved)
 end
 
+-- Puts a cell's light out (before its parts go back to the pool).
+local function unlight(cell: Cell)
+	local light = cell.light
+	if light then
+		cell.light = nil
+		light:Destroy()
+	end
+end
+
 -- Takes a cell's decoration down (it is drawn again when it becomes dirty and active).
 local function undecorate(cell: Cell)
+	unlight(cell)
 	for _, part in cell.parts do
 		releasePart(part)
 	end
@@ -386,6 +399,7 @@ local function addCell(x: number, y: number, z: number, block: number)
 			active = false,
 			parts = {},
 			signature = nil,
+			light = nil,
 		}
 		-- (Drawn at once when it is in range, rather than at the next refresh.)
 		created.active = inRange(created, cameraBlocks())
@@ -683,6 +697,7 @@ local function redraw(key: number)
 		starved[key] = true
 		return
 	end
+	unlight(cell)
 	-- The cell's parts of the same look are reused (resized and moved; no re-parenting).
 	local reusable: { [string]: { Part } } = {}
 	for _, part in old do
@@ -720,6 +735,20 @@ local function redraw(key: number)
 	end
 	cell.parts = parts
 	cell.signature = signature
+	-- (A burning stove or oil heater casts a warm light: TransmitterModel.machineLight.)
+	local glow = if Machines.isMachine(cell.block) and #parts > 0
+		then TransmitterModel.machineLight(cell.block, machineStates[key])
+		else nil
+	if glow then
+		local light = Instance.new("PointLight")
+		light.Name = "MachineLight"
+		light.Range = math.min(60, glow.range * BLOCK)
+		light.Brightness = glow.brightness
+		light.Color = Color3.fromRGB(glow.colour[1], glow.colour[2], glow.colour[3])
+		light.Shadows = true
+		light.Parent = parts[1]
+		cell.light = light
+	end
 	if freed then
 		wakeStarved()
 	end

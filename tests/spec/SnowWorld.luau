@@ -325,7 +325,7 @@ return function(t, shared, require, server)
 	--[[ The thaw ]]
 
 	t.test("snow world: the thaw's chance (clear day x2, rain x2, night x0.5)", function()
-		t.eq(SnowWorld.MELT_BASE, 0.5)
+		t.eq(Config.Seasons.Snow.MeltChance, 0.5)
 		t.eq(SnowWorld.meltChance(false, false, false), 1, "a clear day")
 		t.eq(SnowWorld.meltChance(false, false, true), 0.25, "a clear night")
 		t.eq(SnowWorld.meltChance(true, true, false), 1, "rain by day")

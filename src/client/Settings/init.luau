@@ -309,6 +309,8 @@ function Settings.shown(key: string): boolean
 		return texturesUsed
 	elseif key == "farMaterials" then
 		return farMeshesRun
+	elseif key == "seasonClock" then
+		return Config.Seasons.Enabled == true and Config.Seasons.Clock.Enabled == true
 	end
 	return true
 end
