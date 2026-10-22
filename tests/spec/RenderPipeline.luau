@@ -3864,13 +3864,21 @@ return function(t, shared, require, _server, client)
 		end
 	end
 
-	-- The biome class of box `i` of a node's record: its centre's chunk column's (ChunkRenderer).
-	local function boxClass(classOf: (number, number) -> number, node: any, boxes: buffer, i: number): number
+	-- The biome class of cell (x, z) of a node: the chunk column its centre stands in.
+	local function cellClass(classOf: (number, number) -> number, node: any, x: number, z: number): number
 		local step = ChunkLayout.steps(node.level)
+		return classOf(
+			math.floor((node.nx * SIZE + x + 0.5) * step / SIZE),
+			math.floor((node.nz * SIZE + z + 0.5) * step / SIZE)
+		)
+	end
+
+	-- The biome class of box `i` of a node's record: its centre cell's (ChunkRenderer).
+	local function boxClass(classOf: (number, number) -> number, node: any, boxes: buffer, i: number): number
 		local o = i * BOX
-		local x = node.nx * SIZE + buffer.readu16(boxes, o) + buffer.readu16(boxes, o + 6) / 2
-		local z = node.nz * SIZE + buffer.readu16(boxes, o + 4) + buffer.readu16(boxes, o + 10) / 2
-		return classOf(math.floor(x * step / SIZE), math.floor(z * step / SIZE))
+		local x = buffer.readu16(boxes, o) + buffer.readu16(boxes, o + 6) // 2
+		local z = buffer.readu16(boxes, o + 4) + buffer.readu16(boxes, o + 10) // 2
+		return cellClass(classOf, node, x, z)
 	end
 
 	-- Seasonal test content: grass, leaves, plants on both soils, a fern of boxes, a vine, stone.
@@ -4305,15 +4313,27 @@ return function(t, shared, require, _server, client)
 			renderer:build(node, 0, seasonalRows(2))
 			local far = newNode(1, 1, 0)
 			renderer:build(far, 0, seasonalRows())
+			-- (Grass and leaves over a temperate and a cold chunk: nothing cut either way.)
+			local grassApp = Blocks.get(B.Grass).appearance
+			local wide = boxesOf({
+				{ 0, 0, 0, 16, 1, 16, grassApp },
+				{ 3, 1, 2, 10, 2, 5, Blocks.get(B.OakLeaves).appearance },
+			})
+			local border = newNode(1, 0, 0)
+			renderer:build(border, 0, wide)
 			sim.settle(nil, false)
 			renderer:build(node, 0, seasonalRows(4), { lane = "edit" })
 			sim.settle(nil, false)
 			local done, finished = renderer:seasonSweep(1000, 1000)
 			t.eq(done, 0)
 			t.ok(finished)
+			t.eq(renderer.states[border].records[0].boxes, wide, "the mesher's boxes, not cut")
 			local out = signatures(renderer, node)
 			for k, v in signatures(renderer, far) do
 				out[100 + k] = v
+			end
+			for k, v in signatures(renderer, border) do
+				out[200 + k] = v
 			end
 			return renderer, writes, out
 		end
@@ -4329,15 +4349,21 @@ return function(t, shared, require, _server, client)
 			t.eq(seasonLooks[k], v, `section {k} identical`)
 		end
 		t.eq(seasoned:seasonStats().sweeps, 0)
-		-- Config.Seasons.Enabled false: SeasonTint does nothing at all.
-		local root, req = neutralEnv()
-		local Config2 = req(root.Config)
-		Config2.Seasons.Enabled = false
-		local sim = overlaySim(root, req)
-		local SeasonTint = sim.load("SeasonTint")
-		SeasonTint.start(sim.renderer)
-		t.eq(sim.renderer.season, nil, "no seasons in the renderer")
-		t.eq(sim.renderer.overlay.season, nil, "nor in the far meshes")
+		-- Config.Seasons.Enabled or Seasons.Foliage.Enabled false: SeasonTint does nothing at all.
+		for _, foliageOff in { false, true } do
+			local root, req = neutralEnv()
+			local Config2 = req(root.Config)
+			if foliageOff then
+				Config2.Seasons.Foliage.Enabled = false
+			else
+				Config2.Seasons.Enabled = false
+			end
+			local sim = overlaySim(root, req)
+			local SeasonTint = sim.load("SeasonTint")
+			SeasonTint.start(sim.renderer)
+			t.eq(sim.renderer.season, nil, "no seasons in the renderer")
+			t.eq(sim.renderer.overlay.season, nil, "nor in the far meshes")
+		end
 	end)
 
 	t.test("seasons: SeasonTint hands a palette over each step, the far meshes theirs each far step", function()
@@ -4713,6 +4739,559 @@ return function(t, shared, require, _server, client)
 		t.eq((renderer:seasonSweep(1000, 1000)), 0, "nothing left for the sweep")
 	end)
 
+	-- Seasonal boxes of a node's live records whose cells are not all of one class.
+	local function mixedBoxes(renderer: any, Foliage: any, classOf: (number, number) -> number): number
+		local mixed = 0
+		for node, state in renderer.states do
+			for _, record in state.records do
+				for i = 0, record.count - 1 do
+					local o = i * BOX
+					if not Foliage.isSeasonal(buffer.readu16(record.boxes, o + 12) % GreedyMesher.KEY_STRIDE) then
+						continue
+					end
+					local x0, z0 = buffer.readu16(record.boxes, o), buffer.readu16(record.boxes, o + 4)
+					local class = cellClass(classOf, node, x0, z0)
+					for z = z0, z0 + buffer.readu16(record.boxes, o + 10) - 1 do
+						for x = x0, x0 + buffer.readu16(record.boxes, o + 6) - 1 do
+							if cellClass(classOf, node, x, z) ~= class then
+								mixed += 1
+							end
+						end
+					end
+				end
+			end
+		end
+		return mixed
+	end
+
+	t.test("seasons: far boxes are cut again when a palette first shows or classes change, without a gap", function()
+		local sim, Foliage, Calendar, Looks = seasonSim()
+		local renderer = sim.renderer
+		local world = sim.world
+		-- Classes by chunk column both ways, each asked of the "generator" costing half a ms.
+		local asked = 0
+		local function slow(classes: (number, number) -> number): (number, number) -> number
+			return function(cx: number, cz: number): number
+				asked += 1
+				world.clock += 0.0005
+				return classes(cx, cz)
+			end
+		end
+		local function patchwork(cx: number, cz: number): number
+			return 1 + (cx * 2 + cz * 3) % 4
+		end
+		local function halves(cx: number, _cz: number): number
+			return if cx % 8 < 4 then Foliage.classIndex("cold") else Foliage.classIndex("temperate")
+		end
+		renderer:setSeasonClass(slow(patchwork))
+		local grassApp, leavesApp = Blocks.get(B.Grass).appearance, Blocks.get(B.OakLeaves).appearance
+		-- Far nodes of levels 1-3 under wide grass and leaves (over 2 x 2 to 8 x 8 chunk columns).
+		local nodes = { newNode(1, 0, 0), newNode(2, 1, 0), newNode(3, 0, 1) }
+		local rows = {
+			{ 0, 0, 0, 16, 1, 16, grassApp },
+			{ 3, 1, 2, 9, 2, 11, leavesApp },
+			{ 0, 4, 0, 16, 1, 16, stoneApp },
+		}
+		for _, node in nodes do
+			renderer:build(node, 0, boxesOf(rows))
+		end
+		sim.settle()
+		for _, node in nodes do
+			sim.show(node)
+		end
+		sim.step(3)
+		-- No palette shown: nothing cut, no class asked.
+		for _, node in nodes do
+			local record = renderer.states[node].records[0]
+			t.eq(record.count, #rows, "built as meshed")
+			t.eq(record.boxes, record.source, "its own boxes")
+		end
+		t.eq(asked, 0, "no class asked before a palette")
+		-- A palette: the sweep has the far sections cut again in the background, a few classes a
+		-- frame, swapped without a gap; the parts end in their cells' classes.
+		local function run(classOf: (number, number) -> number, targets: any)
+			local frames = 0
+			while true do
+				local before = asked
+				sim.step(1)
+				-- (At most one class asked past each budget, the edits' and the others': the cut
+				-- stops after it.)
+				local built = asked - before
+				t.ok(
+					built * 0.5 <= renderer:budgetMs() + Render.EditBudgetMs + 1,
+					`classes asked by the builds a frame: {built}`
+				)
+				local _, finished = renderer:seasonSweep(100000, Config.Seasons.Foliage.SweepMs)
+				frames += 1
+				if finished and not renderer:busy() then
+					break
+				end
+				t.ok(frames < 2000, "it ends")
+			end
+			t.eq(sim.gaps, 0, `no gaps ({sim.gapDetail or ""})`)
+			t.eq(sim.doubled, 0)
+			t.eq(sim.handedEarly, 0, "quarantine")
+			t.eq(mixedBoxes(renderer, Foliage, classOf), 0, "every seasonal box over one class")
+			showsAll(t, expected(renderer, Foliage, Looks, targets, classOf), "painted in their classes")
+			return frames
+		end
+		local s = enabledState(Calendar)
+		local autumn = Foliage.targets(Foliage.midpoint(Foliage.stepOf(7.5)), s)
+		renderer:setSeason(autumn)
+		local frames = run(patchwork, autumn)
+		t.ok(asked >= 64, `the level 3 node's columns asked ({asked})`)
+		t.ok(frames >= 4, `spread over frames ({frames})`)
+		for _, node in nodes do
+			local record = renderer.states[node].records[0]
+			t.ok(record.count > #rows, "cut")
+			t.ok(record.boxes ~= record.source, "the mesher's boxes kept")
+		end
+		-- Another way of finding classes: cut again for it.
+		renderer:setSeasonClass(slow(halves))
+		run(halves, autumn)
+		local level3 = renderer.states[nodes[3]].records[0]
+		-- (Halves: the level 3 node's grass in two pieces, west cold and east temperate.)
+		local grassPieces = 0
+		for i = 0, level3.count - 1 do
+			if buffer.readu16(level3.boxes, i * BOX + 12) == grassApp then
+				grassPieces += 1
+			end
+		end
+		t.eq(grassPieces, 2, "cut where the new classes meet, and only there")
+		-- Classes changed while a new far section is being cut, a box cut for the old ones already
+		-- (leaves over two cold columns: whole; with the new classes they differ): it goes live,
+		-- then is cut again.
+		local fresh = newNode(3, 0, 2)
+		renderer:build(fresh, 0, boxesOf({ { 0, 1, 0, 4, 1, 2, leavesApp }, rows[1] }))
+		sim.show(fresh)
+		sim.step(1)
+		local task = renderer.schedule.slots[fresh][0].current
+		local cutting = if task then task.data.cutting else nil
+		t.ok(cutting ~= nil and cutting.at == 1, "the first box cut, the next on its way")
+		renderer:setSeasonClass(slow(patchwork))
+		run(patchwork, autumn)
+		t.ok(renderer.states[fresh].records[0].count > 3, "cut again")
+	end)
+
+	--[[
+		Generated terrain around the spawn (seed 12345, the regression review's sample): far nodes of
+		levels 1-4, each meshed as the workers mesh one (its boxes as one section over its active
+		range, and its quads).
+	]]
+	local function farSample(): { any }
+		local QuadMesher = require(shared.Meshing.QuadMesher)
+		local list = {}
+		for level = 1, 4 do
+			local step = ChunkLayout.steps(level)
+			local nodeBlocks = SIZE * step
+			local nx0, nz0 = spawnX // nodeBlocks, spawnZ // nodeBlocks
+			local radius = math.max(2, 48 // step)
+			local stride = math.max(1, radius // 3)
+			for nx = nx0 - radius, nx0 + radius, stride do
+				for nz = nz0 - radius, nz0 + radius, stride do
+					local r = gen.generate(level, nx, nz, nil, true)
+					local y0, y1 = GreedyMesher.activeRange(r.solidBelow, r.emptyAbove, r.height)
+					if y1 > y0 then
+						local quads, count = QuadMesher.mesh(r.data, r.height, y0, y1, true)
+						table.insert(list, {
+							node = newNode(level, nx, nz),
+							boxes = (GreedyMesher.mesh(r.data, r.height, y0, y1, true, nil, false, true)),
+							quads = quads,
+							count = count,
+						})
+					end
+				end
+			end
+		end
+		return list
+	end
+
+	-- A palette giving every biome class a colour of its own (the same for every seasonal
+	-- appearance), so what a part or a far-mesh quad shows tells its class.
+	local DISTINCT = { { 235, 70, 50 }, { 60, 190, 70 }, { 70, 90, 225 }, { 215, 190, 60 } }
+	local function distinctPalette(Foliage: any, Calendar: any): any
+		local base = Foliage.targets(Foliage.midpoint(Foliage.stepOf(7.5)), enabledState(Calendar))
+		local colours = {}
+		for class in Foliage.CLASSES do
+			local list = {}
+			for _, appearance in Foliage.appearances() do
+				list[appearance] = DISTINCT[class]
+			end
+			colours[class] = list
+		end
+		return { time = base.time, p = base.p, covers = base.covers, colours = colours }
+	end
+
+	--[[
+		The far sample drawn in the distinct palette, its classes the generator's (SeasonTint.classOf):
+		every other node built before the palette (cut again by the sweep's restyles once it is
+		shown), the rest after it; settled, every part painted. Made once for the tests below.
+	]]
+	local farDrawn: any = nil
+	local function drawFarSample(): any
+		if farDrawn then
+			return farDrawn
+		end
+		local sim, Foliage, Calendar, Looks = seasonSim()
+		local renderer = sim.renderer
+		local SeasonTint = sim.load("SeasonTint")
+		local function classOf(cx: number, cz: number): number
+			return SeasonTint.classOf(gen, cx, cz)
+		end
+		renderer:setSeasonClass(classOf)
+		local palette = distinctPalette(Foliage, Calendar)
+		local sample = farSample()
+		local function settle()
+			for _ = 1, 20000 do
+				sim.step(1, false)
+				local _, finished = renderer:seasonSweep(100000, 100000)
+				if finished and not renderer:busy() then
+					return
+				end
+			end
+			error("the far sample did not settle")
+		end
+		for i = 1, #sample, 2 do
+			renderer:build(sample[i].node, 0, sample[i].boxes)
+		end
+		settle()
+		-- (No palette shown yet: nothing cut, the mesher's boxes as they are.)
+		local before = 0
+		for i = 1, #sample, 2 do
+			local record = renderer.states[sample[i].node].records[0]
+			if record and record.boxes == sample[i].boxes then
+				before += 1
+			end
+		end
+		renderer:setSeason(palette)
+		renderer:setFarSeason(palette, 1)
+		for i = 2, #sample, 2 do
+			renderer:build(sample[i].node, 0, sample[i].boxes)
+		end
+		settle()
+		farDrawn = {
+			sim = sim,
+			sample = sample,
+			uncutBefore = before,
+			classOf = classOf,
+			palette = palette,
+			Foliage = Foliage,
+			Looks = Looks,
+			MeshOverlay = sim.load("MeshOverlay"),
+		}
+		return farDrawn
+	end
+
+	-- A far node's meshes as MeshOverlay builds them in the palette now (cut and coloured), or
+	-- without a palette (`plain`: neither).
+	local function farMeshesOf(drawn: any, entry: any, plain: boolean?): { any }
+		local overlay = drawn.sim.renderer.overlay
+		local payload = seasonPayload(overlay, entry.node.level)
+		payload.quads = { { buffer = entry.quads, count = entry.count } }
+		if plain then
+			payload.season = nil
+		end
+		local meshes = drawn.MeshOverlay.meshesOf({ members = { entry.node }, payload = payload })
+		if not plain then
+			for _, mesh in meshes do
+				drawn.MeshOverlay.recolour(mesh, payload)
+			end
+		end
+		return meshes
+	end
+
+	--[[
+		The cells far-mesh quad `q` covers (node-local x0, x1, z0, z1; a face across X or Z: the
+		block behind it) and the cell row of its top, from its corners; nil for an anchor quad.
+	]]
+	local function quadCells(mesh: any, q: number, node: any): (number?, number, number, number, number)
+		local step, stepY = ChunkLayout.steps(node.level)
+		local cell = step * BLOCK
+		local grow = Render.FarMeshes.Overlap
+		local p, c = mesh.positions, mesh.center
+		local o = (q - 1) * 12
+		local minX, maxX, minY, maxY, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge, math.huge, -math.huge
+		for k = 0, 3 do
+			local x, y, z = c[1] + p[o + k * 3 + 1], c[2] + p[o + k * 3 + 2], c[3] + p[o + k * 3 + 3]
+			minX, maxX = math.min(minX, x), math.max(maxX, x)
+			minY, maxY = math.min(minY, y), math.max(maxY, y)
+			minZ, maxZ = math.min(minZ, z), math.max(maxZ, z)
+		end
+		if maxX - minX + maxY - minY + maxZ - minZ < 1 then
+			return nil, 0, 0, 0, 0
+		end
+		local ux, uy, uz = p[o + 4] - p[o + 1], p[o + 5] - p[o + 2], p[o + 6] - p[o + 3]
+		local vx, vy, vz = p[o + 10] - p[o + 1], p[o + 11] - p[o + 2], p[o + 12] - p[o + 3]
+		local normalX, normalZ = uy * vz - uz * vy, ux * vy - uy * vx
+		local function range(min: number, max: number, normal: number, origin: number): (number, number)
+			local plane = math.round((min - origin) / cell)
+			if normal > 1e-9 then
+				return plane - 1, plane
+			elseif normal < -1e-9 then
+				return plane, plane + 1
+			end
+			return math.round((min + grow - origin) / cell), math.round((max - grow - origin) / cell)
+		end
+		local x0, x1 = range(minX, maxX, normalX, node.nx * SIZE * cell)
+		local z0, z1 = range(minZ, maxZ, normalZ, node.nz * SIZE * cell)
+		return x0, x1, z0, z1, math.round(maxY / (stepY * BLOCK)) - 1
+	end
+
+	t.test("seasons: every seasonal cell of a far node takes its own chunk's class, in parts and in meshes", function()
+		local MeshGeometry = require(shared.Meshing.MeshGeometry)
+		local drawn = drawFarSample()
+		local renderer, overlay = drawn.sim.renderer, drawn.sim.renderer.overlay
+		local Foliage, Looks, classOf, palette = drawn.Foliage, drawn.Looks, drawn.classOf, drawn.palette
+		local STRIDE = GreedyMesher.KEY_STRIDE
+		t.eq(drawn.uncutBefore, (#drawn.sample + 1) // 2, "nothing cut before a palette is shown")
+		local season = overlay.season
+		t.ok(season ~= nil and not overlay.looks, "the far palette, plain meshes")
+		-- Parts: every seasonal box holds cells of one class (its cells', each its own chunk
+		-- column's), the cells the mesher's boxes hold, and its parts show that class's colour.
+		local stats: { [number]: { [string]: number } } = {}
+		local mixed, lost, detail = 0, 0, nil
+		for _, entry in drawn.sample do
+			local node = entry.node
+			local step = ChunkLayout.steps(node.level)
+			local level = stats[node.level]
+				or { footprint = 0, boxes = 0, cut = 0, parts = 0, triangles = 0, cutTriangles = 0 }
+			stats[node.level] = level
+			local record = renderer.states[node].records[0]
+			t.ok(record ~= nil and record.source == entry.boxes, "a record of the mesher's boxes")
+			local held: { [number]: number } = {}
+			local function hold(boxes: buffer, count: number, sign: number)
+				for i = 0, count - 1 do
+					local o = i * BOX
+					local key = buffer.readu16(boxes, o + 12)
+					if not Foliage.isSeasonal(key % STRIDE) then
+						continue
+					end
+					local x0, y0, z0 =
+						buffer.readu16(boxes, o), buffer.readu16(boxes, o + 2), buffer.readu16(boxes, o + 4)
+					local w, h, d =
+						buffer.readu16(boxes, o + 6), buffer.readu16(boxes, o + 8), buffer.readu16(boxes, o + 10)
+					for y = y0, y0 + h - 1 do
+						for z = z0, z0 + d - 1 do
+							for x = x0, x0 + w - 1 do
+								local cell = (((y * SIZE + z) * SIZE + x) * 65536) + key
+								held[cell] = (held[cell] or 0) + sign
+							end
+						end
+					end
+				end
+			end
+			hold(entry.boxes, buffer.len(entry.boxes) // BOX, 1)
+			hold(record.boxes, record.count, -1)
+			for _, n in held do
+				if n ~= 0 then
+					lost += 1
+				end
+			end
+			local seasonalBoxes = 0
+			for i = 0, record.count - 1 do
+				local o = i * BOX
+				if not Foliage.isSeasonal(buffer.readu16(record.boxes, o + 12) % STRIDE) then
+					continue
+				end
+				seasonalBoxes += 1
+				local x0, z0 = buffer.readu16(record.boxes, o), buffer.readu16(record.boxes, o + 4)
+				local w, d = buffer.readu16(record.boxes, o + 6), buffer.readu16(record.boxes, o + 10)
+				local class = cellClass(classOf, node, x0, z0)
+				for z = z0, z0 + d - 1 do
+					for x = x0, x0 + w - 1 do
+						level.footprint += step * step
+						if cellClass(classOf, node, x, z) ~= class then
+							mixed += 1
+							detail = detail or `L{node.level} ({node.nx}, {node.nz}) box at {x0}, {z0}`
+						end
+					end
+				end
+			end
+			local added = record.count - buffer.len(entry.boxes) // BOX
+			level.boxes += seasonalBoxes - added
+			level.cut += added
+			level.parts += #record.parts
+		end
+		t.eq(lost, 0, "the cut boxes hold the mesher's cells, and only those")
+		t.eq(mixed, 0, `every seasonal box over one class ({detail or ""})`)
+		showsAll(t, expected(renderer, Foliage, Looks, palette, classOf), "every part in its cells' class")
+
+		-- Meshes: every seasonal quad over cells of one class, coloured in it.
+		local wrong, quadCount = 0, 0
+		detail = nil
+		for _, entry in drawn.sample do
+			local node = entry.node
+			local level = stats[node.level]
+			for _, mesh in farMeshesOf(drawn, entry, true) do
+				level.triangles += mesh.quads * 2
+			end
+			for _, mesh in farMeshesOf(drawn, entry) do
+				t.eq(mesh.look, MeshGeometry.PLAIN)
+				level.cutTriangles += mesh.quads * 2
+				for q = 1, mesh.quads do
+					local appearance = mesh.appearances[q]
+					local x0, x1, z0, z1 = quadCells(mesh, q, node)
+					if x0 == nil or not Foliage.isSeasonal(appearance) then
+						continue
+					end
+					quadCount += 1
+					for z = z0, z1 - 1 do
+						for x = x0 :: number, x1 - 1 do
+							local want = season.colours[cellClass(classOf, node, x, z)][appearance]
+							for k = 1, 3 do
+								if math.abs(mesh.colors[(q - 1) * 3 + k] - want[3 + k]) > 1e-9 then
+									wrong += 1
+									detail = detail
+										or `L{node.level} ({node.nx}, {node.nz}) quad {q} over {x0}..{x1 - 1}, {z0}..{z1 - 1}`
+									break
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		t.ok(quadCount > 1000, `seasonal quads checked ({quadCount})`)
+		t.eq(wrong, 0, `every seasonal quad's cells in their own class ({detail or ""})`)
+		-- (What the cuts cost here: parts and triangles.)
+		for index = 1, 4 do
+			local level = stats[index]
+			print(
+				string.format(
+					"    level %d: seasonal footprint %d blocks^2, %d seasonal boxes +%d cut (%d parts, +%.2f%%), mesh triangles %d +%d (+%.2f%%)",
+					index,
+					level.footprint,
+					level.boxes,
+					level.cut,
+					level.parts,
+					100 * level.cut / math.max(1, level.parts - level.cut),
+					level.triangles,
+					level.cutTriangles - level.triangles,
+					100 * (level.cutTriangles - level.triangles) / math.max(1, level.triangles)
+				)
+			)
+		end
+	end)
+
+	t.test("seasons: a far node's parts and its far mesh show every top cell in the same class", function()
+		local drawn = drawFarSample()
+		local renderer, overlay = drawn.sim.renderer, drawn.sim.renderer.overlay
+		local Foliage, Looks, palette = drawn.Foliage, drawn.Looks, drawn.palette
+		local STRIDE = GreedyMesher.KEY_STRIDE
+		local season = overlay.season
+		-- The class a part's or a quad's colour tells (the palette gives each its own).
+		local partColours: { [string]: { any } } = {}
+		local function partClass(appearance: number, plain: boolean, colour: any): number?
+			local key = `{appearance}{plain}`
+			local list = partColours[key]
+			if list == nil then
+				list = {}
+				for class in Foliage.CLASSES do
+					local tint = Looks.seasonalTint(appearance, palette.colours[class][appearance])
+					list[class] = if plain then tint.plain else tint.far
+				end
+				for a = 1, #list do
+					for b = a + 1, #list do
+						t.ok(not nearColour(list[a], list[b]), "the palette tells classes apart")
+					end
+				end
+				partColours[key] = list
+			end
+			for class, c in list do
+				if nearColour(c, colour) then
+					return class
+				end
+			end
+			return nil
+		end
+		local function quadClass(appearance: number, r: number, g: number, b: number): number?
+			for class in Foliage.CLASSES do
+				local c = season.colours[class][appearance]
+				if math.abs(c[4] - r) + math.abs(c[5] - g) + math.abs(c[6] - b) < 1e-6 then
+					return class
+				end
+			end
+			return nil
+		end
+		local compared, differ, unknown = 0, 0, 0
+		local example, detail = nil, nil
+		for _, entry in drawn.sample do
+			local node = entry.node
+			local record = renderer.states[node].records[0]
+			-- Each seasonal top cell's class as its part shows it.
+			local byParts: { [number]: number } = {}
+			for i = 0, record.count - 1 do
+				local o = i * BOX
+				local appearance = buffer.readu16(record.boxes, o + 12) % STRIDE
+				if not Foliage.isSeasonal(appearance) then
+					continue
+				end
+				local class = partClass(appearance, record.plain, record.parts[record.first[i + 1]].Color)
+				if class == nil then
+					unknown += 1
+					continue
+				end
+				local x0, z0 = buffer.readu16(record.boxes, o), buffer.readu16(record.boxes, o + 4)
+				local top = buffer.readu16(record.boxes, o + 2) + buffer.readu16(record.boxes, o + 8) - 1
+				for z = z0, z0 + buffer.readu16(record.boxes, o + 10) - 1 do
+					for x = x0, x0 + buffer.readu16(record.boxes, o + 6) - 1 do
+						byParts[(top * SIZE + z) * SIZE + x] = class
+					end
+				end
+			end
+			-- And as its far mesh's top shows it.
+			for _, mesh in farMeshesOf(drawn, entry) do
+				for q = 1, mesh.quads do
+					local appearance = mesh.appearances[q]
+					local x0, x1, z0, z1, y = quadCells(mesh, q, node)
+					-- (A top: U x V, QuadMesher.corners' outward normal, points up.)
+					local p, o = mesh.positions, (q - 1) * 12
+					local up = (p[o + 6] - p[o + 3]) * (p[o + 10] - p[o + 1])
+						- (p[o + 4] - p[o + 1]) * (p[o + 12] - p[o + 3])
+					if x0 == nil or up <= 0 or not Foliage.isSeasonal(appearance) then
+						continue
+					end
+					local c = mesh.colors
+					local class = quadClass(appearance, c[q * 3 - 2], c[q * 3 - 1], c[q * 3])
+					if class == nil then
+						unknown += 1
+						continue
+					end
+					for z = z0, z1 - 1 do
+						for x = x0 :: number, x1 - 1 do
+							local p = byParts[(y * SIZE + z) * SIZE + x]
+							if p then
+								compared += 1
+								if p ~= class then
+									differ += 1
+									detail = detail
+										or `L{node.level} ({node.nx}, {node.nz}) cell ({x}, {y}, {z}): parts {p}, mesh {class}`
+								end
+								-- (The review's example: parts cold, the mesh temperate before.)
+								if
+									node.level == 2
+									and node.nx == 16
+									and node.nz == 6
+									and x == 0
+									and y == 21
+									and z == 2
+								then
+									example = { p, class }
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		t.eq(unknown, 0, "every colour tells a class")
+		t.ok(compared > 20000, `top cells compared ({compared})`)
+		t.eq(differ, 0, `parts and meshes agree ({detail or ""})`)
+		t.ok(example ~= nil, "the review's example cell compared")
+		t.eq(example[1], example[2], "the review's example cell agrees")
+		t.eq(example[1], cellClass(drawn.classOf, newNode(2, 16, 6), 0, 2), "in its own chunk's class")
+	end)
+
 	--[[
 		Node states as the renderer keeps them: `count` level 0 nodes around the origin, each with
 		`sections` records of no boxes: the first built before the seasons (painted 0: its parts
@@ -4724,9 +5303,12 @@ return function(t, shared, require, _server, client)
 		for i = 0, count - 1 do
 			local records = {}
 			for section = 0, sections - 1 do
+				local boxes = buffer.create(0)
 				records[section] = {
-					boxes = buffer.create(0),
+					boxes = boxes,
 					count = 0,
+					source = boxes,
+					cut = math.huge,
 					parts = {},
 					first = { 1 },
 					folder = nil,
@@ -4834,13 +5416,38 @@ return function(t, shared, require, _server, client)
 	--[[
 		Random edits, LOD swaps (another place, other classes), teleport trash, palettes (now and
 		then the calendar off), restyles and pool limits under a sweep with random budgets: it
-		writes only to parts live in a record, and ends with every part current.
+		writes only to parts live in a record, and ends with every part current. With `cuts`, far
+		nodes also get wide seasonal boxes over chunks of other classes (a class per chunk column
+		each way) and the way of finding classes changes now and then: every seasonal box ends cut
+		for the classes in effect, over cells of one class.
 	]]
-	for _, seed in { 4242, 77, 31337 } do
-		t.test(`seasons: random edits, swaps, trash and palettes end with every part current ({seed})`, function()
+	for _, case in
+		{
+			{ seed = 4242, cuts = false },
+			{ seed = 77, cuts = false },
+			{ seed = 31337, cuts = false },
+			{ seed = 2718, cuts = true },
+			{ seed = 1618, cuts = true },
+		}
+	do
+		local seed, cuts = case.seed, case.cuts
+		local name = if cuts
+			then `seasons: random edits, swaps, trash, palettes and classes end with far boxes cut for their classes ({seed})`
+			else `seasons: random edits, swaps, trash and palettes end with every part current ({seed})`
+		t.test(name, function()
 			local sim, Foliage, Calendar, Looks = seasonSim()
 			local renderer, world = sim.renderer, sim.world
 			local classOf = testClass(Foliage)
+			-- (With cuts: classes by chunk column both ways, and another way now and then.)
+			local function patchwork(cx: number, cz: number): number
+				return 1 + (cx * 2 + cz * 3) % 4
+			end
+			local function stripes(cx: number, cz: number): number
+				return if (cx + cz) % 3 == 0 then Foliage.classIndex("cold") else Foliage.classIndex("dry")
+			end
+			if cuts then
+				classOf = patchwork
+			end
 			renderer:setSeasonClass(classOf)
 			local s = enabledState(Calendar)
 			local rand = rng(seed)
@@ -4854,7 +5461,14 @@ return function(t, shared, require, _server, client)
 				end
 			end
 			table.insert(kinds, stoneApp)
-			local function randomMesh(sct: number): buffer
+			-- (Seasonal cubes, for wide boxes.)
+			local cubes = {}
+			for _, appearance in Foliage.appearances() do
+				if appearances[appearance].shape == nil then
+					table.insert(cubes, appearance)
+				end
+			end
+			local function randomMesh(sct: number, level: number): buffer
 				local list, used = {}, {}
 				for _ = 1, 3 + rand(20) do
 					local x, y, z = rand(16), rand(8), rand(16)
@@ -4864,14 +5478,21 @@ return function(t, shared, require, _server, client)
 						table.insert(list, { x, sct * 8 + y, z, 1, 1, 1, kinds[1 + rand(#kinds)] })
 					end
 				end
+				if cuts and level > 0 then
+					for _ = 1, 1 + rand(3) do
+						local x, z = rand(15), rand(15)
+						local w, d = 1 + rand(16 - x), 1 + rand(16 - z)
+						table.insert(list, { x, sct * 8 + rand(8), z, w, 1 + rand(2), d, cubes[1 + rand(#cubes)] })
+					end
+				end
 				return boxesOf(list)
 			end
 			local slots = {}
 			for i = 1, 8 do
-				local level = ({ 0, 0, 0, 1, 2 })[1 + rand(5)]
+				local level = (if cuts then { 0, 1, 1, 2, 3 } else { 0, 0, 0, 1, 2 })[1 + rand(5)]
 				local node = newNode(level, i % 4, i // 4, rand(50))
 				for sct = 0, 1 do
-					renderer:build(node, sct, randomMesh(sct))
+					renderer:build(node, sct, randomMesh(sct, level))
 				end
 				slots[i] = node
 			end
@@ -4892,14 +5513,19 @@ return function(t, shared, require, _server, client)
 					local node = slots[i]
 					if op < 40 then
 						local sct = rand(2)
-						renderer:build(node, sct, randomMesh(sct), { lane = if rand(2) == 0 then "edit" else "normal" })
+						renderer:build(
+							node,
+							sct,
+							randomMesh(sct, node.level),
+							{ lane = if rand(2) == 0 then "edit" else "normal" }
+						)
 					elseif op < 55 then
 						-- An LOD change: a fresh node at another place (another class), swapped in when built.
-						local level = ({ 0, 0, 1, 2 })[1 + rand(4)]
+						local level = (if cuts then { 0, 1, 2, 3 } else { 0, 0, 1, 2 })[1 + rand(4)]
 						local fresh = newNode(level, rand(4), 3 + rand(3), rand(50))
 						local pending = 2
 						for sct = 0, 1 do
-							renderer:build(fresh, sct, randomMesh(sct), {
+							renderer:build(fresh, sct, randomMesh(sct, level), {
 								onDone = function()
 									pending -= 1
 									if pending == 0 and not fresh.removed and slots[i] == node and not node.removed then
@@ -4914,10 +5540,11 @@ return function(t, shared, require, _server, client)
 						node.removed = true
 						sim.shown[node] = nil
 						renderer:trashNode(node, rand(1000), rand(2) == 0)
-						local fresh = newNode(0, rand(4), rand(3), rand(50))
+						local level = if cuts then rand(3) else 0
+						local fresh = newNode(level, rand(4), rand(3), rand(50))
 						local pending = 2
 						for sct = 0, 1 do
-							renderer:build(fresh, sct, randomMesh(sct), {
+							renderer:build(fresh, sct, randomMesh(sct, level), {
 								onDone = function()
 									pending -= 1
 									if pending == 0 and not fresh.removed then
@@ -4946,6 +5573,10 @@ return function(t, shared, require, _server, client)
 						})
 					elseif op < 75 then
 						renderer.pool:setLimit(rand(300))
+					elseif cuts and op < 78 then
+						-- Another way of finding classes: every far box cut again, in the background.
+						classOf = if classOf == patchwork then stripes else patchwork
+						renderer:setSeasonClass(classOf)
 					end
 				end
 				-- The sweep, watched: writes only to live parts and their images.
@@ -4961,7 +5592,12 @@ return function(t, shared, require, _server, client)
 				sim.step(1, false)
 			end
 			sim.settle(nil, false)
-			while not select(2, renderer:seasonSweep(100000, 100000)) do
+			-- (The sweep may have far sections cut again: until those are built and painted too.)
+			for _ = 1, 2000 do
+				local _, finished = renderer:seasonSweep(100000, 100000)
+				if finished and not renderer:busy() then
+					break
+				end
 				sim.step(1, false)
 			end
 			t.eq(outside, 0, `sweep writes outside live records ({outsideDetail})`)
@@ -4973,6 +5609,56 @@ return function(t, shared, require, _server, client)
 				"every part current"
 			)
 			t.eq(sim.handedEarly, 0, "quarantine")
+			if not cuts then
+				return
+			end
+			-- Every far seasonal box over cells of one class, the mesher's cells and only those.
+			local mixed, cut, held = 0, 0, 0
+			for node, state in renderer.states do
+				if node.level == 0 then
+					continue
+				end
+				for _, record in state.records do
+					local cells: { [string]: number } = {}
+					local function hold(boxes: buffer, count: number, sign: number)
+						for i = 0, count - 1 do
+							local o = i * BOX
+							local key = buffer.readu16(boxes, o + 12)
+							local x0, y0, z0 =
+								buffer.readu16(boxes, o), buffer.readu16(boxes, o + 2), buffer.readu16(boxes, o + 4)
+							for y = y0, y0 + buffer.readu16(boxes, o + 8) - 1 do
+								for z = z0, z0 + buffer.readu16(boxes, o + 10) - 1 do
+									for x = x0, x0 + buffer.readu16(boxes, o + 6) - 1 do
+										local cell = `{x},{y},{z},{key}`
+										cells[cell] = (cells[cell] or 0) + sign
+									end
+								end
+							end
+							if sign < 0 and Foliage.isSeasonal(key % STRIDE) then
+								local class = cellClass(classOf, node, x0, z0)
+								for z = z0, z0 + buffer.readu16(boxes, o + 10) - 1 do
+									for x = x0, x0 + buffer.readu16(boxes, o + 6) - 1 do
+										if cellClass(classOf, node, x, z) ~= class then
+											mixed += 1
+										end
+									end
+								end
+							end
+						end
+					end
+					hold(record.source, buffer.len(record.source) // BOX, 1)
+					hold(record.boxes, record.count, -1)
+					for _, n in cells do
+						if n ~= 0 then
+							held += 1
+						end
+					end
+					cut += record.count - buffer.len(record.source) // BOX
+				end
+			end
+			t.ok(cut > 0, "some far boxes were cut")
+			t.eq(held, 0, "the cut boxes hold the mesher's cells")
+			t.eq(mixed, 0, "every far seasonal box over one class")
 		end)
 	end
 end

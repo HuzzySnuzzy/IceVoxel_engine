@@ -18,8 +18,10 @@
 	           included), nearest sections first, every seasonal part written once a step (about
 	           15-26 frames a step).
 	  Classes  A chunk column's biome class is SeasonClimate.classOf of the generator's biome at
-	           its centre column (`classOf`); the renderer asks it per chunk of each seasonal box
-	           and far-mesh quad, and keeps the answers (ChunkRenderer.setSeasonClass).
+	           its centre column (`classOf`); the renderer asks it for every chunk column a far
+	           seasonal box or far-mesh quad stands in (cut where classes meet: every seasonal
+	           block in its own column's class) and keeps the answers
+	           (ChunkRenderer.setSeasonClass).
 	  Off      Config.Seasons.Enabled or Config.Seasons.Foliage.Enabled false: `start` does nothing,
 	           so every colour is exactly as without seasons. The calendar off (before the server
 	           publishes, a world without seasons): the authored palette (nothing written unless a

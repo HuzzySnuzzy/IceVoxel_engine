@@ -3690,20 +3690,27 @@ Steps of BlendDays/24 days (with a season shorter than 8 days, times the square 
 one's share of 8: the palettes' moves and the snow cover's ramps in days then both move less a step)
 never differ by more than ΔE76 2.5, whatever the seasons' lengths. The biome class is per chunk
 column at every level (the generator's biome at its centre, asked once and kept in a fixed 1.3 MB
-cache that holds a 4096-block view): a box takes its centre's chunk's, a far-mesh quad its block's,
-so a far node spanning several classes paints each chunk as its children will. SeasonTint hands
-ChunkRenderer a palette per step; colours become paints through `TextureLooks.seasonalTint`; each
-record keeps its parts' palette generations, so the budgeted sweep (nearest first, live records
-only, SweepWrites/SweepMs a frame) writes each changed colour once and skips unchanged ones. It
-visits only the nodes that may hold seasonal parts, ranks them into distance rings over its first
-frames (each ring sorted when reached) and looks at the clock through its walk, so neither a new
-palette nor the walk costs a long frame with thousands of nodes. New and pooled parts are painted
-as they are built. Far meshes bake the far palette per chunk's class, in their own look's colour
-only when they are built in looks (the overlay's, which may have dropped Far Materials, not the
-setting), and are rebuilt (`MeshRegions.stale`), through MeshOverlay's usual ranking and gate, when
-it drifts past FarDeltaE in a class their quads took. Items, icons and the map keep the authored
-colours. F3 has a foliage line (the palette, the last sweep's writes and frames, the far step,
-stale meshes).
+cache that holds a 4096-block view), and every seasonal block takes its own column's class (the
+one its centre stands in), in far parts and far meshes alike and as its children will, however
+the two meshers merged it: once a palette is shown, a far node's seasonal boxes and far-mesh quads
+are cut where the classes of the columns they stand in differ (`Meshing/ClassCuts`, greedily into
+rectangles of one class; only there, so everything else stays as meshed), and each takes its
+centre block's class. Around the spawn (seed 12345) that is 0.5%, 1.2%, 8.9% and 21% more parts at
+levels 1 to 4 (biome borders are ragged at a chunk a cell) and 0.1% to 4.4% more far-mesh
+triangles. The cut runs before a build's diff within the build budget; far sections built before
+the first palette (nothing cut, no class asked) or cut for classes since changed are cut again in
+the background when the sweep reaches them. SeasonTint hands ChunkRenderer a palette per step;
+colours become paints through `TextureLooks.seasonalTint`; each record keeps its parts' palette
+generations, so the budgeted sweep (nearest first, live records only, SweepWrites/SweepMs a
+frame) writes each changed colour once and skips unchanged ones. It visits only the nodes that may
+hold seasonal parts, ranks them into distance rings over its first frames (each ring sorted when
+reached) and looks at the clock through its walk, so neither a new palette nor the walk costs a
+long frame with thousands of nodes. New and pooled parts are painted as they are built. Far
+meshes bake the far palette per chunk's class, in their own look's colour only when they are
+built in looks (the overlay's, which may have dropped Far Materials, not the setting), and are
+rebuilt (`MeshRegions.stale`), through MeshOverlay's usual ranking and gate, when it drifts past
+FarDeltaE in a class their quads took. Items, icons and the map keep the authored colours. F3 has
+a foliage line (the palette, the last sweep's writes and frames, the far step, stale meshes).
 
 **The season clock** (client `Ui/SeasonClock` face, `Ui/SeasonLine` words, both pure; `Ui/SeasonHud`
 glue). A Don't Starve dial left of the minimap (HudLayout `clock`: GAP left of the minimap or Map

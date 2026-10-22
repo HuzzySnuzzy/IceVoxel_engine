@@ -219,6 +219,277 @@ return function(t, shared, require, _server, client)
 		t.eq(gen.farSeamLimits(Config.Lod.Levels - 1, 0, 0), nil, "nothing is coarser than the top level")
 	end)
 
+	--[[ ClassCuts (seasons: far boxes and quads cut where chunk classes meet) ]]
+
+	local ClassCuts = require(shared.Meshing.ClassCuts)
+	local Foliage = require(shared.Seasons.Foliage)
+	local grassApp = Blocks.get(Blocks.id.Grass).appearance
+	local leavesApp = Blocks.get(Blocks.id.OakLeaves).appearance
+	local stoneApp = Blocks.get(Blocks.id.Stone).appearance
+
+	-- The chunk column the centre of cell `x` of a node at `n` stands in (blocks).
+	local function ownColumn(n: number, x: number, step: number): number
+		return math.floor((n * SIZE + x + 0.5) * step / SIZE)
+	end
+
+	-- Classes 1..k per chunk column, scattered, and how many were asked.
+	local function scattered(seed: number, k: number): ((number, number) -> number, () -> number)
+		local asked = 0
+		return function(cx: number, cz: number): number
+			asked += 1
+			return 1 + ((cx * 73856093 + cz * 19349663 + seed * 83492791) % 2147483647) % k
+		end, function(): number
+			return asked
+		end
+	end
+
+	t.test("class cuts: pieces of one class tile a footprint; whole over one class or one chunk", function()
+		local state = 12345
+		local function rand(n: number): number
+			state = (state * 1103515245 + 12345) % 2147483648
+			return (state // 65536) % n
+		end
+		for level = 0, Config.Lod.Levels - 1 do
+			local step = ChunkLayout.steps(level)
+			for x = 0, SIZE - 1 do
+				for _, n in { -3, 0, 5 } do
+					t.eq(ClassCuts.column(n, x, step), ownColumn(n, x, step), `column of cell {x}, level {level}`)
+				end
+			end
+			for trial = 1, 200 do
+				local nx, nz = rand(9) - 4, rand(9) - 4
+				local x0, z0 = rand(SIZE), rand(SIZE)
+				local x1, z1 = x0 + 1 + rand(SIZE - x0), z0 + 1 + rand(SIZE - z0)
+				local classAt = scattered(trial, 1 + rand(3))
+				local n = ClassCuts.cut(nx, nz, step, x0, x1, z0, z1, classAt)
+				local label = `level {level} trial {trial}`
+				local classes: { [number]: boolean } = {}
+				for z = z0, z1 - 1 do
+					for x = x0, x1 - 1 do
+						classes[classAt(ownColumn(nx, x, step), ownColumn(nz, z, step))] = true
+					end
+				end
+				local count = 0
+				for _ in classes do
+					count += 1
+				end
+				if not ClassCuts.spans(step, x0, x1, z0, z1) then
+					t.eq(n, 0, `{label}: one chunk column, whole`)
+					continue
+				end
+				if count == 1 then
+					t.eq(n, 0, `{label}: one class, whole`)
+					continue
+				end
+				t.ok(n > 1, `{label}: cut`)
+				local covered: { [number]: number } = {}
+				local rects = ClassCuts.rects
+				for p = 0, n - 1 do
+					local px0, px1, pz0, pz1 = rects[p * 4 + 1], rects[p * 4 + 2], rects[p * 4 + 3], rects[p * 4 + 4]
+					t.ok(
+						px0 >= x0 and px1 <= x1 and pz0 >= z0 and pz1 <= z1 and px0 < px1 and pz0 < pz1,
+						`{label}: in it`
+					)
+					local class = classAt(ownColumn(nx, px0, step), ownColumn(nz, pz0, step))
+					for z = pz0, pz1 - 1 do
+						for x = px0, px1 - 1 do
+							covered[z * SIZE + x] = (covered[z * SIZE + x] or 0) + 1
+							t.eq(classAt(ownColumn(nx, x, step), ownColumn(nz, z, step)), class, `{label}: one class`)
+						end
+					end
+				end
+				for z = z0, z1 - 1 do
+					for x = x0, x1 - 1 do
+						t.eq(covered[z * SIZE + x], 1, `{label}: every cell once`)
+					end
+				end
+			end
+			-- (A footprint within one chunk column asks nothing.)
+			local classAt, asked = scattered(1, 4)
+			local unit = math.max(1, SIZE // step)
+			t.eq(ClassCuts.cut(2, -1, step, 0, unit, 0, unit, classAt), 0)
+			t.eq(asked(), 0, `level {level}: no class asked within one column`)
+		end
+	end)
+
+	-- Boxes (GreedyMesher layout) from rows of { x, y, z, w, h, d, key }.
+	local function boxesOf(rows: { { number } }): buffer
+		local b = buffer.create(#rows * GreedyMesher.BOX_BYTES)
+		for i, row in rows do
+			for k = 1, 7 do
+				buffer.writeu16(b, (i - 1) * GreedyMesher.BOX_BYTES + (k - 1) * 2, row[k])
+			end
+		end
+		return b
+	end
+
+	t.test(
+		"class cuts: boxes keep everything else as it is, go on where they stopped, and stay whole unseen",
+		function()
+			-- Level 2 (four cells a chunk column): classes by column, west half cold, east temperate.
+			local step = 4
+			local cold, temperate = Foliage.classIndex("cold"), Foliage.classIndex("temperate")
+			local function halves(cx: number, _cz: number): number
+				return if cx % 4 < 2 then cold else temperate
+			end
+			local tinted = grassApp + 3 * GreedyMesher.KEY_STRIDE
+			local rows = {
+				{ 0, 0, 0, 16, 4, 16, stoneApp }, -- not seasonal: never cut
+				{ 0, 4, 0, 16, 1, 16, tinted }, -- cut in two at x = 8 (its key kept)
+				{ 1, 5, 1, 6, 2, 3, leavesApp }, -- within the cold half: whole
+				{ 4, 5, 9, 12, 1, 2, leavesApp }, -- cut at x = 8
+				{ 9, 6, 9, 1, 1, 1, leavesApp },
+			}
+			local source = boxesOf(rows)
+			local job = ClassCuts.job(source)
+			t.ok(ClassCuts.boxes(job, 0, 0, step, halves, true))
+			t.ok(job.spans, "seasonal boxes over several columns")
+			t.eq(job.count, 7)
+			local out = job.out :: buffer
+			t.eq(buffer.len(out), 7 * GreedyMesher.BOX_BYTES, "exactly the boxes")
+			local want = {
+				rows[1],
+				{ 0, 4, 0, 8, 1, 16, tinted },
+				{ 8, 4, 0, 8, 1, 16, tinted },
+				rows[3],
+				{ 4, 5, 9, 4, 1, 2, leavesApp },
+				{ 8, 5, 9, 8, 1, 2, leavesApp },
+				rows[5],
+			}
+			for i, row in want do
+				for k = 1, 7 do
+					t.eq(
+						buffer.readu16(out, (i - 1) * GreedyMesher.BOX_BYTES + (k - 1) * 2),
+						row[k],
+						`box {i} field {k}`
+					)
+				end
+			end
+			-- Stopped (out of time) after every third class asked, which is kept (ChunkRenderer's
+			-- cache): it goes on from that box and ends with the same boxes.
+			local known: { [number]: number } = {}
+			local fresh = 0
+			local function stopping(cx: number, cz: number): number
+				local key = cx * 4096 + cz
+				local class = known[key]
+				if class == nil then
+					class = halves(cx, cz)
+					known[key] = class
+					fresh += 1
+					if fresh % 3 == 0 then
+						return -1
+					end
+				end
+				return class
+			end
+			local resumed = ClassCuts.job(source)
+			local tries = 0
+			while not ClassCuts.boxes(resumed, 0, 0, step, stopping, true) do
+				tries += 1
+				t.ok(tries < 100, "it ends")
+			end
+			t.ok(tries > 0, "it stopped")
+			t.eq(buffer.tostring(resumed.out :: buffer), buffer.tostring(out), "the same boxes")
+			-- Nothing to cut (one class), or not cutting (no palette shown): the source itself.
+			local whole = ClassCuts.job(source)
+			t.ok(ClassCuts.boxes(whole, 0, 0, step, function()
+				return cold
+			end, true))
+			t.eq(whole.out, source, "one class: the very buffer")
+			t.eq(whole.count, #rows)
+			local unseen = ClassCuts.job(source)
+			t.ok(ClassCuts.boxes(unseen, 0, 0, step, function(): number
+				error("no class is asked without cutting")
+			end, false))
+			t.eq(unseen.out, source)
+			t.ok(unseen.spans, "but it knows a change of classes may cut it")
+			local single = ClassCuts.job(boxesOf({ rows[1], { 1, 5, 1, 3, 2, 3, leavesApp }, rows[5] }))
+			t.ok(ClassCuts.boxes(single, 0, 0, step, halves, false))
+			t.ok(not single.spans, "seasonal boxes within one column each: nothing ever to cut")
+		end
+	)
+
+	t.test("class cuts: quads are cut along their own axes, in every direction", function()
+		local QUAD = QuadMesher.QUAD_BYTES
+		-- Level 1 (eight cells a chunk column): a class per column, each way.
+		local step, scale = 2, 2 * Config.BlockSize
+		local function patchwork(cx: number, cz: number): number
+			return 1 + (cx + 2 * cz) % 3
+		end
+		for dir = 0, 5 do
+			-- A seasonal quad over cells 4..11 of both in-plane axes (one cell across a side face),
+			-- and a stone one the same.
+			local quads = buffer.create(2 * QUAD)
+			for i, key in { leavesApp, stoneApp } do
+				local o = (i - 1) * QUAD
+				buffer.writeu16(quads, o, dir)
+				buffer.writeu16(quads, o + 2, 4)
+				buffer.writeu16(quads, o + 4, 4)
+				buffer.writeu16(quads, o + 6, 4)
+				buffer.writeu16(quads, o + 8, 8)
+				buffer.writeu16(quads, o + 10, 8)
+				buffer.writeu16(quads, o + 12, key)
+			end
+			local paused = 0
+			local out, count = ClassCuts.quads(quads, 2, 1, -1, step, patchwork, function()
+				paused += 1
+			end)
+			local across = if dir < 2 then "x" elseif dir > 3 then "z" else nil
+			local pieces = if across then 2 else 4
+			t.eq(count, pieces + 1, `direction {dir}: cut where the columns meet`)
+			t.eq(paused, 1, "a pause after the quad it looked at")
+			t.eq(buffer.readu16(out, pieces * QUAD + 12), stoneApp, "the stone quad last, as it was")
+			-- The pieces' faces tile the quad's face, each over cells of one class.
+			local function area(b: buffer, i: number): (number, { number })
+				local c = { QuadMesher.corners(b, i, 0, 0, scale, scale, Config.BlockSize, 0) }
+				local min, max = { math.huge, math.huge, math.huge }, { -math.huge, -math.huge, -math.huge }
+				for k = 0, 3 do
+					for a = 1, 3 do
+						min[a] = math.min(min[a], c[k * 3 + a])
+						max[a] = math.max(max[a], c[k * 3 + a])
+					end
+				end
+				local sides = {}
+				for a = 1, 3 do
+					if max[a] > min[a] then
+						table.insert(sides, max[a] - min[a])
+					end
+				end
+				return sides[1] * sides[2], { min[1], min[2], min[3], max[1], max[2], max[3] }
+			end
+			local whole, box = area(quads, 0)
+			local sum = 0
+			for p = 0, pieces - 1 do
+				local a, b = area(out, p)
+				sum += a
+				for k = 1, 3 do
+					t.ok(b[k] >= box[k] - 1e-9 and b[k + 3] <= box[k + 3] + 1e-9, `direction {dir}: within the quad`)
+				end
+				local o = p * QUAD
+				local x, z = buffer.readu16(out, o + 2), buffer.readu16(out, o + 6)
+				local x1 = if across == "x" then x + 1 else x + (b[4] - b[1]) / scale
+				local z1 = if across == "z" then z + 1 else z + (b[6] - b[3]) / scale
+				local class = patchwork(ownColumn(1, x, step), ownColumn(-1, z, step))
+				for cz = z, z1 - 1 do
+					for cx = x, x1 - 1 do
+						t.eq(
+							patchwork(ownColumn(1, cx, step), ownColumn(-1, cz, step)),
+							class,
+							`direction {dir}: one class`
+						)
+					end
+				end
+			end
+			t.near(sum, whole, 1e-6, `direction {dir}: the pieces tile the face`)
+		end
+		-- Nothing seasonal over several classes: the very buffer.
+		local plain = buffer.create(QUAD)
+		buffer.writeu16(plain, 8, 16)
+		buffer.writeu16(plain, 10, 16)
+		buffer.writeu16(plain, 12, stoneApp)
+		t.eq((ClassCuts.quads(plain, 1, 0, 0, step, patchwork)), plain)
+	end)
+
 	--[[ MeshRegions ]]
 
 	local function node(level: number, nx: number, nz: number)

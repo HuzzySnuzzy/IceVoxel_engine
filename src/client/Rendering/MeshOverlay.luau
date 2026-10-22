@@ -64,14 +64,17 @@
 	Seasons (`setSeason`, from Rendering/SeasonTint through ChunkRenderer.setFarSeason; nil: none,
 	so without seasons nothing here changes). Vertex colours are baked, so a far palette (one per
 	far step, Config.Seasons.Foliage.FarStepDays) is used when a build starts: its seasonal quads
-	(grass, leaves, plants, vines) take the biome class of the chunk column their block stands in
-	(the quad's centre moved half a block back against its face, so a side face on a chunk's or a
-	member's edge is its own block's; ChunkRenderer's per-chunk classes, as the parts take them),
-	in their own look the look's colour, in the remainder or a plain build (Far Materials off, or
-	dropped: the overlay's looks, not the setting) their plain colour, tinted for the look they
-	joined as MeshGeometry's rule does. Each mesh remembers the palette and the classes its
-	seasonal quads took; when the palette now drifted more than its limit (FarDeltaE, ΔE76)
-	from that, in any of those classes, the region is marked stale: a new version for
+	(grass, leaves, plants, vines) are cut where the classes of the chunk columns they stand in
+	differ (Shared/Meshing/ClassCuts, as the parts' boxes are, and only there), so each takes the
+	class all of its blocks have, each its own chunk column's (ChunkRenderer's per-chunk
+	classes): found from the block under the quad's centre moved half a block back against its
+	face (a side face on a chunk's or a member's edge is its own block's). Parts and meshes so
+	show every block in the same class, however differently their meshers merged it. In their
+	own look the quads take the class's look colour, in the remainder or a plain build (Far
+	Materials off, or dropped: the overlay's looks, not the setting) its plain colour, tinted for
+	the look they joined as MeshGeometry's rule does. Each mesh remembers the palette and the
+	classes its seasonal quads took; when the palette now drifted more than its limit (FarDeltaE,
+	ΔE76) from that, in any of those classes, the region is marked stale: a new version for
 	MeshRegions, so it joins the usual candidate ranking (with every member meshed already it
 	ranks below any region with parts to merge), waits RebuildSeconds and the gate like any
 	build, and its new mesh replaces the old one without a gap. The drift per palette and class
@@ -97,6 +100,7 @@ local LodTree = require(Shared.World.LodTree)
 local Origin = require(Shared.World.Origin)
 local MeshGeometry = require(Shared.Meshing.MeshGeometry)
 local QuadMesher = require(Shared.Meshing.QuadMesher)
+local ClassCuts = require(Shared.Meshing.ClassCuts)
 local Foliage = require(Shared.Seasons.Foliage)
 
 local MeshRegions = require(script.Parent.MeshRegions)
@@ -367,17 +371,18 @@ local TEMPERATE = Foliage.TEMPERATE
 local CHUNK_STUDS = SIZE * BLOCK
 
 --[[
-	Gives a mesh's seasonal quads their palette's colours for their chunk column's biome class
-	(builder thread; see the header), adding the classes to the payload's list: in their own look
-	the look's colour (only in a build in looks), else their plain colour (tinted for the look
-	they joined, as MeshGeometry's remainder rule).
+	Gives a mesh's seasonal quads (cut where classes meet: meshesOf) their palette's colours for
+	their blocks' chunk column's biome class (builder thread; see the header), adding the classes
+	to the payload's list: in their own look the look's colour (only in a build in looks), else
+	their plain colour (tinted for the look they joined, as MeshGeometry's remainder rule).
 ]]
 local function recolour(mesh: MeshGeometry.Mesh, payload: Payload)
 	local season = payload.season :: Season
 	local colors = mesh.colors :: { number }
 	local options = payload.options :: MeshGeometry.Options
 	local list = payload.classList :: { number }
-	local half = payload.blockStuds / 2
+	local cell = payload.blockStuds
+	local half = cell / 2
 	local looks = payload.looks
 	local lookOf = options.lookOf
 	local positions, center, appearances = mesh.positions, mesh.center, mesh.appearances
@@ -395,7 +400,9 @@ local function recolour(mesh: MeshGeometry.Mesh, payload: Payload)
 			continue
 		end
 		-- The quad's centre, half a block back against its face (U x V, QuadMesher.corners: the
-		-- outward normal), is in its own block's chunk column.
+		-- outward normal), is in one of its own blocks; that block's centre stands in the chunk
+		-- column whose class it takes (ClassCuts.column), as its part does (the quad was cut where
+		-- classes meet, so it is every one of its blocks' own).
 		local o = (q - 1) * 12
 		local ux, uy, uz =
 			positions[o + 4] - positions[o + 1],
@@ -410,6 +417,8 @@ local function recolour(mesh: MeshGeometry.Mesh, payload: Payload)
 		local z = center[3] + (positions[o + 3] + positions[o + 6] + positions[o + 9] + positions[o + 12]) / 4
 		x -= if normalX > 0 then half elseif normalX < 0 then -half else 0
 		z -= if normalZ > 0 then half elseif normalZ < 0 then -half else 0
+		x = (math.floor(x / cell) + 0.5) * cell
+		z = (math.floor(z / cell) + 0.5) * cell
 		local class, asked = season.classAt(math.floor(x / CHUNK_STUDS), math.floor(z / CHUNK_STUDS))
 		if not table.find(list, class) then
 			table.insert(list, class)
@@ -598,6 +607,21 @@ local function meshesOf(job: MeshRegions.Job): ({ MeshGeometry.Mesh }?, string?)
 	local payload = job.payload :: Payload
 	local builder = MeshGeometry.builder(BLOCK, Settings.Overlap, Settings.MaxTriangles, payload.options)
 	local snapshot = payload.quads
+	-- With a palette, seasonal quads are cut where chunk classes meet (ClassCuts; see the header),
+	-- the classes asked of the generator slicing the build like the colouring does.
+	local season = payload.season
+	local asked = false
+	local function classAt(cx: number, cz: number): number
+		local class, new = (season :: Season).classAt(cx, cz)
+		asked = asked or new
+		return class
+	end
+	local function pause()
+		if asked then
+			asked = false
+			slice()
+		end
+	end
 	for i, node in job.members do
 		local entry = snapshot[i]
 		if entry == nil then
@@ -605,13 +629,17 @@ local function meshesOf(job: MeshRegions.Job): ({ MeshGeometry.Mesh }?, string?)
 		end
 		local step, stepY = ChunkLayout.steps(node.level)
 		local scale = step * BLOCK
-		builder:add(entry.buffer, entry.count, node.nx * SIZE * scale, node.nz * SIZE * scale, scale, stepY * BLOCK)
+		local quads, count = entry.buffer, entry.count
+		if season and payload.options then
+			quads, count = ClassCuts.quads(quads, count, node.nx, node.nz, step, classAt, pause)
+		end
+		builder:add(quads, count, node.nx * SIZE * scale, node.nz * SIZE * scale, scale, stepY * BLOCK)
 		slice()
 	end
 	return builder:finish(), nil
 end
 
--- (For specs: what a build's MeshParts are made of; seasonal quads not yet recoloured.)
+-- (For specs: what a build's MeshParts are made of, seasonal quads cut but not yet recoloured.)
 MeshOverlay.meshesOf = meshesOf
 
 --[[

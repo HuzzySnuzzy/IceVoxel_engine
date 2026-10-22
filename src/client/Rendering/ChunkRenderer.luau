@@ -122,11 +122,22 @@
 	    nothing. Colours become paints (part Color, image and Decal Color3s per drawn mode, shape
 	    box and soil tint) through TextureLooks.seasonalTint, cached per class until the next
 	    palette or a change of looks;
-	  * the biome class is per chunk column, at every level: a box takes the class of the chunk
-	    its centre stands on (a far node spanning several classes paints each of its chunks
-	    with its own, as its children will), asked of `setSeasonClass`'s function once and kept
-	    in a direct-mapped cache of CLASS_SIDE x CLASS_SIDE columns (a 4096-block view with its
-	    farthest nodes fits, 1.3 MB, made with the first class asked);
+	  * the biome class is per chunk column, at every level, asked of `setSeasonClass`'s function
+	    once and kept in a direct-mapped cache of CLASS_SIDE x CLASS_SIDE columns (a 4096-block
+	    view with its farthest nodes fits, 1.3 MB, made with the first class asked). Every
+	    seasonal cell takes its own column's class (the one its centre stands in), as its
+	    children will and as the far meshes do, however the cells were merged: once a palette
+	    other than the authored one was applied, a far node's seasonal boxes are cut where the
+	    classes of the columns they stand in differ (Shared/Meshing/ClassCuts; only there, so a
+	    box over one class, and everything else, stays exactly as meshed), and a box takes its
+	    centre cell's class. The cut runs before the diff, within the build budget (a class
+	    asked of the generator past the deadline stops it; it goes on from that box next
+	    frame). A record keeps the mesher's boxes (`source`) and the cut generation they were
+	    cut for (`cut`: the season's `cuts`, one more with the first palette shown and with
+	    every new way of finding classes; math.huge with nothing to cut whatever the classes).
+	    A far record cut for older classes, or built before a palette was shown (then nothing is
+	    cut and no class asked), is rebuilt in the background when the sweep reaches it (a
+	    restyle: from its mesher's boxes, cut for the classes now, swapped like any diff);
 	  * every record keeps each part's palette generation (`tone`, parallel to its parts, moved
 	    with the parts a diff keeps and refreshed from the old record when it commits) and the
 	    oldest among its seasonal parts (`painted`; math.huge without any);
@@ -147,9 +158,9 @@
 	    sections and the classes asked included, nothing allocated (the rings are kept). Records
 	    committed with parts of an older palette after the sweep passed them are swept last;
 	    records of an older look are left to the restyle that rebuilds them (and paints them);
-	  * far meshes take the far palette (`setFarSeason`): MeshOverlay colours their seasonal
-	    quads per chunk column's class (the same cache) and rebuilds a mesh whose palette
-	    drifted too far.
+	  * far meshes take the far palette (`setFarSeason`): MeshOverlay cuts their seasonal quads
+	    where classes meet and colours them per chunk column's class (the same cache), and
+	    rebuilds a mesh whose palette drifted too far.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -157,6 +168,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GreedyMesher = require(Shared.Meshing.GreedyMesher)
+local ClassCuts = require(Shared.Meshing.ClassCuts)
 local Scatter = require(Shared.Meshing.Scatter)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Coords = require(Shared.World.Coords)
@@ -292,6 +304,11 @@ export type BuildOptions = {
 type Record = {
 	boxes: buffer,
 	count: number,
+	-- Seasons: the boxes as the mesher made them (`boxes` unless some were cut at class borders;
+	-- see the header) and the cut generation they are cut for (math.huge: none of its seasonal
+	-- boxes stands in several chunk columns, nothing to cut whatever the classes; 0: not cut).
+	source: buffer,
+	cut: number,
 	-- Parts box by box: box i's are parts[first[i + 1]] .. parts[first[i + 2] - 1].
 	parts: { BasePart },
 	first: { number },
@@ -357,9 +374,13 @@ type Build = {
 	maxCells: number,
 	maxCellsY: number,
 	-- Seasons: each part's palette generation (parallel to `parts`, nil without seasons) and the
-	-- oldest one a seasonal part got.
+	-- oldest one a seasonal part got; the boxes as the mesher made them, and while a far node's
+	-- are being cut at class borders (before the diff) the cut's progress, and its generation.
 	tone: { number }?,
 	minTone: number,
+	source: buffer,
+	cutting: ClassCuts.Job?,
+	cut: number,
 }
 
 type Task = RenderSchedule.Task
@@ -433,6 +454,12 @@ type Season = {
 	-- (`chunkClass`; nil until the first).
 	classAt: (cx: number, cz: number) -> number,
 	classes: buffer?,
+	-- The cut generation (see the header): 0 until a palette other than the authored one was
+	-- applied, then one more with every new way of finding classes. Builds cut with `cutClass`,
+	-- which stops a cut once the clock passed `cutDeadline` after a class was asked.
+	cuts: number,
+	cutClass: ClassCuts.ClassAt,
+	cutDeadline: number,
 	-- Per class index: TextureLooks.seasonalTint per appearance, and paints by paint key.
 	tints: { { [number]: TextureLooks.Seasonal } },
 	paints: { { [number]: Paint } },
@@ -601,9 +628,11 @@ export type ChunkRenderer = {
 local ChunkRenderer = {}
 ChunkRenderer.__index = ChunkRenderer
 
--- (Below: the look of a node now, and what a change of looks rebuilds; the origin's moves.)
+-- (Below: the look of a node now, and what a change of looks rebuilds, or the seasons' cuts;
+-- the origin's moves.)
 local isCurrent: (self: ChunkRenderer, node: RenderNode) -> boolean
 local looksChanged: (self: ChunkRenderer, changes: TextureLooks.Changes) -> ()
+local restyleSection: (self: ChunkRenderer, node: RenderNode, section: number) -> ()
 local settle: (self: ChunkRenderer, node: RenderNode) -> ()
 local gather: (self: ChunkRenderer, dx: number, dz: number, parts: { BasePart }, cframes: { CFrame }) -> ()
 
@@ -969,11 +998,25 @@ local function chunkClass(season: Season, cx: number, cz: number): (number, bool
 	return class, true
 end
 
--- The chunk column the centre of box `o` (byte offset) of a node of `step` stands on.
+--[[
+	The chunk column box `o` (byte offset) of a node of `step` takes its class from: its centre
+	cell's (ClassCuts.column). A far node's seasonal box was cut where classes meet, so that is
+	every one of its cells' own.
+]]
 local function chunkOf(node: RenderNode, step: number, boxes: buffer, o: number): (number, number)
-	local x = node.nx * CHUNK + readu16(boxes, o) + readu16(boxes, o + 6) * 0.5
-	local z = node.nz * CHUNK + readu16(boxes, o + 4) + readu16(boxes, o + 10) * 0.5
-	return math.floor(x * step / CHUNK), math.floor(z * step / CHUNK)
+	local x = readu16(boxes, o) + readu16(boxes, o + 6) // 2
+	local z = readu16(boxes, o + 4) + readu16(boxes, o + 10) // 2
+	return ClassCuts.column(node.nx, x, step), ClassCuts.column(node.nz, z, step)
+end
+
+-- Should a far record be cut again (a palette is shown and its boxes are not cut for the
+-- classes now; see the header)?
+local function needsCut(season: Season?, node: RenderNode, record: Record): boolean
+	return season ~= nil
+		and season.cuts > 0
+		and node.level > 0
+		and record.cut ~= season.cuts
+		and record.cut ~= math.huge
 end
 
 -- A node may hold seasonal parts: the sweeps visit it (see the header).
@@ -1122,7 +1165,7 @@ local function applyPaint(pool: PartPool.PartPool, part: BasePart, paint: Paint)
 end
 
 local function newSeason(): Season
-	return {
+	local season: Season = {
 		applied = {},
 		since = {},
 		gen = 0,
@@ -1131,6 +1174,11 @@ local function newSeason(): Season
 			return Foliage.TEMPERATE
 		end,
 		classes = nil,
+		cuts = 0,
+		cutClass = function(_cx: number, _cz: number): number
+			return Foliage.TEMPERATE
+		end,
+		cutDeadline = 0,
 		tints = {},
 		paints = {},
 		nextPaint = 0,
@@ -1162,6 +1210,16 @@ local function newSeason(): Season
 		lastFrames = 0,
 		sweeps = 0,
 	}
+	-- (A build's cut asks classes through the cache; past its deadline after one asked, it stops
+	-- and goes on next frame: the class is kept.)
+	season.cutClass = function(cx: number, cz: number): number
+		local class, asked = chunkClass(season, cx, cz)
+		if asked and os.clock() > season.cutDeadline then
+			return -1
+		end
+		return class
+	end
+	return season
 end
 
 --[[
@@ -1257,14 +1315,26 @@ local function startSweep(season: Season)
 end
 
 --[[
+	A far record not cut for the classes now (see the header) is rebuilt in the background, painted
+	as it is built; one in an older look is restyled anyway.
+]]
+local function recut(self: ChunkRenderer, node: RenderNode, section: number, record: Record)
+	if needsCut(self.season, node, record) and record.texture == self.pool:generationOf(record.plain) then
+		restyleSection(self, node, section)
+	end
+end
+
+--[[
 	A record was committed: its node holds seasonal parts when the record does, and one with parts
-	of an older palette is swept after the order (see the header).
+	of an older palette is swept after the order; one cut for older classes (its build began before
+	they changed) is cut again (see the header).
 ]]
 local function lateRecord(self: ChunkRenderer, node: RenderNode, section: number, record: Record)
 	local season = self.season
 	if season == nil then
 		return
 	end
+	recut(self, node, section, record)
 	if record.painted ~= math.huge then
 		addHolder(season, node)
 	end
@@ -1717,7 +1787,46 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 	return true
 end
 
--- First work on a task: what it builds against, and the diff.
+-- What a task builds against once its boxes are final: the diff, or a new folder.
+local function matchBase(b: Build, section: number)
+	local base = b.base
+	b.first = table.create(b.count + 1)
+	local sameLook = base ~= nil and base.texture == b.texture and base.plain == b.plain
+	if base and base.count > 0 and b.count > 0 and sameLook and base.folder then
+		local matched, removed = SectionDiff.match(base.boxes, base.count, b.boxes, b.count)
+		b.matched, b.removed = matched, removed
+	elseif b.count > 0 then
+		local folder = Instance.new("Folder")
+		folder.Name = tostring(section)
+		b.folder = folder
+	end
+end
+
+--[[
+	Seasons: cuts a far node's seasonal boxes where classes meet (ClassCuts; see the header), on
+	from where it stopped; false when the clock passed `deadline` after a class was asked of the
+	generator (the class is kept: it goes on from that box next frame). Then the diff.
+]]
+local function cutBoxes(self: ChunkRenderer, task: Task, deadline: number): boolean
+	local b: Build = task.data
+	local job = b.cutting :: ClassCuts.Job
+	local season = self.season :: Season
+	season.cutDeadline = deadline
+	local node: RenderNode = task.node
+	if not ClassCuts.boxes(job, node.nx, node.nz, b.step, season.cutClass, b.cut > 0) then
+		return false
+	end
+	b.cutting = nil
+	b.boxes, b.count = job.out :: buffer, job.count
+	-- (None of its seasonal boxes stands in several chunk columns: nothing to cut, ever.)
+	if not job.spans then
+		b.cut = math.huge
+	end
+	matchBase(b, task.section)
+	return true
+end
+
+-- First work on a task: what it builds against, and the diff (after the cut, see cutBoxes).
 local function startBuild(self: ChunkRenderer, task: Task)
 	local b: Build = task.data
 	local node: RenderNode = task.node
@@ -1729,23 +1838,18 @@ local function startBuild(self: ChunkRenderer, task: Task)
 	b.plain = b.far and self.overlay:plainLevel(node.level)
 	b.texture = self.pool:generationOf(b.plain)
 	local sameLook = base ~= nil and base.texture == b.texture and base.plain == b.plain
+	local season = self.season
 	if b.restyle then
-		-- Rebuild what is live now, unless a newer build already used the current look.
-		if base == nil or sameLook then
+		-- Rebuild what is live now, unless a newer build already used the current look (and cut
+		-- its boxes for the classes now: see the header).
+		if base == nil or (sameLook and not needsCut(season, node, base)) then
 			b.noop = true
 			return
 		end
-		b.boxes, b.count = base.boxes, base.count
+		b.boxes = base.source
+		b.count = buffer.len(b.boxes) // BOX
 	end
-	b.first = table.create(b.count + 1)
-	if base and base.count > 0 and b.count > 0 and sameLook and base.folder then
-		local matched, removed = SectionDiff.match(base.boxes, base.count, b.boxes, b.count)
-		b.matched, b.removed = matched, removed
-	elseif b.count > 0 then
-		local folder = Instance.new("Folder")
-		folder.Name = tostring(task.section)
-		b.folder = folder
-	end
+	b.source = b.boxes
 	local step, stepY = ChunkLayout.steps(node.level)
 	b.step, b.stepY = step, stepY
 	b.scale = step * Config.BlockSize
@@ -1757,11 +1861,20 @@ local function startBuild(self: ChunkRenderer, task: Task)
 	b.originZ = node.nz * Config.ChunkSize * b.scale - b.oz
 	b.maxCells = math.max(1, MAX_PART // b.scale)
 	b.maxCellsY = math.max(1, MAX_PART // b.scaleY)
-	-- Seasons: the parts' palette generations (see the header).
-	if self.season then
+	-- Seasons: the parts' palette generations, and a far node's boxes cut where classes meet
+	-- once a palette is shown, else only looked at (see the header). Without seasons nothing.
+	b.cut = 0
+	if season then
 		b.tone = {}
 		b.minTone = math.huge
+		if b.far then
+			b.cut = season.cuts
+			b.cutting = ClassCuts.job(b.boxes)
+			return
+		end
+		b.cut = math.huge
 	end
+	matchBase(b, task.section)
 end
 
 -- Builds part of a task; returns true when it is built.
@@ -1772,6 +1885,9 @@ local function work(self: ChunkRenderer, task: Task, deadline: number): boolean
 	end
 	if b.noop then
 		return true
+	end
+	if b.cutting and not cutBoxes(self, task, deadline) then
+		return false
 	end
 	local matched = b.matched
 	local base = b.base
@@ -1904,6 +2020,8 @@ local function commit(self: ChunkRenderer, task: Task)
 			record = {
 				boxes = b.boxes,
 				count = b.count,
+				source = b.source,
+				cut = b.cut,
 				parts = b.parts,
 				first = b.first,
 				folder = folder,
@@ -1978,6 +2096,8 @@ local function commit(self: ChunkRenderer, task: Task)
 			record = {
 				boxes = b.boxes,
 				count = b.count,
+				source = b.source,
+				cut = b.cut,
 				parts = b.parts,
 				first = b.first,
 				folder = live,
@@ -2064,6 +2184,9 @@ local function newBuild(boxes: buffer, restyle: boolean): Build
 		maxCellsY = 1,
 		tone = nil,
 		minTone = math.huge,
+		source = boxes,
+		cutting = nil,
+		cut = 0,
 	}
 end
 
@@ -2337,7 +2460,8 @@ local function lookNow(self: ChunkRenderer, node: RenderNode): (boolean, number)
 	return plain, self.pool:generationOf(plain)
 end
 
--- Do all of a node's live sections carry the current look (MeshOverlay merges only those)?
+-- Do all of a node's live sections carry the current look, and far ones the seasons' current
+-- cuts (MeshOverlay merges only those)?
 function isCurrent(self: ChunkRenderer, node: RenderNode): boolean
 	local state = self.states[node]
 	if state == nil then
@@ -2345,11 +2469,24 @@ function isCurrent(self: ChunkRenderer, node: RenderNode): boolean
 	end
 	local plain, generation = lookNow(self, node)
 	for _, record in state.records do
-		if record.texture ~= generation or record.plain ~= plain then
+		-- (A far record about to be cut again for the seasons' classes would demote the mesh.)
+		if record.texture ~= generation or record.plain ~= plain or needsCut(self.season, node, record) then
 			return false
 		end
 	end
 	return true
+end
+
+--[[
+	Rebuilds a section in the background lane with the looks (and the seasons' cuts) as they are
+	when it starts, unless a build that starts later will anyway (RenderSchedule's restyles).
+]]
+function restyleSection(self: ChunkRenderer, node: RenderNode, section: number)
+	if not self.schedule:startsLater(node, section) then
+		local task = newTask(node, section, BACKGROUND, newBuild(buffer.create(0), true))
+		task.restyle = true
+		addTask(self, task)
+	end
 end
 
 --[[
@@ -2398,12 +2535,7 @@ function looksChanged(self: ChunkRenderer, changes: TextureLooks.Changes)
 		end
 	end
 	for _, entry in sections do
-		-- (A build that starts later uses the new look.)
-		if not schedule:startsLater(entry.node, entry.section) then
-			local task = newTask(entry.node, entry.section, BACKGROUND, newBuild(buffer.create(0), true))
-			task.restyle = true
-			addTask(self, task)
-		end
+		restyleSection(self, entry.node, entry.section)
 	end
 end
 
@@ -2836,7 +2968,12 @@ function ChunkRenderer.setSeason(self: ChunkRenderer, targets: Foliage.Targets?)
 		return false
 	end
 	season.gen += 1
-	season.dirty = season.dirty or seasonal
+	if seasonal and not season.dirty then
+		-- (From now on far nodes' boxes are cut where classes meet: the sweep has those built
+		-- before cut again.)
+		season.dirty = true
+		season.cuts += 1
+	end
 	table.clear(season.tints)
 	table.clear(season.paints)
 	if season.dirty then
@@ -2856,8 +2993,10 @@ function ChunkRenderer.setSeasonClass(self: ChunkRenderer, classAt: (cx: number,
 		buffer.fill(season.classes :: buffer, 0, 0)
 	end
 	if season.dirty then
-		-- (Chunks may change class: every seasonal colour is written again.)
+		-- (Chunks may change class: every seasonal colour is written again, and the sweep has far
+		-- boxes cut for the old classes cut again.)
 		season.gen += 1
+		season.cuts += 1
 		for class in Foliage.CLASSES do
 			if season.applied[class] == nil then
 				season.applied[class] = {}
@@ -2940,6 +3079,15 @@ function ChunkRenderer.seasonSweep(self: ChunkRenderer, writes: number, ms: numb
 			table.clear(season.lateSections)
 			season.lateIndex = 1
 			return done, true
+		end
+		if season.record ~= record then
+			-- (Its boxes may not be cut for the classes now: then cut again.)
+			recut(
+				self,
+				node,
+				if season.fromLate then season.lateSections[season.lateIndex] else season.sections[season.sectionIndex],
+				record
+			)
 		end
 		local finished: boolean
 		done, finished = paintRecord(self, season, node, record, done, writes, deadline)
