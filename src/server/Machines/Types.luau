@@ -77,8 +77,8 @@ export type Env = {
 	-- The room next to a machine and the outside value there (Seasons/RoomWorld.climateAt), for
 	-- the kinds' TickContext.climate; nil: no rooms (outdoors everywhere).
 	climate: ((x: number, y: number, z: number) -> (Machines.RoomSample?, number))?,
-	-- Is a player within `radius` blocks of a cell (Seasons/RoomWorld.playerNear), for the kinds'
-	-- TickContext.near; nil: always.
+	-- Is a player within `radius` blocks of a cell (Seasons/RoomWorld.playerNear: always with the
+	-- rooms off), for the kinds' TickContext.near; nil: always.
 	near: ((x: number, y: number, z: number, radius: number) -> boolean)?,
 	-- Results left a furnace's or machine's output at (x, y, z) on their own (pushed out, or
 	-- pulled by a pipe): Players/Inventories.resultsTaken credits them as smelted to the

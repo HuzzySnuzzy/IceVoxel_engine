@@ -6,8 +6,8 @@
 	their slots and tanks take; their ticks: the thermostats over a room (Rooms.thermostat with
 	the room's heat less their own), energy per HU and the share delivered on too little ("Low
 	power"), the space heater outdoors and its standby, the fan's band, the stove's fuel x4 held
-	when off, the oil heater's oil and fuel by output, every state and status line; and their
-	recipes, Ages, lore and sounds.
+	when off and its room asked for while it burns, the oil heater's oil and fuel by output, every
+	state and status line; and their recipes, Ages, lore and sounds.
 ]]
 
 return function(t, shared, require)
@@ -359,6 +359,27 @@ return function(t, shared, require)
 		Machines.set(stove, "burnTime", 1e9)
 		Machines.tick(stove, ctx(block))
 		t.ok(Machines.get(stove, "burnTime") <= Machines.info(block).maxBurn)
+		-- Burning, it asks for its room every tick, as the thermostats do (server RoomWorld finds
+		-- the room from it); off or without fuel it asks nothing.
+		local asked = 0
+		local context = ctx(block)
+		context.climate = function(x: number, y: number, z: number): (any, number)
+			t.ok(x == context.x and y == context.y and z == context.z, "its own cell")
+			asked += 1
+			return nil, -6.7
+		end
+		Machines.tick(stove, context)
+		Machines.tick(stove, context)
+		t.eq(asked, 2, "burning")
+		Machines.set(stove, "on", 0)
+		Machines.tick(stove, context)
+		t.eq(asked, 2, "off")
+		Machines.set(stove, "on", 1)
+		Machines.set(stove, "burnTime", 0)
+		stove.slots[1] = nil
+		Machines.tick(stove, context)
+		t.eq(Machines.state(stove), HeatStates.NO_FUEL)
+		t.eq(asked, 2, "no fuel")
 	end)
 
 	t.test("heaters: the Oil Heater burns oil and fuel by its output, in rooms only", function()

@@ -7,32 +7,35 @@
 	the server's; players learn of theirs through the Survival message (room and outside).
 
 	  Cache      `roomOf[cellKey]` maps interior cells and `wallsOf[cellKey]` wall and opening
-	             cells (World/Coords pos keys) to their rooms (a wall between two rooms to both).
-	             A change at a room's cell or wall (`blockChanged`, from WorldServer.onChanged:
-	             door toggles and every edit) marks it dirty and it is filled again from its seed
-	             (a cell of it still passable when the seed no longer is); changes that keep a
-	             cell's insulation and are no heat source either way (a torch put down, stone for
-	             cobblestone) change nothing. The new room's air is the volume-weighted mean of
-	             the rooms it overlaps, its cells no room had counted at the outside value: a
-	             torch never resets the heat, a door opened onto a porch cools the room by the
-	             porch's share. Cells of the old room the new one does not take (a wall built
-	             across it) stay the old room's, which is filled again from one of them, so both
-	             halves keep its air.
+	             cells and the eaves (World/Coords pos keys; Rooms.Room `walls`) to their rooms (a
+	             wall between two rooms to both). A change at a room's cell or wall
+	             (`blockChanged`, from WorldServer.onChanged: door toggles and every edit) marks
+	             it dirty and it is filled again from its seed (a cell of it still passable when
+	             the seed no longer is); changes that keep a cell's insulation and are no heat
+	             source either way (a torch put down, stone for cobblestone) change nothing. The
+	             new room's air is the volume-weighted mean of the rooms it overlaps, its cells no
+	             room had counted at the outside value: a torch never resets the heat, a door
+	             opened onto a porch cools the room by the porch's share. Cells of the old room
+	             the new one does not take (a wall built across it) stay the old room's, which is
+	             filled again from one of them, so both halves keep its air. A dirty room whose
+	             fill finds no room (its roof blown off) goes at once, all of it.
 	  Seeds      each player's feet (`sample`, once a second with ToughAsNails' sample; the head's
 	             cell when the feet's is a wall) and each room-source machine (`climateAt`, which
-	             machines call every tick, and room sources placed: a campfire, a furnace, the
-	             generators and heaters; not fire or lava) every MachineSeedSeconds when a player
-	             is within Range blocks (sideways). A fill that finds no room marks every passable
-	             cell it went through as no room for NotRoomSeconds (they are one open, too big or
-	             unloaded space), unless a block there changes. A room nobody visited (a player
-	             in it, a machine asking) for ForgetSeconds whose sources give nothing is
-	             forgotten.
+	             the heaters and coolers call every tick while on and a stove while it burns, and
+	             room sources placed: a campfire, a furnace, the generators and heaters; not fire
+	             or lava) every MachineSeedSeconds when a player is within Range blocks
+	             (sideways). A fill that finds no room marks every passable cell it went through
+	             as no room for NotRoomSeconds (they are one open, too big or unloaded space),
+	             unless a block there changes. A room nobody visited (a player in it, a machine
+	             asking) for ForgetSeconds whose sources give nothing is forgotten.
 	  Budget     at most FillsPerFrame fills and FillMs a frame (`step`; dirty rooms and players'
 	             seeds before machines'); a fill is at most MaxVolume x 6 block reads and a sky
 	             scan per column. The air steps at 1 Hz (Rooms.step over the time since the last
 	             step): its heat the room sources' (Players/Climate.roomSource: what each block
 	             in the room or its walls gives, machines their `heat` field, at most a source's
-	             limit of each kind) and PLAYER_HU for each player whose feet are in it; its
+	             limit of each kind; a source in a wall between rooms gives to one, the room
+	             `climateAt` answers for its cell, so a thermostat heats the room it measures and
+	             is paid for once) and PLAYER_HU for each player whose feet are in it; its
 	             outside value (`outside`) the sheltered outdoor value at its seed's column
 	             (Tough As Nails' Temperature.outside under a roof, with the season's shift and
 	             night drop), kept within OutsideLimit. Nothing else runs per frame: O(rooms +
@@ -40,14 +43,15 @@
 	  Snow       `temperatureAt` (Seasons/SnowWorld: a snow cell and the block under it, up to 32
 	             a visit, several visits a tick) is a lookup only, never a fill and nothing made:
 	             the air of the room holding the cell, else of the warmest room it walls (a roof
-	             block, a wall, a floor) or is an opening of; nil for cells of no room.
+	             block, a wall, a floor, an eave over a wall) or is an opening of; nil for cells
+	             of no room.
 	  Machines   `climateAt` answers a machine's every tick: the room of the first of its cell and
 	             its neighbours (above, below, then the sides) that is in one, its heat summed
 	             again for the call (so a thermostat's `others`, the room's heat less its own,
 	             is exact however often it changes), else nil and the outdoor value there
 	             (worked out once a second per machine). `playerNear` says whether a player
 	             stands within a radius of a cell (the positions of the last 1 Hz step): a space
-	             heater's standby (Machines' TickContext `near`).
+	             heater's standby (Machines' TickContext `near`; with no rooms, always).
 
 	The rooms' state is `RoomWorld.new(env)` (pure over its Env, so tests run it on a fake world);
 	`start(world)` makes the game's one over World/WorldServer (loaded chunks only, never
@@ -301,9 +305,25 @@ end
 
 --[[ Heat ]]
 
+-- The room of a machine's cell or its neighbours (see the header).
+local function roomAround(world: RoomWorld, x: number, y: number, z: number): Record?
+	local roomOf = world.roomOf
+	for _, d in AROUND do
+		local record = roomOf[posKey(x + d[1], y + d[2], z + d[3])]
+		if record then
+			return record
+		end
+	end
+	return nil
+end
+
 local counting: { [any]: number } = {}
 
--- What a room's sources give now (players aside), each kind at most its limit.
+--[[
+	What a room's sources give now (players aside), each kind at most its limit. A source gives
+	its heat to one room, the one `climateAt` answers for its cell (a wall between two rooms is
+	both rooms' wall: the room its thermostat measures takes it, never both).
+]]
 local function sourceHeat(world: RoomWorld, record: Record): number
 	local env = world.env
 	local roomSource = sourcesOf(env)
@@ -312,7 +332,7 @@ local function sourceHeat(world: RoomWorld, record: Record): number
 	local total = 0
 	for i = 1, #at, 3 do
 		local x, y, z = at[i], at[i + 1], at[i + 2]
-		local block = getBlock(x, y, z)
+		local block = if roomAround(world, x, y, z) == record then getBlock(x, y, z) else nil
 		if block then
 			local output, limit = roomSource(block)
 			if output then
@@ -570,6 +590,11 @@ local function process(world: RoomWorld, seed: Seed): boolean
 			-- (The seed itself is open to the sky, or a wall.)
 			cells[posKey(x, y, z)] = true
 		end
+		if record then
+			-- A dirty room that is no room now goes at once, all of it (the cells this fill did not
+			-- reach are found again from players and machines if they are a room of their own).
+			destroy(world, record)
+		end
 		refuse(world, cells)
 	end
 	return true
@@ -618,18 +643,6 @@ local function inRange(world: RoomWorld, x: number, z: number): boolean
 		end
 	end
 	return false
-end
-
--- The room of a machine's cell or its neighbours (see the header).
-local function roomAround(world: RoomWorld, x: number, y: number, z: number): Record?
-	local roomOf = world.roomOf
-	for _, d in AROUND do
-		local record = roomOf[posKey(x + d[1], y + d[2], z + d[3])]
-		if record then
-			return record
-		end
-	end
-	return nil
 end
 
 -- Room-source machines with a player in range and no room yet seed fills from their neighbours.
@@ -1001,19 +1014,23 @@ end
 
 --[[
 	The air temperature of the room holding cell (x, y, z), or of the warmest room it is a wall
-	(roof, floor) or opening of (nil: none): snow melts in and on a warm room (Seasons/SnowWorld,
-	for a snow cell and the block under it, many times a tick). A cache lookup: no fill, nothing
-	made.
+	(roof, floor, an eave over a wall) or opening of (nil: none): snow melts in and on a warm room
+	(Seasons/SnowWorld, for a snow cell and the block under it, many times a tick). A cache
+	lookup: no fill, nothing made.
 ]]
 function RoomWorld.temperatureAt(x: number, y: number, z: number): number?
 	local world = current
 	return if world then RoomWorld.temperatureIn(world, x, y, z) else nil
 end
 
--- Is a player within `radius` blocks of cell (x, y, z) (a space heater's standby)?
+--[[
+	Is a player within `radius` blocks of cell (x, y, z) (a space heater's standby)? Without rooms
+	(Config.Seasons or its Rooms off) there are no positions to go by: true, as a TickContext
+	without `near` (an Electric Heater outdoors keeps warming the players beside it).
+]]
 function RoomWorld.playerNear(x: number, y: number, z: number, radius: number): boolean
 	local world = current
-	return world ~= nil and RoomWorld.nearIn(world, x, y, z, radius)
+	return world == nil or RoomWorld.nearIn(world, x, y, z, radius)
 end
 
 return RoomWorld

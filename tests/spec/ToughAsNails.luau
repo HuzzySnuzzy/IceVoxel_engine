@@ -9,8 +9,10 @@
 	modifiers in steps, armor insulation, the effects and the clemency's hold; the drift and the
 	faster recovery; hypothermia and hyperthermia timing; the clemency's countdown), how long the
 	harshest cold takes to kill (simulated tick by tick), the surroundings (Players/Climate over a
-	fake world: heat and cold sources and their distance, checks, insulation), the recipes
-	(bottles, the canteen, purification by smelting) and the Protocol messages.
+	fake world: heat and cold sources and their distance, a source's own radius, checks,
+	insulation; the machines' heat, cold and room sources registered by the server, room sources
+	whatever thirst and temperature say), the recipes (bottles, the canteen, purification by
+	smelting) and the Protocol messages.
 ]]
 
 local fs = require("@lune/fs")
@@ -1220,6 +1222,86 @@ return function(t, shared, require, server)
 		t.eq(cold, 2, "cooling")
 		-- (Registries are module state: leave the stand-ins idle for the specs after.)
 		cooling = false
+	end)
+
+	t.test("climate: a source warms or cools only within its own radius (a space heater's, a fan's)", function()
+		local blocks: { [string]: number } = {}
+		local view = {
+			getBlock = function(x, y, z)
+				return blocks[`{x},{y},{z}`] or Blocks.AIR
+			end,
+			column = function(_x, _z)
+				return 64, assert(Biomes.byName("Plains")).index
+			end,
+			skyOpen = function(_x, _y, _z)
+				return true
+			end,
+		}
+		local heat = Config.Seasons.Heat
+		local r = settings.ProximityRadius
+		local working = true
+		local function check(): boolean
+			return working
+		end
+		-- Stand-ins registered as Players/ToughAsNails registers the Electric Heater and the fan.
+		Climate.addHeatSource(B.GoldBlock, check, nil, heat.SpaceHeaterRadius)
+		Climate.addColdSource(B.EmeraldBlock, check, heat.FanRadius)
+		t.ok(heat.FanRadius < r and heat.SpaceHeaterRadius <= r, "within what Tough As Nails looks at")
+		blocks[`{heat.SpaceHeaterRadius},64,0`] = B.GoldBlock
+		t.eq((Climate.sources(view, 0, 64, 0, r)), heat.SpaceHeaterRadius, "the space heater at its edge")
+		blocks[`0,64,{heat.FanRadius + 1}`] = B.EmeraldBlock
+		t.eq(select(2, Climate.sources(view, 0, 64, 0, r)), nil, "a fan one block past its radius")
+		blocks[`0,64,{heat.FanRadius + 1}`] = nil
+		blocks[`0,64,{-heat.FanRadius}`] = B.EmeraldBlock
+		t.eq(select(2, Climate.sources(view, 0, 64, 0, r)), heat.FanRadius, "at its radius")
+		-- A shorter reach for a heat source; registered again without one, the whole radius.
+		Climate.addHeatSource(B.GoldBlock, check, nil, 2)
+		t.eq((Climate.sources(view, 0, 64, 0, r)), nil, "3 blocks away, reaching 2")
+		blocks["0,66,0"] = B.GoldBlock
+		t.eq((Climate.sources(view, 0, 64, 0, r)), 2)
+		blocks["0,66,0"] = nil
+		Climate.addHeatSource(B.GoldBlock, check)
+		t.eq((Climate.sources(view, 0, 64, 0, r)), heat.SpaceHeaterRadius)
+		-- (Leave the stand-ins idle for the specs after.)
+		working = false
+	end)
+
+	t.test("climate: the server registers the machines' room sources whatever thirst and temperature say", function()
+		-- (Server Players/ToughAsNails can't run outside Roblox; its registrations are checked in its
+		-- source: the room sources before the switches, the heat and cold sources, with the space
+		-- heater's and the fan's radii, behind them.)
+		local function code(path: string): string
+			local source = fs.readFile(path)
+			source = string.gsub(source, "%-%-%[(=*)%[.-%]%1%]", "")
+			return (string.gsub(source, "%-%-[^\n]*", ""))
+		end
+		local tan = code("src/server/Players/ToughAsNails.luau")
+		local start = assert(string.match(tan, "function ToughAsNailsServer%.start%(.-\nend\n"), "start")
+		local rooms = string.find(start, "\n\tregisterRoomSources()\n", 1, true)
+		local switch =
+			string.find(start, "\n\tif thirstOn() or temperatureOn() then\n\t\tregisterHeatSources()", 1, true)
+		t.ok(rooms ~= nil and switch ~= nil and rooms < switch, "room sources first, unconditionally")
+		local roomSources = assert(string.match(tan, "local function registerRoomSources%(%)(.-)\nend\n"))
+		for _, needle in
+			{
+				"Climate.addRoomSource(Blocks.id.Furnace,",
+				"Climate.addRoomSource(Blocks.id.HeatGenerator, generator)",
+				"Climate.addRoomSource(Blocks.id.CombustionGenerator, generator)",
+				'{ "WoodStove", "OilHeater", "ElectricHeater", "AirConditioner", "ElectricFan" }',
+			}
+		do
+			t.ok(string.find(roomSources, needle, 1, true) ~= nil, needle)
+		end
+		local heatSources = assert(string.match(tan, "local function registerHeatSources%(%)(.-)\nend\n"))
+		t.eq(string.find(heatSources, "addRoomSource", 1, true), nil, "no room source behind the switches")
+		for _, needle in
+			{
+				"Climate.addHeatSource(Blocks.id.ElectricHeater, heating, nil, heat.SpaceHeaterRadius)",
+				"Climate.addColdSource(Blocks.id.ElectricFan, cooling, heat.FanRadius)",
+			}
+		do
+			t.ok(string.find(heatSources, needle, 1, true) ~= nil, needle)
+		end
 	end)
 
 	--[[ Protocol ]]

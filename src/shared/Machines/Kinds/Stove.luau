@@ -10,7 +10,9 @@
 	Each tick, on: with nothing burning the next item in its slot lights (one is used up, its
 	burn time x StoveBurnFactor ticks), then what burns burns a tick for WoodStove HU; with nothing
 	to burn, nothing ("No fuel"). A new item lights in the tick after the last one ran out, so the
-	fire never dips between two.
+	fire never dips between two. Burning, it asks for its room (TickContext `climate`, as the
+	thermostats do; the answer is unused): server RoomWorld then finds the room from the stove
+	itself and keeps it, so a stove restored from a save heats a house nobody is in.
 
 	Data after the header (Shared/Machines), frozen (saved items depend on it):
 	  burnTime   ticks left of what burns (kept in the item; at most the longest fuel's)
@@ -61,7 +63,7 @@ local function light(container: Container): number
 	return math.min(Smelting.fuel(stack.item) * FACTOR, MAX_BURN)
 end
 
-local function tick(container: Container, _ctx: Core.TickContext)
+local function tick(container: Container, ctx: Core.TickContext)
 	local burn = math.clamp(Core.get(container, "burnTime"), 0, MAX_BURN)
 	local total = math.clamp(Core.get(container, "burnTotal"), 0, MAX_BURN)
 	local heat, state = 0, HeatStates.IDLE
@@ -86,6 +88,11 @@ local function tick(container: Container, _ctx: Core.TickContext)
 	Core.set(container, "rate", heat)
 	Core.set(container, "state", state)
 	Core.set(container, "active", if heat > 0 then 1 else 0)
+	-- (Burning: its room is found from it and kept, see the header.)
+	local climate = ctx.climate
+	if heat > 0 and climate then
+		climate(ctx.x, ctx.y, ctx.z)
+	end
 end
 
 local function onButton(container: Container, button: number)

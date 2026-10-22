@@ -570,7 +570,7 @@ local INSULATION_BY_MATERIAL: { [string]: number } = {
 	WoodPlanks = 0.025,
 	LeafyGrass = 0.3,
 }
--- Fluids' and machines' U, and every other solid block's.
+-- Fluids', machines' and transmitters' U, and every other solid block's.
 local FLUID_INSULATION = 0.05
 local DEFAULT_INSULATION = 0.02
 -- The most layers a snow layer has.
@@ -673,7 +673,7 @@ for index, spec in BlockList do
 		insulation = if spec.insulation ~= nil
 			then spec.insulation
 			elseif kind == Blocks.KIND_NONE then nil
-			elseif spec.fluid ~= nil or spec.machine ~= nil then FLUID_INSULATION
+			elseif spec.fluid ~= nil or spec.machine ~= nil or spec.transmitter ~= nil then FLUID_INSULATION
 			elseif solid and spec.collision == nil then INSULATION_BY_MATERIAL[spec.material or "SmoothPlastic"]
 				or DEFAULT_INSULATION
 			else nil,

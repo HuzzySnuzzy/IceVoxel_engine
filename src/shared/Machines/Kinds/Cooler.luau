@@ -5,7 +5,8 @@
 	(Shared/Seasons/Rooms, server Seasons/RoomWorld) at Config.Seasons.Heat.CoolerJoules J a tick
 	per HU, down to AirConditioner HU, in rooms only ("No room" outdoors); and the Electric Fan
 	(`ElectricFan`, 2 kJ, 100 J/t in), FanJoules J a tick while it runs for ElectricFan HU in a
-	room, and outdoors a cold source near it while it runs (Players/Climate's cold sources).
+	room, and outdoors a cold source within FanRadius while it runs (Players/Climate's cold
+	sources).
 
 	Each tick, while on:
 	  Air Conditioner  the room next to it (TickContext `climate`: server RoomWorld.climateAt) and

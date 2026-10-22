@@ -7,18 +7,28 @@
 	            passable cells (Blocks.insulation nil: air, cave air, plants, torches, open doors,
 	            fences, snow layers 1-7). A neighbour with an insulation is a wall face: a floor
 	            face (the cell below the room with a solid block under it) adds its U to
-	            `uaGround` (the ground's temperature, GROUND, is 0), any other to `uaOut`. A
-	            passable cell at or above its column's `skyAbove` (the first height open to the
-	            sky) is outside: the face towards it is an opening (OPENING_U, counted in
-	            `openings`) and the fill does not enter it. Gives up past `maxVolume` cells,
-	            `maxExtent` blocks across or `maxOpenings` openings, and at an unknown cell:
-	            nil and "too big", "open" or "unloaded" (then the roof rule holds, Tough As
-	            Nails' Temperature). Cell keys are World/Coords.posKey's.
+	            `uaGround` (the ground's temperature, GROUND, is 0), any other to `uaOut`; but a
+	            block standing inside the room (furniture, a pillar, the heater itself, a wall
+	            jutting in: going on from it the way the face looks, through blocks with an
+	            insulation and within the room's bounds, reaches a cell of the room) loses nothing
+	            through that face, so only faces towards the outside count, and a block on the
+	            floor stands in for the floor face it covers. A passable cell at or above its
+	            column's `skyAbove` (the first height open to the sky) is outside: the face
+	            towards it is an opening (OPENING_U, counted in `openings`) and the fill does not
+	            enter it; unless three or four of its sideways neighbour columns are covered above
+	            it (a hole in the roof or a chimney a block wide: the fill goes up it to where the
+	            sky starts, so a missing roof block is one opening, as a missing wall block is).
+	            Gives up past `maxVolume` cells, `maxExtent` blocks across or `maxOpenings`
+	            openings, at an unknown cell, and when no cell it entered is under a roof (a pit
+	            dug in the open): nil and "too big", "open" or "unloaded" (then the roof rule
+	            holds, Tough As Nails' Temperature). Cell keys are World/Coords.posKey's.
 	            So an open door leaks its two faces and a broken window one; under a porch roof
 	            the fill runs on to where the sky starts; a seed in a wall, or open to the sky, is
 	            "open" at once. A wall or an opening cell next to several of the room's cells is
 	            one face for each. `walls` holds the wall and opening cells (what a change at
-	            means the room must be filled again), `sources` the cells inside or in the walls
+	            means the room must be filled again) and the eaves (the blocks over the tops of
+	            its walls, touching none of its cells: for server RoomWorld.temperatureAt, so snow
+	            on them melts with the room; no U), `sources` the cells inside or in the walls
 	            whose block the view's `source` says gives heat (Players/Climate's room sources;
 	            none without one). `fillCells` is the same fill into a table of the caller's,
 	            which on failure holds the passable cells it went through (all of them in the
@@ -78,7 +88,7 @@ export type Room = {
 	openings: number,
 	-- Positions (Coords.posKey) of heat sources inside it or in its walls.
 	sources: { number },
-	-- Wall and opening cells (Coords.posKey -> true).
+	-- Wall and opening cells, and the eaves (Coords.posKey -> true).
 	walls: { [number]: true },
 }
 
@@ -121,6 +131,15 @@ local STEP_X = SPAN * 1024
 local function posKey(x: number, y: number, z: number): number
 	return ((x + OFFSET) * SPAN + (z + OFFSET)) * 1024 + y
 end
+
+-- The ways a face looks from a cell of the room (STEPS' indices): up, down (a floor), the sides.
+local UP = 1
+local DOWN = 2
+local EAST = 3
+local WEST = 4
+local SOUTH = 5
+local NORTH = 6
+local STEPS = { { 0, 1, 0 }, { 0, -1, 0 }, { 1, 0, 0 }, { -1, 0, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
 
 -- Every block's U (Blocks.insulation, -1 where a room's air passes), by id + 1: the fill's hot loop.
 local U: { number } = table.create(Blocks.count, -1)
@@ -172,9 +191,31 @@ function Rooms.fillCells(
 		end
 		return top
 	end
-	if not Rooms.passable(seed) or y >= sky(x, z) then
+	-- Is a cell open to the sky still under a roof: three or four of its sideways neighbour
+	-- columns covered above it (a roof hole or a chimney a block wide)?
+	local function sheltered(cx: number, cy: number, cz: number): boolean
+		local covered = 0
+		if cy < sky(cx + 1, cz) then
+			covered += 1
+		end
+		if cy < sky(cx - 1, cz) then
+			covered += 1
+		elseif covered == 0 then
+			return false
+		end
+		if cy < sky(cx, cz + 1) then
+			covered += 1
+		end
+		if cy < sky(cx, cz - 1) then
+			covered += 1
+		end
+		return covered >= 3
+	end
+	if not Rooms.passable(seed) or (y >= sky(x, z) and not sheltered(x, y, z)) then
 		return nil, Rooms.OPEN
 	end
+	-- Whether a cell under a roof was entered (none: a pit open to the sky, no room).
+	local roofed = y < sky(x, z)
 	local walls: { [number]: true } = {}
 	local sources: { number } = {}
 	local sourced: { [number]: boolean } = {}
@@ -192,11 +233,15 @@ function Rooms.fillCells(
 	local qy: { number } = { y }
 	local qz: { number } = { z }
 	local head, tail = 1, 1
+	-- Wall faces, counted once the room's bounds are known, three numbers each: the wall cell's
+	-- key, the way the face looks (STEPS) and its U (negative: it loses to the ground).
+	local faces: { number } = {}
+	local last = 0
 
-	-- One face of a cell towards its neighbour (nx, ny, nz), key `nk`, not in the room yet: false
-	-- when the fill gives up (`reason`).
+	-- One face of a cell towards its neighbour (nx, ny, nz), key `nk`, not in the room yet, looking
+	-- `way`: false when the fill gives up (`reason`).
 	local reason: string? = nil
-	local function face(nk: number, nx: number, ny: number, nz: number, floor: boolean): boolean
+	local function face(nk: number, nx: number, ny: number, nz: number, way: number): boolean
 		local block = getBlock(nx, ny, nz)
 		if block == nil then
 			reason = Rooms.UNLOADED
@@ -205,17 +250,15 @@ function Rooms.fillCells(
 		local u = U[block + 1] or -1
 		if u >= 0 then
 			walls[nk] = true
-			if floor then
+			if way == DOWN then
 				-- (A floor on anything insulating loses to the ground; one over air, to the outside.)
 				local under = getBlock(nx, ny - 1, nz)
 				if under ~= nil and (U[under + 1] or -1) >= 0 then
-					uaGround += u
-				else
-					uaOut += u
+					u = -u
 				end
-			else
-				uaOut += u
 			end
+			last += 3
+			faces[last - 2], faces[last - 1], faces[last] = nk, way, u
 			if isSource and not sourced[nk] then
 				sourced[nk] = true
 				if isSource(block) then
@@ -223,7 +266,9 @@ function Rooms.fillCells(
 				end
 			end
 			return true
-		elseif ny >= sky(nx, nz) then
+		end
+		local top = sky(nx, nz)
+		if ny >= top and not sheltered(nx, ny, nz) then
 			-- Outside: an opening, not entered.
 			walls[nk] = true
 			openings += 1
@@ -233,6 +278,9 @@ function Rooms.fillCells(
 				return false
 			end
 			return true
+		end
+		if ny < top then
+			roofed = true
 		end
 		cells[nk] = true
 		volume += 1
@@ -273,29 +321,104 @@ function Rooms.fillCells(
 		head += 1
 		-- (Cells already in the room are skipped here: half of all faces, without a call.)
 		local nk = k + STEP_Y
-		if not cells[nk] and not face(nk, cx, cy + 1, cz, false) then
+		if not cells[nk] and not face(nk, cx, cy + 1, cz, UP) then
 			return nil, reason
 		end
 		nk = k - STEP_Y
-		if not cells[nk] and not face(nk, cx, cy - 1, cz, true) then
+		if not cells[nk] and not face(nk, cx, cy - 1, cz, DOWN) then
 			return nil, reason
 		end
 		nk = k + STEP_X
-		if not cells[nk] and not face(nk, cx + 1, cy, cz, false) then
+		if not cells[nk] and not face(nk, cx + 1, cy, cz, EAST) then
 			return nil, reason
 		end
 		nk = k - STEP_X
-		if not cells[nk] and not face(nk, cx - 1, cy, cz, false) then
+		if not cells[nk] and not face(nk, cx - 1, cy, cz, WEST) then
 			return nil, reason
 		end
 		nk = k + STEP_Z
-		if not cells[nk] and not face(nk, cx, cy, cz + 1, false) then
+		if not cells[nk] and not face(nk, cx, cy, cz + 1, SOUTH) then
 			return nil, reason
 		end
 		nk = k - STEP_Z
-		if not cells[nk] and not face(nk, cx, cy, cz - 1, false) then
+		if not cells[nk] and not face(nk, cx, cy, cz - 1, NORTH) then
 			return nil, reason
 		end
+	end
+	if not roofed then
+		-- (Every cell open to the sky: a pit or a trench dug in the open.)
+		return nil, Rooms.OPEN
+	end
+
+	-- The wall faces that lose heat: not those of a block standing inside the room (going on the
+	-- way the face looks, through blocks with an insulation and within the bounds, reaches a cell
+	-- of the room). And the eaves: over the top of a wall (a side face whose wall has no wall or
+	-- cell of the room above it), the block there and its two neighbours along the wall, when
+	-- they have an insulation (walls for the snow's lookup only: no U).
+	local eaves: { [number]: true } = {}
+	for i = 1, last, 3 do
+		local key, way, u = faces[i], faces[i + 1], faces[i + 2]
+		-- (The wall cell is beside a cell of the room: only the way the face looks can leave the
+		-- bounds, and most faces look out of them at once.)
+		local within: boolean
+		if way == UP then
+			within = key % 1024 < maxY
+		elseif way == DOWN then
+			within = key % 1024 > minY
+		elseif way == EAST then
+			within = key // STEP_X - OFFSET < maxX
+		elseif way == WEST then
+			within = key // STEP_X - OFFSET > minX
+		elseif way == SOUTH then
+			within = (key // STEP_Z) % SPAN - OFFSET < maxZ
+		else
+			within = (key // STEP_Z) % SPAN - OFFSET > minZ
+		end
+		local inside = false
+		if within then
+			local step = STEPS[way]
+			local dx, dy, dz = step[1], step[2], step[3]
+			local xz = key // STEP_Z
+			local cx = xz // SPAN - OFFSET + dx
+			local cy = key % 1024 + dy
+			local cz = xz % SPAN - OFFSET + dz
+			while cx >= minX and cx <= maxX and cy >= minY and cy <= maxY and cz >= minZ and cz <= maxZ do
+				if cells[posKey(cx, cy, cz)] then
+					inside = true
+					break
+				end
+				local block = getBlock(cx, cy, cz)
+				if block == nil or (U[block + 1] or -1) < 0 then
+					break
+				end
+				cx, cy, cz = cx + dx, cy + dy, cz + dz
+			end
+		end
+		if inside then
+			continue
+		elseif u < 0 then
+			uaGround -= u
+		else
+			uaOut += u
+		end
+		local above = key + STEP_Y
+		if way > DOWN and not walls[above] and not cells[above] then
+			-- (Along the wall: sideways, square to the way the face looks.)
+			local along = if way == EAST or way == WEST then STEP_Z else STEP_X
+			for side = -1, 1 do
+				local eave = above + side * along
+				if not walls[eave] and not cells[eave] and not eaves[eave] then
+					local xz = eave // STEP_Z
+					local block = getBlock(xz // SPAN - OFFSET, eave % 1024, xz % SPAN - OFFSET)
+					if block ~= nil and (U[block + 1] or -1) >= 0 then
+						eaves[eave] = true
+					end
+				end
+			end
+		end
+	end
+	for key in eaves do
+		walls[key] = true
 	end
 
 	return {

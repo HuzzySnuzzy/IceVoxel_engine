@@ -4,9 +4,11 @@
 	changes refilling only what they touch (a door toggled, a torch put down, a wall built across, a
 	wall knocked through) with the air inherited by volume, an open room remembered as none for a
 	while, rooms forgotten unless a source lives in them, machines seeding rooms near players,
-	climateAt summing the heat for the call, temperatureAt in cells and walls, sources' limits, the
-	sheltered outside value, a heater's thermostat holding a room through climateAt, and the fill's
-	cost.
+	climateAt summing the heat for the call, temperatureAt in cells, walls and the eaves, sources'
+	limits, a source in a wall between two rooms heating one (and paid for once), two thermostats
+	sharing a room, a room whose roof is blown off going at once, a burning stove finding its room
+	alone, no rooms at all (a space heater beside players), the sheltered outside value, a heater's
+	thermostat holding a room through climateAt, and the fill's cost.
 ]]
 
 local FakeRooms = require("../lib/FakeRooms")
@@ -17,6 +19,7 @@ return function(t, shared, require, server)
 	local Config = require(shared.Config)
 	local Coords = require(shared.World.Coords)
 	local DayCycle = require(shared.DayCycle)
+	local Items = require(shared.Items)
 	local Machines = require(shared.Machines)
 	local Rooms = require(shared.Seasons.Rooms)
 	local HeatStates = require(shared.Seasons.HeatStates)
@@ -421,6 +424,272 @@ return function(t, shared, require, server)
 		t.ok(warm > cool + 1, `the campfire's side {warm}, the other {cool}`)
 		t.eq(RoomWorld.temperatureIn(both.rooms, 2, G + 1, 1), warm, "the wall between")
 		t.eq(RoomWorld.temperatureIn(both.rooms, 5, G + 1, 1), cool, "an outer wall of the cool one")
+	end)
+
+	t.test("roomworld: the eaves over a warm house's walls answer temperatureAt (snow on them melts)", function()
+		local world = plankHouse()
+		world.set(1, G, 1, B.Campfire)
+		world.set(3, G, 3, B.Campfire)
+		local fake = game(world, sourced(B.Campfire, campfire))
+		RoomWorld.sampleIn(fake.rooms, 2.5, G, 2.5)
+		fake.run(300)
+		local sample = assert(RoomWorld.sampleIn(fake.rooms, 2.5, G, 2.5))
+		local air = sample.temperature
+		t.ok(air >= Config.Seasons.Snow.RoomMelt, `warm enough to melt snow: {air}`)
+		-- The roof over the walls' tops, the corners too: the house's air (Seasons/SnowWorld asks
+		-- for the snow's cell and the block under it).
+		local eaves = 0
+		for x = -1, 5 do
+			for z = -1, 5 do
+				if x == -1 or x == 5 or z == -1 or z == 5 then
+					t.eq(RoomWorld.temperatureIn(fake.rooms, x, G + 3, z), air, `the eave over ({x}, {z})`)
+					t.eq(RoomWorld.temperatureIn(fake.rooms, x, G + 4, z), nil, "the snow's cell over it")
+					eaves += 1
+				end
+			end
+		end
+		t.eq(eaves, 24)
+		t.eq(RoomWorld.temperatureIn(fake.rooms, -2, G + 3, 2), nil, "past the eaves")
+		-- For the lookup only: the house loses what it did.
+		t.near(sample.uaOut, 83 * 0.025 + 0.2, 1e-9)
+	end)
+
+	t.test("roomworld: a source in a wall between two rooms heats one, the room it measures", function()
+		-- Two 2 x 5 x 3 rooms of a plank house split by a plank wall at x = 2, a Wood Stove in it.
+		local function split(block: number): any
+			local world = FakeRooms.new(Blocks, Rooms)
+			world.house(0, 0, 5, 5, 3, B.Planks)
+			world.fill(2, G, 0, 2, G + 2, 4, B.Planks)
+			world.set(2, G, 2, block)
+			return world
+		end
+		local world = split(B.WoodStove)
+		local fake = game(
+			world,
+			sourced(B.WoodStove, function(): number
+				return HEAT.WoodStove
+			end)
+		)
+		-- (Someone looks into each room every second: the cold one is not forgotten.)
+		for _ = 1, 120 do
+			RoomWorld.sampleIn(fake.rooms, 0.5, G, 0.5)
+			RoomWorld.sampleIn(fake.rooms, 4.5, G, 0.5)
+			fake.run(1, 1)
+		end
+		local west = assert(RoomWorld.sampleIn(fake.rooms, 0.5, G, 0.5))
+		local east = assert(RoomWorld.sampleIn(fake.rooms, 4.5, G, 0.5))
+		t.ok(west.id ~= east.id, "two rooms")
+		t.eq(#fake.rooms.rooms[west.id].room.sources, 1, "the stove walls both")
+		t.eq(#fake.rooms.rooms[east.id].room.sources, 1)
+		local own = assert((RoomWorld.climateIn(fake.rooms, 2, G, 2)))
+		t.eq(own.id, east.id, "the stove's room: the first of its neighbours in one")
+		t.eq(east.heat, HEAT.WoodStove, "all of its heat")
+		t.eq(west.heat, 0, "none on the other side")
+		t.ok(east.temperature > west.temperature + 10, `{east.temperature} and {west.temperature}`)
+
+		-- An Electric Heater there: it holds the room it measures and pays for what that room gets.
+		local heaterWorld = split(B.ElectricHeater)
+		local container = Machines.newContainer(B.ElectricHeater)
+		Machines.set(container, "setPoint", 5)
+		local heated = game(
+			heaterWorld,
+			sourced(B.ElectricHeater, function(): number
+				return Machines.get(container, "heat")
+			end)
+		)
+		RoomWorld.sampleIn(heated.rooms, 0.5, G, 0.5)
+		RoomWorld.sampleIn(heated.rooms, 4.5, G, 0.5)
+		RoomWorld.stepWorld(heated.rooms, 1 / 20)
+		local ctx: any = {
+			block = B.ElectricHeater,
+			x = 2,
+			y = G,
+			z = 2,
+			energy = assert(Machines.energyOf(B.ElectricHeater)),
+			tick = 0,
+			dayTime = 18000,
+			getBlock = heaterWorld.getBlock,
+			climate = function(x: number, y: number, z: number): (any, number)
+				return RoomWorld.climateIn(heated.rooms, x, y, z)
+			end,
+		}
+		-- (What it paid over the last 40 s, held.)
+		local joules, ticks, counted = 0, 200 * 20, 40 * 20
+		for tick = 1, ticks do
+			ctx.tick += 1
+			Machines.set(container, "energy", Machines.capacity(container))
+			Machines.tick(container, ctx)
+			if tick > ticks - counted then
+				joules += -Machines.view(container).rate
+			end
+			RoomWorld.stepWorld(heated.rooms, 1 / 20)
+			if tick % 20 == 0 then
+				RoomWorld.sampleIn(heated.rooms, 0.5, G, 0.5)
+			end
+		end
+		local cold = assert(RoomWorld.sampleIn(heated.rooms, 0.5, G, 0.5))
+		local warm = assert(RoomWorld.sampleIn(heated.rooms, 4.5, G, 0.5))
+		local paid = joules / counted / HEAT.HeaterJoules
+		t.near(warm.temperature, 5, 0.5, "held at its set point")
+		t.eq(cold.heat, 0, "the other room gets none of it")
+		t.near(warm.heat, paid, 0.5, `delivered {warm.heat} HU for {paid} HU paid`)
+		t.near(warm.heat, Rooms.thermostat(5, 5, warm, warm.outside, 0, 0, HEAT.ElectricHeater), 0.5)
+	end)
+
+	t.test("roomworld: two thermostats in one room share it without hunting", function()
+		-- The plank house with one Electric Heater in its side wall and one on its floor.
+		local world = plankHouse()
+		world.set(5, G, 2, B.ElectricHeater)
+		world.set(2, G, 2, B.ElectricHeater)
+		local a = Machines.newContainer(B.ElectricHeater)
+		local b = Machines.newContainer(B.ElectricHeater)
+		Machines.set(a, "setPoint", 2)
+		Machines.set(b, "setPoint", 2)
+		local fake = game(
+			world,
+			sourced(B.ElectricHeater, function(x: number): number
+				return Machines.get(if x == 5 then a else b, "heat")
+			end)
+		)
+		RoomWorld.sampleIn(fake.rooms, 0.5, G, 0.5)
+		RoomWorld.stepWorld(fake.rooms, 1 / 20)
+		local function context(x: number): any
+			return {
+				block = B.ElectricHeater,
+				x = x,
+				y = G,
+				z = 2,
+				energy = assert(Machines.energyOf(B.ElectricHeater)),
+				tick = 0,
+				dayTime = 18000,
+				getBlock = world.getBlock,
+				climate = function(cx: number, cy: number, cz: number): (any, number)
+					return RoomWorld.climateIn(fake.rooms, cx, cy, cz)
+				end,
+			}
+		end
+		local ca, cb = context(5), context(2)
+		local totals: { number } = {}
+		for second = 1, 300 do
+			for _ = 1, 20 do
+				for _, pair in { { a, ca }, { b, cb } } do
+					pair[2].tick += 1
+					Machines.set(pair[1], "energy", Machines.capacity(pair[1]))
+					Machines.tick(pair[1], pair[2])
+				end
+				RoomWorld.stepWorld(fake.rooms, 1 / 20)
+			end
+			totals[second] = Machines.get(a, "heat") + Machines.get(b, "heat")
+		end
+		local room = assert(RoomWorld.sampleIn(fake.rooms, 0.5, G, 0.5))
+		t.near(room.temperature, 2, 0.5, "held")
+		t.near(room.heat, totals[300], 1e-9, "both count in the room")
+		local need = room.uaOut * (2 - room.outside) + room.uaGround * 2
+		for second = 240, 300 do
+			t.near(totals[second], need, 0.5, "no hunting")
+		end
+	end)
+
+	t.test("roomworld: a room whose roof is blown off goes at once, leaving one failure", function()
+		-- A 16 x 16 x 3 stone hall (768 cells) with a campfire and a player.
+		local world = FakeRooms.new(Blocks, Rooms)
+		world.house(0, 0, 16, 16, 3, B.Stone)
+		world.set(8, G, 8, B.Campfire)
+		local fake = game(world, sourced(B.Campfire, campfire))
+		fake.players = { { 2.5, G, 2.5 } }
+		RoomWorld.sampleIn(fake.rooms, 2.5, G, 2.5)
+		fake.run(10, 1 / 60)
+		local before = assert(RoomWorld.sampleIn(fake.rooms, 2.5, G, 2.5))
+		t.eq(before.volume, 768)
+		-- An explosion takes the whole roof at once.
+		for x = -1, 16 do
+			for z = -1, 16 do
+				change(fake, world, x, G + 3, z, B.Air)
+			end
+		end
+		local fills, frames = fake.rooms.fills, 0
+		while fake.rooms.count > 0 and frames < 600 do
+			RoomWorld.stepWorld(fake.rooms, 1 / 60)
+			frames += 1
+		end
+		t.eq(frames, 1, "gone in the frame after")
+		t.eq(fake.rooms.fills - fills, 1, "one fill")
+		t.eq(#fake.rooms.failures, 1, "one failure remembered")
+		t.eq(RoomWorld.sampleIn(fake.rooms, 2.5, G, 2.5), nil, "no warm air answered")
+		t.eq(RoomWorld.temperatureIn(fake.rooms, 8, G + 1, 8), nil)
+		t.eq(RoomWorld.temperatureIn(fake.rooms, -1, G + 1, 8), nil, "nor in its walls")
+	end)
+
+	t.test("roomworld: a burning stove finds its room and keeps it with nobody in the house", function()
+		-- A stove restored from a save: its block is there (no change seen), it burns, and the only
+		-- player is outside, within Range.
+		local world = plankHouse()
+		world.set(4, G, 4, B.WoodStove)
+		local stove = Machines.newContainer(B.WoodStove)
+		stove.slots[1] = Items.newStack(Items.id.Coal, 4)
+		local fake = game(
+			world,
+			sourced(B.WoodStove, function(): number
+				return Machines.get(stove, "heat")
+			end)
+		)
+		fake.players = { { 20.5, G, 20.5 } }
+		local ctx: any = {
+			block = B.WoodStove,
+			x = 4,
+			y = G,
+			z = 4,
+			energy = assert(Machines.energyOf(B.WoodStove)),
+			tick = 0,
+			dayTime = 18000,
+			getBlock = world.getBlock,
+			climate = function(x: number, y: number, z: number): (any, number)
+				return RoomWorld.climateIn(fake.rooms, x, y, z)
+			end,
+		}
+		for _ = 1, 400 * 20 do
+			ctx.tick += 1
+			Machines.tick(stove, ctx)
+			RoomWorld.stepWorld(fake.rooms, 1 / 20)
+		end
+		local room = assert((RoomWorld.climateIn(fake.rooms, 4, G, 4)), "the stove's room found")
+		t.eq(room.heat, HEAT.WoodStove)
+		t.near(room.temperature, Rooms.steady(room, -6.7, 0, HEAT.WoodStove), 0.5, "heated")
+		t.eq(fake.rooms.count, 1, "kept past ForgetSeconds")
+	end)
+
+	t.test("roomworld: with no rooms (the seasons or their rooms off) a heater is a space heater", function()
+		-- The module's own functions before (without) RoomWorld.start: what Machines/Machines' env
+		-- gives the kinds.
+		t.eq(RoomWorld.world(), nil, "no rooms world")
+		t.eq(RoomWorld.sample(0, G, 0), nil)
+		local none, outside = RoomWorld.climateAt(0, G, 0)
+		t.eq(none, nil)
+		t.eq(outside, 0)
+		t.eq(RoomWorld.temperatureAt(0, G, 0), nil)
+		t.eq(RoomWorld.playerNear(0, G, 0, HEAT.StandbyRadius), true, "no positions to go by: near")
+		local container = Machines.newContainer(B.ElectricHeater)
+		local ctx: any = {
+			block = B.ElectricHeater,
+			x = 0,
+			y = G,
+			z = 0,
+			energy = assert(Machines.energyOf(B.ElectricHeater)),
+			tick = 0,
+			dayTime = 18000,
+			getBlock = function(): number
+				return B.Air
+			end,
+			climate = RoomWorld.climateAt,
+			near = RoomWorld.playerNear,
+		}
+		for _ = 1, 40 do
+			ctx.tick += 1
+			Machines.set(container, "energy", Machines.capacity(container))
+			Machines.tick(container, ctx)
+		end
+		t.eq(Machines.state(container), HeatStates.HEATING, "never Standby")
+		t.eq(Machines.get(container, "heat"), HEAT.SpaceHeater)
 	end)
 
 	t.test("roomworld: the sheltered outside value (Tough As Nails under a roof), within OutsideLimit", function()

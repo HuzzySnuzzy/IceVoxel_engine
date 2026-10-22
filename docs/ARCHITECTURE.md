@@ -3525,9 +3525,18 @@ season's shift times the biome's amplitude): a winter plain (0.8 - 0.8) snows, a
 doors, fences, snow layers 1-7) from a seed, every neighbour with an insulation a wall face (its
 U to `uaOut`, or to `uaGround` for a floor on solid ground), every passable neighbour at or above
 its column's sky height an opening (U 1.0, not entered). An open door leaks its two faces, a
-broken window one, a porch's roof carries the fill on to where the sky starts; past MaxVolume
-(1024) cells, MaxExtent (32) blocks or MaxOpenings (6), or at a cell nobody knows, there is no
-room and the roof rule holds. The air: `C dT/dt = P - uaOut (T - outside) - uaGround T`, C = 2 x
+broken window one, a porch's roof carries the fill on to where the sky starts. A hole in the
+roof costs what a hole in a wall does: an open-sky cell with three or four of its sideways
+neighbour columns covered above it is entered (a roof hole or a chimney a block wide), the face
+where the sky starts one opening; a roofless house, a hole three wide, or a fill that never
+enters a cell under a roof (a pit dug in the open) is no room. Only faces towards the outside
+lose: a block standing inside the room (furniture, a pillar, the heater itself: going on from
+its face through blocks with an insulation, within the room's bounds, reaches the room again)
+loses nothing, and one on the floor stands in for the floor face it covers. Universal Cables,
+Mechanical Pipes and Logistical Transporters are wall faces (0.05, as machines): a cable through
+a wall leaves it shut. Past MaxVolume (1024) cells, MaxExtent (32) blocks or MaxOpenings (6), or
+at a cell nobody knows, there is no room and the roof rule holds. The air:
+`C dT/dt = P - uaOut (T - outside) - uaGround T`, C = 2 x
 volume, stepped once a second with the exact exponential (`Rooms.step`, stable at any step),
 `outside` the sheltered outdoor value at the room's seed (Temperature.outside under a roof, the
 season's shift and night drop in, within +-15). The design's house (5 x 5 x 3 planks, a door, two
@@ -3536,30 +3545,37 @@ windows, on grass): uaOut 2.465, uaGround 0.5, tau 50.6 s; a winter night's -6.7
 tests/spec/Rooms).
 - *Where rooms come from* (RoomWorld). Seeds are each player's feet (Tough As Nails' sample, once
   a second while the calendar counts), each machine that asks for its climate (every tick:
-  `climateAt`, the heaters, coolers and stoves) and each room source placed (a campfire, a
-  furnace, a generator; not fire or lava), the machines' every 5 s while a player is within 128
+  `climateAt`, the heaters and coolers while on, a stove while it burns, so one restored from a
+  save heats a house nobody is in) and each room source placed (a campfire, a furnace, a
+  generator; not fire or lava), the machines' every 5 s while a player is within 128
   blocks. Fills run in `step` after the machines, at most 2 and 2 ms a frame (players' and
   refills first); a fill is at most 1 024 x 6 block reads (1.2-2.1 ms in Lune). A fill that finds
   no room marks every cell it went through as none for 5 s (one open, too big or unloaded space),
   unless a block in it changes. A room nobody visited (a player in it, a machine asking) for 60 s
   whose sources give nothing is forgotten. Nothing else runs per frame; the air's step is O(rooms
   + sources + players) a second.
-- *Cache and changes.* `roomOf` maps interior cells, `wallsOf` wall and opening cells (a wall
-  between two rooms to both). A change there (every edit, a door toggled) refills the room from
-  its seed, unless it keeps the cell's insulation and touches no source (a torch, stone for
-  cobblestone). The new room's air is the volume-weighted mean of the rooms it overlaps, the cells
-  no room had at the outside value; cells of the old room the new one did not take (a wall built
-  across) stay the old room's and are filled again, so both halves keep its air.
+- *Cache and changes.* `roomOf` maps interior cells, `wallsOf` wall and opening cells and the
+  eaves (the blocks over the walls' tops, for `temperatureAt` only: no U; a wall between two rooms
+  to both). A change there (every edit, a door toggled) refills the room from its seed, unless it
+  keeps the cell's insulation and touches no source (a torch, stone for cobblestone). The new
+  room's air is the volume-weighted mean of the rooms it overlaps, the cells no room had at the
+  outside value; cells of the old room the new one did not take (a wall built across) stay the
+  old room's and are filled again, so both halves keep its air. A dirty room whose fill finds no
+  room (its roof blown off) goes at once, all of it: one fill, one failure.
 - *Heat.* The room sources in the room or its walls (Players/Climate.roomSource: a campfire 20
   HU, fire 15 (at most 3), lava 10 (at most 6), a lit furnace 8, a working generator 10, the
-  heaters', coolers' and stoves' `heat` field) and 1 HU per player whose feet are in it.
-  `climateAt` sums it again for each call, so a thermostat's `others` (the room's heat less its
-  own) is exact and several thermostats in one room share the load instead of hunting.
+  heaters', coolers' and stoves' `heat` field; Players/ToughAsNails registers the machines' at
+  the start whatever thirst and temperature say) and 1 HU per player whose feet are in it. A
+  source in a wall between two rooms heats one: the room `climateAt` answers for its cell, so a
+  thermostat heats the room it measures and pays for what that room gets. `climateAt` sums it
+  again for each call, so a thermostat's `others` (the room's heat less its own) is exact and
+  several thermostats in one room share the load instead of hunting.
 - *Answers.* `sample` (Tough As Nails: the feet's room, or the head's), `climateAt` (a machine's
   cell or a neighbour's room and the outside), `temperatureAt` (snow: a lookup only, a cell's room
-  or the warmest room it walls, nil for none), `playerNear` (a space heater's standby). Rooms are
-  the server's alone; players learn of theirs in the Survival message (`room`, `outside`: the
-  Thermometer's "Room +1 · Out -9", WAILA's "Room +1 (out -9)" on a heater).
+  or the warmest room it walls, its eaves too, nil for none), `playerNear` (a space heater's
+  standby; true with no rooms). Rooms are the server's alone; players learn of theirs in the
+  Survival message (`room`, `outside`: the Thermometer's "Room +1 · Out -9", WAILA's
+  "Room +1 (out -9)" on a heater).
 
 **Heaters, coolers and stoves** (Shared/Machines kinds "stove", "oilheater", "heater",
 "cooler"; `Seasons/HeatStates`). Each tick a thermostat asks its room (`TickContext.climate`)
@@ -3569,14 +3585,17 @@ feed-forward that settles on S exactly when it can (the error times 2a - 1 a sec
 passes Pmax.
 - *Electric Heater*: up to 40 HU at 4 J/t per HU (Machines `use`); on too little energy it takes
   all there is for that share ("Low power"), none "No power". Outdoors it is a 20 HU space heater
-  (Tough As Nails' +3 within 5 blocks) while a player is within 16 (TickContext `near`), else
-  "Standby". Convective: no warmth in a room besides the air's.
+  (Tough As Nails' +3 within SpaceHeaterRadius, 5 blocks) while a player is within 16
+  (TickContext `near`), else "Standby"; with the rooms off no position is known and it always
+  warms. Convective: no warmth in a room besides the air's.
 - *Air Conditioner*: down to -40 HU at 5 J/t per HU, in rooms only ("No room").
 - *Electric Fan*: 30 J/t for -10 HU while it runs: in a room while the air is over its set point
-  (on half a step above it, off half a step below), outdoors whenever it is on (a cold source).
+  (on half a step above it, off half a step below), outdoors whenever it is on (a cold source
+  within FanRadius, 3 blocks).
 - *Wood Stove* (fuel only): furnace fuel that leaves nothing behind, 4 times its furnace time
   (coal 320 s, a log 60 s), 30 HU while it burns, anywhere (a radiant source like a campfire);
-  switched off it holds what burns.
+  burning, it asks for its room every tick as the thermostats do; switched off it holds what
+  burns.
 - *Oil Heater* (fuel only): up to 35 HU, its tank's Oil (a mB every 30 ticks at full output) or
   Fuel (every 60), less as it gives less; rooms only. Radiant.
 Their `heat` field is what they deliver (negative cools): RoomWorld and Tough As Nails' heat and
@@ -4985,7 +5004,9 @@ dehydration doesn't hurt.
 SkyCheck for the roof above the eyes). Heat and cold sources are block ids: `HeatingBlocks` and
 `CoolingBlocks` names (a fluid name is every level and the cave twin: "Lava"; a name no block has
 is skipped with a warning, so a block can be listed before it exists), plus sources registered with
-`Climate.addHeatSource(block, check?)` / `addColdSource(block)` (they return how many ids they
+`Climate.addHeatSource(block, check?, radiant?, radius?)` / `addColdSource(block, check?,
+radius?)` (`radius`: how far it reaches, at most ProximityRadius: the Electric Heater's
+SpaceHeaterRadius, the Electric Fan's FanRadius; they return how many ids they
 cover): the server module registers the Furnace (while its container's litTime > 0) and the Heat
 and Combustion Generators (while their machine is active). `Climate.sources` gives the distance of
 the nearest heat and cold source (along the farthest axis); a check only runs for a block of its

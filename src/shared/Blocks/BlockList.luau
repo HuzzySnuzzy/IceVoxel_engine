@@ -232,7 +232,8 @@
 	                box's top to the layers' height (client Rendering/ChunkRenderer).
 	  insulation    U, the heat a room loses through one face of the block per degree (Shared/
 	                Seasons/Rooms: a wall face). Default by kind and material (Blocks.insulation):
-	                fluids and machines 0.05; solid blocks without their own collision boxes by
+	                fluids, machines and transmitters (cables, pipes, transporters: a wall they
+	                run through stays shut) 0.05; solid blocks without their own collision boxes by
 	                material (glass 0.12, ice and metal 0.06, wool 0.008, snow 0.015, planks
 	                0.025, leaves 0.3, anything else: logs, stone, brick, concrete, ground 0.02);
 	                everything else (air, plants, torches, open doors, fences, snow layers 1-7)

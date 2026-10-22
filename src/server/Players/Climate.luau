@@ -31,7 +31,9 @@
 	anything else may add its own the same way, e.g. a brazier that is lit only sometimes:
 	`Climate.addHeatSource("Brazier", isLit)`. A check runs only for a block of its kind within
 	range, once a second per player, and never for one farther than the nearest source found so
-	far. (Within Temperature.NEAR of a heat source, the cold sources around no longer cool.)
+	far. A source may have a reach of its own, at most the proximity radius (`radius`: the
+	Electric Heater's Config.Seasons.Heat.SpaceHeaterRadius, the Electric Fan's FanRadius). (Within
+	Temperature.NEAR of a heat source, the cold sources around no longer cool.)
 
 	Seasons (Config.Seasons; Players/ToughAsNails passes them only while the calendar is on):
 	  season            the season's sample (Shared/Seasons/SeasonClimate, for the column's
@@ -104,6 +106,8 @@ local EYES = 1.62
 local heating: { [number]: true | Check } = {}
 local radiant: { [number]: boolean } = {}
 local cooling: { [number]: true | Check } = {}
+-- Per block id: how far it warms or cools (nil: the proximity radius).
+local reach: { [number]: number? } = {}
 -- Per block id: what it gives a room's air, and the most of them counted in one room.
 local roomSources: { [number]: RoomOutput } = {}
 local roomLimits: { [number]: number? } = {}
@@ -156,12 +160,15 @@ end
 --[[
 	Makes `block` (an id or a name; a fluid name means all its blocks) a heat source: always, or
 	while `check` says so; `isRadiant`: it warms by radiance (fire, a stove), so it still warms in
-	a room (see the header; nil keeps what it was). Returns how many block ids it covers (0: an unknown name, skipped).
+	a room (see the header; nil keeps what it was); `radius`: it warms only that far (blocks
+	along the farthest axis; nil: the whole proximity radius). Returns how many block ids it
+	covers (0: an unknown name, skipped).
 ]]
-function Climate.addHeatSource(block: number | string, check: Check?, isRadiant: boolean?): number
+function Climate.addHeatSource(block: number | string, check: Check?, isRadiant: boolean?, radius: number?): number
 	local ids = blocksOf(block)
 	for _, id in ids do
 		heating[id] = check or true
+		reach[id] = radius
 		-- (Registering again without saying keeps whether it is radiant.)
 		if isRadiant ~= nil then
 			radiant[id] = isRadiant
@@ -170,12 +177,13 @@ function Climate.addHeatSource(block: number | string, check: Check?, isRadiant:
 	return #ids
 end
 
--- Makes `block` (an id or a name) a cold source: always, or while `check` says so. Returns how
--- many block ids it covers.
-function Climate.addColdSource(block: number | string, check: Check?): number
+-- Makes `block` (an id or a name) a cold source: always, or while `check` says so, within
+-- `radius` (nil: the proximity radius). Returns how many block ids it covers.
+function Climate.addColdSource(block: number | string, check: Check?, radius: number?): number
 	local ids = blocksOf(block)
 	for _, id in ids do
 		cooling[id] = check or true
+		reach[id] = radius
 	end
 	return #ids
 end
@@ -252,8 +260,8 @@ end
 --[[
 	The nearest heating block and cooling block within `radius` blocks of cell (x, y, z) (a cube),
 	as their distance along the farthest axis (0: the feet's own cell), nil when there is none,
-	and the nearest radiant heating block's. Unknown cells are neither. A source's check runs only
-	when it would be the nearest.
+	and the nearest radiant heating block's. Unknown cells are neither, nor a source farther than
+	its own radius. A source's check runs only when it would be the nearest.
 ]]
 function Climate.sources(view: View, x: number, y: number, z: number, radius: number): (number?, number?, number?)
 	local heat: number?, cold: number?, glow: number? = nil, nil, nil
@@ -267,6 +275,7 @@ function Climate.sources(view: View, x: number, y: number, z: number, radius: nu
 					local source = heating[block]
 					if
 						source
+						and distance <= (reach[block] or radius)
 						and (heat == nil or distance < heat or (radiant[block] and (glow == nil or distance < glow)))
 					then
 						if source == true or (source :: Check)(x + dx, y + dy, z + dz, block) then
@@ -279,7 +288,7 @@ function Climate.sources(view: View, x: number, y: number, z: number, radius: nu
 						end
 					end
 					local chill = cooling[block]
-					if chill and (cold == nil or distance < cold) then
+					if chill and distance <= (reach[block] or radius) and (cold == nil or distance < cold) then
 						if chill == true or (chill :: Check)(x + dx, y + dy, z + dz, block) then
 							cold = distance
 						end

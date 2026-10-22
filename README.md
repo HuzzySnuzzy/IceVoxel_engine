@@ -842,16 +842,17 @@ A fast, Minecraft-style voxel engine for Roblox.
   - **Foliage:** grass, leaves, tinted plants and vines turn through the year: autumn's reds,
     oranges and browns, winter's bare and snow-dusted colours, spring's fresh green, dry grass
     yellowing in summer; evergreens and jungles keep theirs. The distant terrain turns with them.
-  - **Rooms and heating:** walls, a roof and a floor around you make a room (up to 1,024 cells,
-    32 blocks across, a few openings) whose air has its own temperature: warmed by campfires, lit
-    furnaces, working generators, players and the heaters below, and lost through its walls by
-    their insulation (Insulated Planks hold heat best, Insulated Glass and the Insulated Door far
-    better than glass and a door; glass and metal lose it; an open door leaks). The thermometer
-    reads "Room +1 · Out -9", and WAILA a heater's room. The **Wood Stove** burns furnace fuel
-    four times as long for 30 HU, anywhere; the **Oil Heater** burns Oil or Fuel; the **Electric
-    Heater** (up to 40 HU) and the **Air Conditioner** (down to -40) hold a room at their set
-    point on electricity; the **Electric Fan** cools a little. Their panels have "-", "+" and
-    On / Off buttons; working, their windows glow and they hum, crackle or whirr.
+  - **Rooms and heating:** walls, a roof and a floor around you make a room (up to 1,024 cells, 32
+    blocks across, a few openings: a missing roof block leaks like a broken window) whose air has
+    its own temperature: warmed by campfires, lit furnaces, working generators, players and the
+    heaters below, and lost through its walls by their insulation (Insulated Planks hold heat
+    best, Insulated Glass and the Insulated Door far better than glass and a door; glass and metal
+    lose it; an open door leaks; furniture loses nothing, and a cable through a wall leaves it
+    shut). The thermometer reads "Room +1 · Out -9", and WAILA a heater's room. The **Wood Stove**
+    burns furnace fuel four times as long for 30 HU, anywhere; the **Oil Heater** burns Oil or
+    Fuel; the **Electric Heater** (up to 40 HU) and the **Air Conditioner** (down to -40) hold a
+    room at their set point on electricity; the **Electric Fan** cools a little. Their panels have
+    "-", "+" and On / Off buttons; working, their windows glow and they hum, crackle or whirr.
 - **Weather.** Regional, not Minecraft's one switch for the whole world: storms a few hundred to a
   few thousand blocks across drift over the world with a wind that slowly turns (about 1 to 3
   blocks a second), grow and die out, and leave clear stretches between them, so you can see one

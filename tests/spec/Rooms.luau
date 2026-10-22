@@ -1,8 +1,9 @@
 --[[
 	The seasons' rooms (Shared/Seasons/Rooms), pure over a fake world (tests/lib/FakeRooms): the
 	flood fill of sealed rooms, open doors, porches, igloos, leaking, open, too big and unloaded
-	spaces, per-face U values, the ground's faces, heat sources in the cells and the walls; the
-	design's worked numbers (a 5 x 5 x 3 plank house in a winter night, a taiga, a desert room); the
+	spaces, a hole in the roof (one opening, as in a wall; a roofless house and a pit no room),
+	per-face U values, the ground's faces, furniture and pillars (no loss), cables through a wall
+	(shut), the eaves, heat sources in the cells and the walls; the design's worked numbers (a 5 x 5 x 3 plank house in a winter night, a taiga, a desert room); the
 	air's exact exponential and its time constant; the thermostat never above its maximum and
 	settling within half a step, alone, beside a campfire, two in one room, and a cooler.
 ]]
@@ -54,6 +55,20 @@ return function(t, shared, require)
 		t.ok(room.walls[Coords.posKey(2, G - 1, 2)], "the floor")
 		t.ok(room.cells[Coords.posKey(4, G + 2, 4)], "a far corner")
 		t.eq(room.cells[Coords.posKey(2, G + 3, 2)], nil, "not the roof")
+		-- The eaves (the roof over the walls' tops, the corners too) are walls for the snow's lookup
+		-- (server RoomWorld.temperatureAt), without U: uaOut above has none of them.
+		local eaves = 0
+		for x = -1, 5 do
+			for z = -1, 5 do
+				if x == -1 or x == 5 or z == -1 or z == 5 then
+					t.ok(room.walls[Coords.posKey(x, G + 3, z)], `the eave over ({x}, {z})`)
+					eaves += 1
+				end
+			end
+		end
+		t.eq(eaves, 24)
+		t.eq(room.walls[Coords.posKey(-1, G + 4, 2)], nil, "nothing over the eaves")
+		t.eq(room.walls[Coords.posKey(-1, G + 2, -1)], nil, "nor the corner of the walls under one")
 		-- Every interior cell is the same room, whichever it is filled from.
 		local again = assert(fill(world, 4, G + 2, 0))
 		t.eq(again.volume, 75)
@@ -190,6 +205,123 @@ return function(t, shared, require)
 			count += 1
 		end
 		t.ok(count > 10, `{count} cells`)
+	end)
+
+	t.test("rooms: a hole in the roof is one opening, as one in a wall; roofless spaces and pits are none", function()
+		local sealed = assert(fill(plankHouse(), 0, G, 0))
+		-- One block of the back wall's top row out (under the roof's edge), and one of the roof.
+		local wall = plankHouse()
+		wall.set(2, G + 2, 5, B.Air)
+		local walled = assert(fill(wall, 0, G, 0))
+		t.eq(walled.openings, 1)
+		local roof = plankHouse()
+		roof.set(2, G + 3, 2, B.Air)
+		local roofed, why = fill(roof, 0, G, 0)
+		assert(roofed, why)
+		t.eq(roofed.openings, 1, "the hole's top: one face")
+		t.eq(roofed.volume, 76, "the hole's own cell is the room's")
+		t.ok(roofed.cells[Coords.posKey(2, G, 2)] and roofed.cells[Coords.posKey(2, G + 3, 2)], "the column under it")
+		t.ok(roofed.walls[Coords.posKey(2, G + 4, 2)], "the opening, where the sky starts")
+		-- The same losses: the face the block took, its hole's four sides (the wall hole's floor
+		-- loses to the ground) and the opening.
+		local roofLoss = roofed.uaOut + roofed.uaGround
+		t.near(roofLoss, sealed.uaOut + sealed.uaGround - 0.025 + 4 * 0.025 + 1, 1e-9)
+		t.near(roofLoss, walled.uaOut + walled.uaGround, 1e-9, "a roof hole costs what a wall hole does")
+		-- A seed under the hole finds the room too (a player standing there).
+		t.eq((assert(fill(roof, 2, G, 2))).volume, 76)
+		-- A chimney a block wide over the hole: one opening, at its top.
+		for y = G + 4, G + 5 do
+			roof.set(1, y, 2, B.Brick)
+			roof.set(3, y, 2, B.Brick)
+			roof.set(2, y, 1, B.Brick)
+			roof.set(2, y, 3, B.Brick)
+		end
+		local chimney = assert(fill(roof, 0, G, 0))
+		t.eq(chimney.openings, 1)
+		t.eq(chimney.volume, 78)
+		-- Two blocks: two openings.
+		local two = plankHouse()
+		two.set(2, G + 3, 2, B.Air)
+		two.set(3, G + 3, 2, B.Air)
+		t.eq((assert(fill(two, 0, G, 0))).openings, 2)
+		-- A hole three wide, and a house with no roof: no room.
+		local wide = plankHouse()
+		wide.fill(1, G + 3, 1, 3, G + 3, 3, B.Air)
+		t.eq(select(2, fill(wide, 0, G, 0)), Rooms.OPEN, "a 3 x 3 hole")
+		local roofless = plankHouse()
+		roofless.fill(-1, G + 3, -1, 5, G + 3, 5, B.Air)
+		t.eq(select(2, fill(roofless, 0, G, 0)), Rooms.OPEN, "no roof")
+		t.eq(select(2, fill(roofless, 2, G, 2)), Rooms.OPEN)
+		-- A pit dug in the open (walled on all four sides by the ground, nothing over it) is no room,
+		-- nor is the end of a trench.
+		local pit = FakeRooms.new(Blocks, Rooms)
+		pit.fill(10, G - 2, 10, 10, G - 1, 10, B.Air)
+		t.eq(select(2, fill(pit, 10, G - 2, 10)), Rooms.OPEN, "a pit")
+		pit.fill(20, G - 2, 10, 20, G - 1, 20, B.Air)
+		t.eq(select(2, fill(pit, 20, G - 2, 10)), Rooms.OPEN, "a trench's end")
+		-- A deeper pit with a tunnel off it under the ground: the tunnel is a room, the pit's top its
+		-- one opening.
+		pit.fill(30, G - 3, 10, 30, G - 1, 10, B.Air)
+		pit.fill(31, G - 3, 10, 33, G - 2, 10, B.Air)
+		local tunnel = assert(fill(pit, 32, G - 3, 10))
+		t.eq(tunnel.openings, 1)
+		t.eq(tunnel.volume, 3 + 6)
+		t.ok(tunnel.cells[Coords.posKey(30, G - 1, 10)], "the pit, up to the ground")
+	end)
+
+	t.test("rooms: blocks standing inside a room lose nothing to the outside", function()
+		local bare = assert(fill(plankHouse(), 0, G, 0))
+		local furnished = plankHouse()
+		-- The heater itself, two chests, a stack of two, and a stone pillar from the floor to the roof.
+		furnished.set(2, G, 2, B.ElectricHeater)
+		furnished.set(1, G, 3, B.Chest)
+		furnished.set(3, G, 3, B.Chest)
+		furnished.set(1, G, 1, B.Chest)
+		furnished.set(1, G + 1, 1, B.Chest)
+		furnished.fill(3, G, 1, 3, G + 2, 1, B.Stone)
+		local room = assert(fill(furnished, 0, G, 0))
+		t.eq(room.volume, 75 - 5 - 3)
+		t.eq(room.openings, 0)
+		-- Their sides face the room's air on both sides: no loss. The pillar takes a roof face.
+		t.near(room.uaOut, bare.uaOut - 0.025, 1e-9, "the walls' and the roof's faces only")
+		-- What stands on the floor stands in for the floor face it covers (a chest's U, the heater's
+		-- 0.05); the pillar's floor face is gone.
+		local expected = bare.uaGround + 3 * (0.025 - 0.02) + (0.05 - 0.02) - 0.02
+		t.near(room.uaGround, expected, 1e-9)
+		-- They are still the room's walls (a change there fills it again).
+		t.ok(room.walls[Coords.posKey(2, G, 2)] and room.walls[Coords.posKey(3, G + 1, 1)])
+		-- Against an outer wall a block is the wall there (the face it covers, its own U).
+		local backed = plankHouse()
+		backed.set(2, G, 4, B.Furnace)
+		local against = assert(fill(backed, 0, G, 0))
+		t.near(against.uaOut, bare.uaOut - 0.025 + 0.02, 1e-9, "the furnace's back: the wall's face, its U")
+		t.near(against.uaGround, bare.uaGround, 1e-9, "on the floor: 0.02 for 0.02")
+	end)
+
+	t.test("rooms: a cable, pipe or transporter through a wall keeps it shut", function()
+		for _, name in
+			{
+				"BasicUniversalCable",
+				"UltimateUniversalCable",
+				"BasicMechanicalPipe",
+				"UltimateMechanicalPipe",
+				"BasicLogisticalTransporter",
+				"RestrictiveTransporter",
+			}
+		do
+			t.eq(Blocks.insulation(B[name]), 0.05, `{name}: a wall face, as a machine`)
+			t.eq(Rooms.passable(B[name]), false)
+		end
+		-- The design house with the heater's power brought in through its back wall.
+		local world = plankHouse()
+		local sealed = assert(fill(world, 2, G, 2))
+		world.set(4, G, 5, B.BasicUniversalCable)
+		world.set(4, G, 6, B.BasicUniversalCable)
+		local cabled = assert(fill(world, 2, G, 2))
+		t.eq(cabled.openings, 0, "no hole in the wall")
+		t.eq(cabled.volume, 75)
+		t.near(cabled.uaOut, sealed.uaOut - 0.025 + 0.05, 1e-9, "a plank face for a cable's")
+		t.near(sealed.uaOut, 2.465, 1e-9, "the worked numbers")
 	end)
 
 	t.test("rooms: heat sources in the cells and the walls, each once", function()

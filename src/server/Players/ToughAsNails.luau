@@ -96,11 +96,13 @@
 	  Heat       lit furnaces (a furnace container burning: litTime > 0) and working Heat and
 	             Combustion Generators (their machine's active flag) are heat sources
 	             (Climate.addHeatSource), besides Config.ToughAsNails.HeatingBlocks; so are the
-	             seasons' Wood Stove and Oil Heater (radiant) and Electric Heater while they
-	             deliver heat (their `heat` field), and the Air Conditioner and Electric Fan cold
-	             sources while they cool. Rooms (server Seasons/RoomWorld) take the same machines'
-	             heat through Climate.addRoomSource: a lit Furnace, a working generator, the
-	             heaters, coolers and stoves' `heat`.
+	             seasons' Wood Stove and Oil Heater (radiant) and Electric Heater (within
+	             Config.Seasons.Heat.SpaceHeaterRadius) while they deliver heat (their `heat`
+	             field), and the Air Conditioner and Electric Fan (within FanRadius) cold sources
+	             while they cool. Rooms (server Seasons/RoomWorld) take the same machines' heat
+	             through Climate.addRoomSource: a lit Furnace, a working generator, the heaters,
+	             coolers and stoves' `heat`; those are registered at the start whatever thirst
+	             and temperature say (rooms run with both off).
 	  Seasons    while the calendar is on (Shared/Seasons: Calendar's state enabled), each
 	             player's sample takes the season's climate (SeasonClimate.sample for the column's
 	             biome class: shift and night drop), the room at their feet (Seasons/RoomWorld
@@ -869,6 +871,25 @@ local function registerEffects()
 	})
 end
 
+-- Whether the machine at a cell works (its active flag: a generator burning or turning).
+local function working(x: number, y: number, z: number): boolean
+	local machines = Machines.world()
+	local machine = if machines then MachineWorld.machine(machines, x, y, z) else nil
+	local data = if machine then machine.container.data else nil
+	return data ~= nil and (data[SharedMachines.ACTIVE] or 0) ~= 0
+end
+
+-- What the seasons' heater, cooler or stove at a cell delivers (its `heat` field, HU; 0: none).
+local function heatOf(x: number, y: number, z: number): number
+	local machines = Machines.world()
+	local machine = if machines then MachineWorld.machine(machines, x, y, z) else nil
+	local container = if machine then machine.container else nil
+	local index = if container then SharedMachines.field(container.block, "heat") else nil
+	local data = if container then container.data else nil
+	local value = if data and index then data[index] else nil
+	return if type(value) == "number" and value == value then value else 0
+end
+
 -- The heat sources that warm only while they burn or work (see the header).
 local function registerHeatSources()
 	Climate.addHeatSource(Blocks.id.Furnace, function(x: number, y: number, z: number): boolean
@@ -876,36 +897,30 @@ local function registerHeatSources()
 		local data = container and container.data
 		return data ~= nil and (data[1] or 0) > 0
 	end)
-	local function working(x: number, y: number, z: number): boolean
-		local machines = Machines.world()
-		local machine = if machines then MachineWorld.machine(machines, x, y, z) else nil
-		local data = if machine then machine.container.data else nil
-		return data ~= nil and (data[SharedMachines.ACTIVE] or 0) ~= 0
-	end
 	Climate.addHeatSource(Blocks.id.HeatGenerator, working)
 	Climate.addHeatSource(Blocks.id.CombustionGenerator, working)
-	-- The seasons' heaters, coolers and stoves: what they deliver (their `heat` field, HU).
-	local function heatOf(x: number, y: number, z: number): number
-		local machines = Machines.world()
-		local machine = if machines then MachineWorld.machine(machines, x, y, z) else nil
-		local container = if machine then machine.container else nil
-		local index = if container then SharedMachines.field(container.block, "heat") else nil
-		local data = if container then container.data else nil
-		local value = if data and index then data[index] else nil
-		return if type(value) == "number" and value == value then value else 0
-	end
+	-- The seasons' heaters, coolers and stoves: while they deliver heat (or cold); outdoors the
+	-- Electric Heater warms within SpaceHeaterRadius and a running fan cools within FanRadius.
 	local function heating(x: number, y: number, z: number): boolean
 		return heatOf(x, y, z) > 0
 	end
 	local function cooling(x: number, y: number, z: number): boolean
 		return heatOf(x, y, z) < 0
 	end
+	local heat = Config.Seasons.Heat
 	Climate.addHeatSource(Blocks.id.WoodStove, heating, true)
 	Climate.addHeatSource(Blocks.id.OilHeater, heating, true)
-	Climate.addHeatSource(Blocks.id.ElectricHeater, heating)
+	Climate.addHeatSource(Blocks.id.ElectricHeater, heating, nil, heat.SpaceHeaterRadius)
 	Climate.addColdSource(Blocks.id.AirConditioner, cooling)
-	Climate.addColdSource(Blocks.id.ElectricFan, cooling)
-	-- What they give a room's air (server Seasons/RoomWorld).
+	Climate.addColdSource(Blocks.id.ElectricFan, cooling, heat.FanRadius)
+end
+
+--[[
+	What the machines give a room's air (server Seasons/RoomWorld, through Climate.addRoomSource):
+	a lit Furnace, a working generator, the heaters', coolers' and stoves' `heat`. Registered at
+	the start whatever thirst and temperature say: rooms run with Tough As Nails off too.
+]]
+local function registerRoomSources()
 	local heat = Config.Seasons.Heat
 	Climate.addRoomSource(Blocks.id.Furnace, function(x: number, y: number, z: number): number
 		local container = Containers.peek(x, y, z)
@@ -930,6 +945,8 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 	assert(not started, "ToughAsNails.start was already called")
 	started = true
 	local on = thirstOn() or temperatureOn() or hungerOn()
+	-- (The rooms' sources whatever thirst and temperature say: rooms run on their own.)
+	registerRoomSources()
 	if thirstOn() or temperatureOn() then
 		registerHeatSources()
 		registerEffects()
