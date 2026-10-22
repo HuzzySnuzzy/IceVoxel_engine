@@ -13,7 +13,11 @@
 	            Minecraft's FloatGoal keeps mobs at the surface.
 	  Ground    acceleration speed x 0.216 / f^3 (f the friction of the block under it: 0.6, so the
 	            speed itself; ice 0.98 slides), then gravity 0.08, x 0.98 vertically and f x 0.91
-	            sideways: a zombie (0.23) walks 0.114 blocks a tick, 2.3 a second.
+	            sideways: a zombie (0.23) walks 0.114 blocks a tick, 2.3 a second. The acceleration
+	            is times the block's speed factor (Entity.getBlockSpeedFactor: Blocks.speedFactor
+	            of the block at the feet cell, else of the one under the centre), so deep snow
+	            layers slow mobs as they slow players (0.9 for 3-4 layers, 0.8 for 5-6, 0.75 for
+	            7-8).
 	  Air       acceleration 0.02 (Mob's flying speed), x 0.91 sideways.
 	  Water     water's tag (water, fuel: Shared/Fluids `physics`): acceleration 0.02, everything
 	            x 0.8, sinking 0.005 a tick (gravity / 16); lava's tag (lava, oil): x 0.5 (x 0.8
@@ -33,7 +37,9 @@
 	  Chickens  `slowFall`: falling speed x 0.6 a tick (Chicken.aiStep), no fall damage there.
 	  Collision Hull.collide with Minecraft's mob step height 0.6, so a mob must jump a full
 	            block (its AI does); unloaded blocks are solid. `horizontalCollision` says when a
-	            wall stopped it (the AI jumps).
+	            wall stopped it (the AI jumps). Snow layers collide one layer lower than they look
+	            (none for one layer): a mob walks up onto up to 5 layers (0.5 high) and jumps onto
+	            6 to 8 (0.625 to 0.875), landing on their box's top, never sinking in.
 	  Falling   the fall distance counts up while it falls; on landing `tick` returns it (fall
 	            damage is ceil(distance - 3), LivingEntity.causeFallDamage, MobWorld's).
 
@@ -317,16 +323,51 @@ for id = 0, Blocks.count - 1 do
 	buffer.writef64(FRICTION, id * 8, Blocks.get(id).friction)
 end
 
--- The friction of the block carrying the body (under its centre, Minecraft's
--- getBlockPosBelowThatAffectsMyMovement, 0.5 down).
-local function groundFriction(body: Body): number
-	local block = current(floor(body.x), floor(body.y - 0.500001), floor(body.z))
-	return if block then buffer.readf64(FRICTION, block * 8) else 0.6
+-- The block carrying the body (under its centre, Minecraft's getBlockPosBelowThatAffectsMyMovement,
+-- 0.5 down; nil: not loaded): its friction is the ground's.
+local function groundBlock(body: Body): number?
+	return current(floor(body.x), floor(body.y - 0.500001), floor(body.z))
 end
 
 -- Is the feet's cell among the quiet cells (so it holds no ladder)?
 local function feetQuiet(body: Body): boolean
 	return body.quiet == true and floor(body.y) == floor(body.y + INSIDE_EPSILON)
+end
+
+-- Per block: its speed factor (Blocks `speedFactor`). Every quiet block's is 1 (snow layers that
+-- slow have boxes), so a quiet feet cell needs no look.
+local SPEED = buffer.create(Blocks.count * 8)
+for id = 0, Blocks.count - 1 do
+	local factor = Blocks.speedFactor(id)
+	assert(factor == 1 or buffer.readu8(QUIET, id) == 0, `Block {Blocks.get(id).name} slows mobs but is quiet`)
+	buffer.writef64(SPEED, id * 8, factor)
+end
+
+--[[
+	The speed factor of the block at the feet cell, or, when that one's is 1, of `below`, the block
+	carrying the body (Entity.getBlockSpeedFactor; see the header's Ground).
+]]
+local function speedFactor(body: Body, below: number?): number
+	if not feetQuiet(body) then
+		local here = current(floor(body.x), floor(body.y), floor(body.z))
+		local factor = if here then buffer.readf64(SPEED, here * 8) else 1
+		if factor ~= 1 then
+			return factor
+		end
+	end
+	return if below then buffer.readf64(SPEED, below * 8) else 1
+end
+
+-- What the ground under `body` multiplies its walking speed by now (`getBlock` nil: not loaded).
+function MobPhysics.speedFactor(body: Body, getBlock: GetBlock): number
+	local previous = current
+	current = getBlock
+	local saved = body.quiet
+	body.quiet = false
+	local factor = speedFactor(body, groundBlock(body))
+	body.quiet = saved
+	current = previous
+	return factor
 end
 
 -- Entity.moveRelative: `amount` of acceleration along the facing, `forward` of it (|forward| <= 1).
@@ -507,10 +548,12 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 			body.vy = FLUID_EXIT_HOP
 		end
 	else
-		local friction = if body.onGround then groundFriction(body) else 1
-		local acceleration = if body.onGround
-			then shape.speed * (GROUND_FACTOR / (friction * friction * friction))
-			else AIR_ACCELERATION
+		local friction, acceleration = 1, AIR_ACCELERATION
+		if body.onGround then
+			local below = groundBlock(body)
+			friction = if below then buffer.readf64(FRICTION, below * 8) else 0.6
+			acceleration = shape.speed * speedFactor(body, below) * (GROUND_FACTOR / (friction * friction * friction))
+		end
 		moveRelative(body, acceleration, forward)
 		-- Ladders, vines and rope (LivingEntity.handleOnClimbable, then the climb after the move).
 		local climbable = if feetQuiet(body) then nil else climbableAt(body)

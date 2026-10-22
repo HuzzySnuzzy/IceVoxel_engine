@@ -121,6 +121,13 @@
 	a replaceable block is not replaced by its own item (Items.isReplacedBy: Short Grass clicked on
 	short grass goes beside it, as in Minecraft).
 
+	Snow layers (Shared/Seasons/SnowLayers, Minecraft's SnowLayerBlock.canBeReplaced): the Snow
+	Layer clicked on the top of a layer below 8 adds one to it (SnowLayers.stackOnto), and placed
+	against any other face into a cell holding such a layer it adds one there; clicked on a
+	layer's side it goes beside it like any block. A layer needs a block snow lies on below it
+	(SnowLayers.supports: never ice). The stacked layer's block is what is sent (the server's
+	Network/EditRules checks the same).
+
 	Plants go the same way: only on their soil, and a tall plant's lower half only with room for
 	its top (a replaceable cell inside the world; Blocks.canPlace). Placing or breaking one half of
 	a tall plant predicts that half alone: the server places or removes the other and replicates it
@@ -217,6 +224,7 @@ local Boiling = require(Shared.ToughAsNails.Boiling)
 local Combat = require(Shared.Entities.Combat)
 local Rope = require(Shared.Rope)
 local Weapons = require(Shared.Weapons)
+local SnowLayers = require(Shared.Seasons.SnowLayers)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -1322,9 +1330,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		-- Into the clicked block if it can be replaced (not by its own item), else against the
-		-- clicked face.
+		-- clicked face. (The Snow Layer on a layer's top adds one to it: `stacked`.)
 		local x, y, z = hit.x, hit.y, hit.z
-		if not Items.isReplacedBy(hit.block, stack.item) then
+		local snowItem = block == SnowLayers.ITEM
+		local stacked = if snowItem and hit.ny == 1 then SnowLayers.stackOnto(hit.block) else nil
+		if stacked == nil and not Items.isReplacedBy(hit.block, stack.item) then
 			-- (A ladder on the front of a ladder: nowhere, LadderBlock.getStateForPlacement.)
 			if stack.item == LADDER and Items.ofBlock(hit.block) == LADDER then
 				local sx, sy, sz = Blocks.supportOffset(hit.block)
@@ -1344,7 +1354,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		local current = world:getBlock(x, y, z)
-		if current == nil or not Items.isReplacedBy(current, stack.item) then
+		if current == nil then
+			return
+		end
+		if stacked == nil and snowItem then
+			-- (Against another block's face, into a layer's cell: one more there.)
+			stacked = SnowLayers.stackOnto(current)
+		end
+		if stacked == nil and not Items.isReplacedBy(current, stack.item) then
 			return
 		end
 		-- Torches and lanterns: the variant that something holds there (the clicked face first,
@@ -1361,7 +1378,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if variant == nil then
 			return
 		end
-		block = variant
+		block = stacked or variant
+		-- Snow lies only on what holds it (the server's EditRules.supported).
+		if snowItem and not SnowLayers.supports(getBlock(x, y - 1, z) or Blocks.AIR) then
+			return
+		end
 		-- Like the server (EditRules.obstructs): solid blocks and lanterns may not go inside a
 		-- player; torches may.
 		local obstruction = Blocks.obstruction(block)

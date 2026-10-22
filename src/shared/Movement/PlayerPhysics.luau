@@ -7,7 +7,15 @@
 	/ travel, Entity.move / collide, fluid pushing):
 
 	  ground   input acceleration speed * 0.216 / friction^3 (speed 0.1, sprinting 0.13), then the
-	           velocity is multiplied by friction * 0.91 (block friction 0.6, ice 0.98);
+	           velocity is multiplied by friction * 0.91 (block friction 0.6, ice 0.98); the
+	           acceleration times the block's speed factor (`blockSpeedFactor`, Minecraft's
+	           Entity.getBlockSpeedFactor: Blocks.speedFactor of the block at the feet cell, else
+	           of the one carrying the player): deep snow layers (Shared/Seasons/SnowLayers: 0.9
+	           for 3-4 layers, 0.8 for 5-6, 0.75 for 7-8) slow walking to that share. Snow layers
+	           collide one layer lower than they look (none for a single layer), so the player
+	           stands in them, on their box: walked up within the step height (7 layers are
+	           0.75 high), landed on from a jump or a fall at their box's top, never sunk into
+	           (Minecraft's MC-257266);
 	  air      acceleration 0.02 (sprinting 0.026), horizontal drag 0.91, gravity 0.08 and vertical
 	           drag 0.98;
 	  jumping  vertical speed 0.42, plus 0.2 along the facing direction when sprinting; holding jump
@@ -744,6 +752,23 @@ local function frictionBelow(state: State, world: World): number
 	return if block then Blocks.get(block).friction else 0.6
 end
 
+--[[
+	Entity.getBlockSpeedFactor: the speed factor (Blocks.speedFactor) of the block at the feet cell,
+	or, when that one's is 1, of the block carrying the player (getBlockPosBelowThatAffectsMyMovement,
+	as `frictionBelow`). Unloaded blocks change nothing.
+]]
+local function blockSpeedFactor(state: State, world: World): number
+	local here = world.getBlock(floor(state.x), floor(state.y), floor(state.z))
+	local factor = if here then Blocks.speedFactor(here) else 1
+	if factor ~= 1 then
+		return factor
+	end
+	local x, z = state.supportX or floor(state.x), state.supportZ or floor(state.z)
+	local below = world.getBlock(x, floor(state.y - 0.500001), z)
+	return if below then Blocks.speedFactor(below) else 1
+end
+PlayerPhysics.blockSpeedFactor = blockSpeedFactor
+
 -- The solid block under the feet closest to the player (Entity.checkSupportingBlock).
 local function findSupport(state: State, solidAt: Hull.SolidAt): (number?, number?)
 	local box = PlayerPhysics.box(state)
@@ -1251,6 +1276,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			then (if state.sprinting then SPRINT_SPEED else WALK_SPEED)
 				* state.speedFactor
 				* state.runFactor
+				* blockSpeedFactor(state, world)
 				* (GROUND_FACTOR / (friction * friction * friction))
 			else airSpeed
 		accelerate(state, speed, inputX, inputZ)

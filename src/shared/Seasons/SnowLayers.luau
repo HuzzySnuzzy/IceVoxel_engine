@@ -18,9 +18,22 @@
 	  Columns    a column's top cell `c` is WeatherRules.top's (the first cell above the highest
 	             block that stops rain): layers 2+ stop rain, so a column of n >= 2 layers has
 	             them at c - 1, and one of a single layer at c (`layersAt`).
-	  Tiles      `accumulate(columns)` and `melt(columns)` (one 4 x 4 tile, TILE: what a visit
-	             changes; stubs until the snow lands: they change nothing). Frozen: a Column is
-	             { x, z, top, atTop, below, cap }, a Change { x, y, z, block }.
+	             `column(column)`: a column's layers, the cell they are in (or a first layer
+	             would go into) and whether it takes snow at all: layers already, or air (or a
+	             cave mouth's cave air) in its top cell over a block snow lies on (a plant, a
+	             torch or water there takes none).
+	  Tiles      what one visit of a 4 x 4 tile (TILE; server Seasons/SnowWorld) changes, so
+	             tiles rise and fall evenly and same-height cells merge into one box:
+	               snowfall  `accumulate(columns)`: every column that takes snow, has the tile's
+	                         least layers among those below their cap and is below its own cap
+	                         gets one more (a first layer in its top cell, else the layer block
+	                         one higher in place). A column at its cap never holds the rest back.
+	               thaw      `melt(columns)`: the columns with the tile's most layers lose one
+	                         (a single layer goes back to air), one layer at a time (Bedrock's
+	                         melting), so roofs drain gradually.
+	             `meltColumn(column)` takes one layer off a single column (heat, a warm room),
+	             `lessOne(block)` is what a layer less of `block` makes (AIR for one layer).
+	             A Column is { x, z, top, atTop, below, cap }, a Change { x, y, z, block }.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -33,6 +46,8 @@ export type Column = { x: number, z: number, top: number?, atTop: number, below:
 export type Change = { x: number, y: number, z: number, block: number }
 
 local SnowLayers = {}
+
+local AIR, CAVE_AIR = Blocks.AIR, Blocks.CAVE_AIR
 
 -- The most layers, and a tile's side (columns).
 SnowLayers.MAX = Blocks.MAX_LAYERS
@@ -113,20 +128,98 @@ function SnowLayers.layersAt(atTop: number, below: number): (number, number)
 end
 
 --[[
-	One snowfall visit of a tile's `columns` (TILE x TILE of them): the blocks to set. Every
-	column whose layers equal the tile's least and are below its cap gets one more by the column
-	rule (Seasons/SnowWorld's header). Stub: none yet.
+	One layer less of `block`: the layer block below it, AIR for a single layer; nil when `block`
+	is no snow layer.
 ]]
-function SnowLayers.accumulate(_columns: { Column }): { Change }
-	return {}
+function SnowLayers.lessOne(block: number): number?
+	local n = Blocks.layer(block)
+	if n <= 0 then
+		return nil
+	end
+	return if n == 1 then AIR else byLayers[n - 1]
 end
 
 --[[
-	One thaw visit of a tile's `columns`: the blocks to set. The columns at the tile's most layers
-	lose one (a single layer goes back to air). Stub: none yet.
+	A column's snow: its layers (0..MAX), the y of the cell they are in (with none: its top cell,
+	where a first layer would go), and whether it takes snow at all (it has layers, or its top
+	cell is air or cave air over a block snow lies on: `supports`). A column with no top (its
+	chunk isn't loaded) has none and takes none. (A melted layer goes back to AIR here; server
+	Seasons/SnowWorld puts a cave mouth's own cave air back.)
 ]]
-function SnowLayers.melt(_columns: { Column }): { Change }
-	return {}
+function SnowLayers.column(column: Column): (number, number, boolean)
+	local top = column.top
+	if top == nil then
+		return 0, 0, false
+	end
+	local n, dy = SnowLayers.layersAt(column.atTop, column.below)
+	if n > 0 then
+		return n, top + dy, true
+	end
+	local atTop = column.atTop
+	return 0, top, (atTop == AIR or atTop == CAVE_AIR) and SnowLayers.supports(column.below)
+end
+
+--[[
+	One snowfall visit of a tile's `columns` (TILE x TILE of them): the blocks to set. Every
+	column that takes snow, whose layers equal the least of those below their cap and are below
+	its own cap gets one more (see the header). Nothing for a tile with no room left.
+]]
+function SnowLayers.accumulate(columns: { Column }): { Change }
+	local changes: { Change } = {}
+	local least = math.huge
+	for _, column in columns do
+		local n, _, takes = SnowLayers.column(column)
+		if takes and n < column.cap and n < SnowLayers.MAX and n < least then
+			least = n
+		end
+	end
+	if least == math.huge then
+		return changes
+	end
+	for _, column in columns do
+		local n, y, takes = SnowLayers.column(column)
+		if takes and n == least and n < column.cap and n < SnowLayers.MAX then
+			table.insert(changes, { x = column.x, y = y, z = column.z, block = byLayers[n + 1] })
+		end
+	end
+	return changes
+end
+
+--[[
+	One thaw visit of a tile's `columns`: the blocks to set. The columns with the tile's most
+	layers lose one (a single layer goes back to air). Nothing for a tile without snow.
+]]
+function SnowLayers.melt(columns: { Column }): { Change }
+	local changes: { Change } = {}
+	local most = 0
+	for _, column in columns do
+		local n = SnowLayers.column(column)
+		if n > most then
+			most = n
+		end
+	end
+	if most == 0 then
+		return changes
+	end
+	for _, column in columns do
+		local n, y = SnowLayers.column(column)
+		if n == most then
+			table.insert(
+				changes,
+				{ x = column.x, y = y, z = column.z, block = if n == 1 then AIR else byLayers[n - 1] }
+			)
+		end
+	end
+	return changes
+end
+
+-- One layer off `column` alone (heat, a warm room): the block to set, nil when it has no snow.
+function SnowLayers.meltColumn(column: Column): Change?
+	local n, y = SnowLayers.column(column)
+	if n <= 0 then
+		return nil
+	end
+	return { x = column.x, y = y, z = column.z, block = if n == 1 then AIR else byLayers[n - 1] }
 end
 
 return SnowLayers

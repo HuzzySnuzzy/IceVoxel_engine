@@ -46,7 +46,10 @@
 	             out by day.
 	  Noises     what zombies hear this tick (`hear`: Apocalypse/NoiseBus's noises, taken by
 	             Mobs/Mobs): every radius times Noise.NightFactor (1.25) at night and RainFactor
-	             (0.7) where it rains at the noise.
+	             (0.7) where it rains at the noise, or SnowFactor (0.85) where snow falls on it
+	             (the seasons' snowfall: `hear`'s `snowingAt`, else what `setSnowing` gave, which
+	             server Seasons/SnowWorld sets to World/WeatherServer.snowingAt while the calendar
+	             is on; nothing before, so the specs and a world without seasons hear as before).
 	With Config.Apocalypse.Enabled false the director does nothing and the caps are HostileCap.
 ]]
 
@@ -155,20 +158,38 @@ function ZombieDirector.cap(mobs: MobSettings, apoc: Apocalypse, night: boolean,
 	return math.floor(base * (if night then 1 else Z.DayFactor) * factor + 0.5)
 end
 
+-- Whether it rains or snows on a cell.
+type CellTest = (x: number, y: number, z: number) -> boolean
+
+-- Where snow falls, when nobody passes `hear` its own (see the header; nil: nowhere).
+local snowFalls: CellTest? = nil
+
+-- Sets where snow falls for `hear` (server Seasons/SnowWorld: WeatherServer.snowingAt while the
+-- calendar is on; nil: nowhere).
+function ZombieDirector.setSnowing(snowingAt: CellTest?)
+	snowFalls = snowingAt
+end
+
 --[[
 	This tick's `noises` as zombies hear them (see the header), changed in place and returned: `s`
-	is Config.Apocalypse.Noise, `rainingAt` whether it rains at a cell (nil: never).
+	is Config.Apocalypse.Noise, `rainingAt` whether it rains at a cell (nil: never), `snowingAt`
+	whether snow falls on it (nil: `setSnowing`'s).
 ]]
 function ZombieDirector.hear(
 	noises: { MobAI.Noise },
 	night: boolean,
-	rainingAt: ((x: number, y: number, z: number) -> boolean)?,
-	s: { NightFactor: number, RainFactor: number }
+	rainingAt: CellTest?,
+	s: { NightFactor: number, RainFactor: number, SnowFactor: number? },
+	snowingAt: CellTest?
 ): { MobAI.Noise }
+	local snowing: CellTest? = snowingAt or snowFalls
 	for _, noise in noises do
 		local factor = if night then s.NightFactor else 1
-		if rainingAt and rainingAt(floor(noise.x), floor(noise.y), floor(noise.z)) then
+		local x, y, z = floor(noise.x), floor(noise.y), floor(noise.z)
+		if rainingAt and rainingAt(x, y, z) then
 			factor *= s.RainFactor
+		elseif snowing and snowing(x, y, z) then
+			factor *= s.SnowFactor or 1
 		end
 		noise.radius *= factor
 	end

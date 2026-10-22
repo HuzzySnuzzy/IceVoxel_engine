@@ -6,11 +6,13 @@
 	  Support  a plant like any other (Behaviours/Plant): it pops off with its herb item when its
 	           soil goes.
 	  Spread   on a random tick (World/RandomTicker), with chance Config.Server.HerbSpread (1/8;
-	           Minecraft's mushrooms 1/25, as herbs are the player's crop here): unless MAX_NEARBY
-	           (5) of the same herb already grow in the 9 x 3 x 9 blocks around it (itself
-	           included), it walks up to four random steps of one block sideways and up to one up
-	           or down (each step taken only onto air where the herb could stand), and grows a new
-	           one at the last spot when that is air on its soil (Blocks.canSurvive: the dirt set).
+	           Minecraft's mushrooms 1/25, as herbs are the player's crop here) times the season's
+	           growth (server Seasons/SnowWorld.growth: none in winter, 1.5 in spring; 1 with the
+	           calendar off): unless MAX_NEARBY (5) of the same herb already grow in the 9 x 3 x
+	           9 blocks around it (itself included), it walks up to four random steps of one block
+	           sideways and up to one up or down (each step taken only onto air where the herb
+	           could stand), and grows a new one at the last spot when that is air on its soil
+	           (Blocks.canSurvive: the dirt set).
 	           Any one block gets a random tick about every 68 s, so a herb tries every 9 minutes
 	           or so, and a lone plant becomes a small patch within an hour.
 	Nothing needs light: there is no block light here, and herbs grow where their soil is (under
@@ -24,6 +26,7 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 
 local Plant = require(script.Parent.Plant)
+local SnowWorld = require(script.Parent.Parent.Seasons.SnowWorld)
 
 local AIR, CAVE_AIR = Blocks.AIR, Blocks.CAVE_AIR
 
@@ -119,7 +122,7 @@ function Herb.onRandomTick(
 	block: number,
 	random: () -> number
 )
-	if random() >= Config.Server.HerbSpread then
+	if random() >= Config.Server.HerbSpread * SnowWorld.growth() then
 		return
 	end
 	Herb.spread(world, x, y, z, block, random)

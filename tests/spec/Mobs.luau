@@ -345,6 +345,95 @@ return function(t, shared, require, server)
 		t.ok(wet.body.y > FLOOR - 2, `it swam up ({wet.body.y})`)
 	end)
 
+	t.test("mob physics: snow layers slow mobs; they walk up five, jump onto deeper, never sink", function()
+		local SnowLayers = require(shared.Seasons.SnowLayers)
+		local zombieKind = MobList.get(ZOMBIE) :: MobList.Kind
+		local forward = zombieKind.speed * 0.98
+		local speeds = { 1, 1, 0.9, 0.9, 0.8, 0.8, 0.75, 0.75 }
+		for n = 1, 8 do
+			local layer = SnowLayers.block(n) :: number
+			local top = FLOOR + (n - 1) / 8
+			-- A field of n layers everywhere: walking speed times the layers' factor, on the box.
+			local cells: { [number]: number } = {}
+			for x = -2, 40 do
+				for z = -2, 2 do
+					cells[Coords.posKey(x, FLOOR, z)] = layer
+				end
+			end
+			local getBlock = flat(cells)
+			local walker = MobPhysics.new(0.5, top, 0.5, math.pi / 2)
+			walker.onGround = true
+			for _ = 1, 40 do
+				MobPhysics.tick(walker, zombieKind, forward, false, getBlock)
+				t.near(walker.y, top, 1e-9, `{n} layers: on the box, never sunk`)
+			end
+			local x0 = walker.x
+			for _ = 1, 20 do
+				MobPhysics.tick(walker, zombieKind, forward, false, getBlock)
+			end
+			t.near(walker.x - x0, 2.28 * speeds[n], 0.05, `{n} layers: {walker.x - x0} blocks a second`)
+			t.eq(MobPhysics.speedFactor(walker, getBlock), speeds[n])
+			-- Falling 10 blocks onto them: lands on the box's top, the fall damage of 10 blocks.
+			local faller = MobPhysics.new(5.5, top + 10, 0.5, 0)
+			local landed = 0
+			for _ = 1, 60 do
+				local fall = MobPhysics.tick(faller, zombieKind, 0, false, getBlock)
+				if fall > 0 then
+					landed = fall
+				end
+			end
+			t.near(faller.y, top, 1e-9, `{n} layers: landed on the box`)
+			t.ok(landed > 9 and landed <= 10, `{n} layers: fell {landed}`)
+			-- From bare ground into a field of them from x = 3: five are walked up (0.5), six or more
+			-- stop it (Minecraft's 0.6 step) until it jumps.
+			local edge: { [number]: number } = {}
+			for x = 3, 40 do
+				for z = -2, 2 do
+					edge[Coords.posKey(x, FLOOR, z)] = layer
+				end
+			end
+			local edged = flat(edge)
+			local stepper = MobPhysics.new(0.5, FLOOR, 0.5, math.pi / 2)
+			stepper.onGround = true
+			for _ = 1, 40 do
+				MobPhysics.tick(stepper, zombieKind, forward, false, edged)
+			end
+			if n <= 5 then
+				t.ok(stepper.x > 4 and math.abs(stepper.y - top) < 1e-9, `{n} layers: walked up ({stepper.x})`)
+			else
+				t.near(stepper.x, 2.7, 1e-6, `{n} layers: stopped at the edge`)
+				t.ok(stepper.horizontalCollision, "against it (the AI jumps)")
+				for i = 1, 40 do
+					MobPhysics.tick(stepper, zombieKind, forward, i <= 3, edged)
+				end
+				t.ok(stepper.x > 4 and math.abs(stepper.y - top) < 1e-9, `{n} layers: jumped on ({stepper.x})`)
+			end
+			-- The AI sees level ground over them (no cliff).
+			t.eq(MobPhysics.dropAt(edged, 3.5, FLOOR, 0.5, 3), 0, `{n} layers: no drop`)
+		end
+	end)
+
+	t.test("zombies: falling snow muffles noises (Apocalypse.Noise.SnowFactor), rain more", function()
+		local s = Config.Apocalypse.Noise
+		local function noise(): { MobAI.Noise }
+			return { { x = 0.5, y = FLOOR, z = 0.5, radius = 10 } }
+		end
+		local function yes(): boolean
+			return true
+		end
+		t.eq(s.SnowFactor, 0.85)
+		t.near(ZombieDirector.hear(noise(), false, nil, s, yes)[1].radius, 8.5, 1e-9, "x 0.85 in snow")
+		t.near(ZombieDirector.hear(noise(), true, nil, s, yes)[1].radius, 10 * 1.25 * 0.85, 1e-9, "at night too")
+		t.near(ZombieDirector.hear(noise(), false, yes, s, yes)[1].radius, 7, 1e-9, "rain's 0.7 where it rains")
+		t.near(ZombieDirector.hear(noise(), false, nil, s)[1].radius, 10, 1e-9, "none: as before")
+		-- Server Seasons/SnowWorld sets where snow falls; nothing set, nothing muffled.
+		ZombieDirector.setSnowing(yes)
+		local muffled = ZombieDirector.hear(noise(), false, nil, s)[1].radius
+		ZombieDirector.setSnowing(nil)
+		t.near(muffled, 8.5, 1e-9, "the set one")
+		t.near(ZombieDirector.hear(noise(), false, nil, s)[1].radius, 10, 1e-9, "cleared")
+	end)
+
 	t.test("mob AI: lava, fire and fuel are avoided", function()
 		local getBlock, set, skyOpen = flat()
 		for x = 4, 6 do

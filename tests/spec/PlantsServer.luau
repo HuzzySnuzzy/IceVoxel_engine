@@ -658,4 +658,94 @@ return function(t, shared, require, server)
 		t.eq(#dropped, 0)
 		Drops.set(nil)
 	end)
+
+	--[[ The seasons' growth (server Seasons/SnowWorld.growth) ]]
+
+	t.test("seasons: saplings, herbs and grass grow by the season (dormant in winter, x1.5 in spring)", function()
+		local Calendar = require(shared.Seasons.Calendar)
+		local SnowWorld = require(server.Seasons.SnowWorld)
+		local Sapling = require(server.Behaviours.Sapling)
+		local Herb = require(server.Behaviours.Herb)
+		local Grass = require(server.Behaviours.Grass)
+		local saved = Calendar.state()
+		local state = Calendar.newState()
+		state.enabled = true
+		Calendar.setState(state)
+		local now = 0
+		SnowWorld.setClock(function()
+			return now
+		end)
+		-- Noon in the middle of season `season` (1 Autumn .. 4 Summer).
+		local function season(index: number)
+			local start = 0
+			for s = 1, index - 1 do
+				start += Config.Seasons.Lengths[s]
+			end
+			now = (start + math.floor(Config.Seasons.Lengths[index] / 2)) * 24000 + 6000
+		end
+		-- A random that answers `value` and counts its calls.
+		local calls = 0
+		local function fixed(value: number): () -> number
+			return function(): number
+				calls += 1
+				return value
+			end
+		end
+		local ok, err = pcall(function()
+			local chance = Config.Server.SaplingGrowth
+			local function grows(roll: number): boolean
+				local world = newWorld()
+				world:setBlock(0, FLOOR, 0, B.OakSapling)
+				Sapling.onRandomTick(world, nil, 0, FLOOR, 0, B.OakSapling, fixed(roll))
+				return world:getBlock(0, FLOOR, 0) ~= B.OakSapling
+			end
+			season(2)
+			t.eq(SnowWorld.growth(), 0)
+			t.eq(grows(0), false, "winter: a sapling never grows")
+			season(3)
+			t.eq(SnowWorld.growth(), 1.5)
+			t.ok(grows(chance * 1.4), "spring: half as often again")
+			season(4)
+			t.eq(grows(chance * 1.4), false, "summer: as without seasons")
+			t.ok(grows(chance * 0.9))
+			season(1)
+			t.eq(grows(chance * 0.6), false, "autumn: half as often")
+			t.ok(grows(chance * 0.4))
+			-- Herbs: the same factor on their spread.
+			local herb = Config.Server.HerbSpread
+			local function herbTries(roll: number): number
+				local world = newWorld()
+				world:setBlock(0, FLOOR, 0, B.Mint)
+				calls = 0
+				Herb.onRandomTick(world, nil, 0, FLOOR, 0, B.Mint, fixed(roll))
+				return calls
+			end
+			season(2)
+			t.eq(herbTries(0), 1, "winter: herbs don't spread (one roll, then nothing)")
+			season(3)
+			t.ok(herbTries(herb * 1.4) > 1, "spring: spreads")
+			season(4)
+			t.eq(herbTries(herb * 1.4), 1, "summer: not at that roll")
+			-- Grass: four tries times the growth (three rolls a try).
+			local function grassRolls(): number
+				local world = newWorld()
+				calls = 0
+				Grass.onRandomTick(world, nil, 0, FLOOR - 1, 0, GRASS, fixed(0.99))
+				return calls
+			end
+			season(2)
+			t.eq(grassRolls(), 0, "winter: no tries")
+			season(1)
+			t.eq(grassRolls(), 2 * 3, "autumn: two")
+			season(3)
+			t.eq(grassRolls(), 6 * 3, "spring: six")
+			season(4)
+			t.eq(grassRolls(), 4 * 3, "summer: four")
+			state.enabled = false
+			t.eq(grassRolls(), 4 * 3, "the calendar off: four")
+		end)
+		Calendar.setState(saved)
+		SnowWorld.setClock(nil)
+		assert(ok, err)
+	end)
 end

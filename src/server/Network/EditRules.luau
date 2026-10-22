@@ -32,6 +32,14 @@
 	            Minecraft's BlockItem.canPlace), but torches and plants, which have no collision
 	            box, may be. Survival placement also needs the item in hand
 	            (Players/Inventories.place, which maps a variant to its item with Items.ofBlock).
+	  Snow      (Shared/Seasons/SnowLayers) the Snow Layer item places a single layer into any
+	            replaceable block, on a block snow lies on (`supported`: SnowLayers.supports, a
+	            sturdy top, leaves or a full layer; never ice); used on a layer below 8 it adds one
+	            (`mayPlace`: SnowLayers.stackOnto, Minecraft's canBeReplaced), and that is the only
+	            way a layer of 2..8 is placed (the item places them all, so a client asking for a
+	            deep layer anywhere else is refused). It uses up one Snow Layer either way
+	            (Players/Inventories.place maps a layer to its item). Breaking n layers by hand
+	            drops n Snowballs (Items.drops); a shovel only digs faster.
 	  Plants    a tall plant is two blocks (Minecraft's DoublePlantBlock): placing its lower half
 	            also sets its upper half right above (`setPlaced`), and a player breaking either
 	            half removes both (`removeBroken`) with one drop, what the lower half gives the
@@ -69,6 +77,7 @@ local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
+local SnowLayers = require(Shared.Seasons.SnowLayers)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 
@@ -184,11 +193,14 @@ end
 	May `block` be placed where `current` is (ignoring what it hangs on, players in the way and the
 	inventory)? Placeable blocks and the variants their items place, but no tall plant's upper half
 	(placing the lower half sets it: `setPlaced`) and no cave twin (CaveGlowLichen*: only generation
-	puts them in caves; players place GlowLichen*). Creative only blocks need `mayUseCreativeOnly`
-	too.
+	puts them in caves; players place GlowLichen*). A snow layer of 2..8 only onto the layer one
+	below it (stacking: SnowLayers.stackOnto). Creative only blocks need `mayUseCreativeOnly` too.
 ]]
 function EditRules.mayPlace(block: number, current: number): boolean
 	local d = def(block)
+	if d ~= nil and Blocks.layer(block) >= 2 then
+		return SnowLayers.stackOnto(current) == block
+	end
 	if
 		d == nil
 		or block == current
@@ -216,8 +228,8 @@ end
 --[[
 	Is what `block` hangs on there, were it at (x, y, z)? Blocks without a `support` always are;
 	plants need their soil (or lower half) below, and a tall plant's lower half room for its top
-	(Blocks.canPlace). `getBlock` answers nil for blocks that are not loaded, which hold nothing up
-	and leave no room.
+	(Blocks.canPlace); a snow layer a block snow lies on below it (SnowLayers.supports). `getBlock`
+	answers nil for blocks that are not loaded, which hold nothing up and leave no room.
 ]]
 function EditRules.supported(
 	block: number,
@@ -226,7 +238,14 @@ function EditRules.supported(
 	y: number,
 	z: number
 ): boolean
-	return def(block) ~= nil and Blocks.canPlace(block, getBlock, x, y, z)
+	if def(block) == nil then
+		return false
+	end
+	if Blocks.layer(block) > 0 then
+		local below = getBlock(x, y - 1, z)
+		return below ~= nil and SnowLayers.supports(below)
+	end
+	return Blocks.canPlace(block, getBlock, x, y, z)
 end
 
 --[[ Tall plants (Minecraft's DoublePlantBlock) ]]

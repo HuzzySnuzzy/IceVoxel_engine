@@ -1697,4 +1697,140 @@ return function(t, shared, require)
 		t.ok(PlayerPhysics.knockback(state, 0.4, 0.2, 0))
 		t.eq(state.vx, 0.4, "none: all of it, exactly")
 	end)
+
+	--[[ Snow layers (the seasons: Shared/Seasons/SnowLayers) ]]
+
+	local SnowLayers = require(shared.Seasons.SnowLayers)
+	local STEP = 1.0625
+	-- Layer n's box top over its cell (none for one layer: its floor).
+	local function snowTop(n: number): number
+		return (n - 1) / 8
+	end
+	-- Stone below y = 1; from x >= `from` (default everywhere) a field of n snow layers at y = 1.
+	local function snowField(n: number, from: number?): PlayerPhysics.World
+		local block = SnowLayers.block(n) :: number
+		return physicsWorld(function(x: number, y: number, _z: number): number?
+			if y == 1 and x >= (from or -math.huge) then
+				return block
+			end
+			return nil
+		end)
+	end
+
+	t.test("snow: walking in n layers is that much slower (0.9, 0.8, 0.75 from 3, 5, 7 layers)", function()
+		local speeds = { 1, 1, 0.9, 0.9, 0.8, 0.8, 0.75, 0.75 }
+		for n = 1, 8 do
+			local field = snowField(n)
+			local state = PlayerPhysics.new(0.5, 1 + snowTop(n), 0.5)
+			state.onGround = true
+			local x0 = 0
+			for tick = 1, 100 do
+				PlayerPhysics.tick(state, input(1, 0), field)
+				if tick == 40 then
+					x0 = state.x
+				end
+				t.ok(near(state.y, 1 + snowTop(n)), `{n} layers: on the box, never sunk ({state.y})`)
+			end
+			local walk = (state.x - x0) / 60 * PlayerPhysics.TICK_RATE
+			t.ok(near(walk, 4.317 * speeds[n], 0.003), `{n} layers: {walk} m/s`)
+			t.eq(PlayerPhysics.blockSpeedFactor(state, field), speeds[n])
+		end
+		-- Sprinting too; in the air the snow below slows nothing.
+		local deep = snowField(8)
+		local sprint = PlayerPhysics.new(0.5, 1 + snowTop(8), 0.5)
+		sprint.onGround = true
+		local x0 = 0
+		for tick = 1, 100 do
+			PlayerPhysics.tick(sprint, input(1, 0, { sprint = true }), deep)
+			if tick == 40 then
+				x0 = sprint.x
+			end
+		end
+		local run = (sprint.x - x0) / 60 * PlayerPhysics.TICK_RATE
+		t.ok(near(run, 5.612 * 0.75, 0.003), `sprinting in 8 layers: {run} m/s`)
+	end)
+
+	t.test("snow: walked up onto every depth within the step height, and off again", function()
+		for n = 1, 8 do
+			local field = snowField(n, 3)
+			local state = PlayerPhysics.new(0.5, 1, 0.5)
+			state.stepHeight = STEP
+			state.onGround = true
+			local stepped = 0
+			for _ = 1, 40 do
+				local events = PlayerPhysics.tick(state, input(1, 0), field)
+				stepped += events.stepUp
+			end
+			t.ok(state.x > 5, `{n} layers: walked in ({state.x})`)
+			t.ok(near(state.y, 1 + snowTop(n)), `{n} layers: on the box ({state.y})`)
+			t.ok(near(stepped, snowTop(n), 1e-9), `{n} layers: stepped up {stepped}`)
+			t.ok(state.onGround)
+			-- And back out onto the bare ground.
+			for _ = 1, 40 do
+				PlayerPhysics.tick(state, input(-1, 0), field)
+			end
+			t.ok(state.x < 2 and near(state.y, 1), `{n} layers: back on the ground ({state.x}, {state.y})`)
+		end
+		-- Minecraft's 0.6: up to five layers (0.5), not six (0.625).
+		for n = 5, 6 do
+			local field = snowField(n, 3)
+			local state = PlayerPhysics.new(0.5, 1, 0.5)
+			state.onGround = true
+			for _ = 1, 40 do
+				PlayerPhysics.tick(state, input(1, 0), field)
+			end
+			if n == 5 then
+				t.ok(state.x > 5 and near(state.y, 1.5), "0.6 walks up five layers")
+			else
+				t.ok(near(state.x, 2.7, 1e-6) and near(state.y, 1), `0.6 is stopped by six ({state.x})`)
+			end
+		end
+	end)
+
+	t.test("snow: jumping and falling onto every depth lands on the box and stays (MC-257266)", function()
+		for n = 1, 8 do
+			local field = snowField(n)
+			local top = 1 + snowTop(n)
+			-- A fall of 10 blocks: lands on the box's top, hurt as by any 10 block fall.
+			local state = PlayerPhysics.new(0.5, top + 10, 0.5)
+			local landed: PlayerPhysics.Events? = nil
+			for _ = 1, 100 do
+				local events = PlayerPhysics.tick(state, input(0, 0), field)
+				if events.landed then
+					landed = events
+				end
+			end
+			local reference = PlayerPhysics.new(0.5, 11, 0.5)
+			local refLanded: PlayerPhysics.Events? = nil
+			for _ = 1, 100 do
+				local events = PlayerPhysics.tick(reference, input(0, 0), physicsWorld())
+				if events.landed then
+					refLanded = events
+				end
+			end
+			t.ok(landed ~= nil and refLanded ~= nil, "both land")
+			t.ok(near(state.y, top), `{n} layers: landed on the box ({state.y})`)
+			t.eq((landed :: any).damage, (refLanded :: any).damage, `{n} layers: the same fall damage`)
+			-- Standing there: never sinks, jumps as from anywhere.
+			for _ = 1, 40 do
+				PlayerPhysics.tick(state, input(0, 0), field)
+				t.ok(near(state.y, top) and state.onGround, `{n} layers: stays on top`)
+			end
+			local peak = 0
+			for tick = 1, 30 do
+				PlayerPhysics.tick(state, input(0, 0, { jump = tick == 1 }), field)
+				peak = math.max(peak, state.y - top)
+			end
+			t.ok(near(peak, 1.2522, 0.0005), `{n} layers: jumps {peak}`)
+			t.ok(near(state.y, top), `{n} layers: and lands back on it`)
+		end
+		-- A jump from bare ground onto eight layers (beyond Minecraft's step).
+		local field = snowField(8, 2)
+		local state = PlayerPhysics.new(0.5, 1, 0.5)
+		state.onGround = true
+		for tick = 1, 40 do
+			PlayerPhysics.tick(state, input(1, 0, { jump = tick == 5 }), field)
+		end
+		t.ok(state.x > 3 and near(state.y, 1 + snowTop(8)), `jumped onto eight layers ({state.x}, {state.y})`)
+	end)
 end

@@ -7,7 +7,9 @@
 	           goes.
 	  Growth   on a random tick (World/RandomTicker), under the open sky (World/Skylight, the
 	           server's stand-in for Minecraft's light 9), with chance Config.Server.SaplingGrowth
-	           (1/14: Minecraft's 1/7 for each of its two stages), it grows into its wood's tree:
+	           (1/14: Minecraft's 1/7 for each of its two stages) times the season's growth
+	           (server Seasons/SnowWorld.growth: Autumn 0.5, Winter 0, dormant, Spring 1.5,
+	           Summer 1; 1 with the calendar off), it grows into its wood's tree:
 	           the same builders as the world's trees (Generation/Structures/Trees), with a fresh
 	           random size. The tree needs room: every block its trunk takes must be air, a plant
 	           or leaves (the sapling itself too); if not, it waits for a later tick, as Minecraft's
@@ -24,6 +26,7 @@ local Trees = require(Shared.Generation.Structures.Trees)
 
 local Plant = require(script.Parent.Plant)
 local Skylight = require(script.Parent.Parent.World.Skylight)
+local SnowWorld = require(script.Parent.Parent.Seasons.SnowWorld)
 
 local AIR, CAVE_AIR = Blocks.AIR, Blocks.CAVE_AIR
 
@@ -115,7 +118,7 @@ function Sapling.onRandomTick(
 	block: number,
 	random: () -> number
 )
-	if random() >= Config.Server.SaplingGrowth or Skylight.open(world, x, y + 1, z) ~= true then
+	if random() >= Config.Server.SaplingGrowth * SnowWorld.growth() or Skylight.open(world, x, y + 1, z) ~= true then
 		return
 	end
 	Sapling.grow(world, x, y, z, block, math.floor(random() * 2 ^ 31))
