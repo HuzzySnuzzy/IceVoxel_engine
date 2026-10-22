@@ -25,7 +25,11 @@
 	            noise over DriftWavelength blocks; none where it is dry). `melts(temperature)`:
 	            snow melts where Minecraft's temperature (Shared/Weather.temperatureAt, the season's
 	            shift added) is at least SNOW_BELOW (Weather's 0.15) + MeltMargin.
-	            `snowCover(position, class)`: how white the far landscape is (0..1).
+	            `snowCover(position, class)`: how white the far landscape is (0..1), and
+	            `thawing(position, class)` whether that white is going or gone (below 1 and not
+	            rising): the season's own snow (server Seasons/SnowWorld: where the biome would not
+	            snow without the season) melts then whatever the temperature, so the near snow and
+	            the far cover come and go together.
 
 	Requires Config, Calendar, Biomes and Util/Hash only (Shared/Weather requires this, for the
 	classes: SNOW_BELOW is Weather's copied, tests/spec/SeasonClimate checks they agree).
@@ -178,6 +182,30 @@ function SeasonClimate.snowCover(position: Calendar.Position, class: Class): num
 		return 1 - smoothstep(into / ramp)
 	end
 	return 0
+end
+
+--[[
+	Is the far landscape's snow of `class` going or gone at `position` (`snowCover` below 1 and
+	not rising)? Cold biomes from spring's thaw (its last RampDays of ColdLateDays) to autumn's
+	last ColdEarlyDays, temperate ones outside winter, dry and tropical ones always.
+]]
+function SeasonClimate.thawing(position: Calendar.Position, class: Class): boolean
+	if class == "dry" or class == "tropical" then
+		return true
+	end
+	local season = position.season
+	if season == Calendar.WINTER then
+		return false
+	elseif class ~= "cold" or season == Calendar.SUMMER then
+		return true
+	end
+	local cover = Config.Seasons.Climate.SnowCover
+	local into = position.progress * position.days
+	if season == Calendar.AUTUMN then
+		return into <= position.days - math.min(cover.ColdEarlyDays, position.days)
+	end
+	local late = math.min(cover.ColdLateDays, position.days)
+	return into > late - math.min(math.max(cover.RampDays, 1e-6), late)
 end
 
 local function neutral(into: Sample?): Sample

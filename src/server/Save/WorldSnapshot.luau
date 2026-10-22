@@ -20,7 +20,8 @@
 	  applyEdits the loaded regions' edits become the world's edit lists before anything else
 	             starts: WorldServer overlays them on every chunk it generates, so nothing else is
 	             needed for terrain. The seasons' natural map (WorldServer `natural`: what the seed
-	             made where the weather wrote) goes with the edits, both ways.
+	             made where the weather wrote) and thaw map (`thaw`: what the weather's ice thaws
+	             back to) go with the edits, both ways.
 	  restore    after every system started, before the world is published (no player is in it
 	             yet): generated chests asked about, containers (the block's fresh container with
 	             the saved slots and data copied in: a furnace's cooking resumes, a machine keeps
@@ -56,6 +57,8 @@ local MobWorld = require(script.Parent.Parent.Mobs.MobWorld)
 local RegionCodec = require(script.Parent.RegionCodec)
 
 type Region = RegionCodec.Region
+-- Chunk key -> local index -> block (the edits' shape: the seasons' natural and thaw maps).
+type CellMap = { [number]: { [number]: number } }
 
 export type Systems = {
 	world: WorldServer.World,
@@ -245,20 +248,31 @@ function WorldSnapshot.collect(
 			region.chunks[key] = edits
 		end
 	end
-	local naturalMap: { [number]: { [number]: number } } = systems.world.natural or {}
-	for key, naturals in naturalMap do
-		local cx, cz = Coords.decodeChunkKey(key)
-		local rx, rz = RegionCodec.regionOf(cx, cz)
-		local name = RegionCodec.name(rx, rz)
-		if wanted[name] and next(naturals) ~= nil then
-			local region = regions[name]
-			if region == nil then
-				region = RegionCodec.new(rx, rz)
-				regions[name] = region
+	-- (The seasons' maps, beside the edits they are for.)
+	local function seasonsMap(map: CellMap?, of: (region: Region) -> CellMap)
+		if map == nil then
+			return
+		end
+		for key, entries in map do
+			local cx, cz = Coords.decodeChunkKey(key)
+			local rx, rz = RegionCodec.regionOf(cx, cz)
+			local name = RegionCodec.name(rx, rz)
+			if wanted[name] and next(entries) ~= nil then
+				local region = regions[name]
+				if region == nil then
+					region = RegionCodec.new(rx, rz)
+					regions[name] = region
+				end
+				of(region)[key] = entries
 			end
-			region.natural[key] = naturals
 		end
 	end
+	seasonsMap(systems.world.natural, function(region: Region): CellMap
+		return region.natural
+	end)
+	seasonsMap(systems.world.thaw, function(region: Region): CellMap
+		return region.thaw
+	end)
 	for name in wanted do
 		if regions[name] == nil then
 			local rx, rz = RegionCodec.parseName(name)
@@ -289,6 +303,23 @@ end
 
 --[[ Loading ]]
 
+-- Lays a loaded region's seasons' map `from` over the world's `into` (none: a world without it).
+local function merge(into: CellMap?, from: CellMap)
+	if into == nil then
+		return
+	end
+	for key, entries in from do
+		local existing = into[key]
+		if existing then
+			for index, block in entries do
+				existing[index] = block
+			end
+		else
+			into[key] = entries
+		end
+	end
+end
+
 -- The loaded regions' edits become the world's (before any chunk is generated).
 function WorldSnapshot.applyEdits(world: WorldServer.World, regions: { Region })
 	for _, region in regions do
@@ -302,18 +333,8 @@ function WorldSnapshot.applyEdits(world: WorldServer.World, regions: { Region })
 				world.edits[key] = edits
 			end
 		end
-		if world.natural then
-			for key, naturals in region.natural do
-				local existing = world.natural[key]
-				if existing then
-					for index, block in naturals do
-						existing[index] = block
-					end
-				else
-					world.natural[key] = naturals
-				end
-			end
-		end
+		merge(world.natural, region.natural)
+		merge(world.thaw, region.thaw)
 	end
 end
 

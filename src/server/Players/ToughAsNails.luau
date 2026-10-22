@@ -112,7 +112,8 @@
 	             zone and below cost food (Temperature.coldExhaustion, next to the HOT zone's
 	             sweating), and the Survival message carries the room's air and the outside value
 	             (the thermometer's "Room +1 · Out -9"). With the calendar off none of it: as
-	             before.
+	             before. The weather's ice (World/WorldServer.thawAt) is never a cold source
+	             (Climate's View `seasonal`): the season already carries that cold.
 	  Eating     server Players/Eating asks for the food bar (`hunger`) and fills it (Hunger.eat).
 	  Effects    TAN's Thirst, Internal Warmth, Internal Chill and Climate Clemency are status
 	             effects in TAN 1.20, so they are listed with the others (Players/Effects
@@ -970,6 +971,10 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 		end,
 		snowing = function(x: number, y: number, z: number): boolean
 			return WeatherServer.snowingAt(x, y, z)
+		end,
+		-- (The weather's ice: no cold source.)
+		seasonal = function(x: number, y: number, z: number): boolean
+			return WorldServer.thawAt(world, x, y, z) ~= nil
 		end,
 	}
 

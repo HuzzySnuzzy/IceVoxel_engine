@@ -26,6 +26,15 @@
 	player's on a snowed cell too). So a winter leaves no edits behind, and the map is a fact
 	about the generator that never goes stale: a natural entry exists only beside its cell's edit.
 	It is saved with the edits (Save/RegionCodec record NATURAL, Save/WorldSnapshot).
+
+	The thaw map (the weather's ice): a weather write that asks for it (`setWeather`'s `thaw`:
+	SnowWorld freezing still water) remembers the block it replaced (`thaw[chunkKey][localIndex]`,
+	`thawAt`: the water under the ice), edited cell or not, so the ice thaws back to it: a
+	player's pond as well as the seed's lake. Any other change of the cell forgets it (the ice
+	broken, a player's ice put there later: never the weather's to thaw), so a thaw entry exists
+	only while its cell still holds what the weather wrote. Whether the thaw leaves an edit is the
+	natural map's business as above (none on the seed's water, the pond's edit on a player's). It
+	is saved beside the natural map (Save/RegionCodec record THAW).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -62,6 +71,9 @@ export type World = {
 	-- What the seed generated at cells a weather write changed (see the header): chunk key ->
 	-- local index -> block.
 	natural: { [number]: { [number]: number } },
+	-- What the weather's ice froze (see the header): chunk key -> local index -> the block the
+	-- cell thaws back to.
+	thaw: { [number]: { [number]: number } },
 	-- Flat list x, y, z, block of changes not yet sent to clients.
 	pending: { number },
 	-- Called after every successful setBlock.
@@ -80,7 +92,7 @@ export type World = {
 	getBlock: (self: World, x: number, y: number, z: number) -> number,
 	peekBlock: (self: World, x: number, y: number, z: number) -> number?,
 	setBlock: (self: World, x: number, y: number, z: number, block: number) -> boolean,
-	setWeather: (self: World, x: number, y: number, z: number, block: number) -> boolean,
+	setWeather: (self: World, x: number, y: number, z: number, block: number, thaw: boolean?) -> boolean,
 	topBlock: (self: World, x: number, z: number) -> number,
 	chunkEdits: (self: World, cx: number, cz: number) -> { [number]: number }?,
 	takePending: (self: World) -> { number },
@@ -97,6 +109,7 @@ function WorldServer.new(generator: TerrainGenerator.Generator, clock: (() -> nu
 		chunkCount = 0,
 		edits = {},
 		natural = {},
+		thaw = {},
 		pending = {},
 		onChanged = nil,
 		onGenerated = nil,
@@ -204,11 +217,12 @@ function WorldServer.peekBlock(self: World, x: number, y: number, z: number): nu
 	return readu16(chunk.data, ((y * P + z - cz * SIZE + 1) * P + x - cx * SIZE + 1) * 2)
 end
 
--- Changes a block. Returns false if nothing changed (same block or outside the world).
-function WorldServer.setBlock(self: World, x: number, y: number, z: number, block: number): boolean
-	if y < 0 or y >= HEIGHT or not Blocks.isValid(block) then
-		return false
-	end
+--[[
+	Changes a block (`setBlock`, `setWeather`): records the edit, the cell's thaw entry (`thawTo`:
+	the block a weather write replaced and asked to be remembered, else none: see the header),
+	queues it for replication and calls `onChanged`. Returns false if nothing changed.
+]]
+local function change(self: World, x: number, y: number, z: number, block: number, thawTo: number?): boolean
 	local cx, cz = x // SIZE, z // SIZE
 	local lx, lz = x - cx * SIZE, z - cz * SIZE
 	local chunk = WorldServer.getChunk(self, cx, cz)
@@ -250,6 +264,20 @@ function WorldServer.setBlock(self: World, x: number, y: number, z: number, bloc
 		end
 		edits[index] = block
 	end
+	local thaws = self.thaw[key]
+	if thawTo ~= nil then
+		if thaws == nil then
+			thaws = {}
+			self.thaw[key] = thaws
+		end
+		thaws[index] = thawTo
+	elseif thaws and thaws[index] ~= nil then
+		-- (Anything but the weather's own write: the ice is no longer the weather's.)
+		thaws[index] = nil
+		if next(thaws) == nil then
+			self.thaw[key] = nil
+		end
+	end
 
 	local pending = self.pending
 	local n = #pending
@@ -264,12 +292,22 @@ function WorldServer.setBlock(self: World, x: number, y: number, z: number, bloc
 	return true
 end
 
+-- Changes a block. Returns false if nothing changed (same block or outside the world).
+function WorldServer.setBlock(self: World, x: number, y: number, z: number, block: number): boolean
+	if y < 0 or y >= HEIGHT or not Blocks.isValid(block) then
+		return false
+	end
+	return change(self, x, y, z, block, nil)
+end
+
 --[[
 	A weather write (the seasons' snow and ice: server Seasons/SnowWorld): `setBlock`, after
 	recording what the seed generated at a cell with no edit yet (see the header), so a later
-	write back to it deletes the edit. Returns false if nothing changed.
+	write back to it deletes the edit. `thaw`: the cell remembers the block this write replaces
+	(`thawAt`: the weather's ice, the water it froze) until anything else changes it. Returns
+	false if nothing changed.
 ]]
-function WorldServer.setWeather(self: World, x: number, y: number, z: number, block: number): boolean
+function WorldServer.setWeather(self: World, x: number, y: number, z: number, block: number, thaw: boolean?): boolean
 	if y < 0 or y >= HEIGHT or not Blocks.isValid(block) then
 		return false
 	end
@@ -289,7 +327,7 @@ function WorldServer.setWeather(self: World, x: number, y: number, z: number, bl
 		end
 		naturals[index] = generated
 	end
-	return WorldServer.setBlock(self, x, y, z, block)
+	return change(self, x, y, z, block, if thaw then WorldServer.getBlock(self, x, y, z) else nil)
 end
 
 -- What the seed generated at cell (x, y, z) when a weather write changed it (nil: none recorded).
@@ -297,6 +335,14 @@ function WorldServer.naturalAt(self: World, x: number, y: number, z: number): nu
 	local cx, cz = x // SIZE, z // SIZE
 	local naturals = self.natural[Coords.chunkKey(cx, cz)]
 	return if naturals then naturals[ChunkLayout.localIndex(x - cx * SIZE, y, z - cz * SIZE)] else nil
+end
+
+-- The block the weather's write at cell (x, y, z) asked to thaw back to (the water under its ice),
+-- while nothing else has changed the cell since; nil: none (see the header).
+function WorldServer.thawAt(self: World, x: number, y: number, z: number): number?
+	local cx, cz = x // SIZE, z // SIZE
+	local thaws = self.thaw[Coords.chunkKey(cx, cz)]
+	return if thaws then thaws[ChunkLayout.localIndex(x - cx * SIZE, y, z - cz * SIZE)] else nil
 end
 
 -- Y of the highest non-air block in a column (-1 if the column is empty).

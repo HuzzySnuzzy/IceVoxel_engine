@@ -26,9 +26,15 @@
 	              from the save; they are scheduled again when their chunk is generated
 	  natural     the seasons' natural map (World/WorldServer `natural`: chunk key -> local index
 	              -> the generated block), beside the edits of the cells it is for
+	  thaw        the weather's ice (World/WorldServer `thaw`: chunk key -> local index -> the
+	              block it thaws back to), the cells still holding the ice the weather froze
 
-	Stream: u8 VERSION, zigzag rx, zigzag rz, varint RegionChunks, then records (u8 tag, varint
-	length, payload), each read back exactly to its length (anything else is a damaged save):
+	Stream: u8 version, zigzag rx, zigzag rz, varint RegionChunks, then records (u8 tag, varint
+	length, payload), each read back exactly to its length (anything else is a damaged save).
+	The version is VERSION (2) for a region with the seasons' maps (records 12 and 13), else 1,
+	so a region without them is the same bytes as before and older builds still read it. A
+	version 1 region with a natural map was saved before record 13: its weather's ice is what
+	that build thawed, the natural map's Water under an Ice edit, so that becomes its thaw map.
 	  1 EDITS      u16 chunk (lcx x RegionChunks + lcz, its place in the region), varint runs, then
 	               per run: varint gap (cells skipped since the last run's end: local indices are
 	               ChunkLayout's, x then z then y, so a dug tunnel or a wall is a few runs),
@@ -49,6 +55,8 @@
 	               WorldServer's natural map: snow and ice that melting deletes), as EDITS: u16
 	               chunk, varint runs of index gap + block. Builds before it refuse the record
 	               (an unknown record: "played but not saved", World/WorldSave).
+	 13 THAW       the weather's ice (World/WorldServer's thaw map: what each cell thaws back
+	               to), as EDITS. Version 2 (above).
 	Unknown block ids, items and mob kinds (a save from a newer version) are dropped one by one.
 
 	Parts (`split` / `join`): a stream longer than a key holds is cut into parts of at most
@@ -119,20 +127,25 @@ export type Region = {
 	ticks: { TickRecord },
 	-- Chunk key -> local index -> the block the seed generated (World/WorldServer `natural`).
 	natural: { [number]: { [number]: number } },
+	-- Chunk key -> local index -> the block the weather's ice thaws back to (World/WorldServer
+	-- `thaw`).
+	thaw: { [number]: { [number]: number } },
 	-- Edits, items and mobs dropped while reading (ids this version doesn't know).
 	dropped: number,
 }
 
 local RegionCodec = {}
 
-RegionCodec.VERSION = 1
+-- The version of a region with the seasons' maps (see the header); one without them is 1.
+RegionCodec.VERSION = 2
 local SIZE = Config.ChunkSize
 local HEIGHT = Config.WorldHeight
 local CELLS = SIZE * SIZE * HEIGHT
 
 local EDITS, CONTAINER, SOURCED, STRUCTURE, JIGSAW, PIPE, TANK, TRANSPORT, ITEM, MOB, TICKS =
 	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
-local NATURAL = 12
+local NATURAL, THAW = 12, 13
+local WATER, ICE = Blocks.fluidId("Water", 0), Blocks.id.Ice
 RegionCodec.TAGS = table.freeze({
 	EDITS = EDITS,
 	CONTAINER = CONTAINER,
@@ -146,6 +159,7 @@ RegionCodec.TAGS = table.freeze({
 	MOB = MOB,
 	TICKS = TICKS,
 	NATURAL = NATURAL,
+	THAW = THAW,
 })
 
 local KIND_CODE: { [string]: number } = {}
@@ -205,6 +219,7 @@ function RegionCodec.new(rx: number, rz: number): Region
 		mobs = {},
 		ticks = {},
 		natural = {},
+		thaw = {},
 		dropped = 0,
 	}
 end
@@ -223,6 +238,7 @@ function RegionCodec.isEmpty(region: Region): boolean
 		and #region.mobs == 0
 		and #region.ticks == 0
 		and next(region.natural) == nil
+		and next(region.thaw) == nil
 end
 
 -- Edits in the region.
@@ -350,7 +366,8 @@ end
 function RegionCodec.encode(region: Region): buffer
 	local w = SaveCodec.writer(4096)
 	local scratch = SaveCodec.writer(1024)
-	SaveCodec.u8(w, RegionCodec.VERSION)
+	local seasons = next(region.natural) ~= nil or next(region.thaw) ~= nil
+	SaveCodec.u8(w, if seasons then RegionCodec.VERSION else 1)
 	SaveCodec.zigzag(w, region.rx)
 	SaveCodec.zigzag(w, region.rz)
 	SaveCodec.varint(w, RegionCodec.chunks())
@@ -440,6 +457,14 @@ function RegionCodec.encode(region: Region): buffer
 	table.sort(naturalKeys)
 	for _, key in naturalKeys do
 		encodeEdits(w, region, key, region.natural[key], scratch, NATURAL)
+	end
+	local thawKeys: { number } = {}
+	for key in region.thaw do
+		table.insert(thawKeys, key)
+	end
+	table.sort(thawKeys)
+	for _, key in thawKeys do
+		encodeEdits(w, region, key, region.thaw[key], scratch, THAW)
 	end
 	if #region.ticks > 0 then
 		scratch.n = 0
@@ -620,6 +645,8 @@ local function decodeRecord(r: Reader, region: Region, tag: number)
 		end
 	elseif tag == NATURAL then
 		decodeEdits(r, region, region.natural)
+	elseif tag == THAW then
+		decodeEdits(r, region, region.thaw)
 	else
 		error(`unknown record {tag} in save`, 0)
 	end
@@ -657,6 +684,22 @@ function RegionCodec.decode(bytes: buffer, rx: number?, rz: number?): Region
 			error(`record {tag} has bytes left over`, 0)
 		end
 		r.o = stop
+	end
+	if version < 2 then
+		-- (Saved before record 13: the weather's ice is the natural map's Water under an Ice edit.)
+		for key, naturals in region.natural do
+			local edits = region.chunks[key]
+			for index, block in naturals do
+				if block == WATER and edits and edits[index] == ICE then
+					local thaws = region.thaw[key]
+					if thaws == nil then
+						thaws = {}
+						region.thaw[key] = thaws
+					end
+					thaws[index] = WATER
+				end
+			end
+		end
 	end
 	return region
 end

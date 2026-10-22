@@ -6,7 +6,8 @@
 	Roblox's budgets and the 6 s per key (SaveScheduler, against a fake DataStore), the world's
 	state to regions and back through the real server systems (WorldSnapshot: a generated chunk
 	with its loaded edits is the chunk before saving; chests, furnaces, machines, pipes, tanks,
-	transporters, structure blocks, items, animals, block updates), and the store's rules
+	transporters, structure blocks, items, animals, block updates, the seasons' natural and thaw
+	maps), and the store's rules
 	(WorldStore: save -> load, a failed load never written over, one server per world, the
 	world's most, retries; owners, full lists, the lock kept through a long load and looked at
 	before saving, two servers' parts never joined, players' records in order, what a newer
@@ -1111,6 +1112,73 @@ return function(t, shared, require, server, client)
 		withNatural.chunks[Coords.chunkKey(0, 0)] = { [5] = STONE }
 		withNatural.natural[Coords.chunkKey(0, 0)] = { [5] = AIR }
 		t.ok(buffer.len(RegionCodec.encode(withNatural)) > buffer.len(bytes), "the record is extra")
+	end)
+
+	t.test("world save (seasons): record 13 THAW round trips; a region saved before it thaws as it did", function()
+		t.eq(RegionCodec.TAGS.THAW, 13)
+		local WATER, ICE = Blocks.fluidId("Water", 0), id.Ice
+		local game = newGame()
+		local world = game.world
+		local function editAt(w: any, x: number, y: number, z: number): number?
+			local edits = w:chunkEdits(x // 16, z // 16)
+			return if edits then edits[ChunkLayout.localIndex(x % 16, y, z % 16)] else nil
+		end
+		-- A player's pond (an edit of water) and the seed's stone (standing in for a lake), frozen
+		-- by the weather: each cell remembers what it thaws back to.
+		world:setBlock(3, FLOOR - 1, 4, WATER)
+		t.ok(world:setWeather(3, FLOOR - 1, 4, ICE, true))
+		t.ok(world:setWeather(5, FLOOR - 1, 5, ICE, true))
+		t.ok(world:setWeather(-20, FLOOR - 1, 700, ICE, true))
+		t.eq(world:thawAt(3, FLOOR - 1, 4), WATER)
+		t.eq(world:naturalAt(3, FLOOR - 1, 4), nil, "an edited cell: the seed's block unknown")
+		t.eq(world:thawAt(5, FLOOR - 1, 5), STONE)
+		local loaded = throughBytes(WorldSnapshot.collect(game, WorldSnapshot.editedRegions(world), nil))
+		local b = newGame()
+		WorldSnapshot.applyEdits(b.world, loaded)
+		t.eq(b.world:getBlock(3, FLOOR - 1, 4), ICE, "the ice is back")
+		t.eq(b.world:thawAt(3, FLOOR - 1, 4), WATER, "and what it thaws back to")
+		t.eq(b.world:thawAt(5, FLOOR - 1, 5), STONE)
+		t.eq(b.world:thawAt(-20, FLOOR - 1, 700), STONE, "in another region too")
+		-- Thawed: the player's pond again (its edit), the seed's stone with no edit.
+		b.world:setWeather(3, FLOOR - 1, 4, WATER)
+		b.world:setWeather(5, FLOOR - 1, 5, STONE)
+		t.eq(editAt(b.world, 3, FLOOR - 1, 4), WATER, "the pond's edit")
+		t.eq(editAt(b.world, 5, FLOOR - 1, 5), nil)
+		t.eq(b.world:thawAt(3, FLOOR - 1, 4), nil, "nothing left to thaw")
+		-- Any other change forgets it: the ice broken, then a player's ice put there.
+		world:setBlock(-20, FLOOR - 1, 700, AIR)
+		t.eq(world:thawAt(-20, FLOOR - 1, 700), nil)
+		world:setBlock(-20, FLOOR - 1, 700, ICE)
+		t.eq(world:thawAt(-20, FLOOR - 1, 700), nil, "a player's ice is no weather's")
+		-- A region with the seasons' maps is version 2; one without is version 1, as before.
+		local key = Coords.chunkKey(0, 0)
+		local plain = RegionCodec.new(0, 0)
+		plain.chunks[key] = { [5] = STONE }
+		t.eq(buffer.readu8(RegionCodec.encode(plain), 0), 1, "older builds still read it")
+		local thawing = RegionCodec.new(0, 0)
+		thawing.chunks[key] = { [5] = ICE }
+		thawing.thaw[key] = { [5] = WATER }
+		local only = RegionCodec.new(0, 0)
+		only.thaw[key] = { [5] = WATER }
+		t.eq(RegionCodec.isEmpty(only), false)
+		local bytes = RegionCodec.encode(thawing)
+		t.eq(buffer.readu8(bytes, 0), RegionCodec.VERSION)
+		t.eq(RegionCodec.VERSION, 2)
+		t.eq(RegionCodec.decode(bytes, 0, 0).thaw[key][5], WATER)
+		-- A version 1 region with a natural map (saved before record 13) thaws what that build
+		-- thawed: the natural map's Water under an Ice edit.
+		local old = RegionCodec.new(0, 0)
+		old.chunks[key] = { [5] = ICE, [6] = ICE, [7] = ICE, [8] = id.SnowLayer2 }
+		old.natural[key] = { [5] = WATER, [6] = AIR, [8] = AIR }
+		local v1 = RegionCodec.encode(old)
+		buffer.writeu8(v1, 0, 1)
+		local back = RegionCodec.decode(v1, 0, 0)
+		t.eq(back.thaw[key][5], WATER, "the weather's ice over the seed's water")
+		t.eq(back.thaw[key][6], nil, "ice over the seed's air is none of the weather's")
+		t.eq(back.thaw[key][7], nil, "nor ice with no natural entry")
+		t.eq(back.thaw[key][8], nil, "snow is no ice")
+		t.eq(back.natural[key][8], AIR, "the natural map as it was")
+		t.eq(next(RegionCodec.decode(RegionCodec.encode(old), 0, 0).thaw), nil, "version 2 says what thaws itself")
 	end)
 
 	t.test("world save: a typical edited area's size", function()

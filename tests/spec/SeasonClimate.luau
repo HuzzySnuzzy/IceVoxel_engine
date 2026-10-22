@@ -3,7 +3,8 @@
 	the biome classes and amplitudes, the target table of the seasons' design (plains, birch forest,
 	taiga, savanna and desert by day, by night and under a roof at night, a summer roof by day and a
 	heat wave), heat waves (deterministic, summer only, never two in a row), the snow caps, the melt
-	rule, the far landscape's cover and the identity with the seasons off.
+	rule, the far landscape's cover (and when the season's snow thaws with it) and the identity
+	with the seasons off.
 ]]
 
 return function(t, shared, require)
@@ -198,6 +199,34 @@ return function(t, shared, require)
 		t.eq(SeasonClimate.sample(12 * DAY, "temperate", 1, s).growth, 0, "winter: dormant")
 		t.eq(SeasonClimate.sample(20 * DAY, "temperate", 1, s).growth, 1.5, "spring")
 	end)
+
+	t.test(
+		"season climate: the season's snow thaws while the far cover goes or is gone, never while it holds or rises",
+		function()
+			local s = state()
+			for _, class in SeasonClimate.CLASSES do
+				for step = 0, 32 * 16 - 1 do
+					local time = (step + 0.5) / 16
+					local position = Calendar.at(time, s)
+					local cover = SeasonClimate.snowCover(position, class :: any)
+					local later = SeasonClimate.snowCover(Calendar.at(time + 1e-3, s), class :: any)
+					t.eq(
+						SeasonClimate.thawing(position, class :: any),
+						cover < 1 and later <= cover,
+						`{class} at {time}`
+					)
+				end
+			end
+			-- A taiga's spring: white over its first two days, thawing from the third, bare by the fifth.
+			t.eq(SeasonClimate.thawing(Calendar.at(17.5, s), "cold"), false)
+			t.eq(SeasonClimate.thawing(Calendar.at(18.5, s), "cold"), true)
+			t.eq(SeasonClimate.thawing(Calendar.at(4, s), "cold"), true, "early autumn: bare")
+			t.eq(SeasonClimate.thawing(Calendar.at(7, s), "cold"), false, "autumn's last days: whitening")
+			t.eq(SeasonClimate.thawing(Calendar.at(4, s), "temperate"), true)
+			t.eq(SeasonClimate.thawing(Calendar.at(8.5, s), "temperate"), false, "winter")
+			t.eq(SeasonClimate.thawing(Calendar.at(12, s), "dry"), true)
+		end
+	)
 
 	t.test("season climate: off, the identity (no shift, the old night, no biases)", function()
 		local off = state()

@@ -33,7 +33,9 @@
 	range, once a second per player, and never for one farther than the nearest source found so
 	far. A source may have a reach of its own, at most the proximity radius (`radius`: the
 	Electric Heater's Config.Seasons.Heat.SpaceHeaterRadius, the Electric Fan's FanRadius). (Within
-	Temperature.NEAR of a heat source, the cold sources around no longer cool.)
+	Temperature.NEAR of a heat source, the cold sources around no longer cool.) The season's own
+	ice (View `seasonal`: what the weather froze, World/WorldServer.thawAt) is no cold source: the
+	season's climate already carries that cold; placed and generated ice is.
 
 	Seasons (Config.Seasons; Players/ToughAsNails passes them only while the calendar is on):
 	  season            the season's sample (Shared/Seasons/SeasonClimate, for the column's
@@ -78,6 +80,8 @@ export type View = {
 	-- falls on a cell.
 	room: ((x: number, y: number, z: number) -> Rooms.Sample?)?,
 	snowing: ((x: number, y: number, z: number) -> boolean)?,
+	-- Is the block at a cell the season's weather's (its ice; nil: none is)? No cold source.
+	seasonal: ((x: number, y: number, z: number) -> boolean)?,
 }
 
 -- What a room source gives a room's air now (HU a second; negative cools).
@@ -266,6 +270,7 @@ end
 function Climate.sources(view: View, x: number, y: number, z: number, radius: number): (number?, number?, number?)
 	local heat: number?, cold: number?, glow: number? = nil, nil, nil
 	local getBlock = view.getBlock
+	local seasonal = view.seasonal
 	for dy = -radius, radius do
 		for dx = -radius, radius do
 			for dz = -radius, radius do
@@ -288,7 +293,12 @@ function Climate.sources(view: View, x: number, y: number, z: number, radius: nu
 						end
 					end
 					local chill = cooling[block]
-					if chill and distance <= (reach[block] or radius) and (cold == nil or distance < cold) then
+					if
+						chill
+						and distance <= (reach[block] or radius)
+						and (cold == nil or distance < cold)
+						and not (seasonal ~= nil and seasonal(x + dx, y + dy, z + dz))
+					then
 						if chill == true or (chill :: Check)(x + dx, y + dy, z + dz, block) then
 							cold = distance
 						end

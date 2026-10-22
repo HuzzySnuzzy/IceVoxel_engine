@@ -39,7 +39,9 @@
 	            way a layer of 2..8 is placed (the item places them all, so a client asking for a
 	            deep layer anywhere else is refused). It uses up one Snow Layer either way
 	            (Players/Inventories.place maps a layer to its item). Breaking n layers by hand
-	            drops n Snowballs (Items.drops); a shovel only digs faster.
+	            drops n Snowballs (Items.drops); a shovel only digs faster. A break where the
+	            seasons' natural map says the seed made cave air (the weather's snow in a cave
+	            mouth) leaves that cave air, so no edit is left (`removeBroken`).
 	  Plants    a tall plant is two blocks (Minecraft's DoublePlantBlock): placing its lower half
 	            also sets its upper half right above (`setPlaced`), and a player breaking either
 	            half removes both (`removeBroken`) with one drop, what the lower half gives the
@@ -308,20 +310,28 @@ function EditRules.placed(world: World, x: number, y: number, z: number, block: 
 	return edits ~= nil and edits[ChunkLayout.localIndex(x - cx * size, y, z - cz * size)] == block
 end
 
+-- The air a break leaves at (x, y, z): cave air where the seasons' natural map says the seed made
+-- that (a weather snow layer dug in a cave mouth: back to the seed's, no edit left), else air.
+local function airAt(world: World, x: number, y: number, z: number): number
+	local natural = if world.natural then WorldServer.naturalAt(world, x, y, z) else nil
+	return if natural == Blocks.CAVE_AIR then Blocks.CAVE_AIR else Blocks.AIR
+end
+
 --[[
 	Takes what a player's break of `block` at (x, y, z) removes out of `world`: the block, and the
 	other half of a tall plant with it (no drop and no sound of its own: `harvested` already counts
-	the plant's drop). false if the world refused the change (then nothing changed).
+	the plant's drop), leaving air (the seed's cave air where it made that: `airAt`). false if the
+	world refused the change (then nothing changed).
 ]]
 function EditRules.removeBroken(world: World, x: number, y: number, z: number, block: number): boolean
 	local otherY = EditRules.pairedHalf(block, function(bx: number, by: number, bz: number): number?
 		return world:peekBlock(bx, by, bz)
 	end, x, y, z)
-	if not world:setBlock(x, y, z, Blocks.AIR) then
+	if not world:setBlock(x, y, z, airAt(world, x, y, z)) then
 		return false
 	end
 	if otherY ~= nil then
-		world:setBlock(x, otherY, z, Blocks.AIR)
+		world:setBlock(x, otherY, z, airAt(world, x, otherY, z))
 	end
 	return true
 end

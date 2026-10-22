@@ -206,6 +206,10 @@ export type ServerNet = {
 
 local ServerNet = {}
 
+-- Would `block` at (x, y, z) overlap a player in the way of a placement (see the header)? The
+-- seasons' snow grows into no player either (server Seasons/SnowWorld's `occupied`, the boot's).
+ServerNet.intersectsCharacter = intersectsCharacter
+
 function ServerNet.start(world: World): ServerNet
 	local remote = Remotes.net()
 	local editBuckets: { [Player]: Bucket } = {}

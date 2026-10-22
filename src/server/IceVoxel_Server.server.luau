@@ -276,7 +276,11 @@ local function startWorld(settings: WorldSettings.Settings)
 	Machines.start(net, world)
 	-- The seasons' rooms and snow after the machines (rooms' heat sources are machines).
 	RoomWorld.start(world)
-	SnowWorld.start(world)
+	-- (Snow grows into no player or mob: the placements' rule. Mobs start later; until then none
+	-- is in the way.)
+	SnowWorld.start(world, function(block: number, x: number, y: number, z: number): boolean
+		return ServerNet.intersectsCharacter(block, x, y, z) or Mobs.occupied(block, x, y, z)
+	end)
 	-- Structure blocks after inventories (containers, the Use hook).
 	StructureBlocks.start(net, world)
 	-- Thirst and temperature after inventories (drinks, armor) and machines (warm generators).

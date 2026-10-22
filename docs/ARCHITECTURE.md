@@ -3503,11 +3503,12 @@ plants' `growth`, the far landscape's `snowCover` and the `heatWave` (a summer d
 0.3 by `Util/Hash` of the day and the seed, never two in a row, bumping +0.3 from 09:00 to 18:00).
 `snowCap` is the most layers a column piles up (cold 6, temperate 3, tropical 1, dry 0; +1 every
 64 blocks above y 160; a drift of one), `melts` where Minecraft's temperature is 0.05 over the
-snow line. The resulting targets (tests/spec/SeasonClimate checks the table with the real
-`Temperature.target`): a winter night outdoors without gear is ICY in every temperate biome
-(plains -9: from neutral icy in 56 s, frozen 20 s later, dead about 3 minutes on), a bare roof
-leaves a winter plain COLD (-7) and a birch forest ICY, a summer heat wave makes temperate biomes
-HOT, and a desert room stays 10 (the AC matters there).
+snow line, and `thawing` while the far cover is going or gone (below 1 and not rising: the
+season's own snow melts then, Snow layers below). The resulting targets (tests/spec/SeasonClimate
+checks the table with the real `Temperature.target`): a winter night outdoors without gear is ICY
+in every temperate biome (plains -9: from neutral icy in 56 s, frozen 20 s later, dead about 3
+minutes on), a bare roof leaves a winter plain COLD (-7) and a birch forest ICY, a summer heat
+wave makes temperate biomes HOT, and a desert room stays 10 (the AC matters there).
 
 **Weather** (`Shared/Weather`). `Weather.momentAt(state, now, into, season)` copies the season's
 biases into the Moment; `World/WeatherServer` and the client's `Weather/WeatherState` pass the
@@ -3620,24 +3621,35 @@ is sturdy and a wall face. Players and mobs multiply their ground acceleration b
 `Blocks.speedFactor` of the block at the feet cell, else of the one carrying them (0.9 for 3-4
 layers, 0.8 for 5-6, 0.75 for 7-8); a player's 1.0625 step walks onto any depth, a mob's 0.6 onto
 five layers and it jumps onto more; both land on the box's top and never sink in (MC-257266; specs
-Movement, Mobs). The Snow Layer stacks onto a layer below 8 (`stackOnto`: its top clicked, or placed
-into a layer's cell; EditRules places a layer of 2..8 only that way) and lies only on `supports` (a
-sturdy top, leaves, a full layer; never ice); n layers drop n Snowballs; a layer whose support goes
-vanishes without drops. Each tick every active chunk is visited with `TileChance` (at most
-`MaxTilesPerTick`): one 4 x 4 tile, its columns from `WeatherRules.top` (only the open sky takes
-snow). While it snows at the tile's centre a visit (chance: the precipitation) raises its least
-columns a layer up to `SeasonClimate.snowCap` (`accumulate`), so tiles rise evenly; plants, torches
-and water take none. Where `SeasonClimate.melts` and it does not snow, a visit (`MeltChance` 0.5, x2
-clear day, x2 rain, x0.5 night) takes a layer off the deepest (`melt`). Snow beside a heat source
-that heats, or in or on a room at `RoomMelt` or warmer (`RoomWorld.temperatureAt`), loses a layer
-every visit and takes none; every `HeatMeltSeconds` each indexed heat source (onChanged and each
-chunk's saved edits) melts a layer within `HeatMeltRadius`, spread over frames. With `Ice`, still
-water sources with a side that is no water freeze where it is cold enough to snow, and the weather's
-ice thaws back; generated ice stays. All of it goes through `world:setWeather` (at most 16 writes a
-visit), so a melt back to the seed's air or cave air leaves no edit. The season's
-`SnowWorld.growth()` (Autumn 0.5, Winter 0, Spring 1.5, Summer 1) multiplies saplings' and herbs'
-random-tick chances and grass's spread tries, and falling snow muffles zombies
-(`Apocalypse.Noise.SnowFactor`, ZombieDirector.hear).
+Movement, Mobs): snow never grows into a player's or a mob's hull either (SnowWorld's `occupied`,
+the placements' rule: `ServerNet.intersectsCharacter` and `Mobs.occupied`; that column waits for a
+later visit), nor does ice. The Snow Layer stacks onto a layer below 8 (`stackOnto`: its top
+clicked, or placed into a layer's cell; EditRules places a layer of 2..8 only that way) and lies
+only on `supports` (a sturdy top, leaves, a full layer; never ice); n layers drop n Snowballs; a
+layer whose support goes vanishes without drops. Each tick every active chunk is visited with
+`TileChance` (at most `MaxTilesPerTick`): one 4 x 4 tile, its columns from `WeatherRules.top` (only
+the open sky takes snow), each with the weather at its own top cell (the biome and the precipitation
+are the tile centre's; what falls is `WeatherRules.snowingAt`'s: a tower's top may snow while the
+ground around is rained on). A visit (chance: the precipitation) raises the least of the columns it
+snows on a layer up to `SeasonClimate.snowCap` (`accumulate`), so tiles rise evenly; plants, torches
+and water take none. Where it does not snow and `SeasonClimate.melts`, or where the season's own
+snow goes (a column the biome would not snow on without the season, once `SeasonClimate.thawing`
+says the far landscape's white is going or gone: a taiga's snow and ice thaw over spring's third and
+fourth days with its far cover, windswept hills' autumn snow melts in the next clear spell), a visit
+(`MeltChance` 0.5, x2 clear day, x2 rain, x0.5 night) takes a layer off the deepest of those columns
+(`melt`); above Minecraft's own snow line it goes by the temperature alone. Snow beside a heat
+source that heats, or in or on a room at `RoomMelt` or warmer (`RoomWorld.temperatureAt`), loses a
+layer every visit and takes none; every `HeatMeltSeconds` each indexed heat source (onChanged and
+each chunk's saved edits) melts a layer and thaws the weather's ice within `HeatMeltRadius`, spread
+over frames, at most 256 a round from where the last round stopped (so every source gets its turn).
+With `Ice`, still water sources with a side that is no water freeze where it is cold enough to snow
+(not while the season's snow goes, never beside a heat source that heats); the weather's ice thaws
+back to the water it froze (the thaw map below; at once beside heat), while generated ice and a
+player's stay. All of it goes through `world:setWeather` (at most 16 writes a visit), so a melt back
+to the seed's air or cave air leaves no edit, and so does a player digging the weather's layer there
+(`EditRules.removeBroken` leaves the seed's cave air). The season's `SnowWorld.growth()` (Autumn
+0.5, Winter 0, Spring 1.5, Summer 1) multiplies saplings' and herbs' random-tick chances and grass's
+spread tries, and falling snow muffles zombies (`Apocalypse.Noise.SnowFactor`, ZombieDirector.hear).
 
 **The natural map** (`World/WorldServer`). A winter would leave thousands of edits (every snow
 layer, then every melt back to air, is an edit). So weather writes go through
@@ -3645,7 +3657,14 @@ layer, then every melt back to air, is an edit). So weather writes go through
 (`world.natural`); a later `setBlock` back to that block deletes the edit instead of storing it
 (still replicated, still `onChanged`). A player's edit on such a cell is kept as any edit. It is
 saved as RegionCodec record 12 NATURAL beside the edits (`Save/WorldSnapshot`); builds before it
-refuse the record, the documented "newer version" path.
+refuse the record, the documented "newer version" path. **The thaw map** beside it: SnowWorld's
+freezing (`setWeather(x, y, z, Ice, true)`) also remembers the block it replaced (`world.thaw`,
+`thawAt`), edited cell or not, until anything else changes the cell; only such ice thaws, back to
+that block, so a player's pond thaws back to its water edit and the seed's lake to no edit, while
+ice a player puts there (after breaking the weather's, say) is never the weather's. Record 13 THAW;
+a region holding either map is RegionCodec version 2, any other still version 1 and the same bytes
+as before; a version 1 region with a natural map (saved before record 13) gets the thaw map of the
+rule that build thawed by (the natural map's Water under an Ice edit).
 
 **Foliage colours** (`Shared/Seasons/Foliage`, client `Rendering/SeasonTint`; data
 `Config.Seasons.Foliage`). Grass tops, every leaves block, tinted plants and vines follow
@@ -5012,7 +5031,9 @@ and Combustion Generators (while their machine is active). `Climate.sources` giv
 the nearest heat and cold source (along the farthest axis); a check only runs for a block of its
 kind within range that would be nearer than the nearest found so far. The Campfire, always lit, is
 a plain `HeatingBlocks` name; anything new that warms only sometimes (burning blocks) registers
-with a check.
+with a check. The seasons' weather ice (the View's `seasonal`: `WorldServer.thawAt`, what the
+weather froze) is no cold source, as the season's climate already carries that cold; a player's
+ice and a frozen biome's still cool.
 
 **Gear** (the climate's tools; tested in `tests/spec/SurvivalGear`):
 - the **Campfire** (BlockList, appended; Minecraft's CampfireBlock, always lit): Minecraft's recipe
@@ -7567,9 +7588,10 @@ its regions and its players.
   whose energy, gauges and tanks are their container's data, Shared/Machines), generated chests
   already asked about (Containers `sourced`: looted ones never fill again), structure blocks' and
   jigsaws' settings, transmitters (side modes, colour, a pipe's share of its network's fluid by
-  capacity, `TransmitterWorld.saveState`), Fluid Tanks, stacks in transporters, dropped items
-  (with their age), farm animals (`Config.Save.Mobs`; monsters despawn anyway) and block updates
-  still due (`BlockTicker.scheduled`, in ticks from the save). Records are tagged and
+  capacity, `TransmitterWorld.saveState`), Fluid Tanks, stacks in transporters, dropped items (with
+  their age), farm animals (`Config.Save.Mobs`; monsters despawn anyway), block updates still due
+  (`BlockTicker.scheduled`, in ticks from the save) and the seasons' natural and thaw maps (records
+  12 and 13: a region with them is version 2, one without version 1). Records are tagged and
   length-prefixed and read back exactly to their length; ids this version doesn't know (a newer
   version's blocks, items, mobs, items in a chest) are dropped one by one and counted (`dropped`),
   anything else damaged refuses the region. A world with any dropped is played but never saved
@@ -8924,7 +8946,8 @@ Saving worlds).
   Blocks, Biomes, World/Coords, Util/Hash and each other (DayCycle and Weather require them, never
   the reverse); RoomWorld never requires the machines (room sources through Players/Climate) and
   kinds never RoomWorld (`TickContext.climate`). Weather writes (snow, ice) go through
-  `world:setWeather`, so melting back deletes their edits (the natural map); a heaters' or
+  `world:setWeather`, so melting back deletes their edits (the natural map), and only the
+  weather's ice thaws, back to what it froze (the thaw map); a heaters' or
   stoves' data layout is frozen (saved items), and the Survival message and the button action
   ship with both ends.
 - Kind modules require Machines/Core, Machines/Upgrades and plain shared modules (Items,

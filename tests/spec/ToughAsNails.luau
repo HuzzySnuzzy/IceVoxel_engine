@@ -1304,6 +1304,48 @@ return function(t, shared, require, server)
 		end
 	end)
 
+	t.test("climate (seasons): the weather's ice is no cold source; placed and generated ice is", function()
+		local blocks: { [string]: number } = {}
+		local weather: { [string]: boolean } = {}
+		local view = {
+			getBlock = function(x, y, z)
+				return blocks[`{x},{y},{z}`] or (if y < 64 then B.Grass else Blocks.AIR)
+			end,
+			column = function(_x, _z)
+				return 64, assert(Biomes.byName("Plains")).index
+			end,
+			skyOpen = function(_x, _y, _z)
+				return true
+			end,
+			room = function(_x, _y, _z)
+				return nil
+			end,
+			snowing = function(_x, _y, _z)
+				return false
+			end,
+			-- (Server Players/ToughAsNails: World/WorldServer.thawAt, ice the weather froze.)
+			seasonal = function(x, y, z)
+				return weather[`{x},{y},{z}`] == true
+			end,
+		}
+		local body = { wet = false, sprinting = false, burning = false, armorWarmth = 0, armorCooling = 0 }
+		for _, dayTime in { 12 * 24000 + 6000, WINTER_NIGHT } do
+			local winter = season("Plains", dayTime)
+			local bare = Temperature.target(Climate.environment(view, 0.5, 64, 0.5, dayTime, body, winter))
+			-- A pond 4 blocks away frozen by the weather: the season already carries that cold.
+			blocks["4,63,0"] = B.Ice
+			weather["4,63,0"] = true
+			local _, cold = Climate.sources(view, 0, 64, 0, settings.ProximityRadius)
+			t.eq(cold, nil, "the weather's ice cools nobody")
+			t.eq(Temperature.target(Climate.environment(view, 0.5, 64, 0.5, dayTime, body, winter)), bare)
+			-- A player's ice there (or a frozen biome's) still does (-3, down to the scale's end).
+			weather["4,63,0"] = nil
+			local placed = Temperature.target(Climate.environment(view, 0.5, 64, 0.5, dayTime, body, winter))
+			t.eq(placed, math.max(bare - 3, -10), `placed ice: {bare} -> {placed}`)
+			blocks["4,63,0"] = nil
+		end
+	end)
+
 	--[[ Protocol ]]
 
 	t.test("protocol: Exertion, Drink and Survival round trips; malformed payloads", function()
