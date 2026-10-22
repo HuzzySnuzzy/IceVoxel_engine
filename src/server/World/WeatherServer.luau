@@ -37,6 +37,12 @@
 	  Saving     `encode()` and `decode(text)` (Weather.encodeState: the clock, doWeatherCycle and
 	             the override with its time left) for the world's save: World/WorldSave's
 	             "weather" section, decoded after `start` (startWorld starts the weather first).
+	  Seasons    the moment carries the season of the day time (Shared/Seasons/SeasonClimate
+	             through Weather.momentAt, as the clients' Weather/WeatherState does: the
+	             calendar's biases on the rain and thunder), and what falls follows the season's
+	             shift of the column's biome (Weather.seasonShift): `snowingAt` (snow on players,
+	             the snow layers) beside `rainingAt`. With the calendar off the season is the
+	             identity's and nothing changes.
 ]]
 
 local Players = game:GetService("Players")
@@ -49,10 +55,12 @@ local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Weather = require(Shared.Weather)
+local SeasonClimate = require(Shared.Seasons.SeasonClimate)
 
 local WorldServer = require(script.Parent.WorldServer)
 local WeatherRules = require(script.Parent.WeatherRules)
 local Lightning = require(script.Parent.Lightning)
+local TimeOfDay = require(script.Parent.TimeOfDay)
 local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 local Skylight = require(script.Parent.Skylight)
 local Fire = require(script.Parent.Parent.Behaviours.Fire)
@@ -82,8 +90,11 @@ local pending: string? = nil
 local moment: Weather.Moment? = nil
 local momentFrame = -1
 local frame = 0
--- Minecraft temperature per column (DRY: nothing falls there).
+-- Minecraft temperature per column (DRY: nothing falls there), and its biome (Biomes index).
 local temperatures: { [number]: number } = {}
+local biomes: { [number]: number } = {}
+-- The season this frame's moment carries (SeasonClimate's sample, reused).
+local season: SeasonClimate.Sample = SeasonClimate.sample(0, "temperate", 0)
 local DRY = math.huge
 local columnCount = 0
 local random = Random.new()
@@ -111,14 +122,17 @@ local function current(): Weather.Moment
 	if value ~= nil and momentFrame == frame then
 		return value
 	end
-	local fresh = Weather.momentAt(state, now())
+	-- (The season of the day time: its biases are the same for every biome class.)
+	season = SeasonClimate.sample(TimeOfDay.get(), "temperate", 0, nil, season)
+	local fresh = Weather.momentAt(state, now(), nil, season)
 	moment = fresh
 	momentFrame = frame
 	return fresh
 end
 
--- Minecraft temperature of column (x, z)'s biome (nil: nothing falls), from the generator.
-local function temperatureOf(x: number, z: number): number?
+-- Minecraft temperature of column (x, z)'s biome (nil: nothing falls), from the generator, and
+-- the season's shift there now (Weather.seasonShift of the biome).
+local function temperatureOf(x: number, z: number): (number?, number)
 	local key = x * 67108864 + z
 	local known = temperatures[key]
 	if known == nil then
@@ -127,12 +141,17 @@ local function temperatureOf(x: number, z: number): number?
 		known = Weather.biomeTemperature(biome) or DRY
 		if columnCount >= MAX_COLUMNS then
 			table.clear(temperatures)
+			table.clear(biomes)
 			columnCount = 0
 		end
 		temperatures[key] = known
+		biomes[key] = biome
 		columnCount += 1
 	end
-	return if known == DRY then nil else known
+	if known == DRY then
+		return nil, 0
+	end
+	return known, Weather.seasonShift(current(), biomes[key] or 0)
 end
 
 --[[ Queries ]]
@@ -176,7 +195,27 @@ function WeatherServer.rainingAt(x: number, y: number, z: number): boolean
 	if precipitation <= Weather.RAINING then
 		return false
 	end
-	return WeatherRules.rainingAt(world, x, y, z, precipitation, temperatureOf(x, z))
+	local temperature, shift = temperatureOf(x, z)
+	return WeatherRules.rainingAt(world, x, y, z, precipitation, temperature, shift)
+end
+
+-- Is snow falling on cell (x, y, z) now (`rainingAt` with snow: see the header)?
+function WeatherServer.snowingAt(x: number, y: number, z: number): boolean
+	if not started or world == nil then
+		return false
+	end
+	x, y, z = math.floor(x), math.floor(y), math.floor(z)
+	local precipitation = WeatherServer.sample(x, z)
+	if precipitation <= Weather.RAINING then
+		return false
+	end
+	local temperature, shift = temperatureOf(x, z)
+	return WeatherRules.snowingAt(world, x, y, z, precipitation, temperature, shift)
+end
+
+-- The weather's moment now (the clock, the override, the season's biases), read only.
+function WeatherServer.moment(): Weather.Moment
+	return current()
 end
 
 -- Is it day at column (x, z) at `dayTime`, the weather's darkening counted (Level.isDay)?
@@ -192,7 +231,8 @@ function WeatherServer.describe(x: number, y: number, z: number): string
 	end
 	x, y, z = math.floor(x), math.floor(y), math.floor(z)
 	local precipitation, thunder = WeatherServer.sample(x, z)
-	local kind = Weather.kindOf(precipitation, Weather.formAt(temperatureOf(x, z), x, y, z))
+	local temperature, shift = temperatureOf(x, z)
+	local kind = Weather.kindOf(precipitation, Weather.formAt(temperature, x, y, z, shift))
 	if kind == Weather.RAIN and thunder > 0.5 then
 		return Weather.THUNDER
 	end
@@ -333,11 +373,12 @@ local view: Lightning.View = {
 			return false
 		end
 		local top = WeatherRules.top(serverWorld, x, z)
+		local temperature, shift = temperatureOf(x, z)
 		if top == nil then
 			-- (Not loaded: the generator's ground, open to the sky.)
-			return Weather.formAt(temperatureOf(x, z), x, y, z) == Weather.RAIN
+			return Weather.formAt(temperature, x, y, z, shift) == Weather.RAIN
 		end
-		return WeatherRules.rainingAt(serverWorld, x, y, z, precipitation, temperatureOf(x, z))
+		return WeatherRules.rainingAt(serverWorld, x, y, z, precipitation, temperature, shift)
 	end,
 }
 

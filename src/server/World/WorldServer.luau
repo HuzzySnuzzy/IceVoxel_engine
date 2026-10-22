@@ -16,6 +16,16 @@
 
 	Every change goes through `setBlock`, which records the edit, queues it for replication and
 	calls `onChanged` (the block ticker uses that to wake up neighbouring blocks).
+
+	The natural map (the seasons' snow and ice, server Seasons/SnowWorld): a weather write
+	(`setWeather`) on a cell with no edit first records what the seed generated there
+	(`natural[chunkKey][localIndex]`: the cell's block then, exactly the generator's, AIR or
+	Water). From then on a `setBlock` to that same block (the snow melting, the ice thawing, a
+	player digging the snow) deletes the cell's edit (and its natural entry) instead of storing
+	it; it still replicates and calls `onChanged`. Any other block is an ordinary edit, kept (a
+	player's on a snowed cell too). So a winter leaves no edits behind, and the map is a fact
+	about the generator that never goes stale: a natural entry exists only beside its cell's edit.
+	It is saved with the edits (Save/RegionCodec record NATURAL, Save/WorldSnapshot).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -49,6 +59,9 @@ export type World = {
 	chunks: { [number]: Chunk },
 	chunkCount: number,
 	edits: { [number]: { [number]: number } },
+	-- What the seed generated at cells a weather write changed (see the header): chunk key ->
+	-- local index -> block.
+	natural: { [number]: { [number]: number } },
 	-- Flat list x, y, z, block of changes not yet sent to clients.
 	pending: { number },
 	-- Called after every successful setBlock.
@@ -67,6 +80,7 @@ export type World = {
 	getBlock: (self: World, x: number, y: number, z: number) -> number,
 	peekBlock: (self: World, x: number, y: number, z: number) -> number?,
 	setBlock: (self: World, x: number, y: number, z: number, block: number) -> boolean,
+	setWeather: (self: World, x: number, y: number, z: number, block: number) -> boolean,
 	topBlock: (self: World, x: number, z: number) -> number,
 	chunkEdits: (self: World, cx: number, cz: number) -> { [number]: number }?,
 	takePending: (self: World) -> { number },
@@ -82,6 +96,7 @@ function WorldServer.new(generator: TerrainGenerator.Generator, clock: (() -> nu
 		chunks = {},
 		chunkCount = 0,
 		edits = {},
+		natural = {},
 		pending = {},
 		onChanged = nil,
 		onGenerated = nil,
@@ -212,12 +227,29 @@ function WorldServer.setBlock(self: World, x: number, y: number, z: number, bloc
 	writeu16(chunk.data, offset, block)
 
 	local key = Coords.chunkKey(cx, cz)
-	local edits = self.edits[key]
-	if edits == nil then
-		edits = {}
-		self.edits[key] = edits
+	local index = ChunkLayout.localIndex(lx, y, lz)
+	local naturals = self.natural[key]
+	if naturals and naturals[index] == block then
+		-- Back to what the seed made (snow melted, ice thawed): no edit (see the header).
+		naturals[index] = nil
+		if next(naturals) == nil then
+			self.natural[key] = nil
+		end
+		local edits = self.edits[key]
+		if edits then
+			edits[index] = nil
+			if next(edits) == nil then
+				self.edits[key] = nil
+			end
+		end
+	else
+		local edits = self.edits[key]
+		if edits == nil then
+			edits = {}
+			self.edits[key] = edits
+		end
+		edits[index] = block
 	end
-	edits[ChunkLayout.localIndex(lx, y, lz)] = block
 
 	local pending = self.pending
 	local n = #pending
@@ -230,6 +262,41 @@ function WorldServer.setBlock(self: World, x: number, y: number, z: number, bloc
 		self.onChanged(x, y, z, old, block)
 	end
 	return true
+end
+
+--[[
+	A weather write (the seasons' snow and ice: server Seasons/SnowWorld): `setBlock`, after
+	recording what the seed generated at a cell with no edit yet (see the header), so a later
+	write back to it deletes the edit. Returns false if nothing changed.
+]]
+function WorldServer.setWeather(self: World, x: number, y: number, z: number, block: number): boolean
+	if y < 0 or y >= HEIGHT or not Blocks.isValid(block) then
+		return false
+	end
+	local cx, cz = x // SIZE, z // SIZE
+	local key = Coords.chunkKey(cx, cz)
+	local index = ChunkLayout.localIndex(x - cx * SIZE, y, z - cz * SIZE)
+	local edits = self.edits[key]
+	if edits == nil or edits[index] == nil then
+		local generated = WorldServer.getBlock(self, x, y, z)
+		if generated == block then
+			return false
+		end
+		local naturals = self.natural[key]
+		if naturals == nil then
+			naturals = {}
+			self.natural[key] = naturals
+		end
+		naturals[index] = generated
+	end
+	return WorldServer.setBlock(self, x, y, z, block)
+end
+
+-- What the seed generated at cell (x, y, z) when a weather write changed it (nil: none recorded).
+function WorldServer.naturalAt(self: World, x: number, y: number, z: number): number?
+	local cx, cz = x // SIZE, z // SIZE
+	local naturals = self.natural[Coords.chunkKey(cx, cz)]
+	return if naturals then naturals[ChunkLayout.localIndex(x - cx * SIZE, y, z - cz * SIZE)] else nil
 end
 
 -- Y of the highest non-air block in a column (-1 if the column is empty).

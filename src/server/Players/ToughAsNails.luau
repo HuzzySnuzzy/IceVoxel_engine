@@ -95,7 +95,22 @@
 	             of insulation are added to the armor's.
 	  Heat       lit furnaces (a furnace container burning: litTime > 0) and working Heat and
 	             Combustion Generators (their machine's active flag) are heat sources
-	             (Climate.addHeatSource), besides Config.ToughAsNails.HeatingBlocks.
+	             (Climate.addHeatSource), besides Config.ToughAsNails.HeatingBlocks; so are the
+	             seasons' Wood Stove and Oil Heater (radiant) and Electric Heater while they
+	             deliver heat (their `heat` field), and the Air Conditioner and Electric Fan cold
+	             sources while they cool. Rooms (server Seasons/RoomWorld) take the same machines'
+	             heat through Climate.addRoomSource: a lit Furnace, a working generator, the
+	             heaters, coolers and stoves' `heat`.
+	  Seasons    while the calendar is on (Shared/Seasons: Calendar's state enabled), each
+	             player's sample takes the season's climate (SeasonClimate.sample for the column's
+	             biome class: shift and night drop), the room at their feet (Seasons/RoomWorld
+	             .sample) and snow falling on them (World/WeatherServer.snowingAt) into the
+	             environment (Players/Climate); a freeze immune piece no longer stops hypothermia
+	             (Temperature.freezeImmune, Config.ToughAsNails.LeatherFreezeImmunity), the COLD
+	             zone and below cost food (Temperature.coldExhaustion, next to the HOT zone's
+	             sweating), and the Survival message carries the room's air and the outside value
+	             (the thermometer's "Room +1 · Out -9"). With the calendar off none of it: as
+	             before.
 	  Eating     server Players/Eating asks for the food bar (`hunger`) and fills it (Hunger.eat).
 	  Effects    TAN's Thirst, Internal Warmth, Internal Chill and Climate Clemency are status
 	             effects in TAN 1.20, so they are listed with the others (Players/Effects
@@ -119,6 +134,7 @@ local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local SharedMachines = require(Shared.Machines)
 local ToughAsNails = require(Shared.ToughAsNails)
+local SeasonClimate = require(Shared.Seasons.SeasonClimate)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
@@ -128,6 +144,7 @@ local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local SkyCheck = require(script.Parent.Parent.Machines.SkyCheck)
 local MachineWorld = require(script.Parent.Parent.Machines.MachineWorld)
 local Machines = require(script.Parent.Parent.Machines.Machines)
+local RoomWorld = require(script.Parent.Parent.Seasons.RoomWorld)
 local Burning = require(script.Parent.Burning)
 local Characters = require(script.Parent.Characters)
 local EffectsServer = require(script.Parent.Effects)
@@ -181,6 +198,11 @@ type Record = {
 	wait: number,
 	-- The character's Roblox Health script while this module keeps it disabled (the extremes).
 	paused: BaseScript?,
+	-- Seasons: the room's air at the last sample (nil: none), the outside value there
+	-- (Temperature.outside), and the season's sample (reused).
+	room: number?,
+	outside: number,
+	season: SeasonClimate.Sample?,
 }
 
 local ToughAsNailsServer = {}
@@ -220,6 +242,9 @@ local function newRecord(clemency: number): Record
 		sent = nil,
 		wait = 0,
 		paused = nil,
+		room = nil,
+		outside = 0,
+		season = nil,
 	}
 end
 
@@ -284,6 +309,8 @@ local function status(record: Record): Protocol.SurvivalStatus
 		food = hunger.food,
 		saturation = hunger.saturation,
 		foodExhaustion = hunger.exhaustion,
+		room = record.room,
+		outside = record.outside,
 	}
 end
 
@@ -331,6 +358,9 @@ end
 
 --[[ Ticking ]]
 
+-- The world's seed (heat waves), set by `start`.
+local worldSeed = 0
+
 -- One tick of one player (see the header). `sample`: look at the surroundings this tick.
 local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: Player, record: Record, sample: boolean)
 	local character = player.Character
@@ -363,6 +393,8 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 	end
 
 	local damage, heal = 0, 0
+	-- (The seasons count while the calendar is on: see the header.)
+	local seasons = SeasonClimate.active()
 	if temperatureOn() then
 		local touching = Burning.touchingAt(view.getBlock, fx, fy, fz, BODY.width, BODY.height)
 		if Burning.has(touching, Fluids.WATER) then
@@ -385,19 +417,29 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 			cooling += steps
 		end
 		if sample then
-			local env = Climate.environment(view, fx, fy, fz, TimeOfDay.get(), {
+			local dayTime = TimeOfDay.get()
+			local season: SeasonClimate.Sample? = nil
+			if seasons then
+				local _, biome = view.column(math.floor(fx), math.floor(fz))
+				season = SeasonClimate.sample(dayTime, SeasonClimate.classOf(biome), worldSeed, nil, record.season)
+				record.season = season
+			end
+			local env = Climate.environment(view, fx, fy, fz, dayTime, {
 				wet = Temperature.isWet(temperature),
 				sprinting = os.clock() < record.sprintingUntil,
 				burning = character:GetAttribute(Characters.ON_FIRE) == true,
 				armorWarmth = warmth,
 				armorCooling = cooling,
-			})
+			}, season)
 			temperature.target = Temperature.target(env, temperature)
+			record.room = env.room
+			record.outside = Temperature.outside(env)
 		end
 		-- (Resistance softens the extremes, as Minecraft's freeze damage, which TAN's
 		-- hypothermia is: in neither bypasses_resistance nor bypasses_effects. Dehydration below
 		-- doesn't: it is starvation's, which bypasses effects.)
-		damage += EffectsServer.incomingDamage(player, Temperature.tick(temperature, mode, freezeImmune))
+		local immune = Temperature.freezeImmune(freezeImmune, seasons)
+		damage += EffectsServer.incomingDamage(player, Temperature.tick(temperature, mode, immune))
 	else
 		Temperature.tickEffects(temperature, mode)
 	end
@@ -425,6 +467,14 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 	if hungerOn() then
 		-- (Thirst has its say while it rules regeneration: TAN's both bars high.)
 		local rules = thirstOn() and Config.ToughAsNails.ThirstRegeneration
+		-- (Shivering in the COLD zone and below costs food, with the seasons on: the mirror of
+		-- the HOT zone's sweating.)
+		if temperatureOn() and ToughAsNails.affects(mode) then
+			local shiver = Temperature.coldExhaustion(temperature.value, seasons)
+			if shiver > 0 then
+				Hunger.addExhaustion(hunger, shiver)
+			end
+		end
 		local lost, gained = Hunger.tick(
 			hunger,
 			mode,
@@ -834,6 +884,42 @@ local function registerHeatSources()
 	end
 	Climate.addHeatSource(Blocks.id.HeatGenerator, working)
 	Climate.addHeatSource(Blocks.id.CombustionGenerator, working)
+	-- The seasons' heaters, coolers and stoves: what they deliver (their `heat` field, HU).
+	local function heatOf(x: number, y: number, z: number): number
+		local machines = Machines.world()
+		local machine = if machines then MachineWorld.machine(machines, x, y, z) else nil
+		local container = if machine then machine.container else nil
+		local index = if container then SharedMachines.field(container.block, "heat") else nil
+		local data = if container then container.data else nil
+		local value = if data and index then data[index] else nil
+		return if type(value) == "number" and value == value then value else 0
+	end
+	local function heating(x: number, y: number, z: number): boolean
+		return heatOf(x, y, z) > 0
+	end
+	local function cooling(x: number, y: number, z: number): boolean
+		return heatOf(x, y, z) < 0
+	end
+	Climate.addHeatSource(Blocks.id.WoodStove, heating, true)
+	Climate.addHeatSource(Blocks.id.OilHeater, heating, true)
+	Climate.addHeatSource(Blocks.id.ElectricHeater, heating)
+	Climate.addColdSource(Blocks.id.AirConditioner, cooling)
+	Climate.addColdSource(Blocks.id.ElectricFan, cooling)
+	-- What they give a room's air (server Seasons/RoomWorld).
+	local heat = Config.Seasons.Heat
+	Climate.addRoomSource(Blocks.id.Furnace, function(x: number, y: number, z: number): number
+		local container = Containers.peek(x, y, z)
+		local data = container and container.data
+		return if data ~= nil and (data[1] or 0) > 0 then heat.Furnace else 0
+	end)
+	local function generator(x: number, y: number, z: number): number
+		return if working(x, y, z) then heat.Generator else 0
+	end
+	Climate.addRoomSource(Blocks.id.HeatGenerator, generator)
+	Climate.addRoomSource(Blocks.id.CombustionGenerator, generator)
+	for _, name in { "WoodStove", "OilHeater", "ElectricHeater", "AirConditioner", "ElectricFan" } do
+		Climate.addRoomSource(Blocks.id[name], heatOf)
+	end
 end
 
 --[[
@@ -848,6 +934,7 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 		registerHeatSources()
 		registerEffects()
 	end
+	worldSeed = (world.generator :: any).seed or 0
 
 	local view: Climate.View = {
 		getBlock = function(x: number, y: number, z: number): number?
@@ -859,6 +946,13 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 		end,
 		skyOpen = function(x: number, y: number, z: number): boolean
 			return SkyCheck.open(world, x, y, z)
+		end,
+		-- (Seasons: read only while the calendar is on, Climate.environment's `season`.)
+		room = function(x: number, y: number, z: number): RoomWorld.Sample?
+			return RoomWorld.sample(x, y, z)
+		end,
+		snowing = function(x: number, y: number, z: number): boolean
+			return WeatherServer.snowingAt(x, y, z)
 		end,
 	}
 

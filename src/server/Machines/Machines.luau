@@ -52,6 +52,7 @@ local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
 local MachineWorld = require(script.Parent.MachineWorld)
 local SkyCheck = require(script.Parent.SkyCheck)
+local RoomWorld = require(script.Parent.Parent.Seasons.RoomWorld)
 
 type MachineRecord = Protocol.MachineRecord
 
@@ -196,6 +197,8 @@ function Machines.start(serverNet: Net, world: WorldServer.World)
 		transmitters = Transmitters.world(),
 		dayTime = TimeOfDay.get,
 		sky = seesSky,
+		-- (The seasons' rooms next to a machine: Shared/Machines TickContext.climate.)
+		climate = RoomWorld.climateAt,
 	})
 	state = simulation
 	-- A machine's energy stays in its item (Mekanism's sustained data).

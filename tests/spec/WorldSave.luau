@@ -1027,6 +1027,92 @@ return function(t, shared, require, server, client)
 		t.ok(again["0_0"] ~= nil and RegionCodec.isEmpty(again["0_0"]))
 	end)
 
+	--[[ The seasons' natural map (World/WorldServer `natural`, RegionCodec NATURAL) ]]
+
+	t.test("world save (seasons): weather writes melting back delete their edits", function()
+		local game = newGame()
+		local world = game.world
+		local SNOW1, SNOW2 = id.SnowLayer1, id.SnowLayer2
+		local changes = 0
+		local chained = world.onChanged
+		world.onChanged = function(...)
+			changes += 1
+			if chained then
+				chained(...)
+			end
+		end
+		local cx, cz = 3 // 16, 4 // 16
+		local key = Coords.chunkKey(cx, cz)
+		local index = ChunkLayout.localIndex(3, FLOOR, 4)
+		-- Snow on a cell the seed made air: the generated block is recorded, the snow is an edit.
+		t.ok(world:setWeather(3, FLOOR, 4, SNOW1))
+		t.eq(world:naturalAt(3, FLOOR, 4), AIR, "the seed's air")
+		t.eq((world:chunkEdits(cx, cz) :: any)[index], SNOW1)
+		t.ok(world:setWeather(3, FLOOR, 4, SNOW2), "a layer more")
+		t.eq(world:naturalAt(3, FLOOR, 4), AIR, "still the seed's")
+		t.eq((world:chunkEdits(cx, cz) :: any)[index], SNOW2)
+		-- Melting back to air: no edit left (and no natural entry), still replicated and heard.
+		local before = changes
+		local pending = #world.pending
+		t.ok(world:setBlock(3, FLOOR, 4, AIR))
+		t.eq(world:chunkEdits(cx, cz), nil, "the edit is gone")
+		t.eq(world.natural[key], nil, "and the natural entry with it")
+		t.eq(changes, before + 1, "onChanged still fires")
+		t.eq(#world.pending, pending + 4, "it still replicates")
+		t.eq(world:getBlock(3, FLOOR, 4), AIR)
+		-- A player's edit on a weathered cell is kept, the entry beside it.
+		world:setWeather(5, FLOOR, 5, SNOW1)
+		world:setBlock(5, FLOOR, 5, id.Planks)
+		t.eq((world:chunkEdits(0, 0) :: any)[ChunkLayout.localIndex(5, FLOOR, 5)], id.Planks, "kept")
+		t.eq(world:naturalAt(5, FLOOR, 5), AIR)
+		-- Weather on a cell already edited records nothing (its generated block isn't known).
+		world:setBlock(6, FLOOR, 6, id.Glass)
+		world:setWeather(6, FLOOR, 6, SNOW1)
+		t.eq(world:naturalAt(6, FLOOR, 6), nil)
+		world:setBlock(6, FLOOR, 6, AIR)
+		t.eq((world:chunkEdits(0, 0) :: any)[ChunkLayout.localIndex(6, FLOOR, 6)], AIR, "an ordinary edit stays")
+		-- Ice on the seed's stone (a stand-in for still water) thaws back: no edit.
+		t.ok(world:setWeather(7, FLOOR - 1, 7, id.Ice))
+		t.eq(world:naturalAt(7, FLOOR - 1, 7), STONE)
+		world:setBlock(7, FLOOR - 1, 7, STONE)
+		t.eq((world:chunkEdits(0, 0) :: any)[ChunkLayout.localIndex(7, FLOOR - 1, 7)], nil)
+		-- Writing what is there changes nothing.
+		t.eq(world:setWeather(8, FLOOR, 8, AIR), false)
+		t.eq(world:naturalAt(8, FLOOR, 8), nil)
+	end)
+
+	t.test("world save (seasons): record 12 NATURAL round trips with the edits", function()
+		t.eq(RegionCodec.TAGS.NATURAL, 12)
+		local game = newGame()
+		local world = game.world
+		world:setWeather(3, FLOOR, 4, id.SnowLayer3)
+		world:setWeather(4, FLOOR, 4, id.SnowLayer1)
+		world:setWeather(-20, FLOOR, 700, id.SnowLayer2)
+		local regions = WorldSnapshot.collect(game, WorldSnapshot.editedRegions(world), nil)
+		local loaded = throughBytes(regions)
+		local b = newGame()
+		WorldSnapshot.applyEdits(b.world, loaded)
+		t.eq(b.world:getBlock(3, FLOOR, 4), id.SnowLayer3, "the snow is back")
+		t.eq(b.world:naturalAt(3, FLOOR, 4), AIR, "and what the seed made under it")
+		t.eq(b.world:naturalAt(-20, FLOOR, 700), AIR, "in another region too")
+		b.world:setBlock(4, FLOOR, 4, AIR)
+		t.eq((b.world:chunkEdits(0, 0) :: any)[ChunkLayout.localIndex(4, FLOOR, 4)], nil, "melting deletes it there")
+		-- A region with only natural entries left would be no region (they live beside edits).
+		local region = RegionCodec.new(0, 0)
+		region.natural[Coords.chunkKey(0, 0)] = { [5] = AIR }
+		t.eq(RegionCodec.isEmpty(region), false)
+		local back = RegionCodec.decode(RegionCodec.encode(region), 0, 0)
+		t.eq(back.natural[Coords.chunkKey(0, 0)][5], AIR)
+		-- Without any, a region encodes as before (no record 12: older builds still read it).
+		local plain = RegionCodec.new(0, 0)
+		plain.chunks[Coords.chunkKey(0, 0)] = { [5] = STONE }
+		local bytes = RegionCodec.encode(plain)
+		local withNatural = RegionCodec.new(0, 0)
+		withNatural.chunks[Coords.chunkKey(0, 0)] = { [5] = STONE }
+		withNatural.natural[Coords.chunkKey(0, 0)] = { [5] = AIR }
+		t.ok(buffer.len(RegionCodec.encode(withNatural)) > buffer.len(bytes), "the record is extra")
+	end)
+
 	t.test("world save: a typical edited area's size", function()
 		local game = newGame()
 		furnish(game)

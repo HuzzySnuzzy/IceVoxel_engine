@@ -64,8 +64,15 @@ local function cableAt(world: World, key: number): any
 	return if node and node.kind == "energy" then node else nil
 end
 
+-- The machine at `key` when it holds energy (a fuel-only one, capacity 0, is in no network, even
+-- touching others: Machines.hasEnergy).
+local function energyMachine(world: World, key: number): any
+	local machine = world.machines[key]
+	return if machine and machine.energy.capacity > 0 then machine else nil
+end
+
 local function isMember(world: World, key: number): boolean
-	return world.machines[key] ~= nil or cableAt(world, key) ~= nil
+	return energyMachine(world, key) ~= nil or cableAt(world, key) ~= nil
 end
 
 -- Calls `visit(neighbour)` for every position joined to `key` in the graph.
@@ -77,17 +84,18 @@ local function eachLink(world: World, key: number, visit: (number) -> ())
 			if linked or accepting then
 				local neighbour = Grid.neighbour(key, side)
 				if
-					neighbour and ((linked and cableAt(world, neighbour)) or (accepting and world.machines[neighbour]))
+					neighbour
+					and ((linked and cableAt(world, neighbour)) or (accepting and energyMachine(world, neighbour)))
 				then
 					visit(neighbour)
 				end
 			end
 		end
-	elseif world.machines[key] then
+	elseif energyMachine(world, key) then
 		for side = 0, 5 do
 			local neighbour = Grid.neighbour(key, side)
 			if neighbour then
-				if world.machines[neighbour] then
+				if energyMachine(world, neighbour) then
 					visit(neighbour)
 				else
 					local other = cableAt(world, neighbour)
@@ -134,7 +142,7 @@ local function finish(world: World, members: { number })
 	local cables, throughput = 0, 0
 	for _, key in members do
 		if world.componentOf[key] == nil then
-			local machine = world.machines[key]
+			local machine = energyMachine(world, key)
 			local cable = cableAt(world, key)
 			if machine then
 				table.insert(keys, key)

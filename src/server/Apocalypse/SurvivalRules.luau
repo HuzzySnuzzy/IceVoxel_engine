@@ -113,7 +113,8 @@ end
 ]]
 function SurvivalRules.moonTick(record: Record, dayTime: number, s: BloodMoon.Settings): boolean
 	local up = BloodMoon.active(dayTime, s)
-	local day = DayCycle.day(dayTime)
+	-- (The night's day is the sun's: a winter moon sets after the clock's midnight.)
+	local day = DayCycle.solarDay(dayTime)
 	local was = record.moonUp
 	record.moonUp = up
 	if up then
@@ -130,7 +131,7 @@ function SurvivalRules.moonTick(record: Record, dayTime: number, s: BloodMoon.Se
 		return false
 	end
 	record.moonDay = nil
-	if was and watched == day and DayCycle.timeInDay(dayTime) >= s.End then
+	if was and watched == day and DayCycle.solarTimeInDay(dayTime) >= s.End then
 		if record.moons < SurvivalRules.MAX_COUNT then
 			record.moons += 1
 		end

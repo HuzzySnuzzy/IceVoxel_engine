@@ -32,6 +32,23 @@
 	`Climate.addHeatSource("Brazier", isLit)`. A check runs only for a block of its kind within
 	range, once a second per player, and never for one farther than the nearest source found so
 	far. (Within Temperature.NEAR of a heat source, the cold sources around no longer cool.)
+
+	Seasons (Config.Seasons; Players/ToughAsNails passes them only while the calendar is on):
+	  season            the season's sample (Shared/Seasons/SeasonClimate, for the column's
+	                    biome class): its shift and night drop (Temperature's `seasonShift`,
+	                    `nightDrop`)
+	  room              the room the feet are in (View `room`: server Seasons/RoomWorld.sample),
+	                    its air temperature (Temperature's `room`); in a room the proximity
+	                    modifiers give way to `radiant`: a radiant heat source (fire, lava, a
+	                    campfire, the stoves: `addHeatSource`'s `radiant`) within NEAR
+	  snowedOn          snow falling at the feet or the head (View `snowing`:
+	                    World/WeatherServer.snowingAt, open to the sky)
+	Room sources (`addRoomSource(block, output, limit)`): what a block in a room or its walls
+	gives the room's air, in HU a second (Config.Seasons.Heat; server Seasons/RoomWorld reads
+	them through `roomSource`, so it never requires the machines): a Campfire 20, each Fire 15
+	(at most 3 counted), each Lava block 10 (at most 6) here; Players/ToughAsNails registers the
+	machines' (a lit Furnace 8, a working Heat or Combustion Generator 10, the heaters, coolers
+	and stoves their `heat` field). Each player in a room gives PLAYER_HU.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -44,6 +61,8 @@ local DayCycle = require(Shared.DayCycle)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Temperature = require(Shared.ToughAsNails.Temperature)
+local Rooms = require(Shared.Seasons.Rooms)
+local SeasonClimate = require(Shared.Seasons.SeasonClimate)
 
 -- What Climate reads of the world.
 export type View = {
@@ -53,7 +72,14 @@ export type View = {
 	column: (x: number, z: number) -> (number, number),
 	-- Nothing opaque above cell (x, y, z)?
 	skyOpen: (x: number, y: number, z: number) -> boolean,
+	-- Seasons (see the header; nil: none): the room of the cell at the feet, and whether snow
+	-- falls on a cell.
+	room: ((x: number, y: number, z: number) -> Rooms.Sample?)?,
+	snowing: ((x: number, y: number, z: number) -> boolean)?,
 }
+
+-- What a room source gives a room's air now (HU a second; negative cools).
+export type RoomOutput = (x: number, y: number, z: number, block: number) -> number
 
 -- The player's own part of the environment.
 export type Body = {
@@ -73,9 +99,17 @@ local Climate = {}
 -- Eye height of a standing player (blocks above the feet): where the roof is looked for.
 local EYES = 1.62
 
--- Per block id: heating (true, or a check) and cooling.
+-- Per block id: heating (true, or a check), radiant heating (a room's +2) and cooling (true,
+-- or a check).
 local heating: { [number]: true | Check } = {}
-local cooling: { [number]: boolean } = {}
+local radiant: { [number]: boolean } = {}
+local cooling: { [number]: true | Check } = {}
+-- Per block id: what it gives a room's air, and the most of them counted in one room.
+local roomSources: { [number]: RoomOutput } = {}
+local roomLimits: { [number]: number? } = {}
+
+-- HU each player in a room gives its air.
+Climate.PLAYER_HU = Config.Seasons.Heat.Player
 
 -- The block ids a name means: a fluid's every block, else the block of that name (none: a
 -- warning, see the header).
@@ -101,6 +135,8 @@ end
 for _, name in Config.ToughAsNails.HeatingBlocks do
 	for _, id in idsOf(name) do
 		heating[id] = true
+		-- (Lava, fire and campfires warm by radiance: in a room too.)
+		radiant[id] = true
 	end
 end
 for _, name in Config.ToughAsNails.CoolingBlocks do
@@ -119,23 +155,70 @@ end
 
 --[[
 	Makes `block` (an id or a name; a fluid name means all its blocks) a heat source: always, or
-	while `check` says so. Returns how many block ids it covers (0: an unknown name, skipped).
+	while `check` says so; `isRadiant`: it warms by radiance (fire, a stove), so it still warms in
+	a room (see the header; nil keeps what it was). Returns how many block ids it covers (0: an unknown name, skipped).
 ]]
-function Climate.addHeatSource(block: number | string, check: Check?): number
+function Climate.addHeatSource(block: number | string, check: Check?, isRadiant: boolean?): number
 	local ids = blocksOf(block)
 	for _, id in ids do
 		heating[id] = check or true
+		-- (Registering again without saying keeps whether it is radiant.)
+		if isRadiant ~= nil then
+			radiant[id] = isRadiant
+		end
 	end
 	return #ids
 end
 
--- Makes `block` (an id or a name) a cold source. Returns how many block ids it covers.
-function Climate.addColdSource(block: number | string): number
+-- Makes `block` (an id or a name) a cold source: always, or while `check` says so. Returns how
+-- many block ids it covers.
+function Climate.addColdSource(block: number | string, check: Check?): number
 	local ids = blocksOf(block)
 	for _, id in ids do
-		cooling[id] = true
+		cooling[id] = check or true
 	end
 	return #ids
+end
+
+--[[
+	Makes `block` (an id or a name; a fluid name means all its blocks) a room source (see the
+	header): `output` HU a second (a number, or what a function says now), at most `limit` of them
+	counted in one room (nil: every one). Returns how many block ids it covers.
+]]
+function Climate.addRoomSource(block: number | string, output: number | RoomOutput, limit: number?): number
+	local ids = blocksOf(block)
+	local give: RoomOutput
+	if type(output) == "number" then
+		local value = output
+		give = function(): number
+			return value
+		end
+	else
+		give = output
+	end
+	for _, id in ids do
+		roomSources[id] = give
+		roomLimits[id] = limit
+	end
+	return #ids
+end
+
+-- What `block` gives a room's air (its output function) and how many count in one room (nil:
+-- every one); nil for a block that is no room source.
+function Climate.roomSource(block: number): (RoomOutput?, number?)
+	return roomSources[block], roomLimits[block]
+end
+
+-- Is `block` a radiant heat source?
+function Climate.isRadiant(block: number): boolean
+	return radiant[block] == true
+end
+
+do
+	local heat = Config.Seasons.Heat
+	Climate.addRoomSource("Campfire", heat.Campfire)
+	Climate.addRoomSource("Fire", heat.Fire, heat.FireMax)
+	Climate.addRoomSource("Lava", heat.Lava, heat.LavaMax)
 end
 
 -- Does `block` heat (true for a source with a check: it might)? Does it cool?
@@ -144,7 +227,7 @@ function Climate.isHeating(block: number): boolean
 end
 
 function Climate.isCooling(block: number): boolean
-	return cooling[block] == true
+	return cooling[block] ~= nil
 end
 
 --[[
@@ -168,11 +251,12 @@ end
 
 --[[
 	The nearest heating block and cooling block within `radius` blocks of cell (x, y, z) (a cube),
-	as their distance along the farthest axis (0: the feet's own cell), nil when there is none.
-	Unknown cells are neither. A heat source's check runs only when it would be the nearest.
+	as their distance along the farthest axis (0: the feet's own cell), nil when there is none,
+	and the nearest radiant heating block's. Unknown cells are neither. A source's check runs only
+	when it would be the nearest.
 ]]
-function Climate.sources(view: View, x: number, y: number, z: number, radius: number): (number?, number?)
-	local heat: number?, cold: number? = nil, nil
+function Climate.sources(view: View, x: number, y: number, z: number, radius: number): (number?, number?, number?)
+	local heat: number?, cold: number?, glow: number? = nil, nil, nil
 	local getBlock = view.getBlock
 	for dy = -radius, radius do
 		for dx = -radius, radius do
@@ -181,24 +265,36 @@ function Climate.sources(view: View, x: number, y: number, z: number, radius: nu
 				if block then
 					local distance = math.max(math.abs(dx), math.abs(dy), math.abs(dz))
 					local source = heating[block]
-					if source and (heat == nil or distance < heat) then
+					if
+						source
+						and (heat == nil or distance < heat or (radiant[block] and (glow == nil or distance < glow)))
+					then
 						if source == true or (source :: Check)(x + dx, y + dy, z + dz, block) then
-							heat = distance
+							if heat == nil or distance < heat then
+								heat = distance
+							end
+							if radiant[block] and (glow == nil or distance < glow) then
+								glow = distance
+							end
 						end
 					end
-					if cooling[block] and (cold == nil or distance < cold) then
-						cold = distance
+					local chill = cooling[block]
+					if chill and (cold == nil or distance < cold) then
+						if chill == true or (chill :: Check)(x + dx, y + dy, z + dz, block) then
+							cold = distance
+						end
 					end
 				end
 			end
 		end
 	end
-	return heat, cold
+	return heat, cold, glow
 end
 
 --[[
 	The environment of a player with feet at (x, y, z) (blocks) at day time `dayTime`, with their
-	own `body` (see the header).
+	own `body` (see the header), and with the seasons' `season` (nil: none; then the view's room
+	and snow are not looked at either).
 ]]
 function Climate.environment(
 	view: View,
@@ -206,17 +302,19 @@ function Climate.environment(
 	y: number,
 	z: number,
 	dayTime: number,
-	body: Body
+	body: Body,
+	season: SeasonClimate.Sample?
 ): Temperature.Environment
 	local cx, cy, cz = math.floor(x), math.floor(y), math.floor(z)
 	local surface, biomeIndex = view.column(cx, cz)
 	local biome = Biomes.get(biomeIndex)
-	local heat, cold = Climate.sources(view, cx, cy, cz, Config.ToughAsNails.ProximityRadius)
-	return {
+	local heat, cold, glow = Climate.sources(view, cx, cy, cz, Config.ToughAsNails.ProximityRadius)
+	local head = math.floor(y + EYES)
+	local env: Temperature.Environment = {
 		climate = if biome then biome.temperature else 0,
 		y = y,
 		surface = surface,
-		skyOpen = view.skyOpen(cx, math.floor(y + EYES), cz),
+		skyOpen = view.skyOpen(cx, head, cz),
 		night = not DayCycle.isDay(dayTime),
 		wet = body.wet,
 		sprinting = body.sprinting,
@@ -227,6 +325,18 @@ function Climate.environment(
 		armorWarmth = body.armorWarmth,
 		armorCooling = body.armorCooling,
 	}
+	if season then
+		env.seasonShift = season.shift
+		env.nightDrop = season.nightDrop
+		local room = if view.room then view.room(cx, cy, cz) else nil
+		if room then
+			env.room = room.temperature
+			env.radiant = glow ~= nil and glow <= Temperature.NEAR
+		end
+		local snowing = view.snowing
+		env.snowedOn = snowing ~= nil and (snowing(cx, cy, cz) or snowing(cx, head, cz))
+	end
+	return env
 end
 
 return Climate

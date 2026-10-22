@@ -121,7 +121,7 @@ function ZombieDirector.moon(apoc: Apocalypse, dayTime: number): (boolean, numbe
 	if not apoc.Enabled or not BloodMoon.active(dayTime, apoc.BloodMoon) then
 		return false, 0
 	end
-	return true, BloodMoon.number(DayCycle.day(dayTime), apoc.BloodMoon)
+	return true, BloodMoon.number(BloodMoon.nightOf(dayTime), apoc.BloodMoon)
 end
 
 -- The world's limits at `dayTime` (see the header): maxMobs, MaxHostile.

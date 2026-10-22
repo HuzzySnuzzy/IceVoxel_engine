@@ -112,6 +112,7 @@ function MachineWorld.new(env: Env): World
 			dayTime = NOON,
 			getBlock = env.getBlock,
 			sky = nil,
+			climate = env.climate,
 		},
 	}
 	world.ctx.sky = function(x: number, y: number, z: number): boolean

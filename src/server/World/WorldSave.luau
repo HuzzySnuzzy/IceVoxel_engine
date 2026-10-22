@@ -93,7 +93,10 @@
 	             published), or at once when registered later. "time" is the day clock's (day
 	             time and doDaylightCycle), "weather" the weather's (World/WeatherServer: its
 	             clock, doWeatherCycle and a /weather override with its time left, so storms go on
-	             where they were; a world saved without it starts clear at spawn, as a new one).
+	             where they were; a world saved without it starts clear at spawn, as a new one),
+	             "seasons" the calendar's (World/SeasonClock: { v = 1, offset, lock, lengths,
+	             day }; a world saved without it, and a new world, starts on Autumn's first day
+	             once its sections are back: SeasonClock.fresh).
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -116,6 +119,7 @@ local Server = script.Parent.Parent
 local ServerNet = require(Server.Network.ServerNet)
 local WorldServer = require(script.Parent.WorldServer)
 local TimeOfDay = require(script.Parent.TimeOfDay)
+local SeasonClock = require(script.Parent.SeasonClock)
 local Survival = require(Server.Apocalypse.Survival)
 local WeatherServer = require(script.Parent.WeatherServer)
 local Characters = require(Server.Players.Characters)
@@ -1101,6 +1105,20 @@ end, function(value: any)
 	end
 end)
 
+--[[
+	The seasons' calendar (World/SeasonClock: its offset, lock and lengths, and the calendar day
+	when saved, so it reads back whatever order the sections decode in). A world without it gets
+	Autumn's first day at the end of `restore`.
+]]
+WorldSave.registerSection("seasons", function(): any
+	return SeasonClock.encode()
+end, function(value: any)
+	if not SeasonClock.decode(value) then
+		warn("[IceVoxel] the saved seasons could not be read back: Autumn's first day again")
+		SeasonClock.fresh()
+	end
+end)
+
 --[[ The world ]]
 
 --[[
@@ -1171,6 +1189,10 @@ function WorldSave.restore(parts: WorldSnapshot.Systems)
 		end
 	end
 	restoredSections = true
+	-- (A new world, or one saved before the seasons: Autumn's first day now, after the clock.)
+	if savedSections.seasons == nil then
+		SeasonClock.fresh()
+	end
 	local ticker = parts.ticker
 	if ticker then
 		local world = parts.world

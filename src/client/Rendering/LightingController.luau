@@ -8,6 +8,10 @@
 	  Clock      the server's clock (workspace attributes, see server World/TimeOfDay) read with
 	             workspace:GetServerTimeNow(), so every client shows the same time with no traffic.
 	             ClockTime puts the sun at Minecraft's celestial angle (DayCycle.clockTime).
+	  Seasons    the server's calendar (workspace attributes, server World/SeasonClock), read
+	             into Shared/Seasons/Calendar's state at the start and whenever one changes, so
+	             the season's warp of the sun (DayCycle.solarTime) holds on this client for
+	             everything (the light, the sky, the music, the blood moon, the HUD).
 	  Daylight   Night to Day by Minecraft's sky brightness, warm Dusk colours mixed in around
 	             sunrise and sunset. Both follow the height of the sun Roblox draws
 	             (Lighting:GetSunDirection), which GeographicLatitude and the Earth's tilt move away
@@ -69,6 +73,7 @@ local Origin = require(Shared.World.Origin)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local AtmosphereModel = require(script.Parent.AtmosphereModel)
 local BloodMoonSky = require(script.Parent.BloodMoonSky)
+local Calendar = require(Shared.Seasons.Calendar)
 local SkyExposure = require(script.Parent.SkyExposure)
 local ViewSettings = require(script.Parent.ViewSettings)
 local WeatherSky = require(script.Parent.Parent.Weather.WeatherSky)
@@ -425,6 +430,24 @@ function LightingController.start(terrain: TerrainGenerator.Generator?, world: C
 		workspace:GetAttributeChangedSignal(name):Connect(function()
 			changed = true
 		end)
+	end
+	-- The seasons' calendar: the sun's warp everywhere on this client (see the header).
+	local function readSeasons()
+		Calendar.setState(Calendar.readAttributes(function(name: string): any
+			return workspace:GetAttribute(name)
+		end))
+		changed = true
+	end
+	readSeasons()
+	for _, name in
+		{
+			Calendar.ATTRIBUTE_ENABLED,
+			Calendar.ATTRIBUTE_OFFSET,
+			Calendar.ATTRIBUTE_LOCK,
+			Calendar.ATTRIBUTE_LENGTHS,
+		}
+	do
+		workspace:GetAttributeChangedSignal(name):Connect(readSeasons)
 	end
 
 	update(0)

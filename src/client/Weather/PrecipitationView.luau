@@ -245,7 +245,7 @@ local function layout(intensity: number)
 			continue
 		end
 		local low, high = Precipitation.span(entry.floor, cellY, radius)
-		local form = Weather.formAt(entry.temperature, x, entry.floor, z)
+		local form = Weather.formAt(entry.temperature, x, entry.floor, z, WeatherState.shiftAt(x, z))
 		local kind = if form == Weather.SNOW then SNOW elseif form == Weather.RAIN then RAIN else NONE
 		local level = Precipitation.level(intensity, column.edge)
 		if low == nil or kind == NONE or level == 0 then
@@ -284,7 +284,7 @@ local function landing(x: number, z: number): (number?, boolean)
 	if entry == nil then
 		return nil, false
 	end
-	return entry.floor, Weather.formAt(entry.temperature, x, entry.floor, z) == Weather.RAIN
+	return entry.floor, Weather.formAt(entry.temperature, x, entry.floor, z, WeatherState.shiftAt(x, z)) == Weather.RAIN
 end
 
 local function tickSound()

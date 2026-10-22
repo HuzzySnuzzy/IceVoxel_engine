@@ -2970,6 +2970,11 @@ Clients compute the time from these at every update, so a running clock costs no
   client could apply that change halfway.
 - `Lighting.ClockTime` is set by each client, never the server, so the two never fight.
 
+**Seasons.** The sun goes by the solar time (`DayCycle.solarTime`: the seasons' warp of each
+solar day, see Seasons): noon and midnight stay, winter's day half is shorter and summer's
+longer, so everything below follows the season while the clock itself (`now`, `day`,
+`timeInDay`, /time) never changes. With the seasons off the solar time is the day time.
+
 **Sun position.** `DayCycle.timeOfDay` is Minecraft's celestial angle (DimensionType.timeOfDay):
 it lingers around noon and passes midnight fastest, so Minecraft's sun is up for about 13600 of
 the 24000 ticks, and at tick 0 it is already 12° up. `clockTime = (12 + angle × 24) % 24` puts
@@ -3417,11 +3422,150 @@ again after `Map.RefreshSeconds`, when the map panned past its margin or zoomed,
 server's weather changed. Until a new picture is done the last one stays, placed on its own grid.
 The wind (speed and compass point) and its arrow show with the step.
 
-Not done: snow layers piling up and cauldrons filling (the game has no snow layer or cauldron
-blocks), Minecraft's charged creepers and skeleton horse traps (the game has neither mob); rain
+Seasons (see Seasons): the Moment carries the season's biases (`wetBias`, `thunderBias`) and its
+temperature shift (`formAt`'s `shift`, `Weather.seasonShift`): more rain in spring, less in
+summer, no thunder in winter, snow on winter plains; `WeatherServer.snowingAt` beside
+`rainingAt`. Snow layers pile up under the seasons' snowfall (Seasons/SnowWorld).
+
+Not done: cauldrons filling (the game has no cauldron block), Minecraft's charged creepers and skeleton horse traps (the game has neither mob); rain
 splashes (Minecraft's rain particles on the ground) and the sky box's own greying (Roblox's sky
 can't be tinted by a property, so the picture is graded instead); real rain, snow and thunder
 textures and sounds (stand-ins, set in Config and SoundList).
+
+## Seasons (`Seasons/`, server `World/SeasonClock`, `Seasons/RoomWorld`, `Seasons/SnowWorld`, client `Rendering/LightingController`, `Rendering/SeasonTint`, `Ui/SeasonHud`)
+
+Don't Starve's seasons, in its order: Autumn, Winter, Spring and Summer, 8 days each
+(`Config.Seasons.Lengths`), a world starting on Autumn's first day. `Config.Seasons.Enabled =
+false` makes every rule below the identity: the game is as it was without seasons (the specs
+check the identity wherever it is pure).
+
+**The calendar** (`Shared/Seasons/Calendar`, pure; it requires only Config: `DayCycle` requires
+it). One number is the whole state besides the switch and the lengths: an `offset` added to
+DayCycle's day count gives the calendar day (`Calendar.day`), or the locked day while
+doSeasonCycle is off. It exists so the clock and the calendar can move apart: `/time set` keeps
+the calendar (`Calendar.keep`: the offset takes the day's jump back), `/time add 8d` moves it on,
+`/season set` moves only the offset (`Calendar.offsetFor`), and the blood moons and the "Day N"
+line, which go by the day time alone, stay put. The calendar time (`Calendar.time`: the day plus
+the share of it gone, a day starting at sunrise) gives a `Position`: year, season, day (0-based),
+the season's length and days left, the progress through the season and the year. Nothing derived
+from it is stored or sent: like the blood moon it is worked out every frame on every side.
+- *Blending.* Every quantity a season changes is given per season and read with
+  `Calendar.value`: a smoothstep over `BlendDays` (2) centred on each turn (the old season's last
+  day and the new one's first, about 40 minutes of play), so nothing ever steps. The season's
+  label turns at sunrise of its first day.
+- *The sun.* The day keeps its 20 minutes (a variable rate would break the closed-form clock).
+  Instead `Calendar.solarTime` warps the time within each solar day (midnight to midnight):
+  noon and midnight stay, the day half around noon spans `k x` half the day (`DaylightScale`:
+  autumn 1, winter 0.8, spring 1, summer 1.2; one k per solar day, so it changes only at
+  midnight), the night half the rest; piecewise linear, continuous, monotonic, the identity at k
+  = 1. `DayCycle.timeOfDay` takes the solar time, so everything built on the sun (ClockTime, the
+  light, isDay: solar panels, zombies, the music, the night's cold) follows: Minecraft's isDay
+  covers 45 % of a winter day (9.1 minutes) and 64 % of a summer one (12.7). What goes by the
+  night's ticks rather than the sun reads `DayCycle.solarDay` / `solarTimeInDay`: the blood moon
+  (`BloodMoon`, the server's survivor records, `Ui/SurvivorLine`, the zombie director's moon
+  number), so a winter blood moon still rises at the same place of the seasonal sunset.
+- *State and attributes.* The module keeps a state (`setState` / `state`, as Weather.setSeed)
+  that every function defaults to; it starts disabled (the identity) until the server's
+  `World/SeasonClock` sets it at its start and the client's `Rendering/LightingController` reads
+  the attributes (`IceVoxelSeasonsEnabled`, `IceVoxelSeasonOffset`, `IceVoxelSeasonLock`,
+  `IceVoxelSeasonLengths`: `Calendar.writeAttributes` / `readAttributes`; disabled before the
+  server published them).
+
+**The server's clock** (`World/SeasonClock`). Starts before the weather (its Moment reads the
+calendar); publishes when something changes and again every 60 s, as TimeOfDay. The debug worlds
+publish disabled. `setSeason(season, day)`, `setLocked(on)`, `keepCalendar(old, new)` and a
+`changed` event; `/season query|set` and `/gamerule doSeasonCycle` (`Players/SeasonCommand`, pure,
+and its glue) use them, and `/time set` keeps the calendar through them. Saved as WorldSave's
+section `"seasons"`: `{ v = 1, offset, lock, lengths, day }` (`Calendar.encode`); `decode`
+re-anchors a save made with other lengths (the season and the progress through it are kept, the
+offset worked out again from the saved day alone, so the sections' decode order never matters).
+A world without the section (a new world, or one saved before the seasons) gets
+`Calendar.fresh` once the sections are back: Autumn's first day at that moment, so every world
+has the same 8 mild days before its first winter.
+
+**The climate** (`Shared/Seasons/SeasonClimate`, pure). Biome classes: cold (tundra, taigas,
+grove, snowy slopes, jagged and frozen peaks), dry (desert, savannas), tropical (jungle,
+mushroom fields), else temperate, with an amplitude (1, 1, 0.75, 0.5). `sample(dayTime, class,
+seed)` gives the season's `shift` (Tough As Nails' climate units, the amplitude and a heat wave
+in), `nightDrop` (instead of 0.3), the weather's `weatherShift`, `wetBias`, `thunderBias`,
+plants' `growth`, the far landscape's `snowCover` and the `heatWave` (a summer day is one with p
+0.3 by `Util/Hash` of the day and the seed, never two in a row, bumping +0.3 from 09:00 to 18:00).
+`snowCap` is the most layers a column piles up (cold 6, temperate 3, tropical 1, dry 0; +1 every
+64 blocks above y 160; a drift of one), `melts` where Minecraft's temperature is 0.05 over the
+snow line. The resulting targets (tests/spec/SeasonClimate checks the table with the real
+`Temperature.target`): a winter night outdoors without gear is ICY in every temperate biome
+(plains -9: from neutral icy in 56 s, frozen 20 s later, dead about 3 minutes on), a bare roof
+leaves a winter plain COLD (-7) and a birch forest ICY, a summer heat wave makes temperate biomes
+HOT, and a desert room stays 10 (the AC matters there).
+
+**Weather** (`Shared/Weather`). `Weather.momentAt(state, now, into, season)` copies the season's
+biases into the Moment; `World/WeatherServer` and the client's `Weather/WeatherState` pass the
+season of their day time (a forecast the season then), so both build the same Moments.
+`wetBias` lowers the rain's and the clouds' low thresholds (WeatherModel), `thunderBias` the
+thunder's (-1: none), and what falls is the biome temperature plus `Weather.seasonShift` (the
+season's shift times the biome's amplitude): a winter plain (0.8 - 0.8) snows, a jungle (0.95 -
+0.4) rains. Rain shares: autumn 22-24 %, winter 24-27 %, spring 30-32 %, summer 13-15 %
+(tests/spec/Weather); with the biases at 0 the field is the calibrated one to the bit.
+`WeatherServer.snowingAt` is `rainingAt` for snow: snow on players chills by one step
+(Temperature `snowedOn`) without wetting them.
+
+**Rooms** (`Shared/Seasons/Rooms`, server `Seasons/RoomWorld`). An enclosed, insulated space
+(a flood fill over passable cells, every block's U a face from `Blocks.insulation`: BlockList
+`insulation`, by material by default) whose air has a temperature: `C dT/dt = P - uaOut (T -
+outside) - uaGround T`, `outside` the sheltered outdoor value. A player in one takes its air as
+step 1 of the target (Temperature `room`), where the proximity modifiers give way to a radiant
+source's +2. Heat (`P`) comes from room sources (`Players/Climate.addRoomSource`: a campfire 20
+HU, fire 15, lava 10, a lit furnace 8, a working generator 10, a player 1, and the heaters',
+coolers' and stoves' `heat` field), so RoomWorld never requires the machines. Machines see
+their room through `TickContext.climate` (`Machines.start`'s env: `RoomWorld.climateAt`); a
+thermostat's heat is `Rooms.thermostat` (proportional feed-forward). The rooms are the server's
+alone; players learn of theirs in the Survival message (`room`, `outside`: the thermometer's
+"Room +1 · Out -9").
+
+**Heaters, coolers and stoves** (Shared/Machines kinds "stove", "oilheater", "heater",
+"cooler"). The Wood Stove and the Oil Heater are fuel-only machines (`fuelOnly`, BlockList
+`energy = { capacity = 0 }`): `Machines.hasEnergy` is false for them, so cables never connect
+and the energy networks never see them (EnergyNet skips machines without energy, even touching
+ones). Panels may carry buttons (`KindSpec.buttons`, Minecraft's container buttons): a click is
+Inventory Action `{ kind = "button", window, button }`, data only (Inventory/Menu predicts
+nothing), and the server runs the kind's `onButton` (`Machines.button`). The data layouts are
+frozen (saved items keep the set point): heater and cooler `setPoint, heat, state, activeDelay,
+on`; stove `burnTime, burnTotal, on, heat, state`; oil heater `setPoint, heat, state, burning,
+on`, then its tank `fuel` and `fuelFluid`. Their state codes are `Seasons/HeatStates`.
+
+**Snow layers** (BlockList `SnowLayer1..8`, `Shared/Seasons/SnowLayers`, server
+`Seasons/SnowWorld`). Two pixels a layer, transparent boxes that merge (no `shape`), each height
+an appearance of its own whose top the renderer lowers (`Blocks.layerLut`); layers 2+ collide a
+layer lower than they look and stop rain, layer 1 is walked through and replaceable, only the
+eighth is sturdy. `stackOnto`, `supports`, `speedFactor` (deep snow slows walking: Movement and
+mobs multiply the ground speed by `Blocks.speedFactor`). Snowfall and thaw visit 4 x 4 tiles of
+the active chunks (`SnowLayers.accumulate` / `melt`), the heat of fires and machines melts snow
+near them, and still water freezes from its edges in winter.
+
+**The natural map** (`World/WorldServer`). A winter would leave thousands of edits (every snow
+layer, then every melt back to air, is an edit). So weather writes go through
+`world:setWeather`, which first records what the seed generated at a cell with no edit
+(`world.natural`); a later `setBlock` back to that block deletes the edit instead of storing it
+(still replicated, still `onChanged`). A player's edit on such a cell is kept as any edit. It is
+saved as RegionCodec record 12 NATURAL beside the edits (`Save/WorldSnapshot`); builds before it
+refuse the record, the documented "newer version" path.
+
+**Foliage colours** (`Shared/Seasons/Foliage`, client `Rendering/SeasonTint`; data
+`Config.Seasons.Foliage`). Grass tops, leaves, tinted plants and vines move through the year's
+keyframes; live parts are recoloured in place by ChunkRenderer's budgeted sweep (Part.Color, the
+top Texture's Color3, sprite Decals), new parts get the current colour at build, far meshes are
+rebuilt when their palette moved far enough. Items keep the authored colours.
+
+**The season clock** (client `Ui/SeasonClock`, `Ui/SeasonHud`, `Ui/SeasonLine`). A dial beside
+the minimap: the year's seasons around it, the day's 16 segments (by the warped sun) inside, the
+day number, and a caption ("WINTER · 3 DAYS LEFT", "HEAT WAVE"); toasts when a season turns and
+a heat wave dawns, through the HUD's one notice queue. Options > HUD > Season Clock (setting 64).
+
+**Who owns what.** The pure rules are `Shared/Seasons/*`, the rest is thin glue: SeasonClock
+(attributes, section), RoomWorld (cache, budget), SnowWorld (sampling), SeasonHud, SeasonTint
+(the sweep's driver), the commands' glue. `Shared/Seasons/*` require only Config, Blocks, Biomes,
+World/Coords, Util/Hash and each other, never Shared/Machines, Transmitters, Inventory/Menu,
+DayCycle or client modules (Weather and DayCycle require them).
 
 ## Game modes (`GameMode`, server `Players/GameModes` and `Players/GameModeRules`)
 
@@ -4802,6 +4946,19 @@ icons list the same three, with their time). `Ui/SurvivalHud` keeps only the fro
 closing in from the screen's edges as `frozen` / `heat` rise (a ScreenGui of its own behind the
 HUD, in `Theme`'s Frost and Heat). F3 prints a `survival` line with all the numbers.
 
+**Seasons** (see Seasons; every field optional, the old rules hold without them). While the
+calendar is on, `Players/Climate.environment` takes the season's sample for the column's biome
+class (`seasonShift` on the climate outdoors and under a roof, never underground; `nightDrop`
+instead of 0.3, reaching under roofs too), the room at the feet (`room`: step 1 is its air,
+rounded; in a room the +3 / +5 / -3 proximity modifiers give way to a radiant source's
+`RADIANT_IN_ROOM` +2) and snow falling on the player (`snowedOn` -1, no wetting). A freeze immune
+piece no longer stops hypothermia (`Temperature.freezeImmune`,
+`Config.ToughAsNails.LeatherFreezeImmunity`; leather keeps its warmth), and the COLD zone and
+below cost food (`Temperature.coldExhaustion`, `ColdExhaustion` 0.005 a tick: shivering, the
+mirror of the HOT zone's sweating). The Survival message is 19 bytes: the room's air (-128: none)
+and the outside value, in half steps. The seasons' heaters and stoves are heat sources (the stoves
+radiant), the coolers cold sources, while their `heat` says so.
+
 ## Status effects (`Effects/`, server `Players/Effects`, client `Player/EffectState`, `Ui/EffectHud`, `Rendering/EffectView`)
 
 Minecraft 1.20.1's MobEffect and MobEffectInstance, this game's two from the fluids and Tough As
@@ -5792,6 +5949,15 @@ or "Idle" at (30, 20), right of the gauge. Its item keeps its energy, fuel and `
 fuelPerTick 1/4, energyPerMb 10 000. Recipe: "OBO", "IFI", "ODO" (osmium, a bucket; iron, a
 furnace; glow dust): Mekanism's generator shape around BuildCraft's engine, glow dust standing
 for redstone as in the cables. Left out: BuildCraft's coolant and heat.
+
+**Seasons' machines** (see Seasons): a kind may be `fuelOnly` (BlockList `energy = { capacity =
+0 }`: no energy, `Machines.hasEnergy` false, no cable connects, the energy networks skip it, the
+panel has no energy bar and WAILA no energy line), have panel `buttons` (Inventory Action
+"button", `Machines.button` runs its `onButton` on the server) and `defaults` for fresh data;
+`TickContext.climate(x, y, z)` gives a kind the room next to it and the outside value
+(`Machines.start`'s env from `Seasons/RoomWorld.climateAt`; nil and 0 outdoors or in tests). The
+Wood Stove, Oil Heater, Electric Heater, Air Conditioner and Electric Fan are kinds "stove",
+"oilheater", "heater" and "cooler" (Machines/Kinds), their layouts frozen.
 
 **A new machine:** a BlockList block with `machine` and `energy`, a module in
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
@@ -8617,6 +8783,15 @@ Saving worlds).
   tanks, at most 16 values in all. Kind ticks replace slot stacks (never change a stack table) and
   add or use energy through `Machines.produce` / `use`, so energy stays exact.
 - Machines and cables only come from edits, like pipes.
+- Seasons: the calendar is a function of the day time and one published offset on every side;
+  never store or send what derives from it (positions, the warp, the season's climate). Specs
+  prove every rule the identity with the seasons off. `Shared/Seasons/*` require only Config,
+  Blocks, Biomes, World/Coords, Util/Hash and each other (DayCycle and Weather require them, never
+  the reverse); RoomWorld never requires the machines (room sources through Players/Climate) and
+  kinds never RoomWorld (`TickContext.climate`). Weather writes (snow, ice) go through
+  `world:setWeather`, so melting back deletes their edits (the natural map); a heaters' or
+  stoves' data layout is frozen (saved items), and the Survival message and the button action
+  ship with both ends.
 - Kind modules require Machines/Core, Machines/Upgrades and plain shared modules (Items,
   Crafting/Smelting, DayCycle, Fluids), never Shared/Machines, Inventory/Menu or Shared/Transmitters
   (those require Machines: a cycle). A kind keeps per-machine state in its data fields, not in
@@ -8698,7 +8873,10 @@ Saving worlds).
 - Looks come only from `Rendering/TextureLooks`: PartPool, ChunkRenderer, MeshOverlay (through
   `setLooks`) and ItemModels ask it, so near, far, plain, meshed and item looks agree. A change of
   looks goes through its generations and `changed` / `itemsChanged`, and what it touches is
-  rebuilt in the background lane, never all at once.
+  rebuilt in the background lane, never all at once. The one exception is a colour-only
+  seasonal change (Seasons' foliage): ChunkRenderer's budgeted sweep applies it in place, with
+  colours from TextureLooks, to parts live in a record only; materials, variants and images
+  never change that way.
 - Mob kinds (`Entities/MobList` positions) go on the wire as a u8: append, never reorder. Mobs
   only tick in the chunks World/Simulation keeps (loaded, near a player) and read blocks with
   `peekBlock`; spawning never generates terrain and never places a mob in a chunk that doesn't

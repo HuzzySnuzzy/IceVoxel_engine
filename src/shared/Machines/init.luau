@@ -41,6 +41,7 @@ export type Tank = Core.Tank
 export type TankGauge = Core.TankGauge
 export type TankContents = Core.TankContents
 export type ButtonSpec = Core.ButtonSpec
+export type RoomSample = Core.RoomSample
 
 -- Every machine kind (append one line per kind module).
 require(script.Kinds.Creative)

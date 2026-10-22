@@ -1141,6 +1141,87 @@ return function(t, shared, require, server)
 		t.eq(Temperature.target(e), 5, "plains at night (-2), sprinting, a lit table at 1, ice at 4")
 	end)
 
+	t.test("climate (seasons): the season, the room at the feet, snow, radiant and room sources", function()
+		local blocks: { [string]: number } = {}
+		local room: any = nil
+		local snowing = false
+		local view = {
+			getBlock = function(x, y, z)
+				return blocks[`{x},{y},{z}`] or Blocks.AIR
+			end,
+			column = function(_x, _z)
+				return 64, assert(Biomes.byName("Plains")).index
+			end,
+			skyOpen = function(_x, _y, _z)
+				return true
+			end,
+			room = function(_x, _y, _z)
+				return room
+			end,
+			snowing = function(_x, _y, _z)
+				return snowing
+			end,
+		}
+		local body = { wet = false, sprinting = false, burning = false, armorWarmth = 0, armorCooling = 0 }
+		local winter = season("Plains", WINTER_NIGHT)
+		-- Without a season none of it is looked at: as before.
+		room, snowing = { temperature = 3, id = 1 }, true
+		local plain = Climate.environment(view, 0.5, 64, 0.5, 18000, body)
+		t.eq(plain.room, nil)
+		t.eq(plain.snowedOn, nil)
+		t.eq(plain.seasonShift, nil)
+		-- With one: the shift and night drop, the room's air, the snow on the player.
+		local e = Climate.environment(view, 0.5, 64, 0.5, 18000, body, winter)
+		t.eq(e.seasonShift, winter.shift)
+		t.eq(e.nightDrop, winter.nightDrop)
+		t.eq(e.room, 3, "the room's air")
+		t.eq(e.snowedOn, true)
+		t.eq(Temperature.target(e), 2, "the room (3), snowed on (-1)")
+		room, snowing = nil, false
+		e = Climate.environment(view, 0.5, 64, 0.5, 18000, body, winter)
+		t.eq(e.room, nil, "outdoors")
+		t.eq(Temperature.target(e), -9, "a plains winter night")
+		-- Radiant sources (fire, lava, campfires, the stoves) warm in a room; a convective one doesn't.
+		room = { temperature = 0, id = 1 }
+		blocks["1,64,0"] = B.Campfire
+		e = Climate.environment(view, 0.5, 64, 0.5, 18000, body, winter)
+		t.eq(e.radiant, true)
+		t.eq(Temperature.target(e), 2, "a campfire beside you in a room: +2")
+		t.ok(Climate.isRadiant(B.Fire) and Climate.isRadiant(B.Campfire), "fire and campfires")
+		t.ok(Climate.isRadiant(Blocks.fluidId("Lava", 0)), "lava")
+		blocks["1,64,0"] = nil
+		-- Room sources: what a block gives a room's air, and how many count.
+		local campfire, campfires = Climate.roomSource(B.Campfire)
+		t.eq(assert(campfire)(0, 0, 0, B.Campfire), Config.Seasons.Heat.Campfire)
+		t.eq(campfires, nil, "every campfire counts")
+		local fire, fires = Climate.roomSource(B.Fire)
+		t.eq(assert(fire)(0, 0, 0, B.Fire), 15)
+		t.eq(fires, 3, "three fires at most")
+		local lava, lavas = Climate.roomSource(Blocks.fluidId("Lava", 0))
+		t.eq(assert(lava)(0, 0, 0, 0), 10)
+		t.eq(lavas, 6)
+		t.eq(Climate.roomSource(B.Stone), nil)
+		t.eq(Climate.PLAYER_HU, 1)
+		local made = Climate.addRoomSource(B.Chest, function()
+			return -4
+		end, 2)
+		t.eq(made, 1)
+		t.eq(assert(Climate.roomSource(B.Chest))(0, 0, 0, 0), -4)
+		-- A cold source may have a check too (a cooler while it cools).
+		local cooling = false
+		Climate.addColdSource(B.GlowBlock, function()
+			return cooling
+		end)
+		blocks["0,64,2"] = B.GlowBlock
+		local _, cold = Climate.sources(view, 0, 64, 0, settings.ProximityRadius)
+		t.eq(cold, nil, "not cooling")
+		cooling = true
+		_, cold = Climate.sources(view, 0, 64, 0, settings.ProximityRadius)
+		t.eq(cold, 2, "cooling")
+		-- (Registries are module state: leave the stand-ins idle for the specs after.)
+		cooling = false
+	end)
+
 	--[[ Protocol ]]
 
 	t.test("protocol: Exertion, Drink and Survival round trips; malformed payloads", function()

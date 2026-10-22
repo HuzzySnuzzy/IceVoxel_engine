@@ -25,6 +25,11 @@
 	  Wind      `wind()`: blocks a second now; `displacement()`: how far the air has moved (the
 	            clouds' frame).
 
+	Seasons: the moment carries the season of the day time (Shared/Seasons/SeasonClimate from the
+	calendar Rendering/LightingController keeps, as the server's World/WeatherServer does), a
+	forecast's moment the season then; what falls follows the season's shift of the column's biome
+	(`formAt`, `shiftAt`: Weather.seasonShift). With the calendar off nothing changes.
+
 	Before the server has published anything the weather is off (always clear), as
 	Weather.readState says.
 ]]
@@ -38,6 +43,7 @@ local DayCycle = require(Shared.DayCycle)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local Weather = require(Shared.Weather)
 local Origin = require(Shared.World.Origin)
+local SeasonClimate = require(Shared.Seasons.SeasonClimate)
 
 -- (Pure: the wind's words, as the maps write them.)
 local WeatherMap = require(script.Parent.Parent.Map.WeatherMap)
@@ -77,9 +83,27 @@ WeatherState.cameraX = 0
 WeatherState.cameraY = 0
 WeatherState.cameraZ = 0
 
--- Column key -> Minecraft temperature (NO_TEMPERATURE: nothing falls) and ground height.
+-- Column key -> Minecraft temperature (NO_TEMPERATURE: nothing falls), ground height and biome.
 local temperatures: { [number]: number } = {}
 local grounds: { [number]: number } = {}
+local biomes: { [number]: number } = {}
+-- The season of the day time now, and of a forecast's (SeasonClimate samples, reused).
+local season: SeasonClimate.Sample = SeasonClimate.sample(0, "temperate", 0)
+local forecastSeason: SeasonClimate.Sample = SeasonClimate.sample(0, "temperate", 0)
+
+-- The day time `seconds` from now, from the server's clock attributes (server World/TimeOfDay).
+local function dayTimeIn(seconds: number): number
+	local function number(name: string, fallback: number): number
+		local value = workspace:GetAttribute(name)
+		return if type(value) == "number" then value else fallback
+	end
+	return DayCycle.now(
+		number(DayCycle.ATTRIBUTE_TIME, Config.Time.StartTime),
+		number(DayCycle.ATTRIBUTE_SYNC, 0),
+		workspace:GetServerTimeNow() + seconds,
+		number(DayCycle.ATTRIBUTE_RATE, 0)
+	)
+end
 local columnCount = 0
 
 local function read(name: string): any
@@ -101,9 +125,17 @@ function WeatherState.enabled(): boolean
 	return state.enabled and field ~= nil
 end
 
--- The moment `seconds` from now (a forecast), written into `into` when given.
+-- The moment `seconds` from now (a forecast, with the season then), written into `into` when
+-- given.
 function WeatherState.momentIn(seconds: number, into: Weather.Moment?): Weather.Moment
-	return Weather.momentAt(state, workspace:GetServerTimeNow() + seconds, into)
+	forecastSeason = SeasonClimate.sample(dayTimeIn(seconds), "temperate", 0, nil, forecastSeason)
+	return Weather.momentAt(state, workspace:GetServerTimeNow() + seconds, into, forecastSeason)
+end
+
+-- The season of the day time at server time `serverTime` (for moments made elsewhere:
+-- Weather/StormView), a fresh sample.
+function WeatherState.seasonAt(serverTime: number): SeasonClimate.Sample
+	return SeasonClimate.sample(dayTimeIn(serverTime - workspace:GetServerTimeNow()), "temperate", 0)
 end
 
 -- Precipitation, thunder and cover at (x, z) at `moment` (default this frame's); 0s without weather.
@@ -146,12 +178,14 @@ local function column(x: number, z: number): (number?, number)
 		if columnCount >= COLUMNS then
 			table.clear(temperatures)
 			table.clear(grounds)
+			table.clear(biomes)
 			columnCount = 0
 		end
 		local height, biome = terrain.column(x, z)
 		temperature = Weather.biomeTemperature(biome) or NO_TEMPERATURE
 		temperatures[key] = temperature
 		grounds[key] = height
+		biomes[key] = biome
 		columnCount += 1
 	end
 	local value = temperature :: number
@@ -177,10 +211,18 @@ function WeatherState.knows(x: number, z: number): boolean
 	return temperatures[math.floor(x) * COLUMN_SPAN + math.floor(z)] ~= nil
 end
 
+-- The season's temperature shift at column (x, z) this frame (Weather.seasonShift of its biome).
+function WeatherState.shiftAt(x: number, z: number): number
+	local cx, cz = math.floor(x), math.floor(z)
+	column(cx, cz)
+	local biome = biomes[cx * COLUMN_SPAN + cz]
+	return if biome then Weather.seasonShift(WeatherState.moment, biome) else 0
+end
+
 -- What falls at (x, y, z) ("rain", "snow" or ""); y nil: on the natural ground.
 function WeatherState.formAt(x: number, y: number?, z: number): string
 	local temperature, ground = column(math.floor(x), math.floor(z))
-	return Weather.formAt(temperature, x, y or ground, z)
+	return Weather.formAt(temperature, x, y or ground, z, WeatherState.shiftAt(x, z))
 end
 
 local function update(dt: number)
@@ -190,7 +232,8 @@ local function update(dt: number)
 		changedEvent:Fire()
 	end
 	local now = workspace:GetServerTimeNow()
-	local moment = Weather.momentAt(state, now, WeatherState.moment)
+	season = SeasonClimate.sample(dayTimeIn(0), "temperate", 0, nil, season)
+	local moment = Weather.momentAt(state, now, WeatherState.moment, season)
 	-- (The camera in world blocks: Shared/World/Origin.)
 	local camera = workspace.CurrentCamera
 	local px, py, pz = 0, 0, 0

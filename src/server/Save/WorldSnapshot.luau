@@ -19,7 +19,8 @@
 	             state now (the next save's `previous`).
 	  applyEdits the loaded regions' edits become the world's edit lists before anything else
 	             starts: WorldServer overlays them on every chunk it generates, so nothing else is
-	             needed for terrain.
+	             needed for terrain. The seasons' natural map (WorldServer `natural`: what the seed
+	             made where the weather wrote) goes with the edits, both ways.
 	  restore    after every system started, before the world is published (no player is in it
 	             yet): generated chests asked about, containers (the block's fresh container with
 	             the saved slots and data copied in: a furnace's cooking resumes, a machine keeps
@@ -244,6 +245,20 @@ function WorldSnapshot.collect(
 			region.chunks[key] = edits
 		end
 	end
+	local naturalMap: { [number]: { [number]: number } } = systems.world.natural or {}
+	for key, naturals in naturalMap do
+		local cx, cz = Coords.decodeChunkKey(key)
+		local rx, rz = RegionCodec.regionOf(cx, cz)
+		local name = RegionCodec.name(rx, rz)
+		if wanted[name] and next(naturals) ~= nil then
+			local region = regions[name]
+			if region == nil then
+				region = RegionCodec.new(rx, rz)
+				regions[name] = region
+			end
+			region.natural[key] = naturals
+		end
+	end
 	for name in wanted do
 		if regions[name] == nil then
 			local rx, rz = RegionCodec.parseName(name)
@@ -285,6 +300,18 @@ function WorldSnapshot.applyEdits(world: WorldServer.World, regions: { Region })
 				end
 			else
 				world.edits[key] = edits
+			end
+		end
+		if world.natural then
+			for key, naturals in region.natural do
+				local existing = world.natural[key]
+				if existing then
+					for index, block in naturals do
+						existing[index] = block
+					end
+				else
+					world.natural[key] = naturals
+				end
 			end
 		end
 	end

@@ -24,6 +24,8 @@
 	  mobs        farm animals: kind, colour, position, facing, health
 	  ticks       scheduled block updates still due (flowing fluids, falling blocks), in ticks
 	              from the save; they are scheduled again when their chunk is generated
+	  natural     the seasons' natural map (World/WorldServer `natural`: chunk key -> local index
+	              -> the generated block), beside the edits of the cells it is for
 
 	Stream: u8 VERSION, zigzag rx, zigzag rz, varint RegionChunks, then records (u8 tag, varint
 	length, payload), each read back exactly to its length (anything else is a damaged save):
@@ -43,6 +45,10 @@
 	  9 ITEM       f64 x, y, z, varint age, varint pickup delay, stack
 	 10 MOB        u8 kind, u8 variant, f64 x, y, z, f32 yaw, f32 health
 	 11 TICKS      varint n + n x (position, varint delay)
+	 12 NATURAL    what the seed generated at cells the seasons' weather changed (World/
+	               WorldServer's natural map: snow and ice that melting deletes), as EDITS: u16
+	               chunk, varint runs of index gap + block. Builds before it refuse the record
+	               (an unknown record: "played but not saved", World/WorldSave).
 	Unknown block ids, items and mob kinds (a save from a newer version) are dropped one by one.
 
 	Parts (`split` / `join`): a stream longer than a key holds is cut into parts of at most
@@ -111,6 +117,8 @@ export type Region = {
 	items: { ItemRecord },
 	mobs: { MobRecord },
 	ticks: { TickRecord },
+	-- Chunk key -> local index -> the block the seed generated (World/WorldServer `natural`).
+	natural: { [number]: { [number]: number } },
 	-- Edits, items and mobs dropped while reading (ids this version doesn't know).
 	dropped: number,
 }
@@ -124,6 +132,7 @@ local CELLS = SIZE * SIZE * HEIGHT
 
 local EDITS, CONTAINER, SOURCED, STRUCTURE, JIGSAW, PIPE, TANK, TRANSPORT, ITEM, MOB, TICKS =
 	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+local NATURAL = 12
 RegionCodec.TAGS = table.freeze({
 	EDITS = EDITS,
 	CONTAINER = CONTAINER,
@@ -136,6 +145,7 @@ RegionCodec.TAGS = table.freeze({
 	ITEM = ITEM,
 	MOB = MOB,
 	TICKS = TICKS,
+	NATURAL = NATURAL,
 })
 
 local KIND_CODE: { [string]: number } = {}
@@ -194,6 +204,7 @@ function RegionCodec.new(rx: number, rz: number): Region
 		items = {},
 		mobs = {},
 		ticks = {},
+		natural = {},
 		dropped = 0,
 	}
 end
@@ -211,6 +222,7 @@ function RegionCodec.isEmpty(region: Region): boolean
 		and #region.items == 0
 		and #region.mobs == 0
 		and #region.ticks == 0
+		and next(region.natural) == nil
 end
 
 -- Edits in the region.
@@ -249,7 +261,14 @@ local function record(w: Writer, tag: number, body: Writer)
 	SaveCodec.bytes(w, body.b, body.n)
 end
 
-local function encodeEdits(w: Writer, region: Region, chunkKey: number, edits: { [number]: number }, scratch: Writer)
+local function encodeEdits(
+	w: Writer,
+	region: Region,
+	chunkKey: number,
+	edits: { [number]: number },
+	scratch: Writer,
+	tag: number?
+)
 	local indices: { number } = {}
 	for index in edits do
 		table.insert(indices, index)
@@ -287,7 +306,7 @@ local function encodeEdits(w: Writer, region: Region, chunkKey: number, edits: {
 	end
 	SaveCodec.varint(scratch, count)
 	SaveCodec.bytes(scratch, runs.b, runs.n)
-	record(w, EDITS, scratch)
+	record(w, tag or EDITS, scratch)
 end
 
 local function encodeContainer(w: Writer, region: Region, entry: ContainerRecord, scratch: Writer)
@@ -414,6 +433,14 @@ function RegionCodec.encode(region: Region): buffer
 		SaveCodec.f32(scratch, entry.health)
 		record(w, MOB, scratch)
 	end
+	local naturalKeys: { number } = {}
+	for key in region.natural do
+		table.insert(naturalKeys, key)
+	end
+	table.sort(naturalKeys)
+	for _, key in naturalKeys do
+		encodeEdits(w, region, key, region.natural[key], scratch, NATURAL)
+	end
 	if #region.ticks > 0 then
 		scratch.n = 0
 		SaveCodec.varint(scratch, #region.ticks)
@@ -428,7 +455,8 @@ end
 
 --[[ Decoding ]]
 
-local function decodeEdits(r: Reader, region: Region)
+local function decodeEdits(r: Reader, region: Region, into: { [number]: { [number]: number } }?)
+	local chunks = into or region.chunks
 	local n = RegionCodec.chunks()
 	local place = SaveCodec.readU16(r)
 	local lcx, lcz = place // n, place % n
@@ -436,10 +464,10 @@ local function decodeEdits(r: Reader, region: Region)
 		error("chunk outside its region", 0)
 	end
 	local key = Coords.chunkKey(region.rx * n + lcx, region.rz * n + lcz)
-	local edits = region.chunks[key]
+	local edits = chunks[key]
 	if edits == nil then
 		edits = {}
-		region.chunks[key] = edits
+		chunks[key] = edits
 	end
 	local runs = SaveCodec.readVarint(r)
 	local cell, block = 0, -1
@@ -465,7 +493,7 @@ local function decodeEdits(r: Reader, region: Region)
 		cell += length
 	end
 	if next(edits) == nil then
-		region.chunks[key] = nil
+		chunks[key] = nil
 	end
 end
 
@@ -590,6 +618,8 @@ local function decodeRecord(r: Reader, region: Region, tag: number)
 			local x, y, z = readPosition(r, region)
 			table.insert(region.ticks, { x = x, y = y, z = z, delay = math.max(1, SaveCodec.readVarint(r)) })
 		end
+	elseif tag == NATURAL then
+		decodeEdits(r, region, region.natural)
 	else
 		error(`unknown record {tag} in save`, 0)
 	end

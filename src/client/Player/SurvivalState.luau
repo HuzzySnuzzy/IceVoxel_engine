@@ -64,6 +64,19 @@ function SurvivalState.tooHungry(mode: string): boolean
 	return food ~= nil and not Hunger.canSprint(food, mode)
 end
 
+--[[
+	The seasons' room (Protocol Survival, server Seasons/RoomWorld): the air temperature of the room
+	this player stands in (nil: none, or nothing from the server yet) and the outdoor value where
+	they stand (Temperature's scale, half steps): the thermometer's "Room +1 · Out -9".
+]]
+function SurvivalState.room(): (number?, number?)
+	local status = current
+	if status == nil then
+		return nil, nil
+	end
+	return status.room, status.outside
+end
+
 -- Is hand drinking on (Config.ToughAsNails.HandDrinking)?
 function SurvivalState.handDrinking(): boolean
 	return Config.ToughAsNails.HandDrinking == true

@@ -184,6 +184,47 @@ return function(t, shared, require, server, client)
 		t.eq(SurvivorLine.TOASTS.tonight, "A Blood Moon rises tonight")
 	end)
 
+	t.test("survivor (seasons): a winter moon counts and toasts by the sun's night", function()
+		local Calendar = require(shared.Seasons.Calendar)
+		local before = Calendar.state()
+		local s = Calendar.newState()
+		s.enabled = true
+		Calendar.setState(s)
+		local ok, err = pcall(function()
+			-- Night 15 (day 14) is mid winter: its moon sets after the clock's midnight.
+			local day = 14
+			t.ok(BloodMoon.isBloodDay(day, moon))
+			local record = SurvivalRules.new()
+			t.eq(watch(record, at(day, 6000), at(day + 1, 3000)), 1, "rise to set, past midnight")
+			local function events(from: number, to: number): string
+				return table.concat(SurvivorLine.events(from, to, moon), ",")
+			end
+			local rise, set = nil, nil
+			local up = false
+			for tick = at(day, 6000), at(day + 1, 6000), 10 do
+				local active = BloodMoon.active(tick, moon)
+				if active and not up then
+					rise = tick
+				elseif up and not active then
+					set = tick
+				end
+				up = active
+			end
+			assert(rise and set)
+			t.ok(rise < at(day, moon.Start), "rises earlier than the clock's Start: the winter sun sets early")
+			t.ok(set > at(day + 1, 0), "and sets after the clock's next day began")
+			t.eq(events(rise - 10, rise), "rises")
+			t.eq(events(set - 10, set), "sets")
+			local text, notice = SurvivorLine.text(at(day + 1, 100), nil, true, moon)
+			t.eq(text, `Day {day + 2}`, "the line's day is the clock's")
+			t.eq(notice, "Blood Moon", "the moon is still up")
+		end)
+		Calendar.setState(before)
+		if not ok then
+			error(err, 0)
+		end
+	end)
+
 	t.test("survivor: 'You survived the Blood Moon' needs the clock's set and the server's count", function()
 		local seconds = SurvivorLine.CONFIRM_SECONDS
 		local pending: SurvivorLine.Pending = {}

@@ -40,7 +40,9 @@
 	                   and Characters; World/Nuke: the Nuke's crater, dug a budget a tick)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet), and
 	                   the sounds players should hear (Audio/Sounds)
-	  5. clock      -> the day time, published to the clients (World/TimeOfDay), and the weather
+	  5. clock      -> the day time, published to the clients (World/TimeOfDay), the seasons'
+	                   calendar (World/SeasonClock: published the same way, before the weather,
+	                   whose Moment carries the season; none in the debug worlds), and the weather
 	                   (World/WeatherServer: its clock and /weather's overrides, published the same
 	                   way; rain on fire, players and the undead; lightning near players, whose
 	                   strikes hurt through Players/Characters and Mobs/Mobs once they start; none
@@ -58,7 +60,10 @@
 	                   transporters, fluids in pipes, Fluid Tanks and machines' tanks, replication),
 	                   and the Configurator and buckets (Players/ItemUse)
 	  8. machines   -> Mekanism's machines and energy (Machines/Machines: machine ticks, energy
-	                   networks through Universal Cables, energy kept in items, replication)
+	                   networks through Universal Cables, energy kept in items, replication), then
+	                   the seasons' rooms and snow (Seasons/RoomWorld: enclosed rooms' air for
+	                   players and machines; Seasons/SnowWorld: snow layers and ice), which follow
+	                   every block change and step after the machines each frame
 	  9. structures -> structure blocks and jigsaw blocks (Structures/StructureBlocks: their
 	                   settings and replication, SAVE / LOAD / DETECT, a jigsaw's Generate, who may
 	                   use them), and generated structures' chests filled on first use
@@ -132,6 +137,7 @@ local RandomTicker = require(Server.World.RandomTicker)
 local Explosions = require(Server.World.Explosions)
 local Nuke = require(Server.World.Nuke)
 local TimeOfDay = require(Server.World.TimeOfDay)
+local SeasonClock = require(Server.World.SeasonClock)
 local WeatherServer = require(Server.World.WeatherServer)
 local WorldInfo = require(Server.World.WorldInfo)
 local Behaviours = require(Server.Behaviours)
@@ -156,6 +162,8 @@ local WaypointStore = require(Server.Players.WaypointStore)
 local SettingsStore = require(Server.Players.SettingsStore)
 local Transmitters = require(Server.Transmitters.Transmitters)
 local Machines = require(Server.Machines.Machines)
+local RoomWorld = require(Server.Seasons.RoomWorld)
+local SnowWorld = require(Server.Seasons.SnowWorld)
 local ItemUse = require(Server.Players.ItemUse)
 local DoorUse = require(Server.Players.DoorUse)
 local ToggleUse = require(Server.Players.ToggleUse)
@@ -209,6 +217,9 @@ local function startWorld(settings: WorldSettings.Settings)
 		StructureBlocks.blockChanged(x, y, z, old, new)
 		-- Zombies' damage on a block replaced starts over.
 		Mobs.blockChanged(x, y, z, old, new)
+		-- The seasons: a room there or walled by it is filled again; heat sources come and go.
+		RoomWorld.blockChanged(x, y, z, old, new)
+		SnowWorld.blockChanged(x, y, z, old, new)
 		-- Its region is written at the next save.
 		WorldSave.blockChanged(x, y, z)
 	end
@@ -216,6 +227,9 @@ local function startWorld(settings: WorldSettings.Settings)
 	local net = ServerNet.start(world)
 	Sounds.start(net)
 	TimeOfDay.start()
+	-- (The seasons' calendar before the weather, whose Moment carries the season; none in a
+	-- world without ticks.)
+	SeasonClock.start(ticking)
 	-- (No weather in a world without ticks: the debug worlds.)
 	WeatherServer.start(net, world, settings.seed, ticking)
 	GameModes.start(net)
@@ -260,6 +274,9 @@ local function startWorld(settings: WorldSettings.Settings)
 	DoorUse.start(net, world)
 	ToggleUse.start(net, world)
 	Machines.start(net, world)
+	-- The seasons' rooms and snow after the machines (rooms' heat sources are machines).
+	RoomWorld.start(world)
+	SnowWorld.start(world)
 	-- Structure blocks after inventories (containers, the Use hook).
 	StructureBlocks.start(net, world)
 	-- Thirst and temperature after inventories (drinks, armor) and machines (warm generators).
@@ -358,13 +375,19 @@ local function startWorld(settings: WorldSettings.Settings)
 			ticker:step()
 			Explosions.step(world)
 			Nuke.step(world)
-			RandomTicker.step(randomTicker, Simulation.activeChunks(world), Config.Server.RandomTickSpeed, math.random)
+			local active = Simulation.activeChunks(world)
+			RandomTicker.step(randomTicker, active, Config.Server.RandomTickSpeed, math.random)
+			-- (The seasons' snowfall and thaw visit the same chunks.)
+			SnowWorld.tick(active)
 		end
 		StructureBlocks.place()
 		net.flush()
 		-- The pipes after the edits: a client knows a transmitter's block before its state.
 		Transmitters.update(dt)
 		Machines.update(dt)
+		-- (Rooms' air and the snow's heat melt after the machines, whose heat they read.)
+		RoomWorld.step(dt)
+		SnowWorld.step(dt)
 		StructureBlocks.update(dt)
 	end)
 

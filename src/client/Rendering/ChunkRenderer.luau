@@ -136,6 +136,7 @@ local FrameBudget = require(script.Parent.FrameBudget)
 
 local BOX = GreedyMesher.BOX_BYTES
 local FLUID_FULL = Blocks.FLUID_FULL
+local LAYER_LUT = Blocks.layerLut
 local MAX_LEVEL = LodTree.MAX_LEVEL
 local readu16 = buffer.readu16
 local Render = Config.Render
@@ -915,6 +916,11 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 	end
 	local dark = lit and not carries
 	local lower = if fluidHeight > 0 then (FLUID_FULL - fluidHeight) / FLUID_FULL * Config.BlockSize else 0
+	-- A snow layer's box ends at its layers' height (2 pixels a layer: Blocks.layerLut).
+	local layers = buffer.readu8(LAYER_LUT, appearance)
+	if layers > 0 then
+		lower = (Blocks.MAX_LAYERS - layers) / Blocks.MAX_LAYERS * Config.BlockSize
+	end
 	local maxCells, maxCellsY = b.maxCells, b.maxCellsY
 	for py = y, y + sy - 1, maxCellsY do
 		local wy = math.min(maxCellsY, y + sy - py)

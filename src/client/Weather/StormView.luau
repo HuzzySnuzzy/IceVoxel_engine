@@ -208,7 +208,8 @@ local function schedule(dt: number)
 	-- period, late, is finished first; one for a period gone by is dropped).
 	if upcoming.period < period or upcoming.period > period + 1 then
 		DistantStorms.prepare(upcoming, s, period + 1, WeatherState.cameraX, WeatherState.cameraZ)
-		Weather.momentAt(WeatherState.state(), (period + 1) * s.period, upcomingMoment)
+		local at = (period + 1) * s.period
+		Weather.momentAt(WeatherState.state(), at, upcomingMoment, WeatherState.seasonAt(at))
 	end
 	if not upcoming.ready then
 		local budget = DistantStorms.budget(upcoming, s, frameTime, now)

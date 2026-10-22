@@ -18,6 +18,9 @@
 	             window's corner at its Auto GUI scale: about 320 GUI pixels).
 	  Toasts     `events(before, now)` from one frame's day time to the next: "tonight" at dawn of a
 	             blood moon's day (the day changing to one), "rises" at its Start, "sets" at its End.
+	             The night's day and ticks are the sun's (DayCycle.solarDay, solarTimeInDay: the
+	             seasons' warp), as the blood moon's own (Shared/Apocalypse/BloodMoon); the line's
+	             "Day N" is the clock's.
 	             A step back in time or of more than MAX_STEP ticks (a `/time set`, a long hitch) is
 	             no event, so moving the clock never fires a burst of them. A toast is as wide as
 	             its text (`toastWidth`: Minecraft's 160 GUI pixels at least).
@@ -83,7 +86,7 @@ function SurvivorLine.text(
 		notice = "Blood Moon"
 	else
 		local days = BloodMoon.daysUntil(dayTime, s)
-		if days == 0 and DayCycle.timeInDay(dayTime) <= s.Start then
+		if days == 0 and DayCycle.solarTimeInDay(dayTime) <= s.Start then
 			notice = "Blood Moon tonight"
 		elseif days == 1 then
 			notice = "Blood Moon tomorrow"
@@ -122,14 +125,14 @@ function SurvivorLine.events(before: number?, now: number, s: BloodMoon.Settings
 	if before == nil or now < before or now - before > SurvivorLine.MAX_STEP then
 		return events
 	end
-	local day = DayCycle.day(now)
-	if day ~= DayCycle.day(before) and BloodMoon.isBloodDay(day, s) then
+	local day = DayCycle.solarDay(now)
+	if day ~= DayCycle.solarDay(before) and BloodMoon.isBloodDay(day, s) then
 		table.insert(events, "tonight")
 	end
 	local was, up = BloodMoon.active(before, s), BloodMoon.active(now, s)
 	if up and not was then
 		table.insert(events, "rises")
-	elseif was and not up and DayCycle.day(before) == day and DayCycle.timeInDay(now) >= s.End then
+	elseif was and not up and DayCycle.solarDay(before) == day and DayCycle.solarTimeInDay(now) >= s.End then
 		table.insert(events, "sets")
 	end
 	return events

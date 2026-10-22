@@ -17,6 +17,9 @@
 	  Top       the first cell above the highest such block of a column (Minecraft's
 	            getHeightmapPos(MOTION_BLOCKING)): where rain lands and where lightning strikes.
 	            A column of an unloaded chunk has none (nil).
+	  Snowing   `snowingAt`: the same with snow falling (the seasons' snow on players, Players/
+	            ToughAsNails, and the snow layers, Seasons/SnowWorld). Both take the season's
+	            `shift` of the column's biome (Shared/Weather.seasonShift): a winter plain snows.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -65,9 +68,27 @@ function WeatherRules.rainingAt(
 	y: number,
 	z: number,
 	precipitation: number,
-	temperature: number?
+	temperature: number?,
+	shift: number?
 ): boolean
-	if precipitation <= Weather.RAINING or Weather.formAt(temperature, x, y, z) ~= Weather.RAIN then
+	if precipitation <= Weather.RAINING or Weather.formAt(temperature, x, y, z, shift) ~= Weather.RAIN then
+		return false
+	end
+	local top = WeatherRules.top(world, x, z)
+	return top ~= nil and top <= y
+end
+
+-- Is snow falling on cell (x, y, z) (`rainingAt` with snow; see the header)?
+function WeatherRules.snowingAt(
+	world: any,
+	x: number,
+	y: number,
+	z: number,
+	precipitation: number,
+	temperature: number?,
+	shift: number?
+): boolean
+	if precipitation <= Weather.RAINING or Weather.formAt(temperature, x, y, z, shift) ~= Weather.SNOW then
 		return false
 	end
 	local top = WeatherRules.top(world, x, z)

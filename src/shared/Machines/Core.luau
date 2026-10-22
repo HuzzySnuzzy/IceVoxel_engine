@@ -279,6 +279,9 @@ export type TickContext = {
 	climate: ((x: number, y: number, z: number) -> (Rooms.Sample?, number))?,
 }
 
+-- The room next to a machine (Shared/Seasons/Rooms.Sample: TickContext.climate's).
+export type RoomSample = Rooms.Sample
+
 -- A panel button (see the header): its id (sent with the click), place, size and label.
 export type ButtonSpec = { id: number, x: number, y: number, w: number, h: number, label: string }
 
