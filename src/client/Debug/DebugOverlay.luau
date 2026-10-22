@@ -171,7 +171,7 @@ local function seasonLine(): string
 		p.progress,
 		Calendar.daylightScale(now, state),
 		state.offset,
-		if state.lock then `  held on {state.lock}` else "",
+		if state.lock then string.format("  held at %.2f", state.lock) else "",
 		climate.shift,
 		climate.nightDrop,
 		climate.weatherShift,

@@ -1,10 +1,11 @@
 --[[
 	The seasons' mood in the sky (client Rendering/SeasonSky, pure parts): neutral with the
 	calendar off (nothing in the light or the grading changes); a cool winter (blue in the sun's
-	colour shift, +0.05 brightness, less saturation) and a warm autumn; continuous across every
-	turn (Calendar's blend: no step anywhere in the year); only as far as the sky reaches the
-	camera (none in a cave); a heat wave's washed-out warmth at the climate's own heat wave
-	(SeasonClimate.heatWave, the held calendar's day too); the shifts kept within 0..255.
+	colour shift, +0.05 brightness, less saturation) and a warm autumn by day; continuous across
+	every turn (Calendar's blend: no step anywhere in the year); by day only (it fades with the
+	daylight, so a winter night is no brighter or bluer than an autumn one); only as far as the
+	sky reaches the camera (none in a cave); a heat wave's washed-out warmth at the climate's own
+	heat wave (SeasonClimate.heatWave, the held calendar's day too); the shifts kept within 0..255.
 ]]
 
 return function(t, shared, require, _server, client)
@@ -57,9 +58,9 @@ return function(t, shared, require, _server, client)
 		t.near(winter.brightness, 0.05, 1e-9, "winter: +0.05 brightness (the snow's glare)")
 		t.ok(winter.saturation < 0 and autumn.saturation > 0, "winter greyer, autumn richer")
 		t.ok(winter.tint[3] > winter.tint[1] and autumn.tint[1] > autumn.tint[3], "the tints")
-		-- Mid season: exactly MOODS.
+		-- Mid season by day: exactly MOODS.
 		for season, day in { 4, 12, 20, 28 } do
-			local mood = SeasonSky.mood(day * DAY, 0, s)
+			local mood = SeasonSky.mood(day * DAY + 6000, 0, s)
 			for i = 1, 3 do
 				t.near(mood.shift[i], SeasonSky.MOODS.Shift[season][i], 1e-9, `season {season} shift[{i}]`)
 				t.near(mood.tint[i], SeasonSky.MOODS.Tint[season][i], 1e-9, `season {season} tint[{i}]`)
@@ -77,8 +78,9 @@ return function(t, shared, require, _server, client)
 
 	t.test("season sky: no step anywhere in the year", function()
 		local s = state()
-		-- (30 seconds apart, at most the smoothstep's steepest: 1.5 x the seasons' difference over
-		-- BlendDays; under a colour step for the shifts and tints, a hundredth for the grading.)
+		-- (By full day, the season's blend alone: 30 seconds apart, at most the smoothstep's
+		-- steepest, 1.5 x the seasons' difference over BlendDays; under a colour step for the
+		-- shifts and tints, a hundredth for the grading. The daylight's fade is DayCycle's.)
 		local STEP = 600
 		local slope = 1.5 * STEP / (Config.Seasons.BlendDays * DAY) * 1.01
 		local function most(values: { number }): number
@@ -91,10 +93,10 @@ return function(t, shared, require, _server, client)
 		local function channel(colours: { { number } }, i: number): { number }
 			return { colours[1][i], colours[2][i], colours[3][i], colours[4][i] }
 		end
-		local last = SeasonSky.mood(0, 0, s)
+		local last = SeasonSky.mood(0, 0, s, nil, 1)
 		local copy = SeasonSky.neutral()
 		for ticks = STEP, 32 * DAY, STEP do
-			local mood = SeasonSky.mood(ticks, 0, s, copy)
+			local mood = SeasonSky.mood(ticks, 0, s, copy, 1)
 			for i = 1, 3 do
 				local shiftStep = most(channel(SeasonSky.MOODS.Shift, i)) * slope
 				local tintStep = most(channel(SeasonSky.MOODS.Tint, i)) * slope
@@ -105,11 +107,42 @@ return function(t, shared, require, _server, client)
 			t.ok(math.abs(mood.brightness - last.brightness) <= most(SeasonSky.MOODS.Brightness) * slope)
 			t.ok(math.abs(mood.saturation - last.saturation) <= most(SeasonSky.MOODS.Saturation) * slope)
 			t.ok(most(SeasonSky.MOODS.Saturation) * slope < 0.01, "a hundredth")
-			last = SeasonSky.mood(ticks, 0, s)
+			last = SeasonSky.mood(ticks, 0, s, nil, 1)
 		end
 		-- Halfway at a turn (the old season's last day and the new one's first).
-		local turn = SeasonSky.mood(8 * DAY, 0, s)
+		local turn = SeasonSky.mood(8 * DAY, 0, s, nil, 1)
 		t.near(turn.brightness, 0.025, 1e-9, "halfway into winter's glare at the turn")
+	end)
+
+	t.test("season sky: by day only: a winter night no brighter or bluer than an autumn one", function()
+		local s = state()
+		-- Midnight in mid winter (it was +0.05 brightness and the blue shift) and mid autumn.
+		local winter = SeasonSky.mood(12 * DAY + 18000, 0, s)
+		local autumn = SeasonSky.mood(4 * DAY + 18000, 0, s)
+		t.ok(SeasonSky.isNeutral(winter) and SeasonSky.isNeutral(autumn), "no mood at night")
+		local brightness, saturation, tint = SeasonSky.correction(winter, 1)
+		local autumnBrightness, _, autumnTint = SeasonSky.correction(autumn, 1)
+		t.ok(brightness <= autumnBrightness and brightness == 0 and saturation == 0, "no brighter")
+		t.ok(tint[3] - tint[1] <= autumnTint[3] - autumnTint[1], "no bluer a grading")
+		t.ok(winter.shift[3] <= autumn.shift[3] and winter.ambient[3] <= autumn.ambient[3], "no bluer a light")
+		-- By day as before; between, the daylight's share of it (the sun of the calendar's warp).
+		t.near((SeasonSky.correction(SeasonSky.mood(12 * DAY + 6000, 0, s), 1)), 0.05, 1e-9, "the day look")
+		local moods = SeasonSky.MOODS
+		for ticks = 0, DAY - 1, 250 do
+			local dayTime = 12 * DAY + ticks
+			local height = math.cos(DayCycle.celestialAngle(Calendar.solarTime(dayTime, s)) * 2 * math.pi)
+			local daylight = DayCycle.daylight(height)
+			local mood = SeasonSky.mood(dayTime, 0, s)
+			t.near(mood.brightness, moods.Brightness[2] * daylight, 1e-9, `brightness at {ticks}`)
+			t.near(mood.shift[3], moods.Shift[2][3] * daylight, 1e-9, `shift at {ticks}`)
+			t.near(mood.ambient[3], moods.Ambient[2][3] * daylight, 1e-9, `ambient at {ticks}`)
+			t.near(mood.tint[1], 255 + (moods.Tint[2][1] - 255) * daylight, 1e-9, `tint at {ticks}`)
+		end
+		-- The sun given (the client passes the one Roblox draws): its daylight, set or risen.
+		t.ok(SeasonSky.isNeutral(SeasonSky.mood(12 * DAY + 6000, 0, s, nil, -0.3)), "the sun down")
+		local low = SeasonSky.mood(12 * DAY + 6000, 0, s, nil, 0.15)
+		t.near(low.brightness, 0.05 * DayCycle.daylight(0.15), 1e-9, "a low sun")
+		t.near(SeasonSky.mood(12 * DAY + 18000, 0, s, nil, 1).brightness, 0.05, 1e-9, "a high one")
 	end)
 
 	t.test("season sky: only as far as the sky reaches, within 0..255", function()

@@ -9,10 +9,17 @@
 	                season (`keep`: the offset takes the day's jump back), /time add 8d moves it on
 	                and /season set changes only the offset (`offsetFor`): the blood moons and the
 	                "Day N" line, which go by the day time alone, stay put. While doSeasonCycle is
-	                off (`lock`) the calendar stands on the locked day.
+	                off (`lock`) the calendar stands on the held day.
 	  Calendar time `time(dayTime)`: the calendar day plus the share of the day gone (a day starts
-	                at sunrise, tick 0), continuous; locked, the locked day's middle (lock + 0.5),
+	                at sunrise, tick 0), continuous; held, the calendar time it was held at (`lock`),
 	                so nothing a season blends moves while the calendar stands.
+	  Holding       `hold(s, on, dayTime)` (doSeasonCycle): held, the calendar stands at its exact
+	                time then, so nothing it blends moves at that moment and the sun keeps the share
+	                of the solar day it is in; running again, it goes on from the held day at the
+	                time of day it is. The offset stays whole (a season still turns at sunrise), so
+	                running on at another time of day than the held one moves what a blend day
+	                blends by the hours between them; the sun keeps its share while both times are
+	                on the same side of midnight.
 	  Position      `position(dayTime)` / `at(time)`: the year (0-based), the season (AUTUMN 1 ..
 	                SUMMER 4), the day in it (0-based; `daysLeft` counts today: 1 on its last day),
 	                its length, the progress through the season and through the year (0..1). Year 0
@@ -24,27 +31,32 @@
 	                lengths), so nothing ever steps. BlendDays is at most the shortest season.
 	  The sun       `daylightScale(dayTime)`: k, the day half's share of half a day, per *solar*
 	                day (midnight to midnight, 18000 to 18000 ticks: the value at that day's noon,
-	                kept within MIN_SCALE..MAX_SCALE), so it changes only at midnight. `solarTime`
-	                warps the time within each solar day piecewise linearly: noon (6000) and
-	                midnight (18000) stay where they are, the day half (around noon) spans k x half
-	                the real day and the night half the rest. It is continuous and only grows, and
-	                the identity with the seasons off or k = 1. DayCycle's sun follows it
-	                (DayCycle.timeOfDay), so the day length (Config.Time.DayLength) and the closed
-	                form clock never change: winter's sun only sets earlier.
-	  State         `newState()` (Config's lengths, offset 0, unlocked), `setState` / `state` (the
+	                kept within MIN_SCALE..MAX_SCALE; held, the one of the solar day the calendar
+	                was held in), so it changes only at midnight. `solarTime` warps the time within
+	                each solar day piecewise linearly: noon (6000) and midnight (18000) stay where
+	                they are, the day half (around noon) spans k x half the real day and the night
+	                half the rest. It is continuous and only grows, and the identity with the
+	                seasons off or k = 1. DayCycle's sun follows it (DayCycle.timeOfDay), so the day
+	                length (Config.Time.DayLength) and the closed form clock never change: winter's
+	                sun only sets earlier.
+	  State         `newState()` (Config's lengths, offset 0, running), `setState` / `state` (the
 	                module's own, as Weather.setSeed: every function's `s` defaults to it). The
 	                module's state starts disabled (every rule the identity) until something sets
 	                it: the server's World/SeasonClock at its start, the client's
 	                Rendering/LightingController from the attributes (`readAttributes`, which says
 	                disabled before the server published anything).
-	  Saving        `encode(s, dayTime)`: { v = 1, offset, lock, lengths, day } (the calendar day
-	                when saved); `decode(v, s)` gives it back, re-anchored when Config's lengths
-	                changed since: the season and the progress through it are kept and the offset
+	  Saving        `encode(s, dayTime, kept)`: { v = 2, offset, lock, lengths, day } (the calendar
+	                day when saved); a world without seasons (`s.enabled` false) saves nothing of its
+	                own but `kept`, what it had saved (nil: nothing), so the first time its seasons
+	                are on it starts on Autumn's first day. `decode(v, s)` gives it back (version 1's
+	                lock, a whole day, held at that day's middle as it was), re-anchored when
+	                Config's lengths changed since: the season is kept, its first day stays its
+	                first and its last its last (the days between in proportion), and the offset is
 	                worked out again from the saved day alone, so it does not depend on the order
 	                World/WorldSave's sections decode in.
 	  Attributes    `writeAttributes(s, set)` / `readAttributes(get)`: ATTRIBUTE_ENABLED (bool),
-	                ATTRIBUTE_OFFSET (days), ATTRIBUTE_LOCK (the locked day, absent when unlocked)
-	                and ATTRIBUTE_LENGTHS ("8,8,8,8").
+	                ATTRIBUTE_OFFSET (days), ATTRIBUTE_LOCK (the held calendar time, absent while
+	                running) and ATTRIBUTE_LENGTHS ("8,8,8,8").
 
 	Requires only Config: Shared/DayCycle requires this (its sun's warp), never the reverse.
 ]]
@@ -76,22 +88,22 @@ Calendar.MIN_SCALE = 0.6
 Calendar.MAX_SCALE = 1.4
 -- The longest season (days) a state may have.
 Calendar.MAX_LENGTH = 1000
--- The save's version (`encode`).
-Calendar.VERSION = 1
+-- The save's version (`encode`; version 1's lock was a whole day, held at its middle).
+Calendar.VERSION = 2
 
 export type State = {
 	-- false: every rule is the identity (no seasons).
 	enabled: boolean,
 	-- Days added to DayCycle's day (a whole number).
 	offset: number,
-	-- The calendar day it stands on while doSeasonCycle is off (nil: running).
+	-- The calendar time (days, continuous) it stands at while doSeasonCycle is off (nil: running).
 	lock: number?,
 	-- Days of Autumn, Winter, Spring and Summer (whole, 1..MAX_LENGTH).
 	lengths: { number },
 }
 
 export type Position = {
-	-- DayCycle's day + offset (or the locked day), and the continuous calendar time.
+	-- DayCycle's day + offset (or the held day), and the continuous calendar time.
 	calendarDay: number,
 	time: number,
 	-- 0-based year (shown as year + 1).
@@ -177,7 +189,7 @@ local version = 0
 function Calendar.setState(s: State)
 	assert(type(s) == "table" and validLengths(s.lengths), "Calendar.setState needs four whole lengths")
 	assert(whole(s.offset), "Calendar.setState needs a whole offset")
-	assert(s.lock == nil or whole(s.lock), "Calendar.setState needs a whole locked day")
+	assert(s.lock == nil or finite(s.lock), "Calendar.setState needs a finite held time")
 	current = s
 	version += 1
 end
@@ -203,12 +215,12 @@ function Calendar.seasonStart(season: number, s: State?): number
 	return start
 end
 
--- The calendar day (whole) at `dayTime`: DayCycle's day plus the offset, or the locked day.
+-- The calendar day (whole) at `dayTime`: DayCycle's day plus the offset, or the held day.
 function Calendar.day(dayTime: number, s: State?): number
 	local state = s or current
 	local lock = state.lock
 	if lock ~= nil then
-		return lock
+		return floor(lock)
 	end
 	return floor(dayTime / TICKS) + state.offset
 end
@@ -218,7 +230,7 @@ function Calendar.time(dayTime: number, s: State?): number
 	local state = s or current
 	local lock = state.lock
 	if lock ~= nil then
-		return lock + 0.5
+		return lock
 	end
 	return dayTime / TICKS + state.offset
 end
@@ -340,12 +352,20 @@ local function solarDayOf(dayTime: number): number
 	return floor((dayTime + (TICKS - Calendar.MIDNIGHT)) / TICKS)
 end
 
+-- The calendar time of the noon of the solar day holding calendar time `time` (the offset is
+-- whole: the calendar's time of day is the clock's).
+local function solarNoon(time: number): number
+	return floor(time + (TICKS - Calendar.MIDNIGHT) / TICKS) + Calendar.NOON / TICKS
+end
+
 -- (The module state's k by solar day: it changes only with the state.)
 local cachedVersion, cachedDay, cachedScale = -1, 0, 1
 
 local function scaleOf(day: number, state: State): number
-	local noon = day * TICKS + Calendar.NOON
-	local k = Calendar.valueAt(Config.Seasons.DaylightScale, Calendar.time(noon, state), state)
+	local lock = state.lock
+	-- (Held, every solar day is the one the calendar was held in: the sun keeps its share.)
+	local noon = if lock ~= nil then solarNoon(lock) else Calendar.time(day * TICKS + Calendar.NOON, state)
+	local k = Calendar.valueAt(Config.Seasons.DaylightScale, noon, state)
 	return clamp(k, Calendar.MIN_SCALE, Calendar.MAX_SCALE)
 end
 
@@ -396,7 +416,7 @@ end
 --[[
 	The offset putting `dayTime` on day `day` (0-based, within the season's length) of `season`
 	in the year it is in now, so only the season moves (the time of day stays). Returns the offset
-	and that calendar day (the new lock while locked).
+	and that calendar day (the held day while held).
 ]]
 function Calendar.offsetFor(season: number, day: number, dayTime: number, s: State): (number, number)
 	assert(season >= 1 and season <= Calendar.SEASONS and season == floor(season), "Calendar.offsetFor: bad season")
@@ -414,8 +434,31 @@ function Calendar.keep(oldDayTime: number, newDayTime: number, s: State): number
 	return s.offset + floor(oldDayTime / TICKS) - floor(newDayTime / TICKS)
 end
 
--- The save of `s` at `dayTime` (see the header).
-function Calendar.encode(s: State, dayTime: number): Saved
+--[[
+	`s` held (`on`: doSeasonCycle false) or running again (doSeasonCycle true) at `dayTime`: a new
+	state, or `s` itself when it already is (see the header).
+]]
+function Calendar.hold(s: State, on: boolean, dayTime: number): State
+	local lock = s.lock
+	if on == (lock ~= nil) then
+		return s
+	end
+	local next = table.clone(s)
+	if lock == nil then
+		next.lock = Calendar.time(dayTime, s)
+	else
+		-- (On from the held day.)
+		next.offset = floor(lock) - floor(dayTime / TICKS)
+		next.lock = nil
+	end
+	return next
+end
+
+-- The save of `s` at `dayTime`, or `kept` with the seasons off (see the header).
+function Calendar.encode(s: State, dayTime: number, kept: any?): Saved?
+	if not s.enabled then
+		return kept
+	end
 	return {
 		v = Calendar.VERSION,
 		offset = s.offset,
@@ -425,29 +468,35 @@ function Calendar.encode(s: State, dayTime: number): Saved
 	}
 end
 
--- Calendar day `day` of a year with `from` lengths, moved to the same season and progress of a
--- year with `to` lengths.
+-- Calendar day `day` of a year with `from` lengths, moved to the same season of a year with `to`
+-- lengths: its first day to the first, its last to the last, the days between in proportion.
 local function reanchor(day: number, from: { number }, to: { number }): number
 	local fromState: State = { enabled = true, offset = 0, lengths = from }
 	local toState: State = { enabled = true, offset = 0, lengths = to }
 	local position = Calendar.at(day + 0.5, fromState)
-	local length = to[position.season]
-	local inSeason = clamp(floor(position.progress * length), 0, length - 1)
-	return position.year * Calendar.yearLength(toState) + Calendar.seasonStart(position.season, toState) + inSeason
+	local season = position.season
+	local fromLength, toLength = from[season], to[season]
+	local inSeason = if fromLength > 1 then floor(position.day * (toLength - 1) / (fromLength - 1) + 0.5) else 0
+	return position.year * Calendar.yearLength(toState) + Calendar.seasonStart(season, toState) + inSeason
 end
 
 --[[
 	The state a save `v` (`encode`) gives back over `s` (Config's: its switch and lengths are
 	kept): its offset and lock, re-anchored when the saved lengths differ (see the header). nil
-	when `v` is no save of this version.
+	when `v` is no save of this version or the one before.
 ]]
 function Calendar.decode(v: any, s: State): State?
-	if type(v) ~= "table" or v.v ~= Calendar.VERSION then
+	if type(v) ~= "table" or (v.v ~= Calendar.VERSION and v.v ~= 1) then
 		return nil
 	end
 	local offset, day, lock, lengths = v.offset, v.day, v.lock, v.lengths
-	if not whole(offset) or not whole(day) or (lock ~= nil and not whole(lock)) or not validLengths(lengths) then
+	local lockOk = lock == nil or (if v.v == 1 then whole(lock) else finite(lock))
+	if not whole(offset) or not whole(day) or not lockOk or not validLengths(lengths) then
 		return nil
+	end
+	if lock ~= nil and v.v == 1 then
+		-- (Version 1 held a whole day, at its middle.)
+		lock += 0.5
 	end
 	local state: State = { enabled = s.enabled, offset = offset, lock = lock, lengths = table.clone(s.lengths) }
 	local same = true
@@ -461,7 +510,9 @@ function Calendar.decode(v: any, s: State): State?
 		-- (The world's own day when saved stays: day - offset.)
 		state.offset = offset + reanchor(day, saved, s.lengths) - day
 		if lock ~= nil then
-			state.lock = reanchor(lock, saved, s.lengths)
+			-- (The held day moves, its time of day stays.)
+			local heldDay = floor(lock)
+			state.lock = reanchor(heldDay, saved, s.lengths) + (lock - heldDay)
 		end
 	end
 	return state
@@ -478,7 +529,7 @@ end
 --[[
 	The state the attributes describe, read with `get(name)` (workspace:GetAttribute), into `into`
 	when given. Before the server published anything: disabled. Malformed numbers read as 0 and
-	unlocked, malformed lengths as Config's.
+	running, malformed lengths as Config's.
 ]]
 function Calendar.readAttributes(get: (string) -> any, into: State?): State
 	local state = into or Calendar.newState()
@@ -486,7 +537,7 @@ function Calendar.readAttributes(get: (string) -> any, into: State?): State
 	local offset = get(Calendar.ATTRIBUTE_OFFSET)
 	state.offset = if whole(offset) then offset else 0
 	local lock = get(Calendar.ATTRIBUTE_LOCK)
-	state.lock = if whole(lock) then lock else nil
+	state.lock = if finite(lock) then lock else nil
 	local lengths: { number }? = nil
 	local text = get(Calendar.ATTRIBUTE_LENGTHS)
 	if type(text) == "string" then

@@ -3441,7 +3441,7 @@ check the identity wherever it is pure).
 
 **The calendar** (`Shared/Seasons/Calendar`, pure; it requires only Config: `DayCycle` requires
 it). One number is the whole state besides the switch and the lengths: an `offset` added to
-DayCycle's day count gives the calendar day (`Calendar.day`), or the locked day while
+DayCycle's day count gives the calendar day (`Calendar.day`), or the held day while
 doSeasonCycle is off. It exists so the clock and the calendar can move apart: `/time set` keeps
 the calendar (`Calendar.keep`: the offset takes the day's jump back), `/time add 8d` moves it on,
 `/season set` moves only the offset (`Calendar.offsetFor`), and the blood moons and the "Day N"
@@ -3453,17 +3453,24 @@ from it is stored or sent: like the blood moon it is worked out every frame on e
   `Calendar.value`: a smoothstep over `BlendDays` (2) centred on each turn (the old season's last
   day and the new one's first, about 40 minutes of play), so nothing ever steps. The season's
   label turns at sunrise of its first day.
+- *Holding* (`Calendar.hold`, doSeasonCycle false). The calendar stands at the exact calendar
+  time it is held at (the `lock`), so at that moment neither the sun nor anything blended moves:
+  every day is that one, the sun keeping the share of the solar day it was held in. On again, it
+  runs on from the held day at the time of day it is; the offset stays whole (a season turns at
+  sunrise), so what a blend day blends moves by the hours between the two times of day, and the
+  sun keeps its share while both are on the same side of midnight.
 - *The sun.* The day keeps its 20 minutes (a variable rate would break the closed-form clock).
   Instead `Calendar.solarTime` warps the time within each solar day (midnight to midnight):
   noon and midnight stay, the day half around noon spans `k x` half the day (`DaylightScale`:
   autumn 1, winter 0.8, spring 1, summer 1.2; one k per solar day, so it changes only at
-  midnight), the night half the rest; piecewise linear, continuous, monotonic, the identity at k
-  = 1. `DayCycle.timeOfDay` takes the solar time, so everything built on the sun (ClockTime, the
-  light, isDay: solar panels, zombies, the music, the night's cold) follows: Minecraft's isDay
-  covers 45 % of a winter day (9.1 minutes) and 64 % of a summer one (12.7). What goes by the
-  night's ticks rather than the sun reads `DayCycle.solarDay` / `solarTimeInDay`: the blood moon
-  (`BloodMoon`, the server's survivor records, `Ui/SurvivorLine`, the zombie director's moon
-  number), so a winter blood moon still rises at the same place of the seasonal sunset.
+  midnight; held, the one of the solar day it was held in), the night half the rest; piecewise
+  linear, continuous, monotonic, the identity at k = 1. `DayCycle.timeOfDay` takes the solar
+  time, so everything built on the sun (ClockTime, the light, isDay: solar panels, zombies, the
+  music, the night's cold) follows: Minecraft's isDay covers 45 % of a winter day (9.1 minutes)
+  and 64 % of a summer one (12.7). What goes by the night's ticks rather than the sun reads
+  `DayCycle.solarDay` / `solarTimeInDay`: the blood moon (`BloodMoon`, the server's survivor
+  records, `Ui/SurvivorLine`, the zombie director's moon number), so a winter blood moon still
+  rises at the same place of the seasonal sunset.
 - *State and attributes.* The module keeps a state (`setState` / `state`, as Weather.setSeed)
   that every function defaults to; it starts disabled (the identity) until the server's
   `World/SeasonClock` sets it at its start and the client's `Rendering/LightingController` reads
@@ -3476,12 +3483,16 @@ calendar); publishes when something changes and again every 60 s, as TimeOfDay. 
 publish disabled. `setSeason(season, day)`, `setLocked(on)`, `keepCalendar(old, new)` and a
 `changed` event; `/season query|set` and `/gamerule doSeasonCycle` (`Players/SeasonCommand`, pure,
 and its glue) use them, and `/time set` keeps the calendar through them. Saved as WorldSave's
-section `"seasons"`: `{ v = 1, offset, lock, lengths, day }` (`Calendar.encode`); `decode`
-re-anchors a save made with other lengths (the season and the progress through it are kept, the
-offset worked out again from the saved day alone, so the sections' decode order never matters).
-A world without the section (a new world, or one saved before the seasons) gets
-`Calendar.fresh` once the sections are back: Autumn's first day at that moment, so every world
-has the same 8 mild days before its first winter.
+section `"seasons"`: `{ v = 2, offset, lock, lengths, day }` (`Calendar.encode`; version 1's
+whole held day still reads, held at its middle as it was); `decode` re-anchors a save made with
+other lengths (the season kept, its first day still its first and its last its last, the days
+between in proportion; the offset worked out again from the saved day alone, so the sections'
+decode order never matters). A world without seasons saves no calendar of its own (it keeps the
+section it was loaded with, or has none), so neither the days played without them nor a hold set
+then carry over. A world whose calendar was not read back (a new world, one saved before the
+seasons or without them, or a section that can't be read) gets `Calendar.fresh` in
+`SeasonClock.restored`, once every section, the day clock's too, is back: Autumn's first day at
+that moment, so every world has the same 8 mild days before its first winter.
 
 **The climate** (`Shared/Seasons/SeasonClimate`, pure). Biome classes: cold (tundra, taigas,
 grove, snowy slopes, jagged and frozen peaks), dry (desert, savannas), tropical (jungle,
@@ -3637,17 +3648,21 @@ button, top-aligned, or in the corner; the column continues under it; within 40 
 width the caption drops first, then the dial shrinks 40→32, then it goes): 32 year ticks by season
 (lengths in proportion, the current season bright) with a marker, 16 day segments from the warped
 sun's height (winter 6 day/2 dusk/8 night, summer 10/2/4) with a hand (noon top), the day number,
-and a caption ("WINTER · 3 DAYS LEFT", "LAST DAY OF AUTUMN", "HEAT WAVE"). Plain rotated Frames (no
-images); angles at 4 Hz, colours only when the season or day split changes. Hidden with
-`Seasons.Clock.Enabled`, the Season Clock setting (64), the calendar off or the world map, and then
-it tells UiScale so the corner is exactly as before. Toasts at the sunrise of a season's first day
-and a heat wave's dawn, with `ambient.season.*` stingers, go through `SurvivorHud.toast`, the HUD's
-one notice queue shared with the blood moon (`Seasons.Clock.Toasts`). **Commands:** `/season
-query|set` (`Players/SeasonCommand` + `SeasonCommands`, started by TimeCommands) move only the
-offset; `/time set` keeps the calendar (`keepCalendar`), `/time add` moves it, `/gamerule
-doSeasonCycle` holds it. **Sky:** `Rendering/SeasonSky` after BloodMoonSky: a cool winter (+0.05
-brightness), a warm autumn and a heat wave's glare in the colour shift, outdoor ambient and its
-`IceVoxelSeason` grading, scaled by sky exposure. F3 has a season line.
+and a caption ("WINTER · 3 DAYS LEFT", "LAST DAY OF AUTUMN", "HEAT WAVE" from a heat wave's dawn
+until its heat is over). Plain rotated Frames (no images); angles at 4 Hz, colours only when the
+season or day split changes. Hidden with `Seasons.Clock.Enabled`, the Season Clock setting (64), the
+calendar off or the world map, and then it tells UiScale so the corner is exactly as before. Toasts
+at the sunrise of a season's first day and a heat wave's dawn, with `ambient.season.*` stingers, go
+through `SurvivorHud.toast`, the HUD's one notice queue shared with the blood moon
+(`Seasons.Clock.Toasts`); a look whose calendar is not the one the look before read (`/time set`
+keeping it, `/season set`, the hold) toasts nothing, so nothing already toasted comes again.
+**Commands:** `/season query|set` (`Players/SeasonCommand` + `SeasonCommands`, started by
+TimeCommands) move only the offset; `/time set` keeps the calendar (`keepCalendar`), `/time add`
+moves it, `/gamerule doSeasonCycle` holds it. **Sky:** `Rendering/SeasonSky` after BloodMoonSky: a
+cool winter (+0.05 brightness), a warm autumn and a heat wave's glare in the colour shift, outdoor
+ambient and its `IceVoxelSeason` grading, scaled by sky exposure and by the daylight
+(`DayCycle.daylight` of the sun the light blends by: whole by day, none at night, so a winter night
+is no brighter or bluer than an autumn one). F3 has a season line.
 
 **Who owns what.** The pure rules are `Shared/Seasons/*`, the rest is thin glue: SeasonClock
 (attributes, section), RoomWorld (cache, budget), SnowWorld (an instance of rules over an
@@ -7659,7 +7674,9 @@ world, in its record: `encode()` returns a small JSON-able value at every save (
 frame), `decode(value)` runs once when a saved world starts (after every part started, before
 the world is published), or at once when registered later. "time" is the day clock's (day time
 and doDaylightCycle); "weather" the weather's (`WeatherServer.encode`'s text: its clock,
-doWeatherCycle and a `/weather` override with its time left; see Weather).
+doWeatherCycle and a `/weather` override with its time left; see Weather); "seasons" the
+calendar's (see Seasons: a world without a readable one starts on Autumn's first day once every
+section, the day clock's too, is back).
 
 **Feedback.** WorldSave messages (Protocol): "saving" and "saved" to everyone (Ui/SaveIndicator:
 Bedrock's saving icon, a grass block bobbing in the bottom right corner with "Saving...", while a

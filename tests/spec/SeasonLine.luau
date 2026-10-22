@@ -1,10 +1,12 @@
 --[[
 	What the season clock says and when its toasts come (client Ui/SeasonLine, pure): the caption
 	("WINTER · 3 DAYS LEFT", "LAST DAY OF AUTUMN", "HEAT WAVE" in Warn on a heat wave's day until its
-	heat is over, the name alone while the calendar is held), its width in steps; the toasts at the
-	sunrise of each season's first day (every turn of the year, the year's end too) and at a heat
-	wave's dawn, nothing mid-season, for a step back, a jump past MAX_STEP, the first look, /season
-	set between looks or with the calendar off or held; four turns a year when looked at 4 times a
+	heat is over, as the climate's heat curve has it, the name alone while the calendar is held),
+	its width in steps; the toasts at the sunrise of each season's first day (every turn of the
+	year, the year's end too) and at a heat wave's dawn, nothing mid-season, for a step back, a jump
+	past MAX_STEP, the first look, /season set between looks or with the calendar off or held, and
+	none again when the calendar itself changed between two looks (/time set keeping it across a
+	sunrise) while a real turn after still toasts; four turns a year when looked at 4 times a
 	second, a heat wave's toast for each heat wave's day; their texts (Winter's length), colours,
 	stingers (Shared/Sounds' client events) and widths (no wider than the blood moon's widest, which
 	the HUD's layout is tested with).
@@ -88,8 +90,20 @@ return function(t, shared, require, _server, client)
 		local base = WAVE_DAY * DAY
 		t.ok(SeasonLine.heatWaveShown(base, SEED, s), "from dawn")
 		t.ok(SeasonLine.heatWaveShown(base + wave.From + 100, SEED, s), "in the heat")
-		t.ok(SeasonLine.heatWaveShown(base + wave.To + wave.Ramp - 1, SEED, s), "while it fades")
-		t.ok(not SeasonLine.heatWaveShown(base + wave.To + wave.Ramp, SEED, s), "over")
+		t.ok(SeasonLine.heatWaveShown(base + wave.To - 1, SEED, s), "while it fades")
+		t.ok(not SeasonLine.heatWaveShown(base + wave.To, SEED, s), "over")
+		t.ok(not SeasonLine.heatWaveShown(base + wave.To + 500, SEED, s), "its heat gone, no caption")
+		-- Up while the climate's heat is (from dawn: it is coming), gone once that is 0 for the day.
+		for ticks = 0, DAY - 1, 100 do
+			local heat = SeasonClimate.heatWave(WAVE_DAY + ticks / DAY, SEED, s)
+			local shown = SeasonLine.heatWaveShown(base + ticks, SEED, s)
+			if heat > 0 then
+				t.ok(shown, `up in the heat at {ticks}`)
+			end
+			if ticks >= wave.To then
+				t.ok(not shown and heat == 0, `none after the heat at {ticks}`)
+			end
+		end
 		for day = 0, 31 do
 			local shown = SeasonLine.heatWaveShown(day * DAY + 6000, SEED, s)
 			t.eq(shown, SeasonClimate.isHeatWave(day, SEED, s), `day {day} as the climate's`)
@@ -135,6 +149,32 @@ return function(t, shared, require, _server, client)
 			found = found or event.kind == "heatWave"
 		end
 		t.ok(found, "a heat wave's dawn")
+	end)
+
+	t.test("season line: a calendar changed between two looks toasts nothing again", function()
+		local s = state()
+		-- Winter came at the sunrise of day 8; just before the next one /time set keeps the
+		-- calendar across it (Calendar.keep): the clock turns a day, the calendar does not.
+		local before, now = 8 * DAY + 23950, 9 * DAY + 10
+		local kept = table.clone(s)
+		kept.offset = Calendar.keep(before, now, s)
+		t.eq(Calendar.position(now, kept).calendarDay, Calendar.position(before, s).calendarDay, "the same day")
+		t.eq(#SeasonLine.events(before, now, SEED, kept, s), 0, "no second Winter has come")
+		-- A heat wave's day kept the same way: no second heat wave.
+		local waveBefore, waveNow = WAVE_DAY * DAY + 23950, (WAVE_DAY + 1) * DAY + 10
+		local waveKept = table.clone(s)
+		waveKept.offset = Calendar.keep(waveBefore, waveNow, s)
+		t.ok(SeasonClimate.isHeatWave(Calendar.day(waveNow, waveKept), SEED, waveKept), "still the heat wave's day")
+		t.eq(#SeasonLine.events(waveBefore, waveNow, SEED, waveKept, s), 0, "no second heat wave")
+		-- Held between the looks: nothing either.
+		t.eq(#SeasonLine.events(8 * DAY - 5, 8 * DAY, SEED, Calendar.hold(s, true, 8 * DAY - 5), s), 0, "held")
+		-- An equal calendar both times is the same one: the turn as ever.
+		t.eq(#SeasonLine.events(8 * DAY - 5, 8 * DAY, SEED, s, table.clone(s)), 1, "an equal copy")
+		-- The next look goes on with the new calendar, and a real turn after it still toasts.
+		t.eq(#SeasonLine.events(now, now + 5, SEED, kept, kept), 0)
+		local spring = (Calendar.seasonStart(Calendar.SPRING, s) - kept.offset) * DAY
+		local list = SeasonLine.events(spring - 5, spring, SEED, kept, kept)
+		t.ok(#list >= 1 and list[1].kind == "season" and list[1].season == Calendar.SPRING, "Spring still comes")
 	end)
 
 	t.test("season line: a year looked at 4 times a second, four turns and every heat wave", function()

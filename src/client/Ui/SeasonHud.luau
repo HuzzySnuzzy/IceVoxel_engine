@@ -24,9 +24,10 @@
 	            recoloured only when the season, the lengths or the day's split change
 	            (SeasonClock.signature). Nothing else runs per frame.
 	  Toasts    the season's turn at the sunrise of its first day and a heat wave's dawn
-	            (SeasonLine.events) through Ui/SurvivorHud's one toast queue with the blood moon's
-	            notices, in the season's colour (a heat wave in Warn), each with its stinger
-	            (ambient.season.<name>, ambient.season.heat_wave) played as it shows. With
+	            (SeasonLine.events, with the calendar the look before read: one changed between
+	            two looks toasts nothing again) through Ui/SurvivorHud's one toast queue with the
+	            blood moon's notices, in the season's colour (a heat wave in Warn), each with its
+	            stinger (ambient.season.<name>, ambient.season.heat_wave) played as it shows. With
 	            Config.Seasons.Clock.Toasts; whatever the player's setting, as the blood moon's.
 	  Shown     with Config.Seasons.Enabled and Config.Seasons.Clock.Enabled, the calendar on (the
 	            server's: a debug world publishes it off), the player's Season Clock setting
@@ -283,6 +284,7 @@ function SeasonHud.start()
 	--[[ Every SeasonClock.UPDATE seconds ]]
 
 	local before: number? = nil
+	local beforeState: Calendar.State? = nil
 	local reported: number? = nil
 	local elapsed = SeasonClock.UPDATE
 	RunService.Heartbeat:Connect(function(dt: number)
@@ -295,12 +297,12 @@ function SeasonHud.start()
 		local state = Calendar.state()
 		-- The toasts (whatever the setting).
 		if Config.Seasons.Enabled and Config.Seasons.Clock.Toasts then
-			for _, event in SeasonLine.events(before, dayTime, seed, state) do
+			for _, event in SeasonLine.events(before, dayTime, seed, state, beforeState) do
 				local key = SeasonLine.colourKey(event)
 				SurvivorHud.toast(SeasonLine.toastText(event, state), Dayz.Colour[key], SeasonLine.sound(event))
 			end
 		end
-		before = dayTime
+		before, beforeState = dayTime, state
 		-- The clock.
 		local shown = clockShown(state)
 		if shown then

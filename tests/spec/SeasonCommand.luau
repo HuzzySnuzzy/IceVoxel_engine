@@ -7,7 +7,7 @@
 	rules. Then the glue's rules played through Shared/Seasons/Calendar as server World/SeasonClock
 	applies them: /time set never throws the world back to Autumn, /time add 8d is a season on,
 	/season set keeps the time of day, the day count and the blood moons, doSeasonCycle false holds
-	the season through /time add and runs on from the held day.
+	the season at the exact time it is through /time add and runs on from the held day.
 ]]
 
 return function(t, shared, require, server)
@@ -174,21 +174,15 @@ return function(t, shared, require, server)
 		local offset, calendarDay = Calendar.offsetFor(season, day - 1, now, s)
 		local next = table.clone(s)
 		next.offset = offset
-		if next.lock ~= nil then
-			next.lock = calendarDay
+		local lock = next.lock
+		if lock ~= nil then
+			next.lock = calendarDay + (lock - math.floor(lock))
 		end
 		return next
 	end
 	-- World/SeasonClock.setLocked.
 	local function setLocked(s: Calendar.State, now: number, on: boolean): Calendar.State
-		local next = table.clone(s)
-		if on and next.lock == nil then
-			next.lock = Calendar.day(now, s)
-		elseif not on and next.lock ~= nil then
-			next.offset = (next.lock :: number) - math.floor(now / DAY)
-			next.lock = nil
-		end
-		return next
+		return Calendar.hold(s, on, now)
 	end
 	-- What TimeCommands does with a command at `now`: the new state and day time.
 	local function apply(text: string, s: Calendar.State, now: number): (Calendar.State, number)
@@ -262,19 +256,21 @@ return function(t, shared, require, server)
 	t.test("season command (glue): doSeasonCycle false holds the season, true runs on from it", function()
 		local s, now = state(), 3 * DAY + 2000
 		local held = apply("/gamerule doSeasonCycle false", s, now)
-		t.eq(held.lock, 3, "locked on the day it is")
+		t.eq(Calendar.day(now, held), 3, "held on the day it is")
+		t.eq(held.lock, Calendar.time(now, s), "at the exact time it is")
 		-- A week passes, and /time add 8d: still Autumn's fourth day.
 		local later = now + 7 * DAY
 		local _, added = apply("/time add 8d", held, later)
 		t.eq(Calendar.position(added, held).calendarDay, 3, "held through the days and /time add")
-		-- /season set while held moves the held day.
+		-- /season set while held moves the held day (its time of day stays).
 		local set = setSeason(held, added, Calendar.SUMMER, 2)
 		t.eq(Calendar.position(added, set).season, Calendar.SUMMER)
-		t.eq(set.lock, Calendar.seasonStart(Calendar.SUMMER, s) + 1)
-		-- On again: from the held day, no jump.
+		t.eq(Calendar.day(added, set), Calendar.seasonStart(Calendar.SUMMER, s) + 1)
+		t.near((set.lock :: number) % 1, 2000 / DAY, 1e-9)
+		-- On again: from the held day.
 		local running = apply("/gamerule doSeasonCycle true", set, added)
 		t.eq(running.lock, nil)
-		t.eq(Calendar.day(added, running), set.lock, "runs on from the held day")
-		t.eq(Calendar.day(added + DAY, running), (set.lock :: number) + 1)
+		t.eq(Calendar.day(added, running), Calendar.day(added, set), "runs on from the held day")
+		t.eq(Calendar.day(added + DAY, running), Calendar.day(added, set) + 1)
 	end)
 end

@@ -94,9 +94,10 @@
 	             time and doDaylightCycle), "weather" the weather's (World/WeatherServer: its
 	             clock, doWeatherCycle and a /weather override with its time left, so storms go on
 	             where they were; a world saved without it starts clear at spawn, as a new one),
-	             "seasons" the calendar's (World/SeasonClock: { v = 1, offset, lock, lengths,
-	             day }; a world saved without it, and a new world, starts on Autumn's first day
-	             once its sections are back: SeasonClock.fresh).
+	             "seasons" the calendar's (World/SeasonClock: { v = 2, offset, lock, lengths,
+	             day }; a world saved without it or with one that can't be read, and a new world,
+	             starts on Autumn's first day once every section is back, the day clock's too:
+	             SeasonClock.restored).
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -1107,15 +1108,14 @@ end)
 
 --[[
 	The seasons' calendar (World/SeasonClock: its offset, lock and lengths, and the calendar day
-	when saved, so it reads back whatever order the sections decode in). A world without it gets
-	Autumn's first day at the end of `restore`.
+	when saved, so it reads back whatever order the sections decode in). A world without it, or
+	with one that can't be read, gets Autumn's first day at the end of `restore`, after the clock.
 ]]
 WorldSave.registerSection("seasons", function(): any
 	return SeasonClock.encode()
 end, function(value: any)
 	if not SeasonClock.decode(value) then
 		warn("[IceVoxel] the saved seasons could not be read back: Autumn's first day again")
-		SeasonClock.fresh()
 	end
 end)
 
@@ -1189,10 +1189,9 @@ function WorldSave.restore(parts: WorldSnapshot.Systems)
 		end
 	end
 	restoredSections = true
-	-- (A new world, or one saved before the seasons: Autumn's first day now, after the clock.)
-	if savedSections.seasons == nil then
-		SeasonClock.fresh()
-	end
+	-- (A new world, one saved before the seasons or a calendar that can't be read: Autumn's first
+	-- day now, after the clock.)
+	SeasonClock.restored()
 	local ticker = parts.ticker
 	if ticker then
 		local world = parts.world

@@ -12,7 +12,10 @@
 	             the snow's glare), saturation and tint, each blended at the turns with
 	             Calendar.value's smoothstep (Config.Seasons.BlendDays), so nothing steps. A heat
 	             wave (`heatWave`: SeasonClimate's 0..1 at the world's seed) adds HEAT_WAVE's
-	             warm, washed-out glare. With the calendar off it is neutral: nothing changes.
+	             warm, washed-out glare. All of it is the daylight's: it fades with
+	             DayCycle.daylight of the sun's height (as DayCycle.environment blends night to
+	             day), whole by day and none at night, so a winter night is no brighter or bluer
+	             than any other. With the calendar off it is neutral: nothing changes.
 	  Light      `apply(environment, mood, exposure)` adds the shifts to DayCycle.environment's
 	             colour shift and outdoor ambient as far as the sky reaches the camera
 	             (`exposure`, Rendering/SkyExposure: caves keep their own light): pure, the tests
@@ -111,12 +114,19 @@ end
 
 --[[
 	The season's mood at `dayTime` with a heat wave of `heatWave` (0..1), `s` defaulting to the
-	calendar's state (see the header), written into `into` when given.
+	calendar's state (see the header), written into `into` when given. `sunHeight` (-1..1) is the
+	height of the sun its daylight follows; it defaults to Minecraft's with `s`'s warp (the client
+	passes the sun Roblox draws, as to DayCycle.environment).
 ]]
-function SeasonSky.mood(dayTime: number, heatWave: number, s: Calendar.State?, into: Mood?): Mood
+function SeasonSky.mood(dayTime: number, heatWave: number, s: Calendar.State?, into: Mood?, sunHeight: number?): Mood
 	local state = s or Calendar.state()
 	local mood = SeasonSky.neutral(into)
 	if not state.enabled then
+		return mood
+	end
+	local height = sunHeight or math.cos(DayCycle.celestialAngle(Calendar.solarTime(dayTime, state)) * 2 * math.pi)
+	local daylight = DayCycle.daylight(math.clamp(height, -1, 1))
+	if daylight <= 0 then
 		return mood
 	end
 	local time = Calendar.time(dayTime, state)
@@ -124,13 +134,14 @@ function SeasonSky.mood(dayTime: number, heatWave: number, s: Calendar.State?, i
 	local wave = math.clamp(heatWave, 0, 1)
 	local heat = SeasonSky.HEAT_WAVE
 	for i = 1, 3 do
-		mood.shift[i] = Calendar.valueAt(SHIFT[i], time, state)
-		mood.ambient[i] = Calendar.valueAt(AMBIENT[i], time, state)
+		mood.shift[i] = Calendar.valueAt(SHIFT[i], time, state) * daylight
+		mood.ambient[i] = Calendar.valueAt(AMBIENT[i], time, state) * daylight
 		local tint = Calendar.valueAt(TINT[i], time, state)
-		mood.tint[i] = tint + (heat.tint[i] - tint) * wave
+		tint += (heat.tint[i] - tint) * wave
+		mood.tint[i] = 255 + (tint - 255) * daylight
 	end
-	mood.brightness = Calendar.valueAt(moods.Brightness, time, state) + heat.brightness * wave
-	mood.saturation = Calendar.valueAt(moods.Saturation, time, state) + heat.saturation * wave
+	mood.brightness = (Calendar.valueAt(moods.Brightness, time, state) + heat.brightness * wave) * daylight
+	mood.saturation = (Calendar.valueAt(moods.Saturation, time, state) + heat.saturation * wave) * daylight
 	return mood
 end
 

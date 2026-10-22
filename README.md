@@ -2785,7 +2785,7 @@ for performance:
 | `Time.DayLength`          | 1200    | Real seconds per in-game day (Minecraft's 20 minutes).              |
 | `Time.StartTime`          | 1000    | Day time when the server starts (ticks; 6000 noon, 13000 night).    |
 | `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
-| `Seasons.Enabled`         | true    | Don't Starve's seasons: Autumn, Winter, Spring, Summer (false: the game as without them; the debug worlds have none either). A world starts on Autumn's first day, a world saved before the seasons too, when it is next loaded. |
+| `Seasons.Enabled`         | true    | Don't Starve's seasons: Autumn, Winter, Spring, Summer (false: the game as without them; the debug worlds have none either). A world starts on Autumn's first day, and so does a world saved before the seasons or played without them, the next time it is loaded with them on. |
 | `Seasons.Lengths` / `BlendDays` | 8, 8, 8, 8 / 2 | Days each season lasts (a year of 32 days, about 10.7 hours of play); every season quantity blends over BlendDays centred on each turn (at most the shortest season). |
 | `Seasons.DaylightScale`   | 1, 0.8, 1, 1.2 | The sun's day share per season: winter's days are shorter (about 9 of 20 minutes) and summer's longer (12.7), the day length itself unchanged. |
 | `Seasons.Climate`         | see Config | Per season (Autumn, Winter, Spring, Summer): DayShift -0.1 / -0.4 / -0.05 / +0.3 and NightDrop 0.3 / 0.35 / 0.3 / 0.25 (Tough As Nails' climate units, times a biome class's Amplitude: cold 1, temperate 1, dry 0.75, tropical 0.5); WeatherShift -0.2 / -0.8 / -0.1 / +0.2 on Minecraft's temperature (a winter plain snows); WetBias 0 / +0.02 / +0.06 / -0.08 and ThunderBias 0 / -1 / +0.04 / +0.02 (rain about 23 % / 26 % / 31 % / 14 % of the time, no thunder in winter); Growth 0.5 / 0 / 1.5 / 1 (plants' random ticks); HeatWave: a summer day is one with Chance 0.3 (never two in a row), +0.3 from 09:00 to 18:00. |
@@ -3064,7 +3064,8 @@ local server):
   phone, a tablet and a PC at every GUI scale: crisp rotated bars, the disc, the pixel day number,
   the caption's real width (it drops before the dial shrinks on an iPad and a 1024 x 768 window);
   `/season set winter 8` then `/time add 1d`: the toast, the boom and the blood moon's toast
-  waiting their turn; the winter grading on snow and at night beside the blood moon's.
+  waiting their turn; the winter grading on snow by day, fading at dusk and gone at night (beside
+  the blood moon's).
 - **Snow:** a winter in a taiga and a plain (`/season set winter`, `/weather rain`, which snows
   where it is cold): layers piling evenly on roofs and ground, walking slowed in deep snow, a
   campfire and a warm room melting it, ponds freezing at their edges; a spring thaw leaving the

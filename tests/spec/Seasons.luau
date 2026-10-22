@@ -1,11 +1,34 @@
 --[[
 	The seasons' calendar (Shared/Seasons/Calendar): positions across years and before day 0, the
-	lock, the offset kept over /time set and moved by /season set, the smooth blends at the turns,
-	the sun's warp (Shared/DayCycle.solarTime: monotonic, continuous at midnight, the identity
-	with the seasons off or a share of 1, winter's and summer's day shares), saves (re-anchored
-	when the lengths change) and the attributes, and a world without a "seasons" save starting at
-	Autumn's first day. The module's state is shared by every spec: each test puts it back.
+	lock (held at the exact time, so neither the sun nor anything blended moves when it is held or
+	runs on at that time of day), the offset kept over /time set and moved by /season set, the
+	smooth blends at the turns, the sun's warp (Shared/DayCycle.solarTime: monotonic, continuous at
+	midnight, the identity with the seasons off or a share of 1, winter's and summer's day shares),
+	saves (re-anchored when the lengths change: a season's first day stays its first, its last its
+	last; version 1's whole held day still read back) and the attributes, a world without a "seasons"
+	save starting at Autumn's first day, and a world played without seasons saving none. Then
+	server World/SeasonClock itself, loaded with a fake day clock and workspace: holding moves
+	nothing, a world without seasons keeps the section it had (or saves none), and a calendar that
+	can't be read starts on Autumn's first day only once the day clock is back. The module's state
+	is shared by every spec: each test puts it back.
 ]]
+
+local fs = require("@lune/fs")
+local luau = require("@lune/luau")
+
+-- World/SeasonClock, loaded here with its Roblox globals as arguments (after the --! lines).
+local CLOCK = "src/server/World/SeasonClock.luau"
+local GLOBALS = "script, require, game, workspace, Instance, task"
+
+local function withHeader(source: string): string
+	local lines = string.split(source, "\n")
+	local i = 1
+	while lines[i] and string.sub(lines[i], 1, 3) == "--!" do
+		i += 1
+	end
+	lines[i] = `local {GLOBALS} = ...; ` .. (lines[i] or "")
+	return table.concat(lines, "\n")
+end
 
 return function(t, shared, require)
 	local Config = require(shared.Config)
@@ -112,15 +135,66 @@ return function(t, shared, require)
 		t.eq(Calendar.position(17 * DAY, odd).year, 1)
 	end)
 
-	t.test("seasons: the lock stands the calendar still on its day (doSeasonCycle false)", function()
-		local s = state(nil, 0, 12)
+	t.test("seasons: the lock stands the calendar still at its time (doSeasonCycle false)", function()
+		local s = state(nil, 0, 12.4)
 		for _, dayTime in { 0, 5000, 3 * DAY, 100 * DAY + 777 } do
 			local p = Calendar.position(dayTime, s)
-			t.eq(p.calendarDay, 12, "the locked day")
-			t.eq(p.time, 12.5, "its middle: nothing blends while locked")
+			t.eq(p.calendarDay, 12, "the held day")
+			t.eq(p.time, 12.4, "its time: nothing blends while held")
 			t.eq(p.season, Calendar.WINTER)
 		end
 		t.eq(Calendar.day(50 * DAY, s), 12)
+	end)
+
+	t.test("seasons: holding the calendar moves neither the sun nor anything it blends", function()
+		local s = state()
+		local values = { 10, 20, 30, 40 }
+		-- The sun, a blended value and the sun's share at `dayTime` with `st`.
+		local function look(st: any, dayTime: number): (number, number, number)
+			local solar = 0
+			with(st, function()
+				solar = DayCycle.solarTime(dayTime)
+			end)
+			return solar, Calendar.value(values, dayTime, st), Calendar.daylightScale(dayTime, st)
+		end
+		-- Winter's first day at 11000: a blend day (the sun's share and every value move with it).
+		local now = 8 * DAY + 11000
+		local held = Calendar.hold(s, true, now)
+		t.ok(held ~= s and s.lock == nil, "a new state")
+		t.eq(Calendar.hold(held, true, now), held, "held already: the same")
+		local solar, value, k = look(s, now)
+		t.ok(k < 1 and value > 10 and value < 20, "a blend day")
+		local heldSolar, heldValue, heldK = look(held, now)
+		t.eq(heldSolar, solar, "the sun stays where it is")
+		t.eq(heldValue, value, "every blended value too")
+		t.eq(heldK, k)
+		t.eq(Calendar.day(now, held), 8)
+		-- Held, every day is that one: the same share and values.
+		for day = 9, 40, 7 do
+			local _, v, share = look(held, day * DAY + 3000)
+			t.eq(v, value, `day {day}: the value held`)
+			t.eq(share, k, `day {day}: the sun's share held`)
+		end
+		-- Running on at once: as before.
+		local running = Calendar.hold(held, false, now)
+		t.eq(running.lock, nil)
+		t.eq(running.offset, s.offset, "on at once: the calendar it was")
+		-- Days later at the held time of day: nothing moves either.
+		local later = 50 * DAY + 11000
+		running = Calendar.hold(held, false, later)
+		local laterSolar, laterValue = look(running, later)
+		local heldLaterSolar = look(held, later)
+		t.near(laterSolar, heldLaterSolar, 1e-6, "the sun")
+		t.near(laterValue, value, 1e-9, "the values")
+		t.eq(Calendar.day(later, running), 8, "on from the held day")
+		-- At another time of day on the same side of midnight: from the held day, the sun kept.
+		local other = 50 * DAY + 3000
+		running = Calendar.hold(held, false, other)
+		local otherSolar = look(running, other)
+		local heldOtherSolar = look(held, other)
+		t.near(otherSolar, heldOtherSolar, 1e-6, "the sun keeps its share")
+		t.eq(Calendar.day(other, running), 8)
+		t.near(Calendar.time(other, running), 8 + 3000 / DAY, 1e-9, "at the time of day it is")
 	end)
 
 	t.test("seasons: /time set keeps the calendar, /season set moves only the offset", function()
@@ -245,8 +319,8 @@ return function(t, shared, require)
 	t.test("seasons: a save keeps the calendar, re-anchored when the lengths change", function()
 		local s = state(nil, 5)
 		local dayTime = 30 * DAY + 1234
-		local saved = Calendar.encode(s, dayTime)
-		t.eq(saved.v, 1)
+		local saved = assert(Calendar.encode(s, dayTime))
+		t.eq(saved.v, Calendar.VERSION)
 		t.eq(saved.offset, 5)
 		t.eq(saved.day, 35)
 		t.eq(saved.lock, nil)
@@ -263,19 +337,89 @@ return function(t, shared, require)
 		t.eq(oldPosition.season, Calendar.AUTUMN, "day 35: year 1, autumn day 3")
 		t.eq(newPosition.season, oldPosition.season, "the same season")
 		t.eq(newPosition.year, oldPosition.year, "the same year")
-		t.eq(newPosition.day, math.floor((3 + 0.5) / 8 * 4), "the same share of it")
-		-- A lock moves the same way.
-		local locked = state(nil, 0, 13)
+		t.eq(newPosition.day, math.floor(3 * (4 - 1) / (8 - 1) + 0.5), "in proportion")
+		-- A held time moves the same way, its time of day kept.
+		local locked = state(nil, 0, 13.3)
 		local lockedBack = assert(Calendar.decode(Calendar.encode(locked, 0), state(newLengths)))
 		local lockedPosition = Calendar.position(0, lockedBack)
 		t.eq(lockedPosition.season, Calendar.WINTER)
+		t.near((lockedBack.lock :: number) % 1, 0.3, 1e-9)
+		t.eq(assert(Calendar.decode(Calendar.encode(locked, 0), state())).lock, 13.3, "the same lengths: as held")
 		-- It doesn't depend on the day time decoded before or after: only the saved day.
 		t.eq(Calendar.decode(saved, state(newLengths)).offset, wider.offset)
+		-- Version 1 (a whole held day, held at its middle) still reads, as it was held.
+		local old =
+			assert(Calendar.decode({ v = 1, offset = 0, lock = 13, lengths = { 8, 8, 8, 8 }, day = 13 }, state()))
+		t.eq(old.lock, 13.5)
+		t.eq(Calendar.position(77 * DAY, old).calendarDay, 13)
+		t.eq(assert(Calendar.decode({ v = 1, offset = 4, lengths = { 8, 8, 8, 8 }, day = 9 }, state())).offset, 4)
 		-- Malformed saves are refused.
-		for _, bad in { 1, "x", {}, { v = 2 }, { v = 1, offset = 0.5, day = 0, lengths = { 8, 8, 8, 8 } } } do
+		for _, bad in
+			{
+				1,
+				"x",
+				{},
+				{ v = 2 },
+				{ v = 3, offset = 0, day = 0, lengths = { 8, 8, 8, 8 } },
+				{ v = 1, offset = 0.5, day = 0, lengths = { 8, 8, 8, 8 } },
+				{ v = 1, offset = 0, day = 0, lock = 2.5, lengths = { 8, 8, 8, 8 } },
+				{ v = 2, offset = 0, day = 0, lock = math.huge, lengths = { 8, 8, 8, 8 } },
+			}
+		do
 			t.eq(Calendar.decode(bad, state()), nil)
 		end
 		t.eq(Calendar.decode({ v = 1, offset = 0, day = 0, lengths = { 8, 8, 0, 8 } }, state()), nil, "a 0 day season")
+	end)
+
+	t.test("seasons: re-anchored to other lengths, a season's first day stays its first, its last its last", function()
+		-- (Winter's first day of 8 was the second of 16.)
+		local dayTime = 8 * DAY + 6000
+		local wider = assert(Calendar.decode(Calendar.encode(state(), dayTime), state({ 16, 16, 16, 16 })))
+		t.eq(Calendar.position(dayTime, wider).season, Calendar.WINTER)
+		t.eq(Calendar.position(dayTime, wider).day, 0, "the first day")
+		for _, case in { { 8, 16 }, { 16, 8 }, { 8, 3 }, { 3, 8 }, { 1, 5 }, { 5, 1 } } do
+			local from, to = case[1], case[2]
+			local saved = state({ from, from, from, from }, 7)
+			local new = state({ to, to, to, to })
+			for season = 1, 4 do
+				local last = -1
+				for day = 0, from - 1 do
+					-- (Year 1, so the year is kept too.)
+					local at = (Calendar.yearLength(saved) + Calendar.seasonStart(season, saved) + day - 7) * DAY + 9000
+					local p = Calendar.position(at, assert(Calendar.decode(Calendar.encode(saved, at), new)))
+					local name = `{from} to {to}: season {season} day {day}`
+					t.eq(p.season, season, name)
+					t.eq(p.year, 1, name)
+					t.ok(p.day >= last, `{name}: in order`)
+					last = p.day
+					if day == 0 then
+						t.eq(p.day, 0, `{name}: the first`)
+					end
+					if day == from - 1 and from > 1 then
+						t.eq(p.day, to - 1, `{name}: the last`)
+					end
+				end
+			end
+		end
+	end)
+
+	t.test("seasons: a world played without seasons saves none, so they start on Autumn's day 1", function()
+		-- Played with the seasons off from day 0 to day 18, a hold set then too.
+		local now = 18 * DAY + 5000
+		local off = Calendar.fresh(0)
+		off.enabled = false
+		off = Calendar.hold(off, true, now)
+		t.eq(Calendar.encode(off, now), nil, "no section: neither the days nor the hold")
+		-- With them on, no section: Autumn's first day there (it was Spring's third).
+		local on = Calendar.decode(Calendar.encode(off, now), state()) or Calendar.fresh(now)
+		local p = Calendar.position(now, on)
+		t.eq(p.season, Calendar.AUTUMN)
+		t.eq(p.day, 0)
+		t.eq(on.lock, nil, "running")
+		-- A section saved while it had seasons stays as it was.
+		local kept = Calendar.encode(state(nil, 5), 30 * DAY)
+		t.eq(Calendar.encode(off, 40 * DAY, kept), kept, "kept unchanged")
+		t.eq((kept :: any).offset, 5)
 	end)
 
 	t.test("seasons: attributes round trip (before the server says anything: off)", function()
@@ -386,6 +530,158 @@ return function(t, shared, require)
 			-- The counter and its notices go by the same night: tonight's until it sets.
 			t.eq(BloodMoon.daysUntil(14 * DAY + 6000, settings), 0)
 			t.eq(BloodMoon.daysUntil(15 * DAY + 100, settings), 0, "a winter night past midnight is still tonight's")
+		end)
+	end)
+
+	--[[ World/SeasonClock itself, with a fake day clock and workspace ]]
+
+	local source = withHeader(fs.readFile(CLOCK))
+
+	--[[
+		Runs `fn(SeasonClock, clock)` with a fresh World/SeasonClock over a day clock at `dayTime`
+		(`clock.now` moves it), then puts the calendar's module state back (the clock sets it).
+	]]
+	local function withClock(dayTime: number, fn: (any, any) -> ())
+		local clock = { now = dayTime, attributes = {} :: { [string]: any } }
+		local timeNode = { Name = "TimeOfDay" }
+		local timeOfDay = {
+			get = function(): number
+				return clock.now
+			end,
+		}
+		local game = {
+			GetService = function(_, name: string): any
+				assert(name == "ReplicatedStorage", `no fake service {name}`)
+				return shared.Parent
+			end,
+		}
+		local workspace = {
+			SetAttribute = function(_, name: string, value: any)
+				clock.attributes[name] = value
+			end,
+		}
+		local Instance = {
+			new = function(class: string): any
+				assert(class == "BindableEvent", `no fake {class}`)
+				return { Event = {}, Fire = function() end }
+			end,
+		}
+		-- (The 60 s republishing loop never runs here.)
+		local task = { spawn = function() end }
+		local before = Calendar.state()
+		local ok, err = pcall(function()
+			local chunk = luau.load(source, { debugName = CLOCK })
+			local SeasonClock = chunk(
+				{ Name = "SeasonClock", Parent = { TimeOfDay = timeNode } },
+				function(node: any): any
+					return if node == timeNode then timeOfDay else require(node)
+				end,
+				game,
+				workspace,
+				Instance,
+				task
+			)
+			fn(SeasonClock, clock)
+		end)
+		Calendar.setState(before)
+		if not ok then
+			error(err, 0)
+		end
+	end
+
+	t.test(
+		"seasons (World/SeasonClock): an unreadable calendar starts on Autumn's day 1 once the clock is back",
+		function()
+			-- A loaded world's sections in any order: the calendar first (it can't be read), then the
+			-- day clock (a new server's clock until then).
+			withClock(Config.Time.StartTime, function(SeasonClock, clock)
+				SeasonClock.start()
+				t.eq(SeasonClock.decode({ v = Calendar.VERSION, offset = "x" }), false)
+				clock.now = 40 * DAY + 3000
+				SeasonClock.restored()
+				local p = SeasonClock.position()
+				t.eq(p.season, Calendar.AUTUMN, "Autumn at the restored time (not day 40's Winter)")
+				t.eq(p.day, 0)
+				t.eq(clock.attributes[Calendar.ATTRIBUTE_OFFSET], -40, "published")
+			end)
+			-- A readable one stays as saved, whatever decoded first.
+			withClock(Config.Time.StartTime, function(SeasonClock, clock)
+				SeasonClock.start()
+				t.eq(SeasonClock.decode(Calendar.encode(state(nil, -30), 40 * DAY)), true)
+				clock.now = 40 * DAY + 3000
+				SeasonClock.restored()
+				t.eq(SeasonClock.position().calendarDay, 10, "the saved calendar")
+			end)
+			-- None at all (a new world): Autumn's first day.
+			withClock(5 * DAY, function(SeasonClock)
+				SeasonClock.start()
+				SeasonClock.restored()
+				t.eq(SeasonClock.position().calendarDay, 0)
+			end)
+		end
+	)
+
+	t.test(
+		"seasons (World/SeasonClock): a world without seasons saves nothing new, then starts on Autumn's day 1",
+		function()
+			-- Played without seasons (no section, a hold set then): nothing saved.
+			withClock(Config.Time.StartTime, function(SeasonClock, clock)
+				SeasonClock.start(false)
+				SeasonClock.restored()
+				clock.now = 18 * DAY + 5000
+				SeasonClock.setLocked(true)
+				t.eq(SeasonClock.cycle(), false)
+				t.eq(SeasonClock.encode(), nil, "no section")
+			end)
+			-- A section saved while it had seasons comes back unchanged, whatever happened meanwhile.
+			local kept = Calendar.encode(state(nil, 5), 30 * DAY)
+			withClock(Config.Time.StartTime, function(SeasonClock, clock)
+				SeasonClock.start(false)
+				t.eq(SeasonClock.decode(kept), true)
+				SeasonClock.restored()
+				clock.now = 50 * DAY
+				SeasonClock.setLocked(true)
+				SeasonClock.keepCalendar(50 * DAY, 1000)
+				t.eq(SeasonClock.encode(), kept, "the section it had")
+			end)
+			-- The same world with seasons: no section, so Autumn's first day now, saved from there.
+			withClock(18 * DAY + 5000, function(SeasonClock)
+				SeasonClock.start()
+				SeasonClock.restored()
+				local p = SeasonClock.position()
+				t.ok(p.season == Calendar.AUTUMN and p.day == 0, "Autumn's first day")
+				local saved = SeasonClock.encode()
+				t.eq(saved.v, Calendar.VERSION)
+				t.eq(saved.day, 0)
+			end)
+		end
+	)
+
+	t.test("seasons (World/SeasonClock): doSeasonCycle moves neither the sun nor the calendar", function()
+		withClock(8 * DAY + 11000, function(SeasonClock, clock)
+			SeasonClock.start()
+			SeasonClock.restored()
+			-- Winter's first day (a blend day): Autumn's first was day 0.
+			SeasonClock.setSeason(Calendar.WINTER, 1)
+			local values = { 10, 20, 30, 40 }
+			local solar, value = DayCycle.solarTime(clock.now), Calendar.value(values, clock.now)
+			SeasonClock.setLocked(true)
+			t.eq(SeasonClock.cycle(), false)
+			t.eq(DayCycle.solarTime(clock.now), solar, "the sun stays")
+			t.eq(Calendar.value(values, clock.now), value, "and what the season blends")
+			t.eq(
+				clock.attributes[Calendar.ATTRIBUTE_LOCK],
+				Calendar.time(clock.now, state()),
+				"the exact time, published"
+			)
+			-- A day later at the same time: the same; running on then, still the same.
+			clock.now += DAY
+			t.near(DayCycle.solarTime(clock.now) - DAY, solar, 1e-6)
+			SeasonClock.setLocked(false)
+			t.eq(SeasonClock.cycle(), true)
+			t.near(DayCycle.solarTime(clock.now) - DAY, solar, 1e-6, "on: the sun")
+			t.near(Calendar.value(values, clock.now), value, 1e-9, "on: the values")
+			t.eq(SeasonClock.position().calendarDay, 8, "on from the held day")
 		end)
 	end)
 end

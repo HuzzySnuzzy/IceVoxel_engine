@@ -7,21 +7,23 @@
 
 	  Caption   under the dial, upper case (Ui/Theme's caps): "WINTER · 3 DAYS LEFT" (the days left
 	            count today), "LAST DAY OF AUTUMN" on a season's last day, "HEAT WAVE" (Theme's
-	            Warn) on a heat wave's day from dawn until its heat is over (`heatWaveShown`: the
-	            wave's To plus its Ramp), and the season's name alone while /gamerule
-	            doSeasonCycle false holds the calendar (no days run out). Its colour is the season's
-	            (Theme.Season). `captionWidth`: GUI pixels in WIDTH_STEP steps, so a changing
-	            digit doesn't move the clock every day; `captions` lists every caption a calendar
-	            can show (the widest is what the HUD's layout is tested with).
+	            Warn) on a heat wave's day from dawn until its heat is over (`heatWaveShown`: until
+	            the wave's To, where SeasonClimate.heatWave's heat ends), and the season's name
+	            alone while /gamerule doSeasonCycle false holds the calendar (no days run out). Its
+	            colour is the season's (Theme.Season). `captionWidth`: GUI pixels in WIDTH_STEP
+	            steps, so a changing digit doesn't move the clock every day; `captions` lists every
+	            caption a calendar can show (the widest is what the HUD's layout is tested with).
 	  Toasts    `events(before, now)` from one look at the clock to the next: the season's turn at
 	            the sunrise (tick 0) of its first day, the moment its label turns ("Autumn · the
 	            leaves turn", "Winter has come · 8 days", "Spring · the thaw begins", "Summer ·
 	            heat waves ahead"), and a heat wave's dawn ("Heat wave · seek shade"). A step
 	            back in time or of more than MAX_STEP ticks (a /time set, a long hitch) is no event,
-	            and both ends are read with the same calendar, so /season set or the lock changing
-	            fires nothing either. With the calendar off there are none. Each has its colour
-	            key (`colourKey`) and its stinger (`sound`: ambient.season.<name>, heat_wave), and
-	            goes through Ui/SurvivorHud's one toast queue with the blood moon's notices.
+	            and neither is a look whose calendar is not the one the look before read (`earlier`:
+	            /time set keeping the calendar, /season set, the lock), so nothing already toasted
+	            comes again; the next look goes on as ever. With the calendar off there are none.
+	            Each has its colour key (`colourKey`) and its stinger (`sound`:
+	            ambient.season.<name>, heat_wave), and goes through Ui/SurvivorHud's one toast
+	            queue with the blood moon's notices.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -81,9 +83,8 @@ function SeasonLine.heatWaveShown(dayTime: number, seed: number, s: Calendar.Sta
 	if not state.enabled then
 		return false
 	end
-	local wave = Config.Seasons.Climate.HeatWave
 	local ticks = dayTime - math.floor(dayTime / TICKS) * TICKS
-	if ticks >= wave.To + wave.Ramp then
+	if ticks >= Config.Seasons.Climate.HeatWave.To then
 		return false
 	end
 	return SeasonClimate.isHeatWave(Calendar.day(dayTime, state), seed, state)
@@ -131,11 +132,40 @@ function SeasonLine.captionWidth(text: string, measure: (text: string) -> number
 	return math.ceil((measure(text) + 1) / step) * step
 end
 
--- The toasts due between day times `before` (nil: the first look) and `now` (see the header).
-function SeasonLine.events(before: number?, now: number, seed: number, s: Calendar.State?): { Event }
+-- Do `a` and `b` describe the same calendar (the switch, the offset, the lock, the lengths)?
+local function sameCalendar(a: Calendar.State, b: Calendar.State): boolean
+	if a == b then
+		return true
+	elseif a.enabled ~= b.enabled or a.offset ~= b.offset or a.lock ~= b.lock then
+		return false
+	end
+	for i = 1, Calendar.SEASONS do
+		if a.lengths[i] ~= b.lengths[i] then
+			return false
+		end
+	end
+	return true
+end
+
+--[[
+	The toasts due between day times `before` (nil: the first look) and `now` (see the header),
+	`s` the calendar now (default the calendar's state) and `earlier` the one `before` was read
+	with (default `s`).
+]]
+function SeasonLine.events(
+	before: number?,
+	now: number,
+	seed: number,
+	s: Calendar.State?,
+	earlier: Calendar.State?
+): { Event }
 	local events: { Event } = {}
 	local state = s or Calendar.state()
 	if not state.enabled or before == nil or now < before or now - before > SeasonLine.MAX_STEP then
+		return events
+	end
+	-- (The calendar itself changed between the looks: its turns are not the clock's.)
+	if earlier ~= nil and not sameCalendar(earlier, state) then
 		return events
 	end
 	-- (Seasons turn and heat waves come at sunrise, tick 0, when the calendar's day changes.)

@@ -19,8 +19,9 @@
 	set keeps the calendar (`Result.keepCalendar`: the glue has World/SeasonClock.keepCalendar take
 	the day count's jump into the offset, so setting the time never throws the world back to
 	Autumn), while /time add moves it with the days added (/time add 8d is a season on at the
-	default lengths). doSeasonCycle false holds the calendar on the day it is (the lock), as
-	doDaylightCycle holds the sun; /season (Players/SeasonCommand) sets the season itself.
+	default lengths). doSeasonCycle false holds the calendar at the exact time it is (the lock:
+	nothing the season sets moves), as doDaylightCycle holds the sun; true runs it on from the held
+	day; /season (Players/SeasonCommand) sets the season itself.
 
 	Who may: changing the time or a game rule needs `mayUse`, which the glue gives the operators'
 	permission (Players/Operators: operators, among them Config.Gameplay.Admins, the game's owner

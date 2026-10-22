@@ -13,16 +13,19 @@
 	  Off         Config.Seasons.Enabled false, or a world type without ticks (the debug worlds:
 	              `start(false)`, as the weather): published disabled, every rule the identity.
 	  Changes     `setSeason(season, day)` (/season set: only the offset moves, the time of day
-	              and the blood moons stay), `setLocked(on)` (/gamerule doSeasonCycle false locks
-	              the calendar day it is; true runs on from it), `keepCalendar(old, new)` (/time
-	              set: the offset takes the day count's jump back). `changed` fires after each with
-	              the new state.
-	  Saving      World/WorldSave's "seasons" section: `encode()` (Calendar.encode: { v = 1,
-	              offset, lock, lengths, day }) and `decode(value)` (re-anchored when Config's
-	              lengths changed). A world with no section (a new world, or one saved before the
-	              seasons) gets `fresh()` once its sections are back: Autumn's first day at that
-	              moment (Calendar.fresh), so every world has the same 8 mild days before its
-	              first winter.
+	              and the blood moons stay), `setLocked(on)` (/gamerule doSeasonCycle false holds
+	              the calendar at the exact time it is, so nothing moves; true runs on from the held
+	              day: Calendar.hold), `keepCalendar(old, new)` (/time set: the offset takes the day
+	              count's jump back). `changed` fires after each with the new state.
+	  Saving      World/WorldSave's "seasons" section: `encode()` (Calendar.encode: { v = 2,
+	              offset, lock, lengths, day }; a world without seasons keeps the section it was
+	              read with, or saves none, so neither the days played without them nor a hold set
+	              then are kept) and `decode(value)` (re-anchored when Config's lengths changed).
+	              A world whose calendar was not read back (a new world, one saved before the
+	              seasons or without them, or a section that can't be read) gets `fresh()` in
+	              `restored()`, once every section is back (the day clock's too): Autumn's first
+	              day at that moment (Calendar.fresh), so every world has the same 8 mild days
+	              before its first winter.
 	Starts before World/WeatherServer (the weather's season Moment reads the calendar).
 ]]
 
@@ -49,6 +52,10 @@ local started = false
 local allowed = Config.Seasons.Enabled == true
 local state: Calendar.State = Calendar.newState()
 state.enabled = false
+-- The "seasons" section World/WorldSave gave back (saved again unchanged while the world has no
+-- seasons), and whether it could be read.
+local saved: any = nil
+local read = false
 
 local function publish()
 	Calendar.setState(state)
@@ -89,32 +96,26 @@ end
 --[[
 	Sets the season (Calendar.AUTUMN .. SUMMER) and its day (1-based, as /season set takes it;
 	default 1, within the season's length) at the time of day it is, in the year it is in: only
-	the offset moves (and the lock, while locked).
+	the offset moves (and the held day, while held).
 ]]
 function SeasonClock.setSeason(season: number, day: number?)
 	local offset, calendarDay = Calendar.offsetFor(season, (day or 1) - 1, TimeOfDay.get(), state)
 	local s = table.clone(state)
 	s.offset = offset
-	if s.lock ~= nil then
-		s.lock = calendarDay
+	local lock = s.lock
+	if lock ~= nil then
+		-- (Held: the held day moves, its time of day stays.)
+		s.lock = calendarDay + (lock - math.floor(lock))
 	end
 	adopt(s)
 end
 
--- Locks the calendar on the day it is (doSeasonCycle false), or runs it on from the locked day.
+-- Holds the calendar at the time it is (doSeasonCycle false), or runs it on from the held day.
 function SeasonClock.setLocked(on: boolean)
-	local now = TimeOfDay.get()
-	local s = table.clone(state)
-	if on and s.lock == nil then
-		s.lock = Calendar.day(now, state)
-	elseif not on and s.lock ~= nil then
-		-- (On from the locked day: no jump.)
-		s.offset = (s.lock :: number) - math.floor(now / Calendar.TICKS_PER_DAY)
-		s.lock = nil
-	else
-		return
+	local s = Calendar.hold(state, on, TimeOfDay.get())
+	if s ~= state then
+		adopt(s)
 	end
-	adopt(s)
 end
 
 -- Is the calendar running (doSeasonCycle)?
@@ -134,19 +135,31 @@ function SeasonClock.fresh()
 	adopt(Calendar.fresh(TimeOfDay.get()))
 end
 
--- The calendar for the world's save (World/WorldSave's "seasons" section).
+-- The calendar for the world's save (World/WorldSave's "seasons" section; see the header).
 function SeasonClock.encode(): any
-	return Calendar.encode(state, TimeOfDay.get())
+	return Calendar.encode(state, TimeOfDay.get(), saved)
 end
 
 -- Puts a saved calendar back (re-anchored to Config's lengths). false when it can't be read.
 function SeasonClock.decode(value: any): boolean
+	saved = value
 	local s = Calendar.decode(value, Calendar.newState())
 	if s == nil then
 		return false
 	end
+	read = true
 	adopt(s)
 	return true
+end
+
+--[[
+	World/WorldSave once every section is back, the day clock's too: a world whose calendar was not
+	read back gets `fresh()` at the restored time (see the header).
+]]
+function SeasonClock.restored()
+	if not read then
+		SeasonClock.fresh()
+	end
 end
 
 --[[
