@@ -62,7 +62,8 @@
 	      - turning blocks with a structure (`rotate`, `rotateLut`, `turnDirection`): wall
 	        torches, glow lichen and jigsaws face the turned way;
 	      - cave twins (`caveTwin`: CaveGlowLichen*, CaveLava, CaveOil): the same look and behaviour
-	        as their twin (a fluid twin is a source of its group, but never `fluidId`'s answer), but
+	        as their twin (the same appearance, or the same look in one of their own when
+	        `seasonless`; a fluid twin is a source of its group, but never `fluidId`'s answer), but
 	        cave air while caves are hidden (`cullLutHiddenCaves`, `caveTwinLut`), never part of
 	        their item's variants (`placementFor` never picks one), and turned back into their twin
 	        by `surfaceForm` (with CaveAir into Air) when a structure is saved;
@@ -173,11 +174,13 @@ export type BlockDef = {
 	shearSpeed: number?,
 	-- Only creative players place, use and break it (structure blocks, structure voids, jigsaws).
 	creativeOnly: boolean,
-	-- A structure block's mode ("save", "load", "corner", "data"), a jigsaw's orientation and a
-	-- cave twin's twin (its name); see BlockList.
+	-- A structure block's mode ("save", "load", "corner", "data"), a jigsaw's orientation, a
+	-- cave twin's twin (its name) and whether its colour never follows the seasons (an
+	-- appearance of its own); see BlockList.
 	structureMode: string?,
 	jigsaw: JigsawSpec?,
 	caveTwin: string?,
+	seasonless: boolean,
 	-- Minecraft's fire odds (BlockList `flammable`): how readily fire spreads next to it and how
 	-- readily it burns away, 0 for blocks that never burn. See Shared/Fire.
 	ignite: number,
@@ -234,6 +237,8 @@ export type Appearance = {
 	-- A snow layer's layers (1..8; 0: none): each n is an appearance of its own, its box's top
 	-- lowered to 2n pixels (Blocks.layerLut; client Rendering/ChunkRenderer).
 	layer: number,
+	-- Its colour never follows the seasons (BlockList `seasonless`; Shared/Seasons/Foliage).
+	seasonless: boolean,
 }
 
 export type ShapeBox = BlockList.ShapeBox
@@ -580,6 +585,8 @@ local defs: { [number]: BlockDef } = {}
 local ids: { [string]: number } = {}
 local appearances: { Appearance } = {}
 local appearanceByKey: { [string]: number } = {}
+-- Each block's look as its appearance key says it, without `seasonless` (cave twins' check).
+local lookKeyOf: { [number]: string } = {}
 local fluidIds: { [string]: { [number]: number } } = {}
 local placeable: { number } = {}
 
@@ -661,6 +668,7 @@ for index, spec in BlockList do
 		structureMode = spec.structureMode,
 		jigsaw = spec.jigsaw,
 		caveTwin = spec.caveTwin,
+		seasonless = spec.seasonless == true,
 		ignite = if spec.flammable then spec.flammable.ignite else 0,
 		burn = if spec.flammable then spec.flammable.burn else 0,
 		climbable = spec.climbable == true,
@@ -797,8 +805,11 @@ for index, spec in BlockList do
 		-- (Plants never share one with anything else: the mesher and renderer treat them apart.)
 		local upperHalf = spec.plant ~= nil and spec.plant.bottom ~= nil
 		local foliage = `{spec.plant ~= nil},{def.tinted},{def.scatter},{upperHalf}`
-		-- (Each snow layer height is its own appearance: its box is lowered by it.)
-		local key = `{look}|{if solid then 1 else 0}|{texture}|{def.decor or ""}|{glow}|{foliage}|{def.layer}`
+		-- (Each snow layer height is its own appearance: its box is lowered by it. A seasonless
+		-- block's colour stays when its look's follows the seasons: one of its own too.)
+		local lookKey = `{look}|{if solid then 1 else 0}|{texture}|{def.decor or ""}|{glow}|{foliage}|{def.layer}`
+		lookKeyOf[id] = lookKey
+		local key = if def.seasonless then lookKey .. "|seasonless" else lookKey
 		local appearance = appearanceByKey[key]
 		if appearance == nil then
 			appearance = #appearances + 1
@@ -823,6 +834,7 @@ for index, spec in BlockList do
 				upperHalf = upperHalf,
 				foliage = spec.plant ~= nil,
 				layer = def.layer,
+				seasonless = def.seasonless,
 			})
 		end
 		def.appearance = appearance
@@ -868,8 +880,10 @@ for _, def in defs do
 	if name then
 		local twin = defs[ids[name]]
 		assert(twin.caveTwin == nil, `Block {def.name} twins another twin`)
+		-- (The same look; an appearance of its own only when one is seasonless.)
 		assert(
-			def.appearance == twin.appearance
+			lookKeyOf[def.id] == lookKeyOf[twin.id]
+				and (def.appearance == twin.appearance) == (def.seasonless == twin.seasonless)
 				and sameFluid(def, twin)
 				and def.item == (twin.item or twin.name)
 				and def.support == twin.support

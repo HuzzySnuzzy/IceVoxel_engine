@@ -731,10 +731,11 @@ local Config = {
 			class's own keyframes for a class (dry biomes' grass yellows in summer), or the name
 			of another class's (tropical biomes keep every colour). Dust: how far full snow cover
 			moves a kind towards SnowColour (grass and plants, leaves and vines, spruce, jungle).
-			Consecutive steps (BlendDays / 24 days) stay within ΔE76 2.5 (tests/spec/Foliage: keep
-			the snow ramps and the spring green-up apart when tuning). The sweep writes at most
-			SweepWrites properties and SweepMs a frame; far meshes are rebuilt when their palette
-			moved more than FarDeltaE (ΔE76; a far palette every FarStepDays).
+			Consecutive steps (BlendDays / 24 days, shorter with seasons under 8 days) stay within
+			ΔE76 2.5 (tests/spec/Foliage: keep the snow ramps and the spring green-up apart when
+			tuning). The sweep writes at most SweepWrites properties and SweepMs a frame; far
+			meshes are rebuilt when their palette moved more than FarDeltaE (ΔE76; a far palette
+			every FarStepDays).
 		]]
 		Foliage = {
 			Enabled = true,

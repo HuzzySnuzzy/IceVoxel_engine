@@ -3670,15 +3670,26 @@ rule that build thawed by (the natural map's Water under an Ice edit).
 `Config.Seasons.Foliage`). Grass tops, every leaves block, tinted plants and vines follow
 per-foliage-class keyframes over the year's progress (keep in linear light, even CIELAB moves
 between keyframes), with biome-class overrides (dry grass yellows in summer, tropical biomes keep
-their colours) and snow dust by kind from `SeasonClimate.snowCover`. Steps of BlendDays/24 days
-never differ by more than ΔE76 2.5. SeasonTint hands ChunkRenderer a palette per step; colours
-become paints through `TextureLooks.seasonalTint`; each record keeps its parts' palette generations,
-so the budgeted sweep (nearest first, live records only, SweepWrites/SweepMs a frame) writes each
-changed colour once and skips unchanged ones. New and pooled parts are painted as they are built.
-Far meshes bake the far palette per member's biome class and are rebuilt (`MeshRegions.stale`),
-through MeshOverlay's usual ranking and gate, when it drifts past FarDeltaE. Items, icons and the
-map keep the authored colours. F3 has a foliage line (the palette, the last sweep's writes and
-frames, the far step, stale meshes).
+their colours) and snow dust by kind from `SeasonClimate.snowCover`. The mineshafts' cave vines
+keep their green underground (BlockList `seasonless`: the same look in appearances of their own).
+Steps of BlendDays/24 days (with a season shorter than 8 days, times the square of the shortest
+one's share of 8: the palettes' moves and the snow cover's ramps in days then both move less a step)
+never differ by more than ΔE76 2.5, whatever the seasons' lengths. The biome class is per chunk
+column at every level (the generator's biome at its centre, asked once and kept in a fixed 1.3 MB
+cache that holds a 4096-block view): a box takes its centre's chunk's, a far-mesh quad its block's,
+so a far node spanning several classes paints each chunk as its children will. SeasonTint hands
+ChunkRenderer a palette per step; colours become paints through `TextureLooks.seasonalTint`; each
+record keeps its parts' palette generations, so the budgeted sweep (nearest first, live records
+only, SweepWrites/SweepMs a frame) writes each changed colour once and skips unchanged ones. It
+visits only the nodes that may hold seasonal parts, ranks them into distance rings over its first
+frames (each ring sorted when reached) and looks at the clock through its walk, so neither a new
+palette nor the walk costs a long frame with thousands of nodes. New and pooled parts are painted
+as they are built. Far meshes bake the far palette per chunk's class, in their own look's colour
+only when they are built in looks (the overlay's, which may have dropped Far Materials, not the
+setting), and are rebuilt (`MeshRegions.stale`), through MeshOverlay's usual ranking and gate, when
+it drifts past FarDeltaE in a class their quads took. Items, icons and the map keep the authored
+colours. F3 has a foliage line (the palette, the last sweep's writes and frames, the far step,
+stale meshes).
 
 **The season clock** (client `Ui/SeasonClock` face, `Ui/SeasonLine` words, both pure; `Ui/SeasonHud`
 glue). A Don't Starve dial left of the minimap (HudLayout `clock`: GAP left of the minimap or Map
@@ -4237,12 +4248,14 @@ that carries the light: two boxes, two parts. Its outline is a pixel thick plate
 puts in caves, and CaveLava and CaveOil, the lava of the caves' lava seas and underground lakes
 and the oil of buried deposits (see Fluids). A twin looks, drops and behaves exactly like its twin
 (same appearance, item, support, light, hardness, drops and behaviour; a fluid twin is a source of
-the same group, level and tick delay; checked at load), but counts as cave air while caves are
-hidden (`cullLutHiddenCaves`, `caveTwinLut`; see Meshing), as CaveAir is to Air. Players never
-place one: twins are no variants of their item (`placementFor` never returns one, EditRules
-refuses them, `Blocks.fluidId` never answers one, so a bucket pours an ordinary source),
-`Blocks.rotate` keeps a twin a twin, and `Blocks.surfaceForm` turns a twin into its twin and
-CaveAir into Air when a structure is saved (`caveTwinOf`, `caveTwinFor`, `isCaveTwin`).
+the same group, level and tick delay; checked at load; a `seasonless` twin, the mineshafts' cave
+vines, has the same look in an appearance of its own, so the seasons' foliage colours pass it by),
+but counts as cave air while caves are hidden (`cullLutHiddenCaves`, `caveTwinLut`; see Meshing),
+as CaveAir is to Air. Players never place one: twins are no variants of their item (`placementFor`
+never returns one, EditRules refuses them, `Blocks.fluidId` never answers one, so a bucket pours an
+ordinary source), `Blocks.rotate` keeps a twin a twin, and `Blocks.surfaceForm` turns a twin into
+its twin and CaveAir into Air when a structure is saved (`caveTwinOf`, `caveTwinFor`,
+`isCaveTwin`).
 
 **Obsidian** (Minecraft's): what water makes of a lava source (see Fluids). Hardness 50, a diamond
 pickaxe or nothing (`toolLevel` 3: 9.4 s; 250 s by hand, for no drop); it drops itself.

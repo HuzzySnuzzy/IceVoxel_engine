@@ -1129,6 +1129,33 @@ return function(t)
 		end
 	end)
 
+	t.test("texture looks: the mineshafts' cave vines look as the vines, in appearances of their own", function()
+		-- (BlockList `seasonless`: the seasons' foliage colours pass them by underground.)
+		for _, name in { "Vine", "VineNorth", "VineWest", "VineEast" } do
+			local own, cave = app(name), app("Cave" .. name)
+			local label = `Cave{name}`
+			t.ok(own ~= cave, `{label}: an appearance of its own`)
+			local front, caveFront = Looks.frontOf(own), Looks.frontOf(cave)
+			t.ok(front ~= nil and caveFront ~= nil, `{label}: the vine's picture`)
+			t.eq((caveFront :: any).texture, (front :: any).texture, `{label}: its texture`)
+			sameColour(t, (caveFront :: any).color, (front :: any).color, `{label}: its tint`, 0)
+			sameColour(t, Looks.plainColour(cave), Looks.plainColour(own), `{label}: plain colour`, 0)
+			for _, plain in { false, true } do
+				t.eq(
+					table.concat(Looks.drawnBoxes(cave, plain) or {}, ","),
+					table.concat(Looks.drawnBoxes(own, plain) or {}, ","),
+					`{label}: the boxes drawn`
+				)
+			end
+			local look, r, g, b = Looks.lookOf(own, 2)
+			local caveLook, cr, cg, cb = Looks.lookOf(cave, 2)
+			t.eq(caveLook, look, `{label}: the far meshes' look`)
+			t.near(cr, r, 0)
+			t.near(cg, g, 0)
+			t.near(cb, b, 0)
+		end
+	end)
+
 	t.test("texture looks: a season's colour tints only what follows the block's colour", function()
 		local autumn = { 210, 110, 40 }
 		-- Grass: the top image follows (Tint true), the sides' variant keeps its own colours.

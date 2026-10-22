@@ -1,8 +1,9 @@
 --[[
 	Foliage colours by season (Shared/Seasons/Foliage over Config.Seasons.Foliage): the seasonal
-	appearances and their palettes, CIELAB and ΔE76, the steps (consecutive steps never differ by
-	more than ΔE76 2.5, for every seasonal appearance and biome class, all year and across the
-	year's end), keyframes wrapping, keep 1 giving the authored colours, the biome class overrides
+	appearances (not the mineshafts' cave vines) and their palettes, CIELAB and ΔE76, the steps
+	(consecutive steps never differ by more than ΔE76 2.5, for every seasonal appearance and biome
+	class, all year and across the year's end, whatever the seasons' lengths), keyframes wrapping,
+	keep 1 giving the authored colours, the biome class overrides
 	(dry grass yellows in summer, tropical biomes keep their colours), snow dust by class, the far
 	steps and drift, and no targets at all while the foliage does not follow the seasons.
 ]]
@@ -52,6 +53,14 @@ return function(t, shared, require)
 		end
 		t.eq(Foliage.kindOf(app("Vine")), Foliage.VINE)
 		t.eq(Foliage.kindOf(app("VineNorth")), Foliage.VINE)
+		-- The mineshafts' cave vines keep their green underground: appearances of their own.
+		for _, name in { "Vine", "VineNorth", "VineWest", "VineEast" } do
+			local cave = B["Cave" .. name]
+			t.ok(app("Cave" .. name) ~= app(name), `Cave{name} has its own appearance`)
+			t.ok(not Foliage.isSeasonal(app("Cave" .. name)), `Cave{name} keeps its colours`)
+			t.eq(Foliage.colour(app("Cave" .. name), "temperate", 0.3, 1), nil)
+			t.eq(Blocks.get(cave).color, authored(name), "the same green")
+		end
 		for _, name in { "Stone", "Dirt", "OakLog", "Sand", "Water", "Poppy", "SnowLayer1" } do
 			t.ok(not Foliage.isSeasonal(app(name)), `{name} keeps its colours`)
 			t.eq(Foliage.colour(app(name), "temperate", 0.1, 0), nil)
@@ -82,27 +91,27 @@ return function(t, shared, require)
 		t.ok(Foliage.deltaE({ 0, 0, 0 }, { 255, 255, 255 }) > 99, "black to white")
 	end)
 
-	t.test("foliage: consecutive steps differ by at most ΔE76 2.5, all year and over the year's end", function()
-		local s = state()
-		local year = s.lengths[1] + s.lengths[2] + s.lengths[3] + s.lengths[4]
-		local steps = math.round(year / Foliage.stepDays())
-		t.eq(steps, 384, "BlendDays / 24 days a step: 12 a day")
-		local function copy(targets: any): any
-			local out = {}
-			for index, colours in targets.colours do
-				out[index] = {}
-				for appearance, c in colours do
-					out[index][appearance] = { c[1], c[2], c[3] }
-				end
+	local function copy(targets: any): any
+		local out = {}
+		for index, colours in targets.colours do
+			out[index] = {}
+			for appearance, c in colours do
+				out[index][appearance] = { c[1], c[2], c[3] }
 			end
-			return out
 		end
-		local previous = copy(Foliage.targets(Foliage.midpoint(-1), s))
+		return out
+	end
+
+	-- The largest ΔE76 between consecutive steps from step -1 through `years` years with the
+	-- calendar's state `s`, where it was, and how much colour moved in all.
+	local function worstStep(s: any, years: number): (number, string, number)
+		local year = s.lengths[1] + s.lengths[2] + s.lengths[3] + s.lengths[4]
+		local steps = math.round(year / Foliage.stepDays(s))
+		local previous = copy(Foliage.targets(Foliage.midpoint(-1, s), s))
 		local worst, where = 0, ""
 		local moved = 0
-		-- (Two years from a negative step: the year's end is crossed twice.)
-		for step = 0, steps * 2 do
-			local now = copy(Foliage.targets(Foliage.midpoint(step), s))
+		for step = 0, steps * years do
+			local now = copy(Foliage.targets(Foliage.midpoint(step, s), s))
 			for index, colours in now do
 				for appearance, c in colours do
 					local d = Foliage.deltaE(previous[index][appearance], c)
@@ -115,9 +124,56 @@ return function(t, shared, require)
 			end
 			previous = now
 		end
+		return worst, where, moved
+	end
+
+	t.test("foliage: consecutive steps differ by at most ΔE76 2.5, all year and over the year's end", function()
+		local s = state()
+		local year = s.lengths[1] + s.lengths[2] + s.lengths[3] + s.lengths[4]
+		local steps = math.round(year / Foliage.stepDays(s))
+		t.eq(steps, 384, "BlendDays / 24 days a step: 12 a day")
+		-- (Two years from a negative step: the year's end is crossed twice.)
+		local worst, where, moved = worstStep(s, 2)
 		t.ok(worst <= Foliage.MAX_STEP_DELTA, `worst step ΔE76 {worst} ({where})`)
 		t.ok(worst > 1, "the palettes do move")
 		t.ok(moved > 1000, "a year of colour")
+	end)
+
+	t.test("foliage: steps stay within ΔE76 2.5 whatever the seasons' lengths", function()
+		-- (Shorter seasons step more often: the palettes' moves and the snow cover's ramps in days
+		-- come closer together in them; longer ones keep BlendDays / 24.)
+		for _, lengths in
+			{
+				{ 6, 6, 6, 6 },
+				{ 5, 5, 5, 5 },
+				{ 4, 4, 4, 4 },
+				{ 8, 3, 8, 8 },
+				{ 8, 8, 4, 8 },
+				{ 12, 12, 12, 12 },
+				{ 2, 9, 3, 16 },
+			}
+		do
+			local s = state()
+			s.lengths = lengths
+			local share = math.min(1, math.min(table.unpack(lengths)) / 8)
+			local label = table.concat(lengths, ",")
+			t.near(
+				Foliage.stepDays(s),
+				math.min(Config.Seasons.BlendDays / 24, share * share / 12),
+				1e-12,
+				`{label}: the step`
+			)
+			t.ok(Foliage.farStepDays(s) >= Foliage.stepDays(s), `{label}: far steps no shorter`)
+			local worst, where = worstStep(s, 1)
+			t.ok(worst <= Foliage.MAX_STEP_DELTA, `{label}: worst step ΔE76 {worst} ({where})`)
+			t.ok(worst > 0.1, `{label}: the palettes do move`)
+		end
+		local short = state()
+		short.lengths = { 4, 4, 4, 4 }
+		t.near(Foliage.stepDays(short), 1 / 48, 1e-12, "4-day seasons: a quarter of the default step")
+		t.eq(Foliage.stepOf(1 / 48 * 3.5, short), 3)
+		t.near(Foliage.midpoint(3, short), 1 / 48 * 3.5, 1e-12)
+		t.near(Foliage.stepDays(state()), Foliage.TUNED_STEP, 1e-12, "the defaults' step")
 	end)
 
 	t.test("foliage: keyframes, keep 1, overrides by biome class, wrapping", function()

@@ -844,7 +844,8 @@ A fast, Minecraft-style voxel engine for Roblox.
     nothing in the save.
   - **Foliage:** grass, leaves, tinted plants and vines turn through the year: autumn's reds,
     oranges and browns, winter's bare and snow-dusted colours, spring's fresh green, dry grass
-    yellowing in summer; evergreens and jungles keep theirs. The distant terrain turns with them.
+    yellowing in summer; evergreens and jungles keep theirs, and so do the vines in mineshafts.
+    The distant terrain turns with them, each chunk by its own biome.
   - **Rooms and heating:** walls, a roof and a floor around you make a room (up to 1,024 cells, 32
     blocks across, a few openings: a missing roof block leaks like a broken window) whose air has
     its own temperature: warmed by campfires, lit furnaces, working generators, players and the

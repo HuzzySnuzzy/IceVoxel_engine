@@ -121,8 +121,12 @@
 	    TARGET_SLACK of the one in effect is not a change, and a palette with no change starts
 	    nothing. Colours become paints (part Color, image and Decal Color3s per drawn mode, shape
 	    box and soil tint) through TextureLooks.seasonalTint, cached per class until the next
-	    palette or a change of looks. A node's biome class comes from `setSeasonClass`'s function,
-	    asked once per node;
+	    palette or a change of looks;
+	  * the biome class is per chunk column, at every level: a box takes the class of the chunk
+	    its centre stands on (a far node spanning several classes paints each of its chunks
+	    with its own, as its children will), asked of `setSeasonClass`'s function once and kept
+	    in a direct-mapped cache of CLASS_SIDE x CLASS_SIDE columns (a 4096-block view with its
+	    farthest nodes fits, 1.3 MB, made with the first class asked);
 	  * every record keeps each part's palette generation (`tone`, parallel to its parts, moved
 	    with the parts a diff keeps and refreshed from the old record when it commits) and the
 	    oldest among its seasonal parts (`painted`; math.huge without any);
@@ -130,15 +134,22 @@
 	    once some palette other than the authored one was applied (`dirty`; until then nothing
 	    is written, exactly as without seasons);
 	  * a palette with changes starts a sweep (`seasonSweep(writes, ms)`, every frame from
-	    SeasonTint): the nodes nearest the camera first, every live record of each, re-read from
-	    the node's state every frame, so a part not live in a record (retiring, released, in the
-	    pool's quarantine) is never touched. A part whose tone is older than its colour's
-	    `since` is written (once: its tone says it is current), a newer one only takes the new
-	    tone; at most `writes` property writes and `ms` a frame, nothing allocated. Records
+	    SeasonTint) over the nodes that may hold seasonal parts (`holders`: every node when the
+	    seasons start, then those a record with seasonal parts commits in; one whose records
+	    hold none leaves when the sweep passes it): their list is copied at the start and ranked
+	    a few at a time into rings of RING_STUDS by distance from the camera, each ring sorted
+	    (numbers, no comparator) when the walk reaches it, so the nodes nearest the camera come
+	    first and nothing costs a long frame. Every live record of each, re-read from the node's
+	    state every frame, so a part not live in a record (retiring, released, in the pool's
+	    quarantine) is never touched. A part whose tone is older than its colour's `since` is
+	    written (once: its tone says it is current), a newer one only takes the new tone; at
+	    most `writes` property writes and `ms` a frame, the ranking, the walk over nodes and
+	    sections and the classes asked included, nothing allocated (the rings are kept). Records
 	    committed with parts of an older palette after the sweep passed them are swept last;
 	    records of an older look are left to the restyle that rebuilds them (and paints them);
 	  * far meshes take the far palette (`setFarSeason`): MeshOverlay colours their seasonal
-	    quads per member's class and rebuilds a mesh whose palette drifted too far.
+	    quads per chunk column's class (the same cache) and rebuilds a mesh whose palette
+	    drifted too far.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -305,8 +316,6 @@ type NodeState = {
 	-- one while the model is in the workspace (see the header).
 	ox: number,
 	oz: number,
-	-- Its biome class (Foliage.classIndex; nil until the seasons ask).
-	class: number?,
 }
 
 -- The renderer's state of one task (RenderSchedule.Task.data).
@@ -347,11 +356,10 @@ type Build = {
 	plain: boolean,
 	maxCells: number,
 	maxCellsY: number,
-	-- Seasons: each part's palette generation (parallel to `parts`, nil without seasons), the
-	-- oldest one a seasonal part got, and the node's biome class.
+	-- Seasons: each part's palette generation (parallel to `parts`, nil without seasons) and the
+	-- oldest one a seasonal part got.
 	tone: { number }?,
 	minTone: number,
-	class: number,
 }
 
 type Task = RenderSchedule.Task
@@ -421,18 +429,30 @@ type Season = {
 	-- Some part may show other than its template's colour (a palette other than the authored one
 	-- was applied): from then on every seasonal part is painted when built.
 	dirty: boolean,
-	classOf: (node: RenderNode) -> number,
+	-- The biome class of a chunk column (setSeasonClass's function), and the classes asked so far
+	-- (`chunkClass`; nil until the first).
+	classAt: (cx: number, cz: number) -> number,
+	classes: buffer?,
 	-- Per class index: TextureLooks.seasonalTint per appearance, and paints by paint key.
 	tints: { { [number]: TextureLooks.Seasonal } },
 	paints: { { [number]: Paint } },
 	nextPaint: number,
-	-- The sweep: nodes nearest first (their squared distance when it started), the node being
-	-- swept and its sections, the record being painted and where (box, part index).
+	-- Nodes that may hold seasonal parts, and each one's index in the list.
+	holders: { RenderNode },
+	holderAt: { [RenderNode]: number },
+	-- The sweep: the holders when it started (`order`), how many of them are ranked, where the
+	-- camera stood then (world studs), the rings (keys: distance x 8 x KEY_SPAN + order index;
+	-- `ringTop` the farthest one used) and the ring walked and the next key in it; the node
+	-- being swept and its sections, the record being painted and where (box, part index).
 	sweeping: boolean,
 	order: { RenderNode },
-	distance: { [RenderNode]: number },
-	byDistance: (a: RenderNode, b: RenderNode) -> boolean,
-	orderIndex: number,
+	ranked: number,
+	fromX: number,
+	fromZ: number,
+	rings: { { number } },
+	ringTop: number,
+	ring: number,
+	ringIndex: number,
 	node: RenderNode?,
 	sections: { number },
 	sectionIndex: number,
@@ -572,7 +592,7 @@ export type ChunkRenderer = {
 	busy: (self: ChunkRenderer) -> boolean,
 	stats: (self: ChunkRenderer) -> Stats,
 	setSeason: (self: ChunkRenderer, targets: Foliage.Targets?) -> boolean,
-	setSeasonClass: (self: ChunkRenderer, classOf: (node: RenderNode) -> number) -> (),
+	setSeasonClass: (self: ChunkRenderer, classAt: (cx: number, cz: number) -> number) -> (),
 	setFarSeason: (self: ChunkRenderer, targets: Foliage.Targets?, id: number) -> (),
 	seasonSweep: (self: ChunkRenderer, writes: number, ms: number) -> (number, boolean),
 	seasonStats: (self: ChunkRenderer) -> SeasonStats,
@@ -909,23 +929,72 @@ end
 
 local decodeKey = GreedyMesher.decodeKey
 local NO_BOXES: { number } = {}
+local CHUNK = Config.ChunkSize
 -- Target colours closer than this (0..255, every channel) count as unchanged: no new palette.
 local TARGET_SLACK = 0.25
--- The sweep looks at the clock every this many parts it paints.
+-- The sweep looks at the clock every this many parts it paints, and every this many steps of its
+-- walk (a node ranked, a node's sections listed, a record passed).
 local CLOCK_EVERY = 8
+local WALK_EVERY = 16
+-- The chunk classes' cache (see the header): CLASS_SIDE x CLASS_SIDE slots of a u32 each (the
+-- column's tag x 256 + its class; 0: empty), a slot per column modulo CLASS_SIDE, so a view up to
+-- 4096 blocks (256 chunks each way, plus a far node) never puts two columns in one.
+local CLASS_SIDE = 576
+local CLASS_TAGS = 4096
+-- The sweep's rings (studs wide, the last one holding everything farther) and its keys' room
+-- for the order index (see Season).
+local RING_STUDS = CHUNK * Config.BlockSize
+local MAX_RING = 1024
+local KEY_SPAN = 2 ^ 21
 
--- The biome class of a node (Foliage.classIndex), asked once per node state.
-local function classOfNode(self: ChunkRenderer, node: RenderNode): number
-	local state = self.states[node]
-	if state and state.class then
-		return state.class :: number
+--[[
+	The biome class (Foliage.classIndex) of chunk column (cx, cz), from the cache or asked of
+	`classAt` (then kept), and whether it was asked (a generator column: a caller on a budget looks
+	at the clock).
+]]
+local function chunkClass(season: Season, cx: number, cz: number): (number, boolean)
+	local cache = season.classes
+	if cache == nil then
+		cache = buffer.create(CLASS_SIDE * CLASS_SIDE * 4)
+		season.classes = cache
 	end
-	local season = self.season
-	local class = if season then season.classOf(node) else Foliage.TEMPERATE
-	if state then
-		state.class = class
+	local slot = ((cx % CLASS_SIDE) * CLASS_SIDE + cz % CLASS_SIDE) * 4
+	local tag = ((cx // CLASS_SIDE) % CLASS_TAGS) * CLASS_TAGS + (cz // CLASS_SIDE) % CLASS_TAGS
+	local entry = buffer.readu32(cache :: buffer, slot)
+	if entry ~= 0 and entry // 256 == tag then
+		return entry % 256, false
 	end
-	return class
+	local class = season.classAt(cx, cz)
+	buffer.writeu32(cache :: buffer, slot, tag * 256 + class)
+	return class, true
+end
+
+-- The chunk column the centre of box `o` (byte offset) of a node of `step` stands on.
+local function chunkOf(node: RenderNode, step: number, boxes: buffer, o: number): (number, number)
+	local x = node.nx * CHUNK + readu16(boxes, o) + readu16(boxes, o + 6) * 0.5
+	local z = node.nz * CHUNK + readu16(boxes, o + 4) + readu16(boxes, o + 10) * 0.5
+	return math.floor(x * step / CHUNK), math.floor(z * step / CHUNK)
+end
+
+-- A node may hold seasonal parts: the sweeps visit it (see the header).
+local function addHolder(season: Season, node: RenderNode)
+	if season.holderAt[node] == nil then
+		table.insert(season.holders, node)
+		season.holderAt[node] = #season.holders
+	end
+end
+
+local function removeHolder(season: Season, node: RenderNode)
+	local at = season.holderAt[node]
+	if at == nil then
+		return
+	end
+	local list = season.holders
+	local last = list[#list]
+	list[at] = last
+	season.holderAt[last] = at
+	list[#list] = nil
+	season.holderAt[node] = nil
 end
 
 -- TextureLooks.seasonalTint of `appearance` in class `class` for the palette now (cached).
@@ -1053,24 +1122,29 @@ local function applyPaint(pool: PartPool.PartPool, part: BasePart, paint: Paint)
 end
 
 local function newSeason(): Season
-	local season: Season = {
+	return {
 		applied = {},
 		since = {},
 		gen = 0,
 		dirty = false,
-		classOf = function(_node: RenderNode): number
+		classAt = function(_cx: number, _cz: number): number
 			return Foliage.TEMPERATE
 		end,
+		classes = nil,
 		tints = {},
 		paints = {},
 		nextPaint = 0,
+		holders = {},
+		holderAt = {},
 		sweeping = false,
 		order = {},
-		distance = {},
-		byDistance = function(_a: RenderNode, _b: RenderNode): boolean
-			return false
-		end,
-		orderIndex = 1,
+		ranked = 0,
+		fromX = 0,
+		fromZ = 0,
+		rings = {},
+		ringTop = 0,
+		ring = 0,
+		ringIndex = 1,
 		node = nil,
 		sections = {},
 		sectionIndex = 1,
@@ -1088,11 +1162,6 @@ local function newSeason(): Season
 		lastFrames = 0,
 		sweeps = 0,
 	}
-	local distance = season.distance
-	season.byDistance = function(a: RenderNode, b: RenderNode): boolean
-		return distance[a] < distance[b]
-	end
-	return season
 end
 
 --[[
@@ -1151,27 +1220,28 @@ local function copyTargets(t: Foliage.Targets): Foliage.Targets
 	return { time = t.time, p = t.p, covers = table.clone(t.covers), colours = colours }
 end
 
--- Starts a sweep over every live section, nearest node first.
-local function startSweep(self: ChunkRenderer, season: Season)
-	local order, distance = season.order, season.distance
+-- Starts a sweep over the holders' live sections, nearest node first (see the header).
+local function startSweep(season: Season)
+	local order = season.order
 	table.clear(order)
-	table.clear(distance)
+	table.move(season.holders, 1, #season.holders, 1, order)
+	season.ranked = 0
 	local camera = workspace.CurrentCamera
 	local cx, cz = 0, 0
 	if camera then
 		local position = camera.CFrame.Position
 		cx, cz = position.X, position.Z
 	end
-	for node in self.states do
-		local step = ChunkLayout.steps(node.level)
-		local size = Config.ChunkSize * step * Config.BlockSize
-		local dx = (node.nx + 0.5) * size - Origin.x - cx
-		local dz = (node.nz + 0.5) * size - Origin.z - cz
-		distance[node] = dx * dx + dz * dz
-		table.insert(order, node)
+	season.fromX, season.fromZ = cx + Origin.x, cz + Origin.z
+	for r = 1, season.ringTop do
+		local ring = season.rings[r]
+		if ring then
+			table.clear(ring)
+		end
 	end
-	table.sort(order, season.byDistance)
-	season.orderIndex = 1
+	season.ringTop = 0
+	season.ring = 0
+	season.ringIndex = 1
 	season.node = nil
 	table.clear(season.sections)
 	season.sectionIndex = 1
@@ -1186,10 +1256,19 @@ local function startSweep(self: ChunkRenderer, season: Season)
 	season.sweeping = true
 end
 
--- A record was committed with parts of an older palette: swept after the order (see the header).
+--[[
+	A record was committed: its node holds seasonal parts when the record does, and one with parts
+	of an older palette is swept after the order (see the header).
+]]
 local function lateRecord(self: ChunkRenderer, node: RenderNode, section: number, record: Record)
 	local season = self.season
-	if season and record.painted < season.gen then
+	if season == nil then
+		return
+	end
+	if record.painted ~= math.huge then
+		addHolder(season, node)
+	end
+	if record.painted < season.gen then
 		table.insert(season.lateNodes, node)
 		table.insert(season.lateSections, section)
 		if not season.sweeping then
@@ -1202,12 +1281,22 @@ end
 
 --[[
 	The record the sweep is at (moving past what is current), or nil when it is done; `advance`
-	moves past it.
+	moves past it. Ranks the order into rings first, then walks them nearest first (see the
+	header). Looks at the clock every WALK_EVERY steps: past `deadline`, nil and true.
 ]]
-local function sweepRecord(self: ChunkRenderer, season: Season): (RenderNode?, Record?)
+local function sweepRecord(self: ChunkRenderer, season: Season, deadline: number): (RenderNode?, Record?, boolean)
 	local gen = season.gen
+	local steps = 0
 	while true do
+		steps += 1
+		if steps >= WALK_EVERY then
+			steps = 0
+			if os.clock() > deadline then
+				return nil, nil, true
+			end
+		end
 		local node = season.node
+		local ring = season.rings[season.ring]
 		if node then
 			local state = self.states[node]
 			local index = season.sectionIndex
@@ -1215,15 +1304,48 @@ local function sweepRecord(self: ChunkRenderer, season: Season): (RenderNode?, R
 				local record = state.records[season.sections[index]]
 				if record and record.painted < gen then
 					season.fromLate = false
-					return node, record
+					return node, record, false
 				end
 				season.sectionIndex = index + 1
 			else
+				if state then
+					-- (Its records hold no seasonal part: no sweep visits it until one commits.)
+					local bare = true
+					for _, record in state.records do
+						if record.painted ~= math.huge then
+							bare = false
+							break
+						end
+					end
+					if bare then
+						removeHolder(season, node)
+					end
+				end
 				season.node = nil
 			end
-		elseif season.orderIndex <= #season.order then
-			local nextNode = season.order[season.orderIndex]
-			season.orderIndex += 1
+		elseif season.ranked < #season.order then
+			-- The next node into the ring of its distance from where the camera stood.
+			local i = season.ranked + 1
+			season.ranked = i
+			local ranked = season.order[i]
+			local size = CHUNK * ChunkLayout.steps(ranked.level) * Config.BlockSize
+			local dx = (ranked.nx + 0.5) * size - season.fromX
+			local dz = (ranked.nz + 0.5) * size - season.fromZ
+			local distance = math.sqrt(dx * dx + dz * dz)
+			local r = math.min(distance // RING_STUDS, MAX_RING) + 1
+			local list = season.rings[r]
+			if list == nil then
+				list = {}
+				season.rings[r] = list
+			end
+			table.insert(list, math.floor(distance * 8) * KEY_SPAN + i)
+			if r > season.ringTop then
+				season.ringTop = r
+			end
+		elseif ring and season.ringIndex <= #ring then
+			local key = ring[season.ringIndex]
+			season.ringIndex += 1
+			local nextNode = season.order[key % KEY_SPAN]
 			local state = self.states[nextNode]
 			if state then
 				local sections = season.sections
@@ -1234,6 +1356,14 @@ local function sweepRecord(self: ChunkRenderer, season: Season): (RenderNode?, R
 				season.node = nextNode
 				season.sectionIndex = 1
 			end
+		elseif season.ring < season.ringTop then
+			-- The next ring, its nodes nearest first (numbers: no comparator).
+			season.ring += 1
+			season.ringIndex = 1
+			local list = season.rings[season.ring]
+			if list and #list > 1 then
+				table.sort(list)
+			end
 		elseif season.lateIndex <= #season.lateNodes then
 			local i = season.lateIndex
 			local lateNode = season.lateNodes[i]
@@ -1241,11 +1371,11 @@ local function sweepRecord(self: ChunkRenderer, season: Season): (RenderNode?, R
 			local record = if state then state.records[season.lateSections[i]] else nil
 			if record and record.painted < gen then
 				season.fromLate = true
-				return lateNode, record
+				return lateNode, record, false
 			end
 			season.lateIndex = i + 1
 		else
-			return nil, nil
+			return nil, nil, false
 		end
 	end
 end
@@ -1290,7 +1420,7 @@ local function paintRecord(
 		season.seen = false
 	end
 	local gen = season.gen
-	local class = classOfNode(self, node)
+	local step = ChunkLayout.steps(node.level)
 	local far = node.level > 0
 	local mode = if not far then NEAR_MODE elseif record.plain then PLAIN_MODE else FAR_MODE
 	-- (A record made before the seasons started: every part in its template's colour.)
@@ -1309,6 +1439,13 @@ local function paintRecord(
 			continue
 		end
 		season.seen = true
+		-- Its chunk column's class (see the header); one asked of the generator costs, so the
+		-- clock is looked at after it.
+		local class, asked = chunkClass(season, chunkOf(node, step, boxes, i * BOX))
+		if asked and os.clock() > deadline then
+			season.box = i
+			return done, false
+		end
 		local from, to = first[i + 1], first[i + 2] - 1
 		local p = if season.part > 0 then season.part else from
 		local shape = shapes[appearance]
@@ -1418,14 +1555,19 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 	local skip = b.sub
 	local k = 0
 	local shape = shapes[appearance]
-	-- Seasons: a seasonal part's palette generation (nil: not seasonal), and whether it is
-	-- painted now (once a palette other than the authored one was applied; see the header).
+	-- Seasons: a seasonal part's palette generation (nil: not seasonal), whether it is painted
+	-- now (once a palette other than the authored one was applied) and in which biome class (its
+	-- chunk column's; see the header).
 	local season = self.season
 	local tone: number? = nil
 	local painting = false
+	local class = Foliage.TEMPERATE
 	if season and buffer.readu8(SEASONAL, appearance) ~= 0 then
 		painting = season.dirty
 		tone = if painting then season.gen else 0
+		if painting then
+			class = chunkClass(season, chunkOf(node, b.step, boxes, o))
+		end
 	end
 	local mode = if not far then NEAR_MODE elseif plain then PLAIN_MODE else FAR_MODE
 	if shape then
@@ -1480,7 +1622,7 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 							part.Size = Vector3.new(scale * SQRT2, scaleY, PartPool.SPRITE_THICKNESS)
 							part.CFrame = frame * turn
 							if painting then
-								local paint = paintFor(self, b.class, appearance, SPRITE_BOX, mode, tint)
+								local paint = paintFor(self, class, appearance, SPRITE_BOX, mode, tint)
 								if self.spriteTints[part] ~= paint.id then
 									self.spriteTints[part] = paint.id
 									applyPaint(pool, part, paint)
@@ -1515,7 +1657,7 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 							then cell * CFrame.new(box.offset * pixel) * box.rotation
 							else CFrame.new(centre + box.offset * pixel) * box.rotation
 						if painting then
-							applyPaint(pool, part, paintFor(self, b.class, appearance, index, mode, tint))
+							applyPaint(pool, part, paintFor(self, class, appearance, index, mode, tint))
 						elseif tints then
 							part.Color = tints[index][tint]
 						end
@@ -1544,7 +1686,7 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 		lower = (Blocks.MAX_LAYERS - layers) / Blocks.MAX_LAYERS * Config.BlockSize
 	end
 	local maxCells, maxCellsY = b.maxCells, b.maxCellsY
-	local cubePaint = if painting then paintFor(self, b.class, appearance, 0, mode, 1) else nil
+	local cubePaint = if painting then paintFor(self, class, appearance, 0, mode, 1) else nil
 	for py = y, y + sy - 1, maxCellsY do
 		local wy = math.min(maxCellsY, y + sy - py)
 		local height = wy * scaleY - (if py + wy == y + sy then lower else 0)
@@ -1615,11 +1757,10 @@ local function startBuild(self: ChunkRenderer, task: Task)
 	b.originZ = node.nz * Config.ChunkSize * b.scale - b.oz
 	b.maxCells = math.max(1, MAX_PART // b.scale)
 	b.maxCellsY = math.max(1, MAX_PART // b.scaleY)
-	-- Seasons: the parts' palette generations, and the node's biome class (see the header).
+	-- Seasons: the parts' palette generations (see the header).
 	if self.season then
 		b.tone = {}
 		b.minTone = math.huge
-		b.class = classOfNode(self, node)
 	end
 end
 
@@ -1923,7 +2064,6 @@ local function newBuild(boxes: buffer, restyle: boolean): Build
 		maxCellsY = 1,
 		tone = nil,
 		minTone = math.huge,
-		class = Foliage.TEMPERATE,
 	}
 end
 
@@ -2029,6 +2169,9 @@ local function detach(self: ChunkRenderer, node: RenderNode): { Record }
 	local state = self.states[node]
 	if state then
 		self.states[node] = nil
+		if self.season then
+			removeHolder(self.season, node)
+		end
 		for _, record in state.records do
 			dropRecord(self, record)
 			table.insert(records, record)
@@ -2670,8 +2813,13 @@ end
 local function seasonOf(self: ChunkRenderer): Season
 	local season = self.season
 	if season == nil then
-		season = newSeason()
-		self.season = season
+		local made = newSeason()
+		self.season = made
+		-- (Nodes built before may hold seasonal parts, in their templates' colours.)
+		for node in self.states do
+			addHolder(made, node)
+		end
+		return made
 	end
 	return season :: Season
 end
@@ -2692,20 +2840,23 @@ function ChunkRenderer.setSeason(self: ChunkRenderer, targets: Foliage.Targets?)
 	table.clear(season.tints)
 	table.clear(season.paints)
 	if season.dirty then
-		startSweep(self, season)
+		startSweep(season)
 	end
 	return true
 end
 
--- How a node's biome class is found (Foliage.classIndex; asked once per node, see the header).
-function ChunkRenderer.setSeasonClass(self: ChunkRenderer, classOf: (node: RenderNode) -> number)
+--[[
+	How a chunk column's biome class is found (Foliage.classIndex of `classAt(cx, cz)`; asked once
+	per column and kept, see the header).
+]]
+function ChunkRenderer.setSeasonClass(self: ChunkRenderer, classAt: (cx: number, cz: number) -> number)
 	local season = seasonOf(self)
-	season.classOf = classOf
-	for _, state in self.states do
-		state.class = nil
+	season.classAt = classAt
+	if season.classes then
+		buffer.fill(season.classes :: buffer, 0, 0)
 	end
 	if season.dirty then
-		-- (Nodes may change class: every seasonal colour is written again.)
+		-- (Chunks may change class: every seasonal colour is written again.)
 		season.gen += 1
 		for class in Foliage.CLASSES do
 			if season.applied[class] == nil then
@@ -2719,7 +2870,7 @@ function ChunkRenderer.setSeasonClass(self: ChunkRenderer, classOf: (node: Rende
 		end
 		table.clear(season.tints)
 		table.clear(season.paints)
-		startSweep(self, season)
+		startSweep(season)
 	end
 end
 
@@ -2745,12 +2896,13 @@ function ChunkRenderer.setFarSeason(self: ChunkRenderer, targets: Foliage.Target
 		end
 		colours[class] = list
 	end
+	local season = seasonOf(self)
 	self.overlay:setSeason({
 		id = id,
 		targets = copy,
 		colours = colours,
-		classOf = function(node: any): number
-			return classOfNode(self, node)
+		classAt = function(cx: number, cz: number): (number, boolean)
+			return chunkClass(season, cx, cz)
 		end,
 		drift = function(from: any, to: any, classes: { number }): number
 			return Foliage.drift(from, to, classes)
@@ -2761,8 +2913,9 @@ end
 
 --[[
 	Runs the sweep (see the header) for at most `writes` property writes and `ms` milliseconds
-	(Config.Seasons.Foliage.SweepWrites, SweepMs: Rendering/SeasonTint calls it every frame).
-	Returns the writes done and whether nothing is left to paint. Allocates nothing.
+	(Config.Seasons.Foliage.SweepWrites, SweepMs: Rendering/SeasonTint calls it every frame), the
+	ranking and the walk included. Returns the writes done and whether nothing is left to paint.
+	Allocates nothing once its rings are made (they are kept from sweep to sweep).
 ]]
 function ChunkRenderer.seasonSweep(self: ChunkRenderer, writes: number, ms: number): (number, boolean)
 	local season = self.season
@@ -2773,7 +2926,11 @@ function ChunkRenderer.seasonSweep(self: ChunkRenderer, writes: number, ms: numb
 	local done = 0
 	season.frames += 1
 	while true do
-		local node, record = sweepRecord(self, season)
+		local node, record, paused = sweepRecord(self, season, deadline)
+		if paused then
+			season.writes += done
+			return done, false
+		end
 		if node == nil or record == nil then
 			season.sweeping = false
 			season.writes += done

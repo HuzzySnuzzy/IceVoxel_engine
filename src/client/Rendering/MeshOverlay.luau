@@ -64,10 +64,13 @@
 	Seasons (`setSeason`, from Rendering/SeasonTint through ChunkRenderer.setFarSeason; nil: none,
 	so without seasons nothing here changes). Vertex colours are baked, so a far palette (one per
 	far step, Config.Seasons.Foliage.FarStepDays) is used when a build starts: its seasonal quads
-	(grass, leaves, plants, vines) take their member's biome class's colours (the quad's centre
-	gives its member), in their own look the look's colour, in the remainder their plain colour,
-	tinted for the look they joined as MeshGeometry's rule does. Each mesh remembers the palette
-	and its members' classes; when the palette now drifted more than its limit (FarDeltaE, ΔE76)
+	(grass, leaves, plants, vines) take the biome class of the chunk column their block stands in
+	(the quad's centre moved half a block back against its face, so a side face on a chunk's or a
+	member's edge is its own block's; ChunkRenderer's per-chunk classes, as the parts take them),
+	in their own look the look's colour, in the remainder or a plain build (Far Materials off, or
+	dropped: the overlay's looks, not the setting) their plain colour, tinted for the look they
+	joined as MeshGeometry's rule does. Each mesh remembers the palette and the classes its
+	seasonal quads took; when the palette now drifted more than its limit (FarDeltaE, ΔE76)
 	from that, in any of those classes, the region is marked stale: a new version for
 	MeshRegions, so it joins the usual candidate ranking (with every member meshed already it
 	ranks below any region with parts to merge), waits RebuildSeconds and the gate like any
@@ -126,7 +129,8 @@ type RegionParts = {
 	parts: { MeshPart },
 	triangles: number,
 	-- The seasonal palette its mesh was built with (nil: none, the authored colours), the biome
-	-- classes of its members then, and whether it was marked stale since (see setSeason).
+	-- classes its seasonal quads took (all of them without a palette), and whether it was marked
+	-- stale since (see setSeason).
 	season: Season?,
 	classes: { number },
 	stale: boolean,
@@ -177,30 +181,32 @@ export type LookInfoOf = (look: number) -> LookInfo?
 	The far meshes' seasonal palette (see the header; Rendering/ChunkRenderer.setFarSeason): `id`
 	its far step, `targets` what `drift` compares (Shared/Seasons/Foliage.Targets),
 	`colours[class][appearance]` = { r, g, b in its own look, r, g, b plain } (0..1) for every
-	seasonal appearance and biome class, `classOf(node)` a member's biome class, `drift(from, to,
-	classes)` the largest ΔE76 between two targets (nil: the authored colours) over those classes,
-	and `limit` the drift that makes a mesh stale.
+	seasonal appearance and biome class, `classAt(cx, cz)` a chunk column's biome class and
+	whether it had to be asked (a generator column: the builder slices after it), `drift(from,
+	to, classes)` the largest ΔE76 between two targets (nil: the authored colours) over those
+	classes, and `limit` the drift that makes a mesh stale.
 ]]
 export type Season = {
 	id: number,
 	targets: any,
 	colours: { { [number]: { number } } },
-	classOf: (node: Node) -> number,
+	classAt: (cx: number, cz: number) -> (number, boolean),
 	drift: (from: any, to: any, classes: { number }) -> number,
 	limit: number,
 }
 
--- What a build uses, fixed when it starts (MeshRegions.Job.payload): with a palette, the members'
--- biome classes by cell (`cellKey`) and as a list, and a member's width in studs.
+-- What a build uses, fixed when it starts (MeshRegions.Job.payload): whether it is in looks
+-- (Far Materials as the overlay has them), and with a palette the biome classes its seasonal
+-- quads took (filled as they are coloured) and a block's width in studs at its level.
 type Payload = {
 	quads: { QuadsEntry },
 	lookGen: number,
 	options: MeshGeometry.Options?,
 	lookInfo: LookInfoOf?,
+	looks: boolean,
 	season: Season?,
-	classes: { [number]: number }?,
 	classList: { number }?,
-	cellStuds: number,
+	blockStuds: number,
 }
 
 export type Stats = {
@@ -358,22 +364,21 @@ for i in Foliage.CLASSES do
 end
 local TEMPERATE = Foliage.TEMPERATE
 
--- A member's cell (its nx, nz) as one number.
-local function cellKey(nx: number, nz: number): number
-	return (nx + 524288) * 1048576 + (nz + 524288)
-end
+local CHUNK_STUDS = SIZE * BLOCK
 
 --[[
-	Gives a mesh's seasonal quads their palette's colours for their member's biome class (builder
-	thread): in their own look the look's colour, in the remainder their plain colour (tinted for
-	the look they joined, as MeshGeometry's remainder rule).
+	Gives a mesh's seasonal quads their palette's colours for their chunk column's biome class
+	(builder thread; see the header), adding the classes to the payload's list: in their own look
+	the look's colour (only in a build in looks), else their plain colour (tinted for the look
+	they joined, as MeshGeometry's remainder rule).
 ]]
 local function recolour(mesh: MeshGeometry.Mesh, payload: Payload)
 	local season = payload.season :: Season
 	local colors = mesh.colors :: { number }
 	local options = payload.options :: MeshGeometry.Options
-	local classes = payload.classes :: { [number]: number }
-	local cell = payload.cellStuds
+	local list = payload.classList :: { number }
+	local half = payload.blockStuds / 2
+	local looks = payload.looks
 	local lookOf = options.lookOf
 	local positions, center, appearances = mesh.positions, mesh.center, mesh.appearances
 	local look = mesh.look
@@ -389,16 +394,26 @@ local function recolour(mesh: MeshGeometry.Mesh, payload: Payload)
 		if seasonal[appearance] == nil then
 			continue
 		end
-		-- (The quad's centre: its member's cell; a face on a cell's edge may belong to either.)
+		-- The quad's centre, half a block back against its face (U x V, QuadMesher.corners: the
+		-- outward normal), is in its own block's chunk column.
 		local o = (q - 1) * 12
+		local ux, uy, uz =
+			positions[o + 4] - positions[o + 1],
+			positions[o + 5] - positions[o + 2],
+			positions[o + 6] - positions[o + 3]
+		local vx, vy, vz =
+			positions[o + 10] - positions[o + 1],
+			positions[o + 11] - positions[o + 2],
+			positions[o + 12] - positions[o + 3]
+		local normalX, normalZ = uy * vz - uz * vy, ux * vy - uy * vx
 		local x = center[1] + (positions[o + 1] + positions[o + 4] + positions[o + 7] + positions[o + 10]) / 4
 		local z = center[3] + (positions[o + 3] + positions[o + 6] + positions[o + 9] + positions[o + 12]) / 4
-		local nx, nz = math.floor(x / cell), math.floor(z / cell)
-		local class = classes[cellKey(nx, nz)]
-			or classes[cellKey(nx - 1, nz)]
-			or classes[cellKey(nx, nz - 1)]
-			or classes[cellKey(nx - 1, nz - 1)]
-			or TEMPERATE
+		x -= if normalX > 0 then half elseif normalX < 0 then -half else 0
+		z -= if normalZ > 0 then half elseif normalZ < 0 then -half else 0
+		local class, asked = season.classAt(math.floor(x / CHUNK_STUDS), math.floor(z / CHUNK_STUDS))
+		if not table.find(list, class) then
+			table.insert(list, class)
+		end
 		local byClass = season.colours[class] or seasonal
 		local c = byClass[appearance]
 		local id = own[appearance]
@@ -407,7 +422,7 @@ local function recolour(mesh: MeshGeometry.Mesh, payload: Payload)
 			own[appearance] = id
 		end
 		local r, g, b
-		if id == look then
+		if id == look and looks then
 			r, g, b = c[1], c[2], c[3]
 		elseif average then
 			local tinted = MeshGeometry.tint({ c[4], c[5], c[6] }, average)
@@ -416,16 +431,14 @@ local function recolour(mesh: MeshGeometry.Mesh, payload: Payload)
 			r, g, b = c[4], c[5], c[6]
 		end
 		colors[q * 3 - 2], colors[q * 3 - 1], colors[q * 3] = r, g, b
-		if q % 2048 == 0 then
+		if asked or q % 2048 == 0 then
 			slice()
 		end
 	end
 end
 
--- (For specs: the recolouring of a built mesh's quads, with a payload's palette and classes by
--- `cellKey`.)
+-- (For specs: the recolouring of a built mesh's quads with a payload's palette.)
 MeshOverlay.recolour = recolour
-MeshOverlay.cellKey = cellKey
 
 local function batchAdd(em: EditableMesh, attr: Enum.MeshAttribute, data: { any }): { number }
 	local ids: { number } = table.create(#data)
@@ -578,6 +591,30 @@ local function destroyAll(parts: { MeshPart })
 end
 
 --[[
+	A region's meshes (MeshGeometry, builder thread) from the members' quads and the looks as they
+	were when the build started (see MeshOverlay.step), or nil and an error.
+]]
+local function meshesOf(job: MeshRegions.Job): ({ MeshGeometry.Mesh }?, string?)
+	local payload = job.payload :: Payload
+	local builder = MeshGeometry.builder(BLOCK, Settings.Overlap, Settings.MaxTriangles, payload.options)
+	local snapshot = payload.quads
+	for i, node in job.members do
+		local entry = snapshot[i]
+		if entry == nil then
+			return nil, "member without quads"
+		end
+		local step, stepY = ChunkLayout.steps(node.level)
+		local scale = step * BLOCK
+		builder:add(entry.buffer, entry.count, node.nx * SIZE * scale, node.nz * SIZE * scale, scale, stepY * BLOCK)
+		slice()
+	end
+	return builder:finish(), nil
+end
+
+-- (For specs: what a build's MeshParts are made of; seasonal quads not yet recoloured.)
+MeshOverlay.meshesOf = meshesOf
+
+--[[
 	Builds every MeshPart of a region. Returns the parts, their triangles and each one's centre
 	(world studs), or nil and an error.
 ]]
@@ -586,30 +623,21 @@ local function buildRegion(
 	em: EditableMesh,
 	job: MeshRegions.Job
 ): ({ MeshPart }?, number, string?, { { number } }?)
-	-- The members' quads and the looks as they were when the build started (see MeshOverlay.step).
 	local payload = job.payload :: Payload
-	local builder = MeshGeometry.builder(BLOCK, Settings.Overlap, Settings.MaxTriangles, payload.options)
-	local snapshot = payload.quads
-	for i, node in job.members do
-		local entry = snapshot[i]
-		if entry == nil then
-			return nil, 0, "member without quads"
-		end
-		local step, stepY = ChunkLayout.steps(node.level)
-		local scale = step * BLOCK
-		builder:add(entry.buffer, entry.count, node.nx * SIZE * scale, node.nz * SIZE * scale, scale, stepY * BLOCK)
-		slice()
+	local meshes, missing = meshesOf(job)
+	if meshes == nil then
+		return nil, 0, missing
 	end
 	local parts: { MeshPart } = {}
 	local centers: { { number } } = {}
 	local triangles = 0
-	for _, mesh in builder:finish() do
+	for _, mesh in meshes do
 		-- Paused (a teleport): stop between MeshParts, each costs a long frame.
 		if self.abort then
 			destroyAll(parts)
 			return nil, 0, "aborted"
 		end
-		if payload.season and payload.classes and mesh.colors and payload.options then
+		if payload.season and mesh.colors and payload.options then
 			recolour(mesh, payload)
 		end
 		local lookInfo = payload.lookInfo
@@ -1448,28 +1476,17 @@ function MeshOverlay.step(self: MeshOverlay, allowance: number?, used: number?):
 				lookGen = self.lookGen,
 				options = self.lookOptions,
 				lookInfo = self.lookInfo,
+				looks = self.looks,
 				season = nil,
-				classes = nil,
 				classList = nil,
-				cellStuds = 0,
+				blockStuds = 0,
 			}
-			-- The palette now and the members' biome classes (see the header).
+			-- The palette now; the classes its seasonal quads take come as they are coloured.
 			local season = self.season
 			if season then
-				local classes: { [number]: number } = {}
-				local list: { number } = {}
-				for _, node in job.members do
-					local class = season.classOf(node)
-					classes[cellKey(node.nx, node.nz)] = class
-					if not table.find(list, class) then
-						table.insert(list, class)
-					end
-				end
-				local step = ChunkLayout.steps(region.level)
 				payload.season = season
-				payload.classes = classes
-				payload.classList = list
-				payload.cellStuds = SIZE * step * BLOCK
+				payload.classList = {}
+				payload.blockStuds = ChunkLayout.steps(region.level) * BLOCK
 			end
 			job.payload = payload
 			self.pending = job

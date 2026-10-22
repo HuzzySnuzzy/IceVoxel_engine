@@ -8,7 +8,8 @@
 
 	  Kinds      `kindOf(appearance)`: GRASS (Grass, DryGrass: their top texture follows the block's
 	             colour), LEAVES (every *Leaves block), PLANT (tinted plants: grass and ferns, which
-	             scale with the grass palette as their soil's tint does) and VINE, else NONE. Each
+	             scale with the grass palette as their soil's tint does) and VINE, else NONE (also
+	             BlockList's `seasonless` blocks: the mineshafts' cave vines, underground). Each
 	             follows a foliage class's palette (`foliageOf`): "grass" (grass blocks and
 	             plants), "deciduous" (oak and acacia leaves, vines), "birch", "evergreen" (spruce)
 	             or "tropical" (jungle).
@@ -29,10 +30,11 @@
 	             SnowColour in CIELAB, so the far landscape reads white in winter beyond the real
 	             snow layers.
 	  Steps      `stepOf(time)`: calendar time in steps of BlendDays / 24 days (100 s of play at
-	             the defaults), each drawn as at its `midpoint`; consecutive steps differ by at most
-	             MAX_STEP_DELTA (ΔE76 2.5) all year, for every seasonal appearance and biome class
-	             (tests/spec/Foliage), below a noticeable pop. The far meshes use coarser steps
-	             (`farStepOf`: FarStepDays).
+	             the defaults), shorter with seasons shorter than 8 days (`stepDays`: 4-day seasons
+	             step every 25 s), each drawn as at its `midpoint`; consecutive steps differ by at
+	             most MAX_STEP_DELTA (ΔE76 2.5) all year, for every seasonal appearance and biome
+	             class, whatever the seasons' lengths (tests/spec/Foliage), below a noticeable
+	             pop. The far meshes use coarser steps (`farStepOf`: FarStepDays).
 	  Targets    `targets(time)`: every seasonal appearance's colour per biome class (`classIndex`:
 	             SeasonClimate.CLASSES' order) at that calendar time, as sRGB 0..255; nil while the
 	             foliage does not follow the seasons (`active`: Config.Seasons.Enabled,
@@ -72,8 +74,11 @@ Foliage.GRASS = 1
 Foliage.LEAVES = 2
 Foliage.PLANT = 3
 Foliage.VINE = 4
--- The most ΔE76 between the colours of two consecutive steps (tests/spec/Foliage).
+-- The most ΔE76 between the colours of two consecutive steps (tests/spec/Foliage), and the near
+-- step (days) and seasons' length (days) the palettes keep it at (`stepDays`: the defaults).
 Foliage.MAX_STEP_DELTA = 2.5
+Foliage.TUNED_STEP = 1 / 12
+Foliage.TUNED_LENGTH = 8
 -- Biome classes, in index order (`classIndex`).
 Foliage.CLASSES = SeasonClimate.CLASSES
 Foliage.TEMPERATE = table.find(SeasonClimate.CLASSES, "temperate") :: number
@@ -134,7 +139,8 @@ for id = 0, Blocks.count - 1 do
 	local def = Blocks.get(id)
 	local appearance = def.appearance
 	local info = Blocks.appearances[appearance]
-	if info == nil then
+	-- (BlockList `seasonless`: the mineshafts' cave vines keep their green underground.)
+	if info == nil or info.seasonless then
 		continue
 	end
 	local name = def.name
@@ -395,32 +401,41 @@ end
 
 --[[ Steps and targets ]]
 
--- Calendar days per near step (BlendDays / 24) and per far step (FarStepDays).
-function Foliage.stepDays(): number
+--[[
+	Calendar days per near step with the calendar's state `s` (default the module's): BlendDays /
+	24, but at most TUNED_STEP times the square of the shortest season's share of TUNED_LENGTH (at
+	most 1). In a short season the snow cover's ramps (SeasonClimate, in days) come closer to the
+	palettes' moves (over the year's progress); a step then moves both less than at the defaults,
+	so steps stay within MAX_STEP_DELTA whatever the lengths. And per far step (FarStepDays, never
+	less).
+]]
+function Foliage.stepDays(s: Calendar.State?): number
 	local blend = Config.Seasons.BlendDays
-	return if blend > 0 then blend / 24 else 1 / 24
+	local lengths = (s or Calendar.state()).lengths
+	local share = math.min(1, math.min(lengths[1], lengths[2], lengths[3], lengths[4]) / Foliage.TUNED_LENGTH)
+	return math.min(if blend > 0 then blend / 24 else 1 / 24, Foliage.TUNED_STEP * share * share)
 end
 
-function Foliage.farStepDays(): number
-	return math.max(Settings.FarStepDays, Foliage.stepDays())
+function Foliage.farStepDays(s: Calendar.State?): number
+	return math.max(Settings.FarStepDays, Foliage.stepDays(s))
 end
 
 -- The near step holding calendar time `time`, and a step's midpoint (calendar time).
-function Foliage.stepOf(time: number): number
-	return math.floor(time / Foliage.stepDays())
+function Foliage.stepOf(time: number, s: Calendar.State?): number
+	return math.floor(time / Foliage.stepDays(s))
 end
 
-function Foliage.midpoint(step: number): number
-	return (step + 0.5) * Foliage.stepDays()
+function Foliage.midpoint(step: number, s: Calendar.State?): number
+	return (step + 0.5) * Foliage.stepDays(s)
 end
 
 -- The far step holding calendar time `time`, and a far step's midpoint.
-function Foliage.farStepOf(time: number): number
-	return math.floor(time / Foliage.farStepDays())
+function Foliage.farStepOf(time: number, s: Calendar.State?): number
+	return math.floor(time / Foliage.farStepDays(s))
 end
 
-function Foliage.farMidpoint(step: number): number
-	return (step + 0.5) * Foliage.farStepDays()
+function Foliage.farMidpoint(step: number, s: Calendar.State?): number
+	return (step + 0.5) * Foliage.farStepDays(s)
 end
 
 -- Is foliage configured to follow the seasons (Config.Seasons.Enabled and Foliage.Enabled)?

@@ -315,7 +315,15 @@ return function(t, shared, require, _server, client)
 				local def, twinDef = Blocks.get(block), Blocks.get(twin)
 				t.eq(Blocks.caveTwinFor(twin), block)
 				t.ok(Blocks.isCaveTwin(block) and not Blocks.isCaveTwin(twin))
-				t.eq(def.appearance, twinDef.appearance, "the same look")
+				if def.seasonless then
+					-- (The mineshafts' cave vines keep their green underground: the same look in an
+					-- appearance of their own.)
+					local mine, theirs = Blocks.appearances[def.appearance], Blocks.appearances[twinDef.appearance]
+					t.ok(mine ~= theirs and mine.color == theirs.color and mine.textures == theirs.textures)
+					t.ok(mine.shape == theirs.shape and mine.material == theirs.material, "the same look")
+				else
+					t.eq(def.appearance, twinDef.appearance, "the same look")
+				end
 				t.eq(def.light, twinDef.light)
 				t.ok(not def.placeable)
 				t.eq(Blocks.surfaceForm(block), twin)

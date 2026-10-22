@@ -8,15 +8,18 @@
 
 	  Steps    Every frame the calendar time (Rendering/LightingController.dayTime through
 	           Shared/Seasons/Calendar) gives the near step (Foliage.stepOf: BlendDays / 24 days,
-	           100 s of play); a new step hands the renderer its palette (Foliage.targets at the
-	           step's midpoint, `ChunkRenderer:setSeason`), which starts a sweep only when some
-	           colour changed (never in summer's steady weeks). The far step (Foliage.farStepOf,
-	           FarStepDays) hands the far meshes theirs (`setFarSeason`).
+	           100 s of play, shorter with short seasons); a new step hands the renderer its
+	           palette (Foliage.targets at the step's midpoint, `ChunkRenderer:setSeason`), which
+	           starts a sweep only when some colour changed (never in summer's steady weeks). The
+	           far step (Foliage.farStepOf, FarStepDays) hands the far meshes theirs
+	           (`setFarSeason`).
 	  Sweep    `renderer:seasonSweep(SweepWrites, SweepMs)` every frame while it has work: at most
-	           SweepWrites property writes and SweepMs a frame, nearest sections first, every
-	           seasonal part written once a step (about 15-26 frames a step).
-	  Classes  A node's biome class is SeasonClimate.classOf of the generator's biome at its centre
-	           column, cached by node key (CLASS_CACHE entries, then started over).
+	           SweepWrites property writes and SweepMs a frame (the walk over nodes and sections
+	           included), nearest sections first, every seasonal part written once a step (about
+	           15-26 frames a step).
+	  Classes  A chunk column's biome class is SeasonClimate.classOf of the generator's biome at
+	           its centre column (`classOf`); the renderer asks it per chunk of each seasonal box
+	           and far-mesh quad, and keeps the answers (ChunkRenderer.setSeasonClass).
 	  Off      Config.Seasons.Enabled or Config.Seasons.Foliage.Enabled false: `start` does nothing,
 	           so every colour is exactly as without seasons. The calendar off (before the server
 	           publishes, a world without seasons): the authored palette (nothing written unless a
@@ -37,8 +40,6 @@ local Config = require(Shared.Config)
 local Calendar = require(Shared.Seasons.Calendar)
 local Foliage = require(Shared.Seasons.Foliage)
 local SeasonClimate = require(Shared.Seasons.SeasonClimate)
-local ChunkLayout = require(Shared.World.ChunkLayout)
-local Coords = require(Shared.World.Coords)
 local Blocks = require(Shared.Blocks)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local WorldTypes = require(Shared.Generation.WorldTypes)
@@ -47,8 +48,6 @@ local ChunkRenderer = require(script.Parent.ChunkRenderer)
 local TextureLooks = require(script.Parent.TextureLooks)
 
 local Settings = Config.Seasons.Foliage
--- Node classes kept before the cache starts over.
-local CLASS_CACHE = 16384
 -- How much darker than a season's colour a texture may show before it is named (0-255).
 local DARK_VISIBLE = 4
 -- Near steps between checks for textures too dark (12: once a calendar day).
@@ -148,10 +147,10 @@ function SeasonTint.follow(renderer: Renderer, dayTime: number, s: Calendar.Stat
 		end
 	end
 	local time = Calendar.time(dayTime, state)
-	local step = Foliage.stepOf(time)
+	local step = Foliage.stepOf(time, state)
 	if step ~= current.step or not current.active or not sameLengths then
 		current.step = step
-		nearTargets = Foliage.targets(Foliage.midpoint(step), state, nearTargets)
+		nearTargets = Foliage.targets(Foliage.midpoint(step, state), state, nearTargets)
 		renderer:setSeason(nearTargets)
 		local darkStep = current.darkStep
 		if nearTargets and (darkStep == nil or math.abs(step - darkStep) >= DARK_EVERY) then
@@ -159,25 +158,22 @@ function SeasonTint.follow(renderer: Renderer, dayTime: number, s: Calendar.Stat
 			noteDark(nearTargets)
 		end
 	end
-	local farStep = Foliage.farStepOf(time)
+	local farStep = Foliage.farStepOf(time, state)
 	if farStep ~= current.farStep or not current.active or not sameLengths then
 		current.farStep = farStep
-		farTargets = Foliage.targets(Foliage.farMidpoint(farStep), state, farTargets)
+		farTargets = Foliage.targets(Foliage.farMidpoint(farStep, state), state, farTargets)
 		renderer:setFarSeason(farTargets, farStep)
 	end
 	current.active = true
 end
 
 --[[
-	A node's biome class (Foliage.classIndex) from `terrain`: the class of the biome at its centre
-	column (see the header).
+	The biome class (Foliage.classIndex) of chunk column (cx, cz) from `terrain`: the class of the
+	biome at its centre column (see the header).
 ]]
-function SeasonTint.classOf(terrain: TerrainGenerator.Generator, level: number, nx: number, nz: number): number
-	local step = ChunkLayout.steps(level)
-	local size = Config.ChunkSize * step
-	local x = math.floor((nx + 0.5) * size)
-	local z = math.floor((nz + 0.5) * size)
-	local _, biome = terrain.column(x, z)
+function SeasonTint.classOf(terrain: TerrainGenerator.Generator, cx: number, cz: number): number
+	local half = Config.ChunkSize // 2
+	local _, biome = terrain.column(cx * Config.ChunkSize + half, cz * Config.ChunkSize + half)
 	return Foliage.classIndex(SeasonClimate.classOf(biome))
 end
 
@@ -191,22 +187,8 @@ function SeasonTint.start(renderer: ChunkRenderer.ChunkRenderer, terrain: Terrai
 	-- (Required here: the rule above runs without the lighting, in specs.)
 	local LightingController = require(script.Parent.LightingController)
 	local generator = terrain or (WorldTypes.fromAttributes(Shared))
-	local classes: { [number]: number } = {}
-	local count = 0
-	renderer:setSeasonClass(function(node: ChunkRenderer.RenderNode): number
-		local key = Coords.nodeKey(node.level, node.nx, node.nz)
-		local class = classes[key]
-		if class then
-			return class
-		end
-		local found = SeasonTint.classOf(generator, node.level, node.nx, node.nz)
-		if count >= CLASS_CACHE then
-			table.clear(classes)
-			count = 0
-		end
-		classes[key] = found
-		count += 1
-		return found
+	renderer:setSeasonClass(function(cx: number, cz: number): number
+		return SeasonTint.classOf(generator, cx, cz)
 	end)
 	RunService.Heartbeat:Connect(function()
 		SeasonTint.follow(renderer, LightingController.dayTime())

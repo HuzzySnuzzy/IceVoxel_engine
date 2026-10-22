@@ -200,6 +200,9 @@
 	                and the mesher treats it like cave air while caves are hidden
 	                (Blocks.cullLutHiddenCaves, Blocks.caveTwinLut), as CaveAir is to Air. Players
 	                never place twins; their `item` is the twin's.
+	  seasonless    true: its colour never follows the seasons (Shared/Seasons/Foliage), so it
+	                takes an appearance of its own even where it looks exactly like another block
+	                (the mineshafts' cave vines keep their green underground).
 
 	Mekanism pipes (Shared/Transmitters):
 	  transmitter   { kind = "item" | "fluid" | "energy", tier = 1..4, restrictive = true? }: a
@@ -339,6 +342,7 @@ export type BlockSpec = {
 	structureMode: string?,
 	jigsaw: JigsawSpec?,
 	caveTwin: string?,
+	seasonless: boolean?,
 	flammable: FlammableSpec?,
 	climbable: boolean?,
 	chain: boolean?,
@@ -3131,8 +3135,9 @@ table.insert(list, {
 --[[
 	Cave twins of what the mineshafts put in their tunnels (`caveTwin`): wall torches, rails,
 	fence posts, cobwebs, moss carpets, vines and hanging roots, exactly their twins (a copy of the
-	spec), but cave air while caves are hidden, so a mineshaft's decorations cost nothing until a
-	player reaches it (Generation/Mineshafts: a twin in cave air, the block itself in the open).
+	spec; the vines `seasonless`), but cave air while caves are hidden, so a mineshaft's
+	decorations cost nothing until a player reaches it (Generation/Mineshafts: a twin in cave air,
+	the block itself in the open).
 ]]
 do
 	local function caveTwin(name: string)
@@ -3143,6 +3148,10 @@ do
 				twin.placeable = false
 				twin.item = spec.item or name
 				twin.caveTwin = name
+				-- (Vines underground keep their green all year: an appearance of their own.)
+				if string.sub(name, 1, 4) == "Vine" then
+					twin.seasonless = true
+				end
 				table.insert(list, twin)
 				return
 			end

@@ -2205,13 +2205,23 @@ return function(t, shared, require, _server, client)
 		overlay.status = "on"
 		overlay.active = true
 		overlay.configured = true
-		-- Finishes the pending build at once with one fake MeshPart.
+		-- Finishes the pending build at once with one fake MeshPart (with a palette, its meshes'
+		-- seasonal quads coloured as the builder does: their classes go into the payload).
 		function sim.finish(): any?
 			local job = overlay.pending
 			if job == nil then
 				return nil
 			end
 			overlay.pending = nil
+			local payload = job.payload
+			if payload and payload.season and payload.options then
+				local MeshOverlay = sim.load("MeshOverlay")
+				for _, mesh in MeshOverlay.meshesOf(job) or {} do
+					if mesh.colors then
+						MeshOverlay.recolour(mesh, payload)
+					end
+				end
+			end
 			local part = sim.world.new("MeshPart")
 			table.insert(overlay.done, { job = job, parts = { part }, triangles = 2 })
 			return part
@@ -3843,14 +3853,24 @@ return function(t, shared, require, _server, client)
 		return s
 	end
 
-	-- Biome classes of the test nodes: by nx (1 cold, 2 tropical, else temperate).
-	local function testClass(Foliage: any): (node: any) -> number
-		return function(node: any): number
-			return if node.nx == 1
+	-- Biome classes of the test chunks: by the chunk column's cx (1 cold, 2 tropical, else
+	-- temperate), so a level 0 node's is its nx's.
+	local function testClass(Foliage: any): (cx: number, cz: number) -> number
+		return function(cx: number, _cz: number): number
+			return if cx == 1
 				then Foliage.classIndex("cold")
-				elseif node.nx == 2 then Foliage.classIndex("tropical")
+				elseif cx == 2 then Foliage.classIndex("tropical")
 				else Foliage.classIndex("temperate")
 		end
+	end
+
+	-- The biome class of box `i` of a node's record: its centre's chunk column's (ChunkRenderer).
+	local function boxClass(classOf: (number, number) -> number, node: any, boxes: buffer, i: number): number
+		local step = ChunkLayout.steps(node.level)
+		local o = i * BOX
+		local x = node.nx * SIZE + buffer.readu16(boxes, o) + buffer.readu16(boxes, o + 6) / 2
+		local z = node.nz * SIZE + buffer.readu16(boxes, o + 4) + buffer.readu16(boxes, o + 10) / 2
+		return classOf(math.floor(x * step / SIZE), math.floor(z * step / SIZE))
 	end
 
 	-- Seasonal test content: grass, leaves, plants on both soils, a fern of boxes, a vine, stone.
@@ -3891,16 +3911,22 @@ return function(t, shared, require, _server, client)
 		records and TextureLooks.seasonalTint independently of the renderer: a list of { object,
 		property, Color3 }, and each object's part.
 	]]
-	local function expected(renderer: any, Foliage: any, Looks: any, targets: any, classOf: (any) -> number): { any }
+	local function expected(
+		renderer: any,
+		Foliage: any,
+		Looks: any,
+		targets: any,
+		classOf: (number, number) -> number
+	): { any }
 		local list = {}
 		for node, state in renderer.states do
-			local class = classOf(node)
 			for _, record in state.records do
 				for i = 0, record.count - 1 do
 					local appearance, surface = GreedyMesher.decodeKey(buffer.readu16(record.boxes, i * BOX + 12))
 					if not Foliage.isSeasonal(appearance) then
 						continue
 					end
+					local class = boxClass(classOf, node, record.boxes, i)
 					local info = appearances[appearance]
 					local target = if targets then targets.colours[class][appearance] else nil
 					local tint = Looks.seasonalTint(appearance, target)
@@ -4136,13 +4162,11 @@ return function(t, shared, require, _server, client)
 		tweaked.colours[cold][oakApp] = { math.max(0, oak[1] - 20), oak[2], oak[3] }
 		local coldOaks = 0
 		for node, state in renderer.states do
-			if classOf(node) == cold then
-				for _, record in state.records do
-					for i = 0, record.count - 1 do
-						local appearance = GreedyMesher.decodeKey(buffer.readu16(record.boxes, i * BOX + 12))
-						if appearance == oakApp then
-							coldOaks += record.first[i + 2] - record.first[i + 1]
-						end
+			for _, record in state.records do
+				for i = 0, record.count - 1 do
+					local appearance = GreedyMesher.decodeKey(buffer.readu16(record.boxes, i * BOX + 12))
+					if appearance == oakApp and boxClass(classOf, node, record.boxes, i) == cold then
+						coldOaks += record.first[i + 2] - record.first[i + 1]
 					end
 				end
 			end
@@ -4175,8 +4199,8 @@ return function(t, shared, require, _server, client)
 		showsAll(t, expected(renderer, Foliage, Looks, autumn, classOf), "new parts painted when built")
 		done = renderer:seasonSweep(25, 1000)
 		t.eq(done, 0, "nothing left for the sweep")
-		-- A new way of finding classes: every node asked again, every colour written again.
-		local function everyTropical(_node: any): number
+		-- A new way of finding classes: every chunk asked again, every colour written again.
+		local function everyTropical(_cx: number, _cz: number): number
 			return Foliage.classIndex("tropical")
 		end
 		renderer:setSeasonClass(everyTropical)
@@ -4369,17 +4393,50 @@ return function(t, shared, require, _server, client)
 		SeasonTint.follow(fake, 60000, off)
 		t.eq(calls.nearNil, 1)
 		t.eq(calls.farNil, 1)
-		-- Biome classes from the generator's biome at a node's centre.
+		-- 4-day seasons published: steps of a quarter of the default (Foliage.stepDays).
+		local short = enabledState(Calendar)
+		short.lengths = { 4, 4, 4, 4 }
+		local before = calls.near
+		SeasonTint.follow(fake, 10, short)
+		SeasonTint.follow(fake, 10 + Foliage.stepDays(short) * 24000, short)
+		t.eq(calls.near, before + 2, "a step a quarter of the default")
+		t.near(Foliage.stepDays(short) * 4, tick / 24000, 1e-12, "a quarter")
+		-- Biome classes from the generator's biome at a chunk column's centre.
 		local TerrainGenerator = req(root.Generation.TerrainGenerator)
 		local SeasonClimate = req(root.Seasons.SeasonClimate)
 		local gen = TerrainGenerator.new(12345)
 		local x, _, z = gen.findSpawn()
-		local nx, nz = x // SIZE, z // SIZE
-		local _, biome = gen.column(math.floor((nx + 0.5) * SIZE), math.floor((nz + 0.5) * SIZE))
-		t.eq(SeasonTint.classOf(gen, 0, nx, nz), Foliage.classIndex(SeasonClimate.classOf(biome)))
+		local cx, cz = x // SIZE, z // SIZE
+		local _, biome = gen.column(math.floor((cx + 0.5) * SIZE), math.floor((cz + 0.5) * SIZE))
+		t.eq(SeasonTint.classOf(gen, cx, cz), Foliage.classIndex(SeasonClimate.classOf(biome)))
 	end)
 
-	t.test("seasons: far meshes take their members' classes and are rebuilt when their palette drifts", function()
+	-- Quads (QuadMesher layout) from rows of { dir, x, y, z, du, dv, appearance }.
+	local function quadsOf(rows: { { number } }): (buffer, number)
+		local quads = buffer.create(#rows * 16)
+		for i, row in rows do
+			for k = 1, 7 do
+				buffer.writeu16(quads, (i - 1) * 16 + (k - 1) * 2, row[k])
+			end
+		end
+		return quads, #rows
+	end
+
+	-- A payload for MeshOverlay.recolour as a build of level `level` in `overlay` starts it.
+	local function seasonPayload(overlay: any, level: number): any
+		return {
+			quads = {},
+			lookGen = overlay.lookGen,
+			options = overlay.lookOptions,
+			lookInfo = overlay.lookInfo,
+			looks = overlay.looks,
+			season = overlay.season,
+			classList = {},
+			blockStuds = ChunkLayout.steps(level) * BLOCK,
+		}
+	end
+
+	t.test("seasons: far meshes take their chunks' classes and are rebuilt when their palette drifts", function()
 		local sim, Foliage, Calendar = seasonSim()
 		local renderer, overlay = sim.renderer, sim.renderer.overlay
 		local MeshOverlay = sim.load("MeshOverlay")
@@ -4388,52 +4445,64 @@ return function(t, shared, require, _server, client)
 		renderer:setSeasonClass(classOf)
 		local s = enabledState(Calendar)
 		local grassApp = Blocks.get(B.Grass).appearance
-		-- Recolouring a mesh: each quad by its member's class (cold and tropical here).
-		local autumn = Foliage.targets(Foliage.farMidpoint(Foliage.farStepOf(2.6)), s)
-		renderer:setFarSeason(autumn, 5)
+		local temperate, cold, tropical =
+			Foliage.classIndex("temperate"), Foliage.classIndex("cold"), Foliage.classIndex("tropical")
+		-- Recolouring a mesh: each quad by its chunk column's class. A level 2 member spans four
+		-- chunks a side: grass tops over its chunks 0 (temperate), 1 (cold) and 2 (tropical), late
+		-- in autumn (cold biomes white already).
+		local late = Foliage.targets(Foliage.farMidpoint(Foliage.farStepOf(7.5)), s)
+		renderer:setFarSeason(late, 15)
 		local season = overlay.season
-		t.ok(season ~= nil and season.id == 5, "the far palette")
-		local quad = buffer.create(16)
-		buffer.writeu16(quad, 0, 2)
-		buffer.writeu16(quad, 8, 4)
-		buffer.writeu16(quad, 10, 4)
-		buffer.writeu16(quad, 12, grassApp)
+		t.ok(season ~= nil and season.id == 15, "the far palette")
 		local level = 2
 		local step, stepY = ChunkLayout.steps(level)
 		local scale, scaleY = step * BLOCK, stepY * BLOCK
-		local builder = MeshGeometry.builder(BLOCK, 0, 20000, overlay.lookOptions)
-		builder:add(quad, 1, 1 * SIZE * scale, 0, scale, scaleY)
-		builder:add(quad, 1, 2 * SIZE * scale, 0, scale, scaleY)
-		local mesh = builder:finish()[1]
-		local cell = MeshOverlay.cellKey
-		MeshOverlay.recolour(mesh, {
-			quads = {},
-			lookGen = overlay.lookGen,
-			options = overlay.lookOptions,
-			lookInfo = overlay.lookInfo,
-			season = season,
-			classes = { [cell(1, 0)] = Foliage.classIndex("cold"), [cell(2, 0)] = Foliage.classIndex("tropical") },
-			classList = { 1, 4 },
-			cellStuds = SIZE * scale,
+		local perChunk = SIZE // step
+		local quads, count = quadsOf({
+			{ 2, 0, 3, 0, perChunk, perChunk, grassApp },
+			{ 2, perChunk, 3, 0, perChunk, perChunk, grassApp },
+			{ 2, 2 * perChunk, 3, 0, perChunk, perChunk, grassApp },
 		})
-		local cold = season.colours[Foliage.classIndex("cold")][grassApp]
-		local tropical = season.colours[Foliage.classIndex("tropical")][grassApp]
-		for k = 1, 3 do
-			t.near(mesh.colors[k], cold[k], 1e-9, "the cold member's quad")
-			t.near(mesh.colors[3 + k], tropical[k], 1e-9, "the tropical member's quad")
+		local builder = MeshGeometry.builder(BLOCK, 0, 20000, overlay.lookOptions)
+		builder:add(quads, count, 0, 0, scale, scaleY)
+		local mesh = builder:finish()[1]
+		local payload = seasonPayload(overlay, level)
+		MeshOverlay.recolour(mesh, payload)
+		for q, class in { temperate, cold, tropical } do
+			local want = season.colours[class][grassApp]
+			for k = 1, 3 do
+				t.near(mesh.colors[(q - 1) * 3 + k], want[k], 1e-9, `quad {q}: its chunk's class {class}`)
+			end
 		end
+		t.ok(Foliage.deltaE(late.colours[cold][grassApp], late.colours[temperate][grassApp]) > 1, "classes differ")
+		table.sort(payload.classList)
+		local sorted = { cold, temperate, tropical }
+		table.sort(sorted)
+		t.eq(table.concat(payload.classList, ","), table.concat(sorted, ","), "the classes its quads took")
 		local _, r, g, b = overlay.lookOptions.lookOf(grassApp, 2)
-		t.near(tropical[1], r, 1e-6, "the tropics keep the far colour")
-		t.near(tropical[2], g, 1e-6)
-		t.near(tropical[3], b, 1e-6)
+		local kept = season.colours[tropical][grassApp]
+		t.near(kept[1], r, 1e-6, "the tropics keep the far colour")
+		t.near(kept[2], g, 1e-6)
+		t.near(kept[3], b, 1e-6)
 
 		-- A meshed region: stale once its palette drifts past the limit, rebuilt mesh for mesh.
+		local autumn = Foliage.targets(Foliage.farMidpoint(Foliage.farStepOf(2.6)), s)
+		renderer:setFarSeason(autumn, 5)
+		season = overlay.season
 		withRender({ SwapPartsPerFrame = 1000 }, function()
 			local members = {}
 			for i = 0, 3 do
 				local node = newNode(2, i, 0)
 				renderer:build(node, 0, seasonalRows())
-				renderer:setQuads(node, buffer.create(16), 1)
+				-- (The first member's grass over its cold and tropical chunks, the others' over
+				-- temperate ones.)
+				local rows = if i == 0
+					then {
+						{ 2, perChunk, 3, 0, perChunk, perChunk, grassApp },
+						{ 2, 2 * perChunk, 3, 0, perChunk, perChunk, grassApp },
+					}
+					else { { 2, 0, 3, 0, perChunk, perChunk, grassApp } }
+				renderer:setQuads(node, quadsOf(rows))
 				table.insert(members, node)
 			end
 			sim.settle(nil, false)
@@ -4444,9 +4513,10 @@ return function(t, shared, require, _server, client)
 			for _ = 1, 60 * 4 do
 				sim.step(1, false)
 				if overlay.pending then
-					t.eq(overlay.pending.payload.season, season, "built in the far palette")
-					t.eq(#overlay.pending.payload.classList, 3, "its members' classes")
+					local built = overlay.pending.payload
+					t.eq(built.season, season, "built in the far palette")
 					mesh1 = sim.finish()
+					t.eq(#built.classList, 3, "the classes its quads took")
 					break
 				end
 			end
@@ -4488,4 +4558,421 @@ return function(t, shared, require, _server, client)
 			t.eq(overlay:getStats().stale, 2, "the authored palette is far from winter's")
 		end)
 	end)
+
+	t.test("seasons: a far mesh's side faces on a chunk's or a member's edge take their own block's class", function()
+		local sim, Foliage, Calendar = seasonSim()
+		local renderer, overlay = sim.renderer, sim.renderer.overlay
+		local MeshOverlay = sim.load("MeshOverlay")
+		local MeshGeometry = require(shared.Meshing.MeshGeometry)
+		local temperate, cold, tropical =
+			Foliage.classIndex("temperate"), Foliage.classIndex("cold"), Foliage.classIndex("tropical")
+		-- Chunk (3, 3) cold, its east and south neighbours tropical, the rest temperate.
+		renderer:setSeasonClass(function(cx: number, cz: number): number
+			if cx == 3 and cz == 3 then
+				return cold
+			elseif (cx == 4 and cz == 3) or (cx == 3 and cz == 4) then
+				return tropical
+			end
+			return temperate
+		end)
+		local s = enabledState(Calendar)
+		local winter =
+			Foliage.targets(Foliage.farMidpoint(Foliage.farStepOf(Calendar.seasonStart(Calendar.WINTER, s) + 4)), s)
+		renderer:setFarSeason(winter, 5)
+		local season = overlay.season
+		local leaves = Blocks.get(B.OakLeaves).appearance
+		t.ok(Foliage.deltaE(winter.colours[cold][leaves], winter.colours[tropical][leaves]) > 1, "classes differ")
+		-- Level 2 members (four chunks a side): the leaves block in the south east corner of member
+		-- (0, 0) is in chunk (3, 3): its +X, +Z and top faces are its own. The blocks across the
+		-- member's edges (members (1, 0) and (0, 1)) are in the tropical chunks: their -X and -Z.
+		local level = 2
+		local step, stepY = ChunkLayout.steps(level)
+		local scale, scaleY = step * BLOCK, stepY * BLOCK
+		local builder = MeshGeometry.builder(BLOCK, Config.Render.FarMeshes.Overlap, 20000, overlay.lookOptions)
+		local corner, count = quadsOf({
+			{ 0, 15, 3, 15, 1, 1, leaves },
+			{ 4, 15, 3, 15, 1, 1, leaves },
+			{ 2, 15, 3, 15, 1, 1, leaves },
+		})
+		builder:add(corner, count, 0, 0, scale, scaleY)
+		builder:add((quadsOf({ { 1, 0, 3, 15, 1, 1, leaves } })), 1, SIZE * scale, 0, scale, scaleY)
+		builder:add((quadsOf({ { 5, 15, 3, 0, 1, 1, leaves } })), 1, 0, SIZE * scale, scale, scaleY)
+		local mesh = builder:finish()[1]
+		MeshOverlay.recolour(mesh, seasonPayload(overlay, level))
+		for q, class in { cold, cold, cold, tropical, tropical } do
+			local want = season.colours[class][leaves]
+			for k = 1, 3 do
+				t.near(mesh.colors[(q - 1) * 3 + k], want[k], 1e-9, `face {q}: its block's class`)
+			end
+		end
+	end)
+
+	t.test("seasons: far meshes after Far Materials were dropped colour their quads plain", function()
+		local MeshGeometry = require(shared.Meshing.MeshGeometry)
+		-- Far Materials on (the setting), a measured grass top; the overlay builds in looks, or
+		-- (dropped: a mesh in a material failed) plain whatever the setting says.
+		local function recoloured(drop: boolean): (any, any, any, number)
+			local sim, Foliage, Calendar, Looks = seasonSim()
+			local renderer, overlay = sim.renderer, sim.renderer.overlay
+			local MeshOverlay = sim.load("MeshOverlay")
+			renderer:restyle({ shadows = true, farShadows = false, textures = true, farMaterials = true })
+			sim.settle(nil, false)
+			Looks.applyAverages({ ["grass top"] = { 200, 220, 180 } })
+			sim.settle(nil, false)
+			if drop then
+				overlay:dropLooks("spec: a mesh in a material failed")
+			end
+			t.eq(overlay.looks, not drop, "the overlay's looks")
+			t.ok(Looks.farMaterials(), "the setting stays on")
+			renderer:setSeasonClass(testClass(Foliage))
+			local s = enabledState(Calendar)
+			renderer:setFarSeason(Foliage.targets(Foliage.farMidpoint(Foliage.farStepOf(7.5)), s), 5)
+			local grassApp = Blocks.get(B.Grass).appearance
+			local level = 2
+			local step, stepY = ChunkLayout.steps(level)
+			local perChunk = SIZE // step
+			-- Grass tops over a tropical chunk (the authored palette all year) and a cold one.
+			local quads, count = quadsOf({
+				{ 2, 2 * perChunk, 3, 0, perChunk, perChunk, grassApp },
+				{ 2, perChunk, 3, 0, perChunk, perChunk, grassApp },
+			})
+			local builder = MeshGeometry.builder(BLOCK, 0, 20000, overlay.lookOptions)
+			builder:add(quads, count, 0, 0, step * BLOCK, stepY * BLOCK)
+			local mesh = builder:finish()[1]
+			local built = table.clone(mesh.colors)
+			MeshOverlay.recolour(mesh, seasonPayload(overlay, level))
+			local cold = overlay.season.colours[Foliage.classIndex("cold")][grassApp]
+			return built, mesh.colors, cold, mesh.look
+		end
+		for _, drop in { false, true } do
+			local built, after, cold, look = recoloured(drop)
+			local label = if drop then "dropped" else "in looks"
+			-- The authored palette (the tropics): the colour the build gave (as exact as Color3s).
+			for k = 1, 3 do
+				t.near(after[k], built[k], 1e-6, `{label}: the tropics keep the built colour`)
+			end
+			-- A season's colour: its plain colour in a plain build, its look's in looks.
+			local want = if drop then { cold[4], cold[5], cold[6] } else { cold[1], cold[2], cold[3] }
+			for k = 1, 3 do
+				t.near(after[3 + k], want[k], 1e-9, `{label}: the cold quad`)
+			end
+			t.ok(math.abs(cold[1] - cold[4]) + math.abs(cold[2] - cold[5]) > 1e-3, "look and plain differ")
+			if drop then
+				t.eq(look, MeshGeometry.PLAIN, "built plain")
+			end
+		end
+	end)
+
+	t.test("seasons: a far node spanning several classes paints each chunk with its own, as its children do", function()
+		local sim, Foliage, Calendar, Looks = seasonSim()
+		local renderer = sim.renderer
+		local classOf = testClass(Foliage)
+		renderer:setSeasonClass(classOf)
+		local s = enabledState(Calendar)
+		local grassApp = Blocks.get(B.Grass).appearance
+		local function grass(cells: { number }): buffer
+			local rows = {}
+			for _, x in cells do
+				table.insert(rows, { x, 0, 3, 1, 1, 1, grassApp })
+			end
+			return boxesOf(rows)
+		end
+		-- A level 1 node over chunks 0 and 1 (temperate, cold) and its children, level 0.
+		local far = newNode(1, 0, 0)
+		renderer:build(far, 0, grass({ 2, 10 }))
+		local west, east = newNode(0, 0, 0), newNode(0, 1, 0)
+		renderer:build(west, 0, grass({ 4 }))
+		renderer:build(east, 0, grass({ 4 }))
+		sim.settle(nil, false)
+		for _, node in { far, west, east } do
+			sim.show(node)
+		end
+		-- (Late in autumn: cold biomes white already.)
+		local autumn = Foliage.targets(Foliage.midpoint(Foliage.stepOf(7.5)), s)
+		local temperate, cold = Foliage.classIndex("temperate"), Foliage.classIndex("cold")
+		t.ok(Foliage.deltaE(autumn.colours[cold][grassApp], autumn.colours[temperate][grassApp]) > 1, "classes differ")
+		renderer:setSeason(autumn)
+		while not select(2, renderer:seasonSweep(1000, 1000)) do
+			sim.step(1, false)
+		end
+		showsAll(t, expected(renderer, Foliage, Looks, autumn, classOf), "every chunk in its class")
+		local function farColour(class: number): any
+			return Looks.seasonalTint(grassApp, autumn.colours[class][grassApp]).far
+		end
+		local record = renderer.states[far].records[0]
+		t.ok(nearColour(record.parts[1].Color, farColour(temperate)), "the far node's west chunk: temperate")
+		t.ok(nearColour(record.parts[2].Color, farColour(cold)), "its east chunk: cold, as the child there")
+		-- Built after the palette: painted per chunk as it is built.
+		local later = newNode(1, 0, 1)
+		renderer:build(later, 0, grass({ 2, 10 }))
+		sim.settle(nil, false)
+		sim.show(later)
+		local fresh = renderer.states[later].records[0]
+		t.ok(nearColour(fresh.parts[1].Color, farColour(temperate)), "built: the west chunk temperate")
+		t.ok(nearColour(fresh.parts[2].Color, farColour(cold)), "built: the east chunk cold")
+		t.eq((renderer:seasonSweep(1000, 1000)), 0, "nothing left for the sweep")
+	end)
+
+	--[[
+		Node states as the renderer keeps them: `count` level 0 nodes around the origin, each with
+		`sections` records of no boxes: the first built before the seasons (painted 0: its parts
+		unknown), the others known to hold no seasonal part (painted math.huge).
+	]]
+	local function injectStates(renderer: any, count: number, sections: number)
+		local generation = renderer.pool:generationOf(false)
+		local side = math.ceil(math.sqrt(count))
+		for i = 0, count - 1 do
+			local records = {}
+			for section = 0, sections - 1 do
+				records[section] = {
+					boxes = buffer.create(0),
+					count = 0,
+					parts = {},
+					first = { 1 },
+					folder = nil,
+					lights = {},
+					texture = generation,
+					plain = false,
+					tone = nil,
+					painted = if section == 0 then 0 else math.huge,
+				}
+			end
+			local node = newNode(0, i % side - side // 2, i // side - side // 2)
+			renderer.states[node] = { records = records, parts = 0, ox = 0, oz = 0 }
+		end
+	end
+
+	t.test("seasons: the sweep's ranking and walk are spread over frames, over nodes holding seasonal parts", function()
+		local sim, Foliage, Calendar = seasonSim()
+		local renderer = sim.renderer
+		local N, SECTIONS = 400, 6
+		injectStates(renderer, N, SECTIONS)
+		-- (The seasons start: every node built before may hold seasonal parts.)
+		renderer:setSeasonClass(testClass(Foliage))
+		local s = enabledState(Calendar)
+		t.ok(renderer:setSeason(Foliage.targets(Foliage.midpoint(Foliage.stepOf(2.6)), s)))
+		local season = renderer.season
+		t.eq(#season.holders, N, "every node a holder")
+		t.eq(season.ranked, 0, "setSeason ranks nothing: the sweep's frames do")
+		local function unvisited(): number
+			local n = 0
+			for _, state in renderer.states do
+				for _, record in state.records do
+					if record.painted == 0 then
+						n += 1
+					end
+				end
+			end
+			return n
+		end
+		-- Out of time from the start (ms < 0): every call does a few steps of work and stops, the
+		-- ranking and the walk over records with nothing to paint too.
+		local calls, mostRanked, mostVisited = 0, 0, 0
+		local left = unvisited()
+		t.eq(left, N)
+		while true do
+			local ranked = season.ranked
+			local done, finished = renderer:seasonSweep(1500, -1)
+			calls += 1
+			t.eq(done, 0)
+			local now = unvisited()
+			mostRanked = math.max(mostRanked, season.ranked - ranked)
+			mostVisited = math.max(mostVisited, left - now)
+			left = now
+			if finished then
+				break
+			end
+			if calls > N * SECTIONS * 2 then
+				t.ok(false, "it ends")
+				break
+			end
+		end
+		t.eq(left, 0, "every record visited")
+		t.ok(mostRanked <= 16, `at most a few nodes ranked a frame ({mostRanked})`)
+		t.ok(mostVisited <= 16, `at most a few records visited a frame ({mostVisited})`)
+		t.ok(calls >= N * (SECTIONS + 2) / 16, `the walk spread over {calls} frames`)
+		-- None of them holds a seasonal part: the next palette's sweep has nothing to walk.
+		t.eq(#season.holders, 0, "no holders left")
+		t.ok(renderer:setSeason(Foliage.targets(Foliage.midpoint(Foliage.stepOf(4.6)), s)))
+		local _, finished = renderer:seasonSweep(1500, -1)
+		t.ok(finished, "no node left to visit")
+	end)
+
+	t.test("seasons: a palette with thousands of node states costs no long frame", function()
+		local sim, Foliage, Calendar = seasonSim()
+		local renderer = sim.renderer
+		injectStates(renderer, 6000, 6)
+		renderer:setSeasonClass(testClass(Foliage))
+		local s = enabledState(Calendar)
+		local targets = Foliage.targets(Foliage.midpoint(Foliage.stepOf(2.6)), s)
+		-- The renderer on the real clock (the fake one only counts instance work). Timings in Lune
+		-- are indicative, so the margins are wide: before, 6,000 nodes took 13 ms to sort and
+		-- 20 ms in the first sweep frame.
+		sim.world.os.clock = os.clock
+		local started = os.clock()
+		renderer:setSeason(targets)
+		local ms = (os.clock() - started) * 1000
+		t.ok(ms < 4, `setSeason with 6,000 node states: {ms} ms`)
+		local frames, slow, worst = 0, 0, 0
+		while true do
+			local t0 = os.clock()
+			local _, finished = renderer:seasonSweep(1500, 0.75)
+			local frame = (os.clock() - t0) * 1000
+			frames += 1
+			worst = math.max(worst, frame)
+			if frame > 3 then
+				slow += 1
+			end
+			if finished then
+				break
+			end
+		end
+		t.ok(slow <= math.max(1, frames // 50), `frames over 3 ms: {slow} of {frames} (worst {worst} ms)`)
+		t.ok(frames > 1, "spread over frames")
+	end)
+
+	--[[
+		Random edits, LOD swaps (another place, other classes), teleport trash, palettes (now and
+		then the calendar off), restyles and pool limits under a sweep with random budgets: it
+		writes only to parts live in a record, and ends with every part current.
+	]]
+	for _, seed in { 4242, 77, 31337 } do
+		t.test(`seasons: random edits, swaps, trash and palettes end with every part current ({seed})`, function()
+			local sim, Foliage, Calendar, Looks = seasonSim()
+			local renderer, world = sim.renderer, sim.world
+			local classOf = testClass(Foliage)
+			renderer:setSeasonClass(classOf)
+			local s = enabledState(Calendar)
+			local rand = rng(seed)
+			local STRIDE = GreedyMesher.KEY_STRIDE
+			local dry = buffer.readu8(Blocks.tintLut, B.DryGrass)
+			local kinds = {}
+			for _, appearance in Foliage.appearances() do
+				table.insert(kinds, appearance)
+				if appearances[appearance].tinted then
+					table.insert(kinds, appearance + dry * STRIDE)
+				end
+			end
+			table.insert(kinds, stoneApp)
+			local function randomMesh(sct: number): buffer
+				local list, used = {}, {}
+				for _ = 1, 3 + rand(20) do
+					local x, y, z = rand(16), rand(8), rand(16)
+					local key = `{x},{y},{z}`
+					if not used[key] then
+						used[key] = true
+						table.insert(list, { x, sct * 8 + y, z, 1, 1, 1, kinds[1 + rand(#kinds)] })
+					end
+				end
+				return boxesOf(list)
+			end
+			local slots = {}
+			for i = 1, 8 do
+				local level = ({ 0, 0, 0, 1, 2 })[1 + rand(5)]
+				local node = newNode(level, i % 4, i // 4, rand(50))
+				for sct = 0, 1 do
+					renderer:build(node, sct, randomMesh(sct))
+				end
+				slots[i] = node
+			end
+			sim.settle(nil, false)
+			for _, node in slots do
+				sim.show(node)
+			end
+			local time = 2.0
+			local current = Foliage.targets(Foliage.midpoint(Foliage.stepOf(time)), s)
+			renderer:setSeason(current)
+			local outside = 0
+			local outsideDetail = nil
+			local textures = true
+			for frame = 1, 500 do
+				for _ = 1, rand(3) do
+					local op = rand(100)
+					local i = 1 + rand(#slots)
+					local node = slots[i]
+					if op < 40 then
+						local sct = rand(2)
+						renderer:build(node, sct, randomMesh(sct), { lane = if rand(2) == 0 then "edit" else "normal" })
+					elseif op < 55 then
+						-- An LOD change: a fresh node at another place (another class), swapped in when built.
+						local level = ({ 0, 0, 1, 2 })[1 + rand(4)]
+						local fresh = newNode(level, rand(4), 3 + rand(3), rand(50))
+						local pending = 2
+						for sct = 0, 1 do
+							renderer:build(fresh, sct, randomMesh(sct), {
+								onDone = function()
+									pending -= 1
+									if pending == 0 and not fresh.removed and slots[i] == node and not node.removed then
+										sim.show(fresh)
+										sim.clear(node)
+										slots[i] = fresh
+									end
+								end,
+							})
+						end
+					elseif op < 60 then
+						node.removed = true
+						sim.shown[node] = nil
+						renderer:trashNode(node, rand(1000), rand(2) == 0)
+						local fresh = newNode(0, rand(4), rand(3), rand(50))
+						local pending = 2
+						for sct = 0, 1 do
+							renderer:build(fresh, sct, randomMesh(sct), {
+								onDone = function()
+									pending -= 1
+									if pending == 0 and not fresh.removed then
+										sim.show(fresh)
+									end
+								end,
+							})
+						end
+						slots[i] = fresh
+					elseif op < 70 then
+						-- The next palette (a few steps on; now and then the calendar off and on).
+						time += Foliage.stepDays() * (1 + rand(30))
+						if rand(10) == 0 then
+							current = nil
+						else
+							current = Foliage.targets(Foliage.midpoint(Foliage.stepOf(time)), s)
+						end
+						renderer:setSeason(current)
+					elseif op < 73 then
+						textures = not textures
+						renderer:restyle({
+							shadows = true,
+							farShadows = false,
+							textures = textures,
+							farMaterials = rand(2) == 0,
+						})
+					elseif op < 75 then
+						renderer.pool:setLimit(rand(300))
+					end
+				end
+				-- The sweep, watched: writes only to live parts and their images.
+				local live = liveObjects(renderer)
+				world.onWrite = function(o: any, key: string)
+					if (key == "Color" or key == "Color3") and not live[o] then
+						outside += 1
+						outsideDetail = outsideDetail or `frame {frame}: {o.ClassName} {key}`
+					end
+				end
+				renderer:seasonSweep(5 + rand(40), 1000)
+				world.onWrite = nil
+				sim.step(1, false)
+			end
+			sim.settle(nil, false)
+			while not select(2, renderer:seasonSweep(100000, 100000)) do
+				sim.step(1, false)
+			end
+			t.eq(outside, 0, `sweep writes outside live records ({outsideDetail})`)
+			-- (Against the colours in effect: the renderer keeps a colour within TARGET_SLACK of a
+			-- target.)
+			showsAll(
+				t,
+				expected(renderer, Foliage, Looks, { colours = renderer.season.applied }, classOf),
+				"every part current"
+			)
+			t.eq(sim.handedEarly, 0, "quarantine")
+		end)
+	end
 end

@@ -101,7 +101,21 @@ return function(t, shared, require, server)
 			t.ok(id > B.MossyCobblestone, `{twin} comes after the plain blocks`)
 			t.eq(Blocks.caveTwinOf(id), B[of], `{twin} twins {of}`)
 			t.eq(Blocks.caveTwinFor(B[of]), id)
-			t.eq(Blocks.get(id).appearance, Blocks.get(B[of]).appearance, `{twin} looks like {of}`)
+			-- (Cave vines keep their green underground, Shared/Seasons/Foliage: the same look in an
+			-- appearance of their own.)
+			local mine, theirs =
+				Blocks.appearances[Blocks.get(id).appearance], Blocks.appearances[Blocks.get(B[of]).appearance]
+			t.eq(Blocks.get(id).seasonless, string.sub(of, 1, 4) == "Vine", `{twin} seasonless`)
+			if Blocks.get(id).seasonless then
+				t.ok(mine ~= theirs and mine.seasonless and not theirs.seasonless, `{twin}: an appearance of its own`)
+				for _, key in
+					{ "kind", "color", "material", "transparency", "reflectance", "textures", "shape", "light" }
+				do
+					t.eq((mine :: any)[key], (theirs :: any)[key], `{twin} looks like {of}: {key}`)
+				end
+			else
+				t.eq(mine, theirs, `{twin} looks like {of}`)
+			end
 			t.ok(not Blocks.get(id).placeable, `{twin} is never placed`)
 			t.eq(Items.ofBlock(id), Items.ofBlock(B[of]), `{twin} is {of}'s item`)
 			t.eq(TexturePack.Blocks[twin], nil, `{twin} has no texture entry`)
