@@ -3064,9 +3064,10 @@ local server):
 - **The season clock:** the dial beside the minimap (and the Map button on touch screens) on a
   phone, a tablet and a PC at every GUI scale: crisp rotated bars, the disc, the pixel day number,
   the caption's real width (it drops before the dial shrinks on an iPad and a 1024 x 768 window);
-  `/season set winter 8` then `/time add 1d`: the toast, the boom and the blood moon's toast
-  waiting their turn; the winter grading on snow by day, fading at dusk and gone at night (beside
-  the blood moon's).
+  `/season set autumn 8`, `/time set 23400` and a minute's wait for sunrise: the toast and the
+  boom (a jump of more than 600 ticks toasts nothing), with a blood moon's toast waiting its
+  turn; the winter grading on snow by day, fading at dusk and gone at night (beside the blood
+  moon's).
 - **Snow:** a winter in a taiga and a plain (`/season set winter`, `/weather rain`, which snows
   where it is cold): layers piling evenly on roofs and ground, walking slowed in deep snow, a
   campfire and a warm room melting it, ponds freezing at their edges; a spring thaw leaving the

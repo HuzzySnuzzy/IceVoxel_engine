@@ -9,9 +9,8 @@
 	Snow and rooms: in a winter snowstorm both plank houses' roofs pile up to their caps; two
 	campfires (Players/Climate's room sources) heat one past RoomMelt, and the roof over its room
 	sheds its snow and takes none while the cold house's (someone at home, so RoomWorld knows it)
-	keeps its own; its door opened, the step in front of it (an opening of the room) is bare too.
-	[BUG]: the roof over the heated house's walls keeps its snow, a rim round the bare middle (see
-	that test). Heaters: an Electric Heater on a Creative Energy Cube, ticked by MachineWorld with
+	keeps its own; its door opened, the step in front of it (an opening of the room) is bare too,
+	and so is the roof over its walls (the eaves: RoomWorld answers them for the room). Heaters: an Electric Heater on a Creative Energy Cube, ticked by MachineWorld with
 	the climate and players near of RoomWorld, stands by outdoors with nobody within StandbyRadius
 	and heats as a space heater with someone near; in a room it runs its thermostat to its set
 	point with nobody near. The panel: the buttons a client's window (Ui/MenuLayout over the
@@ -454,14 +453,13 @@ return function(t, shared, require, server, client)
 	--[[
 		A house's roof covers its walls too (the roof over the walls, as every Minecraft house and
 		tests/lib/FakeRooms build it), and snow on a heated house should melt from all of it (the
-		docs: snow "in or on a room at RoomMelt or warmer ... takes none"). RoomWorld's walls are
-		only the cells with a face towards the room (Rooms.fill's `walls`), so the roof's blocks over
-		the walls (the eaves, and the corner posts under them) belong to no room: temperatureAt is
-		nil there, though the wall right under an eave reads the room's air, and SnowWorld piles
-		snow on them as on any cold roof. A heated 5 x 5 house keeps a full rim of snow, 24 of its
-		roof's 49 columns.
+		docs: snow "in or on a room at RoomMelt or warmer ... takes none"). The roof's blocks over the
+		walls (the eaves, corners included) touch no room cell, so Rooms.fill adds them to the room's
+		walls for lookups only (no U, no sources): temperatureAt answers them with the room's air,
+		and SnowWorld melts them as the rest of the roof. Without that a heated 5 x 5 house kept a
+		rim of snow on 24 of its roof's 49 columns.
 	]]
-	t.test("seasons together: [BUG] the roof over a heated house's walls keeps its snow", function()
+	t.test("seasons together: the roof over a heated house's walls sheds its snow too", function()
 		with(counting(), function()
 			local g = snowedHouses()
 			local world = g.world
