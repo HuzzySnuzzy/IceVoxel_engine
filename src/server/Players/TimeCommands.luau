@@ -1,10 +1,12 @@
 --!strict
 --[[
 	The /time and /gamerule chat commands (parsed and checked by Players/TimeCommand), applied to the
-	world's clock (World/TimeOfDay) and the weather's (World/WeatherServer: doWeatherCycle).
+	world's clock (World/TimeOfDay), the weather's (World/WeatherServer: doWeatherCycle) and the
+	seasons' calendar (World/SeasonClock: doSeasonCycle locks it; /time set keeps its day through
+	SeasonClock.keepCalendar, applied with the new time; /time add moves it).
 
-	  Commands  `/time set|add|query ...` and `/gamerule doDaylightCycle|doWeatherCycle
-	            [true|false]`. With
+	  Commands  `/time set|add|query ...` and `/gamerule doDaylightCycle|doWeatherCycle|
+	            doSeasonCycle [true|false]`. With
 	            TextChatService they are TextChatCommands made here (the message is not shown to
 	            anyone; Triggered fires on the server with the sender's TextSource). With the legacy
 	            chat they are read from Player.Chatted.
@@ -12,6 +14,8 @@
 	            operators, among them Config.Gameplay.Admins, the game's owner and Studio
 	            sessions; everyone in a world created with Allow Commands); queries: anyone.
 	  Feedback  goes to the player as Notice messages, shown in their chat (client Net/Notices).
+	  /season   `start` starts Players/SeasonCommands too (the season's own command), so the boot
+	            script starts the clock's commands in one place.
 ]]
 
 local Players = game:GetService("Players")
@@ -23,8 +27,10 @@ local Protocol = require(Shared.Net.Protocol)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
+local SeasonClock = require(script.Parent.Parent.World.SeasonClock)
 local WeatherServer = require(script.Parent.Parent.World.WeatherServer)
 local Operators = require(script.Parent.Operators)
+local SeasonCommands = require(script.Parent.SeasonCommands)
 local TimeCommand = require(script.Parent.TimeCommand)
 
 local TimeCommands = {}
@@ -51,6 +57,7 @@ local function run(player: Player, text: string)
 		gameTime = TimeOfDay.gameTime(),
 		cycle = TimeOfDay.cycle(),
 		weatherCycle = WeatherServer.cycle(),
+		seasonCycle = SeasonClock.cycle(),
 	})
 	if result == nil then
 		return
@@ -61,8 +68,17 @@ local function run(player: Player, text: string)
 	if result.weatherCycle ~= nil then
 		WeatherServer.setCycle(result.weatherCycle)
 	end
-	if result.dayTime ~= nil then
-		TimeOfDay.set(result.dayTime)
+	if result.seasonCycle ~= nil then
+		-- (doSeasonCycle false locks the calendar on the day it is.)
+		SeasonClock.setLocked(not result.seasonCycle)
+	end
+	local dayTime = result.dayTime
+	if dayTime ~= nil then
+		if result.keepCalendar then
+			-- (/time set: the calendar day stays; the offset takes the day count's jump.)
+			SeasonClock.keepCalendar(TimeOfDay.get(), dayTime)
+		end
+		TimeOfDay.set(dayTime)
 	end
 	for _, message in result.feedback do
 		notify(player, message)
@@ -100,6 +116,7 @@ function TimeCommands.start(serverNet: ServerNet.ServerNet)
 		command("IceVoxelTime", TimeCommand.TIME_ALIASES[1])
 		command("IceVoxelGameRule", TimeCommand.GAMERULE_ALIASES[1])
 	end
+	SeasonCommands.start(serverNet)
 end
 
 return TimeCommands

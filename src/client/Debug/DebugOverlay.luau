@@ -8,7 +8,12 @@
 	knows about (EntityRenderer), the mobs it knows and how its zombies were drawn last frame (full
 	and reduced R15 rigs, the parts moved: Entities/MobRenderer.rigs), the time of day (the clock,
 	day number, Minecraft's sky light outdoors and how much of it reaches the camera;
-	Rendering/LightingController), the fog showing
+	Rendering/LightingController), the season (Shared/Seasons/Calendar: its name, the day of its
+	length and the days left, the year, the progress through it, the sun's day share k, the
+	calendar's offset and lock; the climate a temperate biome gets from it: the day shift, the
+	night drop, the weather's temperature shift, the wet and thunder biases, growth, the far snow
+	cover and the heat wave at the world's seed, SeasonClimate.sample; the room the server says the
+	player stands in and the outdoor value there, Player/SurvivalState.room), the fog showing
 	(LightingController.describeFog: the Atmosphere's density, how far it hazes things 90%, its
 	haze, glare and offset; or a fluid's or Blindness' Lighting fog, start and end in blocks) and
 	the music (surface or cave, the track playing or the seconds to the next; Audio/Music) with the cave
@@ -79,12 +84,14 @@ local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Calendar = require(Shared.Seasons.Calendar)
 local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
 local LodTree = require(Shared.World.LodTree)
 local Protocol = require(Shared.Net.Protocol)
+local SeasonClimate = require(Shared.Seasons.SeasonClimate)
 local Temperature = require(Shared.ToughAsNails.Temperature)
 local WorldSettings = require(Shared.WorldSettings)
 local WorldTypes = require(Shared.Generation.WorldTypes)
@@ -134,6 +141,47 @@ local function timeLine(): string
 		DayCycle.timeInDay(now),
 		DayCycle.skyLight(now),
 		LightingController.skyExposure()
+	)
+end
+
+--[[
+	The season: name, day of length (days left), year, progress, the sun's day share k, the
+	calendar's offset (and lock); then a temperate biome's climate from it and the player's room.
+]]
+local function seasonLine(): string
+	local state = Calendar.state()
+	if not state.enabled then
+		return "season  off"
+	end
+	local now = LightingController.dayTime()
+	local p = Calendar.position(now, state)
+	local seed = Shared:GetAttribute("Seed")
+	local climate = SeasonClimate.sample(now, "temperate", if type(seed) == "number" then seed else 0, state)
+	local room, outside = SurvivalState.room()
+	local roomText = if room then string.format("room %+.1f", room) else "room -"
+	local outsideText = if outside then string.format("out %+.1f", outside) else "out -"
+	return string.format(
+		"season  %s d%d/%d (%d left) year %d  %.2f  k %.2f  offset %d%s\n"
+			.. "        shift %+.2f night %.2f weather %+.2f wet %+.2f thunder %+.2f growth %.2f snow %.2f heat wave %.2f  %s %s",
+		Calendar.NAMES[p.season],
+		p.day + 1,
+		p.days,
+		p.daysLeft,
+		p.year + 1,
+		p.progress,
+		Calendar.daylightScale(now, state),
+		state.offset,
+		if state.lock then `  held on {state.lock}` else "",
+		climate.shift,
+		climate.nightDrop,
+		climate.weatherShift,
+		climate.wetBias,
+		climate.thunderBias,
+		climate.growth,
+		climate.snowCover,
+		climate.heatWave,
+		roomText,
+		outsideText
 	)
 end
 
@@ -484,6 +532,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			mobsLine(),
 			originLine(),
 			timeLine(),
+			seasonLine(),
 			LightingController.describeFog(),
 			WeatherClient.describe(),
 			musicLine(),

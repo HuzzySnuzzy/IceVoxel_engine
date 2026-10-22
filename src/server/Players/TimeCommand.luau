@@ -9,10 +9,18 @@
 	    /time query <daytime | gametime | day>
 	    /gamerule doDaylightCycle [true | false]
 	    /gamerule doWeatherCycle [true | false]   the weather clock (World/WeatherServer)
+	    /gamerule doSeasonCycle [true | false]    the seasons' calendar (World/SeasonClock)
 
 	A time is a number of ticks with an optional unit, as in Minecraft: "d" days (24000 ticks), "s"
 	seconds (20 ticks), "t" ticks: 1d, 0.5d, 30s, 600 (Shared/DayCycle.parseDuration). Setting the
 	time replaces the day count too, as Minecraft 1.20 does (/time set day starts day 0 again).
+
+	The seasons (Shared/Seasons/Calendar: the calendar day is the day count plus an offset): /time
+	set keeps the calendar (`Result.keepCalendar`: the glue has World/SeasonClock.keepCalendar take
+	the day count's jump into the offset, so setting the time never throws the world back to
+	Autumn), while /time add moves it with the days added (/time add 8d is a season on at the
+	default lengths). doSeasonCycle false holds the calendar on the day it is (the lock), as
+	doDaylightCycle holds the sun; /season (Players/SeasonCommand) sets the season itself.
 
 	Who may: changing the time or a game rule needs `mayUse`, which the glue gives the operators'
 	permission (Players/Operators: operators, among them Config.Gameplay.Admins, the game's owner
@@ -40,6 +48,8 @@ export type Context = {
 	cycle: boolean,
 	-- The doWeatherCycle rule (nil: true).
 	weatherCycle: boolean?,
+	-- The doSeasonCycle rule (nil: true).
+	seasonCycle: boolean?,
 }
 
 export type Result = {
@@ -49,6 +59,10 @@ export type Result = {
 	cycle: boolean?,
 	-- The new doWeatherCycle value, when the command changes it.
 	weatherCycle: boolean?,
+	-- The new doSeasonCycle value, when the command changes it.
+	seasonCycle: boolean?,
+	-- The day time jumps to `dayTime` keeping the calendar day (/time set; /time add moves it).
+	keepCalendar: boolean?,
 	-- Messages for the player who typed the command.
 	feedback: { string },
 }
@@ -62,14 +76,15 @@ TimeCommand.USAGE = "Usage: /time set <day | noon | night | midnight | ticks>, /
 TimeCommand.SET_USAGE = "Usage: /time set <day | noon | night | midnight | ticks> (e.g. 6000, 0.5d, 30s)"
 TimeCommand.ADD_USAGE = "Usage: /time add <ticks> (e.g. 1000, 1d, 30s)"
 TimeCommand.QUERY_USAGE = "Usage: /time query <daytime | gametime | day>"
-TimeCommand.GAMERULE_USAGE = "Usage: /gamerule <doDaylightCycle | doWeatherCycle> [true | false]"
+TimeCommand.GAMERULE_USAGE = "Usage: /gamerule <doDaylightCycle | doWeatherCycle | doSeasonCycle> [true | false]"
 TimeCommand.DENIED = "You can't change the time here"
 TimeCommand.DENIED_RULES = "You can't change game rules here"
 
 -- The game rules /gamerule knows (Minecraft's names).
 TimeCommand.DAYLIGHT_CYCLE = "doDaylightCycle"
 TimeCommand.WEATHER_CYCLE = "doWeatherCycle"
-TimeCommand.RULES = table.freeze({ TimeCommand.DAYLIGHT_CYCLE, TimeCommand.WEATHER_CYCLE })
+TimeCommand.SEASON_CYCLE = "doSeasonCycle"
+TimeCommand.RULES = table.freeze({ TimeCommand.DAYLIGHT_CYCLE, TimeCommand.WEATHER_CYCLE, TimeCommand.SEASON_CYCLE })
 
 --[[
 	May user `userId` change the time and game rules? Admins (`admins`, Config.Gameplay.Admins),
@@ -134,6 +149,7 @@ local function runTime(list: { string }, context: Context, result: Result, say: 
 		end
 		if action == "set" then
 			result.dayTime = ticks
+			result.keepCalendar = true
 			return say(`Set the time to {ticks}`)
 		end
 		local dayTime = math.floor(context.dayTime) + ticks
@@ -158,8 +174,10 @@ local function runGameRule(list: { string }, context: Context, result: Result, s
 	if name == nil then
 		return say(`Unknown game rule '{rule}'. This game has: {table.concat(TimeCommand.RULES, ", ")}`)
 	end
-	local weather = name == TimeCommand.WEATHER_CYCLE
-	local current = if weather then context.weatherCycle ~= false else context.cycle
+	local current = if name == TimeCommand.WEATHER_CYCLE
+		then context.weatherCycle ~= false
+		elseif name == TimeCommand.SEASON_CYCLE then context.seasonCycle ~= false
+		else context.cycle
 	local value = list[3]
 	if value == nil then
 		return say(`Gamerule {name} is currently set to: {current}`)
@@ -171,8 +189,10 @@ local function runGameRule(list: { string }, context: Context, result: Result, s
 		return say(TimeCommand.DENIED_RULES)
 	end
 	local on = lower == "true"
-	if weather then
+	if name == TimeCommand.WEATHER_CYCLE then
 		result.weatherCycle = on
+	elseif name == TimeCommand.SEASON_CYCLE then
+		result.seasonCycle = on
 	else
 		result.cycle = on
 	end

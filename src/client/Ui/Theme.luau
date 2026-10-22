@@ -31,6 +31,11 @@
 	    the cold side in its own blues), the whole silhouette: the part lit in full, the emptied
 	    part at GLYPH_ALARM_T (faint GlyphEmpty while fine); temperature numbers take their zone's
 	    colour (`Zone`).
+	  * The season clock (Ui/SeasonHud, beside the minimap) colours its year ring by season
+	    (`Season`: Autumn orange, Winter ice-blue, Spring green, Summer gold; the other seasons'
+	    ticks at CLOCK_DIM_T) and its day ring by the sun (ClockDay warm white, ClockDusk orange,
+	    ClockNight deep blue), on a ClockFace disc like the Panel; its caption is upper case in the
+	    small role, in its season's colour (Warn in a heat wave). Its toasts take the same colours.
 	  * Headers are not quite flat (`Gradient`): the grey top headers darken a little towards their
 	    bottom edge and the black section bars thin out towards theirs, each averaging its token's
 	    value, so a header reads as the token says from a distance.
@@ -317,7 +322,26 @@ Theme.Colour = table.freeze({
 	AmbientRim = rgba(150, 200, 230, 0.40),
 	Frost = rgba(205, 235, 255, 0),
 	Heat = rgba(255, 96, 32, 0),
+
+	-- The season clock (Ui/SeasonHud): the seasons (`Season` names them by number), its disc, the
+	-- day ring's segments, the hand on the day ring and the marker on the year ring.
+	SeasonAutumn = rgba(226, 124, 44, 0),
+	SeasonWinter = rgba(150, 206, 242, 0),
+	SeasonSpring = rgba(122, 202, 84, 0),
+	SeasonSummer = rgba(236, 194, 62, 0),
+	ClockFace = rgba(0, 0, 0, 0.45),
+	ClockDay = rgba(240, 232, 208, 0),
+	ClockDusk = rgba(214, 112, 60, 0),
+	ClockNight = rgba(44, 62, 132, 0),
+	ClockHand = rgba(255, 255, 255, 0),
+	ClockMarker = rgba(255, 255, 255, 0),
 })
+
+-- The seasons' colour keys by season number (Shared/Seasons/Calendar: Autumn 1 .. Summer 4).
+Theme.Season = table.freeze({ "SeasonAutumn", "SeasonWinter", "SeasonSpring", "SeasonSummer" })
+
+-- The season clock's year ticks of the seasons other than the current one: this transparency.
+Theme.CLOCK_DIM_T = 0.6
 
 --[[
 	The headers' faint gradients (top to bottom). The grey top headers are TOP_GREY multiplied from

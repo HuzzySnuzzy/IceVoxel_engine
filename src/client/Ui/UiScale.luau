@@ -29,7 +29,7 @@
 	             what. Its `kind` says whether it is "scaled" (GUI pixels under a UIScale that
 	             follows the base) or "screen" (screen-relative by design: the first-person hand,
 	             the fire and frost overlays, the Nuke's flash, the world map's backdrop).
-	  corner     what shows in the HUD's corner (`setMinimap`, `setDayLine`, `setToast`,
+	  corner     what shows in the HUD's corner (`setMinimap`, `setClock`, `setDayLine`, `setToast`,
 	             `setEffects`, `setSaving`, `setDebugRight`, `setHudRaise`), the status icons'
 	             sizes (`setStatus`, Ui/StatusCluster: placed at the bottom right before the rest
 	             of the corner, which keeps clear of them) and the touch buttons (the live
@@ -153,6 +153,8 @@ local corner = {
 	dayWrap = nil :: number?,
 	notice = nil :: number?,
 	status = nil :: HudLayout.StatusSizes?,
+	clock = false,
+	clockCaption = nil :: number?,
 }
 -- Roblox's touch buttons as last measured (nil: none found), and the corner's layout.
 local buttons: { HudLayout.Rect }? = nil
@@ -289,6 +291,8 @@ local function layoutCorner()
 		notice = corner.notice,
 		buttons = buttons,
 		status = corner.status,
+		clock = corner.clock,
+		clockCaption = corner.clockCaption,
 	})
 end
 
@@ -522,6 +526,17 @@ function UiScale.setMinimap(shown: boolean, coordsWidth: number?)
 	local width = coordsWidth or corner.coordsWidth
 	if shown ~= corner.minimap or width ~= corner.coordsWidth then
 		corner.minimap, corner.coordsWidth = shown, width
+		cornerChanged()
+	end
+end
+
+--[[
+	The season clock shows (Ui/SeasonHud) and its caption's width (GUI pixels; nil: no caption).
+	HudLayout drops the caption, then shrinks the dial, where the corner has no room for them.
+]]
+function UiScale.setClock(shown: boolean, captionWidth: number?)
+	if shown ~= corner.clock or captionWidth ~= corner.clockCaption then
+		corner.clock, corner.clockCaption = shown, captionWidth
 		cornerChanged()
 	end
 end

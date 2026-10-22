@@ -1,7 +1,8 @@
 --!strict
 --[[
-	The zombie apocalypse's day counter and the blood moon's notices (what they say: Ui/
-	SurvivorLine, pure and tested; where they go: Ui/HudLayout through Ui/UiScale).
+	The zombie apocalypse's day counter and the HUD's one queue of notice toasts: the blood moon's
+	and the seasons' (what they say: Ui/SurvivorLine and Ui/SeasonLine, pure and tested; where they
+	go: Ui/HudLayout through Ui/UiScale).
 
 	  Day line  "Day 4 · Survived 2 days" in the HUD's pixel font, right aligned in the top right
 	            corner (HudLayout's `day`: under the minimap's coordinates line, under the touch
@@ -16,11 +17,14 @@
 	  Toasts    "A Blood Moon rises tonight" at dawn of a blood moon's day, "The Blood Moon rises"
 	            as it rises (with ambient.blood_moon.rise), "You survived the Blood Moon" when the
 	            server counts the moon this character lived through from its rise (the clock's
-	            set and SurvivorState's `moonsRaised` together: SurvivorLine.confirmSet): a toast
-	            32 GUI pixels high and as wide as its text (SurvivorLine.toastWidth, at least
+	            set and SurvivorState's `moonsRaised` together: SurvivorLine.confirmSet), in the
+	            notices' red; and whatever else calls `toast(text, colour, sound)`: the seasons'
+	            turns and heat waves (Ui/SeasonHud, in their seasons' colours, each with its
+	            stinger played as it shows). One queue for all of them, so they never overlap: a
+	            toast 32 GUI pixels high and as wide as its text (SurvivorLine.toastWidth, at least
 	            Minecraft's 160) in HudLayout's `notice` slot (under Now Playing and "World saved"
-	            when they show) for TOAST_SECONDS, one at a time; while the corner has no room for
-	            it, it waits.
+	            when they show) for TOAST_SECONDS, one at a time in the order they came; while the
+	            corner has no room for it, it waits (its time counts only while it shows).
 	  Shown     with Config.Apocalypse.Enabled, Config.Apocalypse.Survivor.DayCounter and the
 	            player's Day Counter setting (PlayerSettings "dayCounter": `setEnabled`), while
 	            the HUD shows (the world map hides it). The toasts come whatever the setting.
@@ -56,6 +60,14 @@ local EDGE = Color3.fromRGB(86, 86, 96)
 local started = false
 local enabled = true
 
+-- A toast waiting or showing: its text, its colour and the sound played as it shows.
+type Toast = { text: string, colour: Color3, sound: string? }
+local queue: { Toast } = {}
+-- Shows the next toast of the queue (set by `start`; nil before).
+local advance: (() -> ())? = nil
+-- The toast showing (nil: none).
+local current: Toast? = nil
+
 local function noticeColour(): Color3
 	local rgb = SurvivorLine.NOTICE_COLOUR
 	return Color3.fromRGB(rgb[1], rgb[2], rgb[3])
@@ -64,6 +76,18 @@ end
 -- The player's Day Counter setting.
 function SurvivorHud.setEnabled(value: boolean)
 	enabled = value
+end
+
+--[[
+	Queues a notice toast (see the header): `text` in `colour` (default the notices' red), `sound`
+	(a Shared/Sounds event) played when it shows. Toasts queued before `start` show once it ran.
+]]
+function SurvivorHud.toast(text: string, colour: Color3?, sound: string?)
+	table.insert(queue, { text = text, colour = colour or noticeColour(), sound = sound })
+	local show = advance
+	if show and current == nil then
+		show()
+	end
 end
 
 -- Does the day line show now?
@@ -220,14 +244,19 @@ function SurvivorHud.start()
 		toastShadow.Size = UDim2.fromOffset(w, Style.TEXT_SIZE)
 	end
 
-	local queue: { string } = {}
-	local current: string? = nil
 	local left = 0
+	-- The showing toast's sound, until it is first on the screen.
+	local soundDue: string? = nil
 
 	local function placeToast()
 		local layout = UiScale.hud()
 		local slot = layout.notice
 		toast.Visible = current ~= nil and slot ~= nil and UiScale.hudShown()
+		local sound = soundDue
+		if sound and toast.Visible then
+			soundDue = nil
+			SoundPlayer.playFlat(sound)
+		end
 		if toastScale.Scale ~= layout.scale then
 			toastScale.Scale = layout.scale
 		end
@@ -241,24 +270,32 @@ function SurvivorHud.start()
 		current = table.remove(queue, 1)
 		local shown = current
 		if shown then
-			toastText.Text, toastShadow.Text = shown, shown
-			sizeToast(SurvivorLine.toastWidth(Style.textWidth(shown)))
+			local words = shown.text
+			toastText.Text, toastShadow.Text = words, words
+			toastText.TextColor3, toastShadow.TextColor3 = shown.colour, Style.shadowOf(shown.colour)
+			sizeToast(SurvivorLine.toastWidth(Style.textWidth(words)))
 			left = TOAST_SECONDS
+			soundDue = shown.sound
 			UiScale.setToast("notice", toastWidth)
 		else
+			soundDue = nil
 			UiScale.setToast("notice", nil)
 		end
 		placeToast()
 	end
+	advance = nextToast
 
 	local function announce(event: string)
+		-- (The rise's boom comes as the moon rises, even while another toast still shows.)
 		if event == "rises" then
 			SoundPlayer.playFlat("ambient.blood_moon.rise")
 		end
-		table.insert(queue, SurvivorLine.TOASTS[event])
-		if current == nil then
-			nextToast()
-		end
+		SurvivorHud.toast(SurvivorLine.TOASTS[event], noticeColour())
+	end
+
+	-- (Toasts queued before the start.)
+	if current == nil and #queue > 0 then
+		nextToast()
 	end
 
 	-- A survived moon's toast waits for both halves (see the header).

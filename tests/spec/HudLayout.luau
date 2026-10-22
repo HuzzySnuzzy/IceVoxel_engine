@@ -27,6 +27,13 @@
 	choice; named regression: at GUI Scale 1 on a 1920 x 1080 desktop the unlifted overlay message
 	("Chat disabled in client options.", 64 to 72 screen pixels up) sat on the lifted quickbar (55 to
 	77). The old canvas rows (`rows`, which the Hunger spec pins) are still exactly where they were.
+	The season clock (Ui/SeasonHud; the main sweep runs with it off and with its longest caption):
+	GAP left of the minimap or the Map button and top aligned with it, or in the corner, the column
+	(the day line, the toasts' slot) going on under it, WAILA left of it; its caption dropped on a
+	1024 x 768 window and an iPad at Auto, the small dial and then nothing only where the top row
+	(CLOCK_SHARE of the area) has no room, never before; always placed on every screen and GUI Scale
+	choice, with the day line, a notice, the effect icons and the status icons, nothing overlapping;
+	without it the corner is as before.
 ]]
 
 local fs = require("@lune/fs")
@@ -36,7 +43,8 @@ return function(t, shared, require, _server, client)
 	local HudLayout = require(client.Ui.HudLayout)
 	local StatusLayout = require(client.Ui.StatusLayout)
 	local SurvivorLine = require(client.Ui.SurvivorLine)
-	local _ = shared
+	local SeasonLine = require(client.Ui.SeasonLine)
+	local Calendar = require(shared.Seasons.Calendar)
 
 	type Insets = HudLayout.Insets
 	type Rect = HudLayout.Rect
@@ -78,12 +86,25 @@ return function(t, shared, require, _server, client)
 	end
 	local STATUS: { HudLayout.StatusSizes | false } =
 		{ false, statusSizes(0, false), statusSizes(5, false), statusSizes(10, true) }
+	-- The season clock (Ui/SeasonHud): none, or with its longest caption at the default lengths
+	-- ("AUTUMN · 8 DAYS LEFT", Ui/SeasonLine.captions) in the Dayz look's small Roboto, measured
+	-- generously (5 GUI pixels a character; Roboto's capitals average under 4.5 at TextSize 7).
+	local function roboto(text: string): number
+		return (utf8.len(text) :: number) * 5
+	end
+	local longestCaption = 0
+	for _, caption in SeasonLine.captions(Calendar.newState()) do
+		longestCaption = math.max(longestCaption, SeasonLine.captionWidth(caption, roboto))
+	end
+	local CLOCKS: { number | false } = { false, longestCaption }
 
 	local function describe(input: HudLayout.Input): string
 		local status = input.status
 		return `{input.width} x {input.height} bar {input.insets.bar} scale {input.scale} touch {input.touch} minimap {input.minimap} coords {input.coordsWidth} music {input.music} save {input.save} under {input.saveUnder} saving {input.saving} effects {if input.effects
 			then `{input.effects.w}x{input.effects.h}`
-			else "none"} status {if status then `{status.full.w}x{status.full.h}` else "none"}`
+			else "none"} status {if status then `{status.full.w}x{status.full.h}` else "none"} clock {if input.clock
+			then input.clockCaption
+			else "none"}`
 	end
 
 	-- Every combination, `check(input, layout)` returning a problem or nil; at most a few reported.
@@ -103,27 +124,31 @@ return function(t, shared, require, _server, client)
 										for _, saving in { false, true } do
 											for _, effects in EFFECTS do
 												for _, status in STATUS do
-													local input: HudLayout.Input = {
-														width = w,
-														height = h,
-														insets = inset,
-														scale = scale,
-														touch = touch,
-														minimap = minimap,
-														coordsWidth = coords,
-														music = music,
-														save = if save then save else nil,
-														saveUnder = under,
-														effects = effects,
-														saving = saving,
-														debugRight = nil,
-														buttons = nil,
-														status = if status then status else nil,
-													}
-													count += 1
-													local problem = check(input, HudLayout.compute(input))
-													if problem and #problems < 5 then
-														table.insert(problems, `{describe(input)}: {problem}`)
+													for _, clock in CLOCKS do
+														local input: HudLayout.Input = {
+															width = w,
+															height = h,
+															insets = inset,
+															scale = scale,
+															touch = touch,
+															minimap = minimap,
+															coordsWidth = coords,
+															music = music,
+															save = if save then save else nil,
+															saveUnder = under,
+															effects = effects,
+															saving = saving,
+															debugRight = nil,
+															buttons = nil,
+															status = if status then status else nil,
+															clock = clock ~= false,
+															clockCaption = if clock then clock else nil,
+														}
+														count += 1
+														local problem = check(input, HudLayout.compute(input))
+														if problem and #problems < 5 then
+															table.insert(problems, `{describe(input)}: {problem}`)
+														end
 													end
 												end
 											end
@@ -152,6 +177,7 @@ return function(t, shared, require, _server, client)
 		list.effects = layout.effects :: any
 		list.saving = layout.saving :: any
 		list.status = layout.status :: any
+		list.clock = layout.clock :: any
 		return list
 	end
 
@@ -1142,5 +1168,282 @@ return function(t, shared, require, _server, client)
 		local notched = HudLayout.jumpButton(844, 390, insets(47, 0, 47, 21, 58))
 		t.ok(notched.x == 844 - 47 - 95 and notched.y == 390 - 21 - 90, "inside the safe area")
 		t.eq(#HudLayout.compute(phone({ touch = false })).buttons, 0, "none on a desktop")
+	end)
+
+	--[[ The season clock (Ui/SeasonHud) ]]
+
+	-- A caption as Ui/SeasonHud measures it in Roblox: Roboto at TextSize 7 ("AUTUMN · 8 DAYS
+	-- LEFT" is some 75 GUI pixels), and the pixel font's 8 a character as an extreme.
+	local CAPTION, WIDE_CAPTION = 80, 192
+
+	local function desk(overrides: { [string]: any }): HudLayout.Input
+		local input = phone({
+			width = 1920,
+			height = 1080,
+			scale = 4,
+			touch = false,
+			clock = true,
+			clockCaption = CAPTION,
+		})
+		-- (No effect icons: a nil in the overrides would not replace phone's.)
+		input.effects = nil
+		for key, value in overrides do
+			(input :: any)[key] = value
+		end
+		return input
+	end
+
+	t.test("hud layout: the season clock beside the minimap, beside the Map button, in the corner", function()
+		-- 1920 x 1080 at Auto (4): the dial over its caption, GAP left of the minimap, top aligned.
+		local layout = HudLayout.compute(desk({}))
+		local clock, map, coords = layout.clock :: Rect, layout.minimap :: Rect, layout.coords :: Rect
+		t.ok(clock ~= nil, "shown")
+		t.eq(layout.clockDial, HudLayout.CLOCK)
+		t.eq(layout.clockCaption, true)
+		t.eq(clock.w, CAPTION * 4, "as wide as its caption")
+		t.eq(clock.h, (HudLayout.CLOCK + HudLayout.COORDS_HEIGHT) * 4, "the dial over the caption's row")
+		t.eq(clock.x + clock.w, map.x - 8, "GAP left of the minimap")
+		t.eq(clock.y, map.y, "top aligned with it")
+		t.ok(clock.y + clock.h <= coords.y, "above the coordinates line's row")
+		t.eq(layout.wailaRight, clock.x - 8, "WAILA keeps left of it")
+		t.eq((layout.music :: Rect).y, coords.y + coords.h + 8, "the toasts where they were")
+		-- Without the clock (or with the seasons off) the corner is as before.
+		local without = HudLayout.compute(desk({ clock = false }))
+		t.ok(without.clock == nil and without.clockDial == 0 and without.clockCaption == false, "none")
+		t.eq(without.wailaRight, map.x - 8)
+		local plainInput = phone({ width = 1920, height = 1080, scale = 4, touch = false })
+		plainInput.effects = nil
+		local plain = HudLayout.compute(plainInput)
+		for _, key in { "minimap", "coords", "music", "saving" } do
+			local a, b = (without :: any)[key], (plain :: any)[key]
+			t.ok((a == nil) == (b == nil), key)
+			if a and b then
+				t.ok(a.x == b.x and a.y == b.y and a.w == b.w and a.h == b.h, `{key} unmoved`)
+			end
+		end
+		-- The effect icons put beside the column at the top go left of the clock.
+		local aside = HudLayout.compute(phone({ music = true, clock = true, clockCaption = CAPTION }))
+		local icons, small = aside.effects, aside.clock
+		t.ok(icons ~= nil and small ~= nil, "the phone's icons and clock")
+		if icons and small and aside.effectsAside and icons.y < small.y + small.h then
+			t.ok(icons.x + icons.w <= small.x, "the icons left of the clock")
+		end
+
+		-- A touch screen with the minimap off: left of the Map button; the column under the clock.
+		local touch = HudLayout.compute(phone({
+			minimap = false,
+			clock = true,
+			clockCaption = CAPTION,
+			dayLine = true,
+			dayWidth = 120,
+		}))
+		local button, beside, day = touch.mapButton :: Rect, touch.clock :: Rect, touch.day :: Rect
+		t.ok(beside ~= nil and day ~= nil, "the clock and the day line")
+		t.ok(math.abs(beside.x + beside.w - (button.x - 2 * touch.scale)) <= 1, "GAP left of the Map button")
+		t.eq(beside.y, button.y, "top aligned with it")
+		t.ok(beside.y + beside.h > button.y + button.h, "taller than the button")
+		t.ok(math.abs(day.y - (beside.y + beside.h + 2 * touch.scale)) <= 1, "the day line under the clock")
+		t.ok((touch.music :: Rect).y >= day.y + day.h, "the toasts under that")
+
+		-- Neither minimap nor touch: the clock takes the corner, the column goes on under it.
+		local corner = HudLayout.compute(desk({ minimap = false, dayLine = true, dayWidth = 120 }))
+		local alone, under = corner.clock :: Rect, corner.day :: Rect
+		t.eq(alone.x + alone.w, 1920 - 16, "in the corner")
+		t.eq(alone.y, 58 + 16)
+		t.eq(under.y, alone.y + alone.h + 8, "the day line under it")
+		t.eq((corner.music :: Rect).y, under.y + under.h + 8, "the toasts under that")
+		t.eq(corner.wailaRight, alone.x - 8, "WAILA left of it")
+		local low = corner.wailaLow :: { y: number, right: number }
+		t.ok(low ~= nil and low.y == under.y and low.right == math.min(alone.x, under.x) - 8, "and of the day line")
+	end)
+
+	t.test("hud layout: the season clock gives way: caption first, then the dial, then itself", function()
+		local bar = insets(0, 0, 0, 0, 58)
+		-- A 1024 x 768 window and an iPad at their Auto scale: the caption goes, the dial stays.
+		for _, touch in { false, true } do
+			local layout = HudLayout.compute(desk({
+				width = 1024,
+				height = 768,
+				insets = bar,
+				scale = GuiScale.base(1024, 768, touch, 0),
+				touch = touch,
+			}))
+			t.ok(layout.clock ~= nil, `touch {touch}: shown`)
+			t.eq(layout.clockCaption, false, `touch {touch}: the caption dropped`)
+			t.eq(layout.clockDial, HudLayout.CLOCK, `touch {touch}: the whole dial`)
+		end
+		-- Phones and the other desktops at Auto keep it.
+		for _, screen in { { 568, 320, true }, { 667, 375, true }, { 1366, 768, false }, { 1920, 1080, false } } do
+			local w, h, touch = screen[1], screen[2], screen[3]
+			local layout = HudLayout.compute(desk({
+				width = w,
+				height = h,
+				insets = bar,
+				scale = GuiScale.base(w, h, touch, 0),
+				touch = touch,
+			}))
+			t.eq(layout.clockCaption, true, `{w} x {h}: the caption shows`)
+		end
+		-- A narrower top row: the small dial, then nothing (a scale the GUI Scale setting never
+		-- gives, standing in for a bigger minimap).
+		local small = HudLayout.compute(desk({ width = 800, height = 600, scale = 3.25 }))
+		t.eq(small.clockDial, HudLayout.CLOCK_SMALL, "the small dial")
+		t.eq(small.clockCaption, false)
+		t.eq((small.clock :: Rect).w, HudLayout.CLOCK_SMALL * 3.25)
+		local none = HudLayout.compute(desk({ width = 800, height = 600, scale = 3.5 }))
+		t.ok(none.clock == nil and none.clockDial == 0, "dropped")
+		t.eq(none.wailaRight, (none.minimap :: Rect).x - 7, "WAILA as without it")
+	end)
+
+	t.test("hud layout: the season clock on every screen and GUI Scale, the column under it", function()
+		local one, wrapped = SurvivorLine.widths("Day 2 · Survived 1 day", "Blood Moon tomorrow", measure)
+		local count, problems = 0, {}
+		local shownCaption = 0
+		-- The problem with `layout` of `input` (`caption` the caption asked for), or nil.
+		local function check(input: HudLayout.Input, layout: HudLayout.Layout, caption: number?): string?
+			local clock = layout.clock
+			if clock == nil then
+				return "the clock was dropped"
+			end
+			local s = input.scale
+			local area = layout.area
+			local right = area.x + area.w
+			local gap = HudLayout.GAP * s
+			local top = layout.minimap or layout.mapButton
+			local dial, withCaption = layout.clockDial, layout.clockCaption
+			if withCaption then
+				shownCaption += 1
+			end
+			local captionW = if withCaption then caption or 0 else 0
+			local row = if withCaption then HudLayout.COORDS_HEIGHT else 0
+			local edge = if top then top.x - gap else right
+			if dial ~= HudLayout.CLOCK and dial ~= HudLayout.CLOCK_SMALL then
+				return `a dial of {dial}`
+			elseif withCaption and not caption then
+				return "a caption nobody asked for"
+			elseif
+				math.abs(clock.w - math.max(dial, captionW) * s) > 1e-9
+				or math.abs(clock.h - (dial + row) * s) > 1e-9
+			then
+				return `the clock is {clock.w} x {clock.h}`
+			elseif math.abs(clock.y - area.y) > 0.5 then
+				return "not at the top"
+			elseif math.abs(clock.x + clock.w - edge) > 1 then
+				return "not right aligned beside the column's top"
+			elseif right - clock.x > HudLayout.CLOCK_SHARE * area.w + 1 then
+				return "the top row too wide"
+			elseif layout.wailaRight > clock.x - gap + 0.5 then
+				return "WAILA's reserve leaves the clock"
+			end
+			-- Given way only where it had to: the bigger try breaks the share.
+			local function fits(width: number): boolean
+				return right - (edge - width * s) <= HudLayout.CLOCK_SHARE * area.w - 1
+			end
+			if caption and not withCaption and fits(math.max(HudLayout.CLOCK, caption)) then
+				return "the caption dropped with room for it"
+			elseif dial == HudLayout.CLOCK_SMALL and fits(HudLayout.CLOCK) then
+				return "the small dial with room for the big one"
+			end
+			-- The column (the day line, the toasts' slot) under it.
+			local day = layout.day
+			if input.dayLine and day == nil then
+				return "no day line"
+			elseif day and day.x < clock.x + clock.w and day.y < clock.y + clock.h then
+				return "the day line beside the clock"
+			end
+			local slot = layout.music
+			if
+				slot
+				and slot.x + slot.w >= right - 0.5
+				and slot.x < clock.x + clock.w
+				and slot.y < clock.y + clock.h
+			then
+				return "the toasts' slot beside the clock"
+			end
+			-- Everything that shows: inside, disjoint, off the buttons and the HUD.
+			local safe = HudLayout.safeArea(input.width, input.height, input.insets)
+			local rects = shown(input, layout)
+			rects.day = layout.day :: any
+			rects.notice = layout.notice :: any
+			for name, r in rects do
+				if not HudLayout.inside(r, safe) then
+					return `{name} leaves the safe area`
+				end
+				for other, q in rects do
+					if name < other and HudLayout.overlaps(r, q) then
+						return `{name} overlaps {other}`
+					end
+				end
+				for _, button in layout.buttons do
+					if HudLayout.overlaps(r, button) then
+						return `{name} covers a touch button`
+					end
+				end
+				if HudLayout.overlaps(r, layout.hud) or HudLayout.overlaps(r, layout.attack) then
+					return `{name} covers the HUD`
+				end
+			end
+			return nil
+		end
+		for _, screen in SCREENS do
+			local w, h, inset = screen[1], screen[2], screen[3]
+			for _, touch in { false, true } do
+				for _, choice in GuiScale.choices(w, h, touch) do
+					local scale = GuiScale.base(w, h, touch, choice)
+					for _, minimap in { true, false } do
+						for _, caption in { false, CAPTION, WIDE_CAPTION } do
+							for _, dayLine in { false, true } do
+								for _, music in { false, true } do
+									for _, notice in { false, widestToast } do
+										for _, effects in { false, true } do
+											for _, status in { false, true } do
+												local input: HudLayout.Input = {
+													width = w,
+													height = h,
+													insets = inset,
+													scale = scale,
+													touch = touch,
+													minimap = minimap,
+													coordsWidth = 160,
+													music = music,
+													save = nil,
+													saveUnder = false,
+													effects = if effects then HudLayout.effectsSize(3, 2) else nil,
+													saving = false,
+													debugRight = nil,
+													dayLine = dayLine,
+													dayWidth = one,
+													dayWrap = wrapped,
+													notice = if notice then notice else nil,
+													buttons = nil,
+													status = if status then statusSizes(10, true) else nil,
+													clock = true,
+													clockCaption = if caption then caption else nil,
+												}
+												count += 1
+												local problem = check(
+													input,
+													HudLayout.compute(input),
+													if caption then caption else nil
+												)
+												if problem and #problems < 5 then
+													table.insert(
+														problems,
+														`{describe(input)} day {dayLine} notice {input.notice}: {problem}`
+													)
+												end
+											end
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		t.ok(count > 10000, `the sweep ran ({count})`)
+		t.ok(shownCaption > count / 6, `the caption shows mostly ({shownCaption} of {count})`)
+		t.ok(#problems == 0, table.concat(problems, "\n         "))
 	end)
 end

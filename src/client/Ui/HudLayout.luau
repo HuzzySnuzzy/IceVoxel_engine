@@ -4,7 +4,8 @@
 	and every GUI Scale choice): the quickbar's canvas at the bottom centre and its cells, the
 	status icons (Ui/StatusCluster) at the bottom right on the quickbar's base line, and the shared
 	top right corner: the minimap with its coordinates line (or the touch "Map" button while the
-	minimap is off) and the zombie apocalypse's day line under them, the toasts under that
+	minimap is off) with the season clock beside it, the zombie apocalypse's day line under them,
+	the toasts under that
 	(Minecraft's ToastComponent: the Now Playing toast in the first slot, the "World saved" toast
 	in it or under it, the blood moon's notices under those), the status effect icons (Minecraft's
 	Gui.renderEffects: the top right) and the saving icon at the bottom right; WAILA keeps out of
@@ -54,10 +55,25 @@
 	            button takes the corner (the only way to the world map there), never smaller than
 	            a finger's TOUCH_TARGET (`mapButtonSize`); `touchSide` is the same floor for the
 	            minimap's own weather button (Map/Minimap).
+	  clock     the season clock (Ui/SeasonHud): a dial CLOCK GUI pixels square over its caption
+	            row (COORDS_HEIGHT; "WINTER · 3 DAYS LEFT", `clockCaption` GUI pixels wide), the
+	            block as wide as the wider of them, right aligned GAP left of the column's top
+	            piece (the minimap, else the touch Map button) and top aligned with it; with
+	            neither it takes the corner itself. The column goes on under the lower of the two
+	            (the minimap's coordinates line is lower than the clock; a Map button is not), so
+	            the day line, the toasts and the effect icons stay clear of it. The top row (the
+	            clock and the piece beside it) takes at most CLOCK_SHARE of the area's width, the
+	            top centre being WAILA's: where the whole clock doesn't fit that, or the area, or
+	            runs into something, the caption goes first (`clockCaption` false), then the dial
+	            shrinks to CLOCK_SMALL (`clockDial`), then the clock is dropped (nil). Of the
+	            screens tested only a 1024 x 768 window's and an iPad's corner at their Auto GUI
+	            scale (some 330 GUI pixels across) drop the caption beside the minimap; phones
+	            (430 to 460 across) keep it.
 	  day line  the day counter (Ui/SurvivorHud: "Day 4 · Survived 2 days", a blood moon's
 	            warning), as tall as the coordinates line (COORDS_HEIGHT) and as wide as its text
 	            (`dayWidth`, at least the minimap's width), right aligned, GAP under the column's
-	            last piece: the coordinates line, else (touch, the minimap off) the Map button,
+	            last piece: the coordinates line, else (touch, the minimap off) the Map button
+	            (or the season clock beside it, which is lower), else the clock in the corner,
 	            else at the area's top right. Where that row doesn't fit (with a warning it is 45
 	            to 50 characters, 360 to 400 GUI pixels, and an iPad's or a 1024 x 768 window's
 	            area is about 320 at its Auto scale) the warning goes on a second row under the day's
@@ -91,8 +107,8 @@
 	            PlayerModule's DynamicThumbstick, as Interaction/BlockInteraction keeps out of it):
 	            the icons are buttons, and a thumb landing on one would pin its tooltip instead of
 	            moving.
-	  WAILA     keeps left of `wailaRight` (the map or the Map button, and anything put beside the
-	            column at the top) and, when it is tall enough to reach the coordinates line
+	  WAILA     keeps left of `wailaRight` (the map or the Map button, the season clock, and anything
+	            put beside the column at the top) and, when it is tall enough to reach the coordinates line
 	            (`wailaLow.y`, with F3's extended lines), left of `wailaLow.right` too; with F3
 	            open, right of `wailaAvoid` (`debugRight`, the F3 text's right edge, plus GAP).
 
@@ -104,9 +120,10 @@
 
 	Every rectangle that shows is disjoint from every other, from the buttons and from the HUD
 	(tested over phones, tablets, desktops and 4K, every GUI Scale choice, the minimap on and off,
-	touch on and off, toasts, the saving icon and the status icons showing or not). Client
-	Ui/UiScale feeds it the screen, the scale and what shows, and hands the result to Map/Minimap,
-	MusicToast, SaveIndicator, EffectHud, StatusCluster and Waila.
+	touch on and off, the season clock with its longest caption or none, toasts, the saving icon
+	and the status icons showing or not). Client Ui/UiScale feeds it the screen, the scale and
+	what shows, and hands the result to Map/Minimap, MusicToast, SaveIndicator, EffectHud,
+	StatusCluster, SurvivorHud, SeasonHud and Waila.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -144,6 +161,11 @@ HudLayout.EFFECT_TIP = 12
 HudLayout.EFFECT_SQUEEZE = 8
 -- The bottom lift on a PC: this share of the screen's height (see the header).
 HudLayout.LIFT = 0.05
+-- The season clock's dial (GUI pixels), its smaller dial on tight screens, and the most of the
+-- area's width the top row (the clock and the column's top piece) may take (see the header).
+HudLayout.CLOCK = 40
+HudLayout.CLOCK_SMALL = 32
+HudLayout.CLOCK_SHARE = 0.4
 
 -- Ui/Hud's canvas (GUI pixels): the quickbar's width (230 with the touch buttons beside it) and
 -- the canvas' height; the quickbar's top and the item-in-hands box's top in it (see the header).
@@ -232,6 +254,9 @@ export type Input = {
 	buttons: { Rect }?,
 	-- The status icons' sizes (Ui/StatusCluster through UiScale.setStatus); nil: none shown.
 	status: StatusSizes?,
+	-- The season clock shows (Ui/SeasonHud), and its caption's width (GUI pixels; nil: none).
+	clock: boolean?,
+	clockCaption: number?,
 }
 
 export type Layout = {
@@ -246,6 +271,11 @@ export type Layout = {
 	music: Rect?,
 	-- "World saved" while it shows (nil while it waits for room).
 	save: Rect?,
+	-- The season clock's block (the dial over its caption; nil: none, or no room), its dial's side
+	-- (GUI pixels: CLOCK or CLOCK_SMALL; 0 without) and whether the caption shows under it.
+	clock: Rect?,
+	clockDial: number,
+	clockCaption: boolean,
 	-- The day line (nil: none, or no room) and its rows (1; 2 with its notice wrapped under its
 	-- text), and a notice toast while it shows (nil: none, or no room yet).
 	day: Rect?,
@@ -686,6 +716,9 @@ function HudLayout.compute(input: Input): Layout
 		mapButton = nil,
 		music = nil,
 		save = nil,
+		clock = nil,
+		clockDial = 0,
+		clockCaption = false,
 		day = nil,
 		dayRows = 1,
 		notice = nil,
@@ -727,6 +760,45 @@ function HudLayout.compute(input: Input): Layout
 		top = button
 		columnBottom = button.y + button.h
 	end
+
+	--[[ The season clock: left of the column's top piece, or in the corner ]]
+
+	local clock: Rect? = nil
+	if input.clock then
+		local edge = if top then top.x - gap else right
+		local caption = input.clockCaption
+		-- The block with a `dial` and the caption or not; nil where it may not go (see the header).
+		local function clockRect(dial: number, withCaption: boolean): Rect?
+			local row = if withCaption then HudLayout.COORDS_HEIGHT else 0
+			local w = math.max(dial, if withCaption then caption or 0 else 0) * s
+			local h = (dial + row) * s
+			local r = snap(rect(edge - w, area.y, w, h))
+			if r.x < area.x or right - r.x > HudLayout.CLOCK_SHARE * area.w then
+				return nil
+			end
+			return if HudLayout.inside(r, safe) and hit(r, placed) == nil then r else nil
+		end
+		local tries: { { dial: number, caption: boolean } } =
+			{ { dial = HudLayout.CLOCK, caption = false }, { dial = HudLayout.CLOCK_SMALL, caption = false } }
+		if caption and caption > 0 then
+			table.insert(tries, 1, { dial = HudLayout.CLOCK, caption = true })
+		end
+		for _, try in tries do
+			local dial, withCaption = try.dial, try.caption
+			local r = clockRect(dial, withCaption)
+			if r then
+				clock = r
+				layout.clock, layout.clockDial, layout.clockCaption = r, dial, withCaption
+				table.insert(placed, r)
+				-- (The column goes on under the lower of it and the clock; with neither minimap nor
+				-- Map button the clock is the column's top.)
+				columnBottom = if top then math.max(columnBottom, r.y + r.h) else r.y + r.h
+				top = top or r
+				break
+			end
+		end
+	end
+
 	-- (The day line under the column, or in the corner, on one row or wrapped onto two; the column
 	-- ends under it.)
 	if input.dayLine then
@@ -868,6 +940,10 @@ function HudLayout.compute(input: Input): Layout
 	--[[ WAILA ]]
 
 	local wailaRight = if top then top.x - gap else right
+	if clock then
+		-- (The clock beside the column's top piece, at the top.)
+		wailaRight = math.min(wailaRight, clock.x - gap)
+	end
 	-- (Pieces put beside the column at the top are in its way too.)
 	for _, piece in { layout.music, layout.save, layout.notice, layout.effects } do
 		if piece and piece.y < slotTop and (piece ~= layout.music or input.music) then

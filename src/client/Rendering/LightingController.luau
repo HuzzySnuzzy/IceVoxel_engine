@@ -46,6 +46,11 @@
 	             weather): the ambients, the sky's colour shift and the haze tinted red as far as
 	             the sky reaches the camera, its own colour grading and a bigger moon; nothing by
 	             day or on other nights (Shared/Apocalypse/BloodMoon's schedule).
+	  Season     the seasons' mood (Rendering/SeasonSky, after the blood moon): a cool winter and a
+	             warm autumn in the sun's colour shift and the outdoor ambient, and its own subtle
+	             colour grading (winter's snow glare, a heat wave's washed-out warmth, at the
+	             world's seed), as far as the sky reaches the camera; nothing with the calendar
+	             off. The foliage's colours are not the sky's (Rendering/SeasonTint).
 	  Effects    Night Vision (`setNightVision`, Rendering/EffectView: its scale, 0..1, flickering
 	             in its last 10 s) raises the ambient and outdoor ambient towards
 	             Config.Effects.NightVisionAmbient's grey, so caves and nights read lit, as
@@ -74,6 +79,7 @@ local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local AtmosphereModel = require(script.Parent.AtmosphereModel)
 local BloodMoonSky = require(script.Parent.BloodMoonSky)
 local Calendar = require(Shared.Seasons.Calendar)
+local SeasonSky = require(script.Parent.SeasonSky)
 local SkyExposure = require(script.Parent.SkyExposure)
 local ViewSettings = require(script.Parent.ViewSettings)
 local WeatherSky = require(script.Parent.Parent.Weather.WeatherSky)
@@ -216,6 +222,24 @@ local function targetExposure(): number
 	return SkyExposure.target(x, y, z, groundAt, getBlock, Config.Lighting.Underground)
 end
 
+-- The season's mood (Rendering/SeasonSky), reused every update.
+local seasonMood: SeasonSky.Mood = SeasonSky.neutral()
+-- The world's seed (the heat waves' hash), once the server published it.
+local seed: number? = nil
+
+local function worldSeed(): number
+	local known = seed
+	if known ~= nil then
+		return known
+	end
+	local value = Shared:GetAttribute("Seed")
+	if type(value) ~= "number" then
+		return 0
+	end
+	seed = value
+	return value
+end
+
 local function update(dt: number)
 	local dayTime = LightingController.dayTime()
 	write("ClockTime", DayCycle.clockTime(dayTime))
@@ -238,6 +262,10 @@ local function update(dt: number)
 	local bloodMoon = BloodMoonSky.intensity(dayTime)
 	BloodMoonSky.apply(environment, bloodMoon * current)
 	BloodMoonSky.update(bloodMoon, current)
+	-- (The season's mood over that, as far as the sky reaches the camera.)
+	local mood = SeasonSky.mood(dayTime, SeasonSky.heatWave(dayTime, worldSeed()), nil, seasonMood)
+	SeasonSky.apply(environment, mood, current)
+	SeasonSky.update(mood, current)
 	if nightVision > 0 then
 		-- (Night Vision: the ambients raised towards its grey.)
 		local grey = Config.Effects.NightVisionAmbient

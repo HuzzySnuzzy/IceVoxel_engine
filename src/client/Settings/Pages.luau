@@ -23,7 +23,8 @@
 	                 mouse, discrete scrolling, and this game's scroll wheel (hotbar or zoom)
 	    keybinds     Minecraft's KeyBindsScreen: a scrolling list (`list = "keys"`, laid out by
 	                 `keyList`), Reset Keys and Done
-	  hud            minimap, WAILA, attack indicator, GUI scale
+	  hud            minimap, WAILA, the day counter, the season clock (Ui/SeasonHud: off with
+	                 Config.Seasons.Clock.Enabled whatever it says), attack indicator, GUI scale
 	  chat           Chat Settings (Ui/Chat): Chat (shown, commands only, hidden), text opacity,
 	                 background opacity, text size, line spacing, chat delay, width, focused and
 	                 unfocused height, command suggestions
