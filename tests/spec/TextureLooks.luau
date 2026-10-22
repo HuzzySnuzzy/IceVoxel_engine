@@ -1067,4 +1067,122 @@ return function(t)
 		t.eq(BL.nearLook(andesite), nil, "the plain block")
 		t.eq(BL.nearLook(BB.get(BB.id.Dirt).appearance), nil, "dirt: the plain block too")
 	end)
+
+	--[[ Seasonal colours (Shared/Seasons/Foliage through ChunkRenderer) ]]
+
+	t.test("texture looks: seasonal tints are the templates' colours for the block's own colour", function()
+		for _, name in
+			{ "Grass", "DryGrass", "OakLeaves", "SpruceLeaves", "JungleLeaves", "ShortGrass", "Fern", "Vine" }
+		do
+			local appearance = app(name)
+			local info = Blocks.appearances[appearance]
+			local tint = Looks.seasonalTint(appearance, nil)
+			local near = Looks.nearLook(appearance)
+			if near == nil then
+				sameColour(t, tint.near, colourOf(name), `{name}: near BlockList colour`, 0)
+			elseif tint.near then
+				sameColour(t, tint.near, near.color, `{name}: near part colour`, 0)
+			end
+			for i, image in (if near then near.images else {}) :: any do
+				local seasonal = tint.images[i]
+				if seasonal then
+					sameColour(t, seasonal, image.color, `{name}: image {i}`, 0)
+				end
+			end
+			local far = Looks.farLook(appearance)
+			if far and tint.far then
+				sameColour(t, tint.far, far.color, `{name}: far part colour`, 0)
+			end
+			sameColour(t, tint.plain, Looks.plainColour(appearance), `{name}: plain colour`, 0)
+			local look, r, g, b = Looks.lookOf(appearance, 2)
+			t.ok(look >= 0)
+			t.near(tint.look[1], r, 0, `{name}: mesh colour`)
+			t.near(tint.look[2], g, 0)
+			t.near(tint.look[3], b, 0)
+			local sprite = Looks.spriteOf(appearance)
+			if sprite then
+				for k, c in sprite.tints do
+					sameColour(t, (tint.sprite :: any)[k], c, `{name}: sprite tint {k}`, 0)
+				end
+			end
+			local front = Looks.frontOf(appearance)
+			if front and tint.front then
+				sameColour(t, tint.front, front.color, `{name}: front`, 0)
+			end
+			if info.shape then
+				-- (ChunkRenderer's tinted plants' rule: the box's colour times the soil's tint.)
+				for i, box in info.shape do
+					local c = box.color or info.color
+					sameColour(t, (tint.boxes :: any)[i][1], Color3.fromRGB(c[1], c[2], c[3]), `{name}: box {i}`, 0)
+					if info.tinted then
+						for k, m in Blocks.FOLIAGE_TINTS do
+							local want = Color3.fromRGB(
+								math.min(255, math.round(c[1] * m[1])),
+								math.min(255, math.round(c[2] * m[2])),
+								math.min(255, math.round(c[3] * m[3]))
+							)
+							sameColour(t, (tint.boxes :: any)[i][k + 1], want, `{name}: box {i} tint {k}`, 0)
+						end
+					end
+				end
+			end
+		end
+	end)
+
+	t.test("texture looks: a season's colour tints only what follows the block's colour", function()
+		local autumn = { 210, 110, 40 }
+		-- Grass: the top image follows (Tint true), the sides' variant keeps its own colours.
+		local grass = Looks.seasonalTint(app("Grass"), autumn)
+		t.eq(grass.near, nil, "grass side keeps its colours")
+		local top = Looks.nearLook(app("Grass")).images[1]
+		t.eq(top.texture, "grass top")
+		sameColour(t, grass.images[1] :: any, byteColour(autumn), "the top (unknown average: the colour)")
+		sameColour(t, grass.far :: any, byteColour(autumn), "far: the top's variant tinted")
+		sameColour(t, grass.plain, byteColour(autumn), "plain: what the top averages to")
+		-- Leaves: the variant follows; no images.
+		local leaves = Looks.seasonalTint(app("OakLeaves"), autumn)
+		sameColour(t, leaves.near :: any, byteColour(autumn), "leaves near")
+		t.eq(#leaves.images, 0)
+		-- Plants scale their boxes and sprites by target / own colour; vines their plate image.
+		local own = Blocks.get(B.ShortGrass).color
+		local plant = Looks.seasonalTint(app("ShortGrass"), autumn)
+		local box2 = Blocks.appearances[app("ShortGrass")].shape[2].color
+		sameColour(
+			t,
+			(plant.boxes :: any)[2][1],
+			Color3.fromRGB(
+				math.min(255, math.round(box2[1] * autumn[1] / own[1])),
+				math.min(255, math.round(box2[2] * autumn[2] / own[2])),
+				math.min(255, math.round(box2[3] * autumn[3] / own[3]))
+			),
+			"box 2 scaled",
+			0
+		)
+		if Looks.spriteOf(app("ShortGrass")) then
+			sameColour(t, (plant.sprite :: any)[1], byteColour(autumn), "sprite: the colour (unknown average)")
+		end
+		local vine = Looks.seasonalTint(app("Vine"), autumn)
+		if Looks.frontOf(app("Vine")) then
+			sameColour(t, vine.front :: any, byteColour(autumn), "vine plate")
+		end
+		-- With known averages: unclamped images, clamped parts, and how far short a part falls.
+		local world = newLooks()
+		local L, BB = world.Looks, world.Blocks
+		L.applyAverages({ ["grass top"] = { 100, 140, 60 }, leaves = { 90, 120, 60 } })
+		local appOf = function(name: string): number
+			return BB.get(BB.id[name]).appearance
+		end
+		local bright = { 230, 190, 60 }
+		local raw, clamped = L.tintOf(bright, { 90, 120, 60 })
+		local seasonal = L.seasonalTint(appOf("BirchLeaves"), bright)
+		sameColour(t, seasonal.near :: any, Color3.new(clamped[1], clamped[2], clamped[3]), "clamped part tint")
+		t.ok(raw[1] > 1, "brighter than the texture can show on a part")
+		t.ok(seasonal.short > 4, "named as too dark")
+		local rawTop = L.tintOf(bright, { 100, 140, 60 })
+		local grassSeason = L.seasonalTint(appOf("Grass"), bright)
+		sameColour(t, grassSeason.images[1] :: any, Color3.new(rawTop[1], rawTop[2], rawTop[3]), "images unclamped")
+		sameColour(t, grassSeason.plain, byteColour(bright), "the top shows the colour exactly", 1e-6)
+		local dim = L.seasonalTint(appOf("OakLeaves"), { 60, 70, 40 })
+		t.ok(dim.short < 1e-6, "a darker colour is reached")
+	end)
 end

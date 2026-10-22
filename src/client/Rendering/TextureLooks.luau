@@ -61,6 +61,14 @@
 	         it every face is the plain look (SmoothPlastic) in its plain colour, like the plain
 	         parts it replaces. One look per appearance, as a far part has one variant;
 	         `lookInfo` also gives what the look's texture averages to, when known.
+	  season `seasonalTint(appearance, target)`: the colours every kind of part of a block shows
+	         when its colour is `target` instead of its BlockList colour (Shared/Seasons/Foliage:
+	         grass tops, leaves, tinted plants, vines), by the rules above (a texture that follows
+	         the block's colour, Tint true, takes the target; Tint false and a named block's keep
+	         theirs; shaped boxes scale by target / colour): only colours, so ChunkRenderer
+	         recolours live parts in place and the far meshes their vertices, never a material,
+	         variant or image. Without a target it gives exactly the templates' colours. Items
+	         keep the authored colours.
 
 	Missing textures: a blank face draws the pack's missing texture when TexturePack.ShowMissing
 	is on, otherwise what the block draws without it. A filled texture whose MaterialVariant is
@@ -1006,6 +1014,204 @@ end
 function TextureLooks.plainRgb(appearance: number, _face: number?): (number, number, number)
 	local c = resolve(appearance).plain
 	return c[1], c[2], c[3]
+end
+
+--[[ Seasonal colours (Shared/Seasons/Foliage) ]]
+
+--[[
+	What an appearance's parts show when its colour is `target` instead of its BlockList colour
+	(`seasonalTint`): only colours, never materials, variants or images (see the header's rule).
+	nil (or false) fields keep what the parts already carry (a texture that does not follow the
+	block's colour: Tint false or a named block's).
+	  near    near cube parts' Color (the near look's variant tinted towards the target, clamped;
+	          the target itself without a variant);
+	  images  near cube images in nearLook(appearance).images' order (unclamped tints; false:
+	          unchanged);
+	  far     far cube parts' Color (the far look's, the plain colour when its texture was too dark);
+	  plain   plain parts' Color (what the top averages to), also as `plainRgb` (r, g, b 0..1);
+	  look    the far meshes' vertex colour in the far look (lookOf's), r, g, b 0..1;
+	  boxes   shaped blocks' boxes per box and soil tint ([box][tint + 1], ChunkRenderer's tinted
+	          plants' rule): their colour scaled by target / BlockList colour per channel;
+	  sprite  sprite Decals per soil tint (as Sprite.tints);
+	  front   a Front plate's Decals (vines);
+	  short   how much darker than the target the part's texture shows (0-255, `shortfall`; a
+	          lighter greyscale texture fixes it): Rendering/SeasonTint names those once.
+]]
+export type Seasonal = {
+	near: Color3?,
+	images: { Color3 | false },
+	far: Color3?,
+	plain: Color3,
+	plainRgb: { number },
+	look: { number },
+	boxes: { { Color3 } }?,
+	sprite: { Color3 }?,
+	front: Color3?,
+	short: number,
+}
+
+-- Does a texture's tint follow the block's colour (Tint true or unset)?
+local function follows(name: string): boolean
+	local mode = packTextures[name].Tint
+	return mode ~= false and type(mode) ~= "string"
+end
+
+-- The colour texture `name` is tinted towards on a block whose colour is `colour`.
+local function targetWith(name: string, colour: { number }): { number }?
+	local texture = packTextures[name]
+	local mode = texture.Tint
+	if mode == false then
+		return nil
+	elseif type(mode) == "string" then
+		return Blocks.get(Blocks.id[mode]).color
+	end
+	return colour
+end
+
+-- `faceAverage` with the block's colour `colour`.
+local function faceAverageWith(
+	info: Blocks.Appearance,
+	drawn: { texture: string, part: boolean }?,
+	colour: { number }
+): { number }
+	if drawn == nil then
+		return bytes(colour)
+	end
+	local name = drawn.texture
+	local average = TextureLooks.averageKnown(name)
+	local target = targetWith(name, colour)
+	if average then
+		local tint, clamped = TextureLooks.tintOf(target, average)
+		return TextureLooks.shownOf(average, if drawn.part then clamped else tint)
+	end
+	return bytes(target or info.color)
+end
+
+--[[
+	The colours an appearance's parts take when its colour is `target` (sRGB 0..255; nil: its
+	BlockList colour, which gives exactly the templates' colours): see Seasonal. Pure over the
+	current looks (their generation: call again after `changed`).
+]]
+function TextureLooks.seasonalTint(appearance: number, target: { number }?): Seasonal
+	local info = appearances[appearance]
+	local resolved = resolve(appearance)
+	local colour = target or info.color
+	local function tinted(name: string, part: boolean): Color3
+		local tint, clamped = TextureLooks.tintOf(colour, TextureLooks.averageKnown(name))
+		return rgb(if part then clamped else tint)
+	end
+	-- (The BlockList colour as PartPool's templates write it.)
+	local function own(): Color3
+		return if target then rgb(bytes(colour)) else Color3.fromRGB(colour[1], colour[2], colour[3])
+	end
+	local short = 0
+	-- Near cubes: the variant's tint and the images' (see the near look in the header).
+	local near: Color3? = nil
+	local images: { Color3 | false } = {}
+	local look = resolved.near
+	if look == nil then
+		near = own()
+	elseif look.texture == nil then
+		near = rgb(bytes(colour))
+	elseif follows(look.texture :: string) then
+		near = tinted(look.texture :: string, true)
+		short = math.max(short, TextureLooks.shortfall(colour, TextureLooks.averageKnown(look.texture :: string)))
+	end
+	if look then
+		for i, image in look.images do
+			images[i] = if follows(image.texture) then tinted(image.texture, false) else false
+		end
+	end
+	local plain = faceAverageWith(info, resolved.faces.top, colour)
+	-- Far cubes: their look's variant, the plain colour when it was too dark, else the block colour.
+	local farLook = resolved.far
+	local far: Color3? = nil
+	if farLook == nil then
+		far = own()
+	elseif farLook.texture == nil then
+		far = rgb(plain)
+	elseif follows(farLook.texture :: string) then
+		far = tinted(farLook.texture :: string, true)
+		short = math.max(short, TextureLooks.shortfall(colour, TextureLooks.averageKnown(farLook.texture :: string)))
+	end
+	local lookColour: { number }
+	if not style.farMaterials then
+		lookColour = plain
+	elseif farLook then
+		local c = far or farLook.color
+		lookColour = { c.R, c.G, c.B }
+	else
+		lookColour = bytes(colour)
+	end
+	-- Shaped blocks: every box scaled by target / colour (tinted plants per soil tint too).
+	local boxes: { { Color3 } }? = nil
+	local shape = info.shape
+	if shape then
+		local scale = table.create(3)
+		for k = 1, 3 do
+			scale[k] = colour[k] / math.max(info.color[k], 1e-6)
+		end
+		local list: { { Color3 } } = {}
+		for i, box in shape do
+			local c = box.color or info.color
+			local scaled = { c[1] * scale[1], c[2] * scale[2], c[3] * scale[3] }
+			local colours = {
+				Color3.fromRGB(
+					math.min(255, math.round(scaled[1])),
+					math.min(255, math.round(scaled[2])),
+					math.min(255, math.round(scaled[3]))
+				),
+			}
+			if info.tinted then
+				for t, m in Blocks.FOLIAGE_TINTS do
+					colours[t + 1] = Color3.fromRGB(
+						math.min(255, math.round(c[1] * m[1] * scale[1])),
+						math.min(255, math.round(c[2] * m[2] * scale[2])),
+						math.min(255, math.round(c[3] * m[3] * scale[3]))
+					)
+				end
+			end
+			list[i] = colours
+		end
+		boxes = list
+	end
+	-- Sprites per soil tint, as spriteOf (the target replaces the block's colour).
+	local sprite: { Color3 }? = nil
+	local spriteLook = resolved.sprite
+	if spriteLook then
+		local name = spriteLook.texture
+		local average = TextureLooks.averageKnown(name)
+		local base = targetWith(name, colour)
+		local tints: { Color3 } = { rgb((TextureLooks.tintOf(base, average))) }
+		if spriteLook.tinted and base then
+			for t, m in Blocks.FOLIAGE_TINTS do
+				local foliage = {
+					math.min(255, math.round(base[1] * m[1])),
+					math.min(255, math.round(base[2] * m[2])),
+					math.min(255, math.round(base[3] * m[3])),
+				}
+				tints[t + 1] = rgb((TextureLooks.tintOf(foliage, average)))
+			end
+		end
+		sprite = tints
+	end
+	local front: Color3? = nil
+	local frontLook = resolved.front
+	if frontLook and follows(frontLook.texture) then
+		front = tinted(frontLook.texture, false)
+	end
+	return {
+		near = near,
+		images = images,
+		far = far,
+		plain = rgb(plain),
+		plainRgb = plain,
+		look = lookColour,
+		boxes = boxes,
+		sprite = sprite,
+		front = front,
+		short = short,
+	}
 end
 
 --[[ Generations and changes ]]

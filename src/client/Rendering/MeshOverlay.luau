@@ -61,6 +61,19 @@
 	changes `plainLevel`'s answer on its own (`dropLooks`), it calls `onLooks` (set by the
 	renderer) to restyle what was drawn in the old look.
 
+	Seasons (`setSeason`, from Rendering/SeasonTint through ChunkRenderer.setFarSeason; nil: none,
+	so without seasons nothing here changes). Vertex colours are baked, so a far palette (one per
+	far step, Config.Seasons.Foliage.FarStepDays) is used when a build starts: its seasonal quads
+	(grass, leaves, plants, vines) take their member's biome class's colours (the quad's centre
+	gives its member), in their own look the look's colour, in the remainder their plain colour,
+	tinted for the look they joined as MeshGeometry's rule does. Each mesh remembers the palette
+	and its members' classes; when the palette now drifted more than its limit (FarDeltaE, ΔE76)
+	from that, in any of those classes, the region is marked stale: a new version for
+	MeshRegions, so it joins the usual candidate ranking (with every member meshed already it
+	ranks below any region with parts to merge), waits RebuildSeconds and the gate like any
+	build, and its new mesh replaces the old one without a gap. The drift per palette and class
+	is worked out once per new palette.
+
 	The floating origin (Shared/World/Origin, Rendering/Rebase): a mesh keeps its centre in world
 	studs and is placed for the origin of the moment it goes into the workspace (`apply`), so a
 	move during a build costs nothing; MeshParts in the workspace move with the renderer's mover
@@ -81,6 +94,7 @@ local LodTree = require(Shared.World.LodTree)
 local Origin = require(Shared.World.Origin)
 local MeshGeometry = require(Shared.Meshing.MeshGeometry)
 local QuadMesher = require(Shared.Meshing.QuadMesher)
+local Foliage = require(Shared.Seasons.Foliage)
 
 local MeshRegions = require(script.Parent.MeshRegions)
 local ViewSettings = require(script.Parent.ViewSettings)
@@ -111,6 +125,11 @@ type Node = any
 type RegionParts = {
 	parts: { MeshPart },
 	triangles: number,
+	-- The seasonal palette its mesh was built with (nil: none, the authored colours), the biome
+	-- classes of its members then, and whether it was marked stale since (see setSeason).
+	season: Season?,
+	classes: { number },
+	stale: boolean,
 	-- Previous mesh, destroyed once the new one hid its members.
 	retiring: { MeshPart },
 	retiringTriangles: number,
@@ -154,12 +173,34 @@ export type LookOf = MeshGeometry.LookOf
 export type PlainOf = MeshGeometry.PlainOf
 export type LookInfoOf = (look: number) -> LookInfo?
 
--- What a build uses, fixed when it starts (MeshRegions.Job.payload).
+--[[
+	The far meshes' seasonal palette (see the header; Rendering/ChunkRenderer.setFarSeason): `id`
+	its far step, `targets` what `drift` compares (Shared/Seasons/Foliage.Targets),
+	`colours[class][appearance]` = { r, g, b in its own look, r, g, b plain } (0..1) for every
+	seasonal appearance and biome class, `classOf(node)` a member's biome class, `drift(from, to,
+	classes)` the largest ΔE76 between two targets (nil: the authored colours) over those classes,
+	and `limit` the drift that makes a mesh stale.
+]]
+export type Season = {
+	id: number,
+	targets: any,
+	colours: { { [number]: { number } } },
+	classOf: (node: Node) -> number,
+	drift: (from: any, to: any, classes: { number }) -> number,
+	limit: number,
+}
+
+-- What a build uses, fixed when it starts (MeshRegions.Job.payload): with a palette, the members'
+-- biome classes by cell (`cellKey`) and as a list, and a member's width in studs.
 type Payload = {
 	quads: { QuadsEntry },
 	lookGen: number,
 	options: MeshGeometry.Options?,
 	lookInfo: LookInfoOf?,
+	season: Season?,
+	classes: { [number]: number }?,
+	classList: { number }?,
+	cellStuds: number,
 }
 
 export type Stats = {
@@ -183,6 +224,9 @@ export type Stats = {
 	looks: boolean,
 	lookParts: number,
 	tinyFrameMs: number,
+	-- The seasonal palette's far step (-1: none) and the meshes marked stale by it (total).
+	seasonId: number,
+	stale: number,
 }
 
 export type MeshOverlay = {
@@ -246,6 +290,10 @@ export type MeshOverlay = {
 	-- `plainLevel`'s answer changed without a setLooks call (`dropLooks`): the renderer restyles
 	-- what it drew in the old look (set by ChunkRenderer; nothing without it).
 	onLooks: () -> (),
+	-- The seasonal palette (setSeason), and the drift of each palette meshes were built with per
+	-- biome class (cleared with every new one).
+	season: Season?,
+	driftCache: { [any]: { [number]: number } },
 
 	mergedLevel: (self: MeshOverlay, level: number) -> boolean,
 	plainLevel: (self: MeshOverlay, level: number) -> boolean,
@@ -272,6 +320,7 @@ export type MeshOverlay = {
 	restyle: (self: MeshOverlay, farShadows: boolean) -> (),
 	gate: (self: MeshOverlay, now: number) -> string,
 	gather: (self: MeshOverlay, d: Vector3, parts: { BasePart }, cframes: { CFrame }) -> (),
+	setSeason: (self: MeshOverlay, season: Season?) -> (),
 }
 
 local MeshOverlay = {}
@@ -299,6 +348,84 @@ local function slice()
 		sliceStart = os.clock()
 	end
 end
+
+--[[ Seasons (see the header) ]]
+
+-- Every biome class (meshes built without a palette compare over all of them).
+local ALL_CLASSES: { number } = {}
+for i in Foliage.CLASSES do
+	table.insert(ALL_CLASSES, i)
+end
+local TEMPERATE = Foliage.TEMPERATE
+
+-- A member's cell (its nx, nz) as one number.
+local function cellKey(nx: number, nz: number): number
+	return (nx + 524288) * 1048576 + (nz + 524288)
+end
+
+--[[
+	Gives a mesh's seasonal quads their palette's colours for their member's biome class (builder
+	thread): in their own look the look's colour, in the remainder their plain colour (tinted for
+	the look they joined, as MeshGeometry's remainder rule).
+]]
+local function recolour(mesh: MeshGeometry.Mesh, payload: Payload)
+	local season = payload.season :: Season
+	local colors = mesh.colors :: { number }
+	local options = payload.options :: MeshGeometry.Options
+	local classes = payload.classes :: { [number]: number }
+	local cell = payload.cellStuds
+	local lookOf = options.lookOf
+	local positions, center, appearances = mesh.positions, mesh.center, mesh.appearances
+	local look = mesh.look
+	local average: { number }? = nil
+	if look ~= MeshGeometry.PLAIN and payload.lookInfo then
+		local info = payload.lookInfo(look)
+		average = if info then info.average else nil
+	end
+	local seasonal = season.colours[TEMPERATE] or season.colours[1]
+	local own: { [number]: number } = {}
+	for q = 1, mesh.quads do
+		local appearance = appearances[q]
+		if seasonal[appearance] == nil then
+			continue
+		end
+		-- (The quad's centre: its member's cell; a face on a cell's edge may belong to either.)
+		local o = (q - 1) * 12
+		local x = center[1] + (positions[o + 1] + positions[o + 4] + positions[o + 7] + positions[o + 10]) / 4
+		local z = center[3] + (positions[o + 3] + positions[o + 6] + positions[o + 9] + positions[o + 12]) / 4
+		local nx, nz = math.floor(x / cell), math.floor(z / cell)
+		local class = classes[cellKey(nx, nz)]
+			or classes[cellKey(nx - 1, nz)]
+			or classes[cellKey(nx, nz - 1)]
+			or classes[cellKey(nx - 1, nz - 1)]
+			or TEMPERATE
+		local byClass = season.colours[class] or seasonal
+		local c = byClass[appearance]
+		local id = own[appearance]
+		if id == nil then
+			id = (lookOf(appearance, 2))
+			own[appearance] = id
+		end
+		local r, g, b
+		if id == look then
+			r, g, b = c[1], c[2], c[3]
+		elseif average then
+			local tinted = MeshGeometry.tint({ c[4], c[5], c[6] }, average)
+			r, g, b = tinted[1], tinted[2], tinted[3]
+		else
+			r, g, b = c[4], c[5], c[6]
+		end
+		colors[q * 3 - 2], colors[q * 3 - 1], colors[q * 3] = r, g, b
+		if q % 2048 == 0 then
+			slice()
+		end
+	end
+end
+
+-- (For specs: the recolouring of a built mesh's quads, with a payload's palette and classes by
+-- `cellKey`.)
+MeshOverlay.recolour = recolour
+MeshOverlay.cellKey = cellKey
 
 local function batchAdd(em: EditableMesh, attr: Enum.MeshAttribute, data: { any }): { number }
 	local ids: { number } = table.create(#data)
@@ -481,6 +608,9 @@ local function buildRegion(
 		if self.abort then
 			destroyAll(parts)
 			return nil, 0, "aborted"
+		end
+		if payload.season and payload.classes and mesh.colors and payload.options then
+			recolour(mesh, payload)
 		end
 		local lookInfo = payload.lookInfo
 		local info = if mesh.look ~= MeshGeometry.PLAIN and lookInfo then lookInfo(mesh.look) else nil
@@ -709,6 +839,9 @@ local function partsOf(self: MeshOverlay, region: MeshRegions.Region): RegionPar
 		entry = {
 			parts = {},
 			triangles = 0,
+			season = nil,
+			classes = ALL_CLASSES,
+			stale = false,
 			retiring = {},
 			retiringTriangles = 0,
 			hidden = {},
@@ -763,6 +896,58 @@ local function demote(self: MeshOverlay, region: MeshRegions.Region)
 		self.instances[region] = nil
 	end
 	self.regions:demoted(region, os.clock())
+end
+
+-- (A key for meshes built without a palette in the drift cache.)
+local NO_SEASON = {}
+
+-- How far the palette now is from `from` (a mesh's) in biome class `class` (ΔE76, cached).
+local function driftOf(self: MeshOverlay, from: Season?, class: number): number
+	local key = from or NO_SEASON
+	local cache = self.driftCache[key]
+	if cache == nil then
+		cache = {}
+		self.driftCache[key] = cache
+	end
+	local drift = cache[class]
+	if drift == nil then
+		local to = self.season
+		local judge = to or from
+		drift = if judge
+			then judge.drift(if from then from.targets else nil, if to then to.targets else nil, { class })
+			else 0
+		cache[class] = drift
+	end
+	return drift :: number
+end
+
+--[[
+	A mesh whose palette drifted more than the limit from the one now (in any of its members'
+	biome classes) becomes a candidate again: MeshRegions ranks a region by the parts a build would
+	take out of the workspace, so one whose members are all meshed already (0.5) waits behind any
+	region with parts to merge, and it is rebuilt through the usual gate after RebuildSeconds; the
+	new mesh replaces the old one without a gap (`apply`'s retiring mesh).
+]]
+local function checkStale(self: MeshOverlay, region: MeshRegions.Region, entry: RegionParts)
+	if entry.stale or entry.season == self.season then
+		return
+	end
+	local judge = self.season or entry.season
+	if judge == nil then
+		return
+	end
+	local worst = 0
+	for _, class in entry.classes do
+		worst = math.max(worst, driftOf(self, entry.season, class))
+	end
+	if worst > judge.limit then
+		entry.stale = true
+		self.stats.stale += 1
+		-- (MeshRegions' own `touch`: a new version, changed now. A build running for it applies
+		-- with its version, still older, so the region stays a candidate.)
+		region.version += 1
+		region.changedAt = os.clock()
+	end
 end
 
 local function apply(self: MeshOverlay, finished: Done)
@@ -827,6 +1012,11 @@ local function apply(self: MeshOverlay, finished: Done)
 	entry.pendingHide = job.members
 	entry.hideFrame = self.frame + swapFrames()
 	entry.hideIndex = 1
+	-- Its palette (a newer one may have come while it was built).
+	entry.season = if payload then payload.season else nil
+	entry.classes = if payload and payload.classList then payload.classList else ALL_CLASSES
+	entry.stale = false
+	checkStale(self, region, entry)
 end
 
 --[[
@@ -989,6 +1179,8 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 			return true
 		end,
 		onLooks = function() end,
+		season = nil,
+		driftCache = {},
 		stats = {
 			status = "",
 			gate = "",
@@ -1006,6 +1198,8 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 			looks = false,
 			lookParts = 0,
 			tinyFrameMs = 0,
+			seasonId = -1,
+			stale = 0,
 		},
 	}
 	setmetatable(self, MeshOverlay)
@@ -1255,7 +1449,29 @@ function MeshOverlay.step(self: MeshOverlay, allowance: number?, used: number?):
 				lookGen = self.lookGen,
 				options = self.lookOptions,
 				lookInfo = self.lookInfo,
+				season = nil,
+				classes = nil,
+				classList = nil,
+				cellStuds = 0,
 			}
+			-- The palette now and the members' biome classes (see the header).
+			local season = self.season
+			if season then
+				local classes: { [number]: number } = {}
+				local list: { number } = {}
+				for _, node in job.members do
+					local class = season.classOf(node)
+					classes[cellKey(node.nx, node.nz)] = class
+					if not table.find(list, class) then
+						table.insert(list, class)
+					end
+				end
+				local step = ChunkLayout.steps(region.level)
+				payload.season = season
+				payload.classes = classes
+				payload.classList = list
+				payload.cellStuds = SIZE * step * BLOCK
+			end
 			job.payload = payload
 			self.pending = job
 		end
@@ -1373,7 +1589,24 @@ function MeshOverlay.getStats(self: MeshOverlay): Stats
 	stats.looks = self.looks
 	stats.triangles = self.liveTriangles
 	stats.baked = self.baked
+	stats.seasonId = if self.season then self.season.id else -1
 	return stats
+end
+
+--[[
+	A new seasonal palette (nil: none, the authored colours; see the header). Builds from now on
+	colour their seasonal quads with it; every mesh whose palette drifted more than the limit since
+	it was built is rebuilt (`checkStale`).
+]]
+function MeshOverlay.setSeason(self: MeshOverlay, season: Season?)
+	if season == self.season then
+		return
+	end
+	self.season = season
+	table.clear(self.driftCache)
+	for region, entry in self.instances do
+		checkStale(self, region, entry)
+	end
 end
 
 return MeshOverlay

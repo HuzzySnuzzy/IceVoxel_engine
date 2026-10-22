@@ -15,7 +15,10 @@
 	block whose entry has cube faces (the oak fence's planks) takes that look on its near boxes
 	(TextureLooks.shapeLook; glowing boxes stay Neon). Plants with a sprite are drawn as two crossed
 	planes (`SPRITE_BOX`, ChunkRenderer): see-through thin parts with the sprite as a Decal on both
-	sides (`images(part)`: ChunkRenderer tints them per soil).
+	sides (`images(part)`: ChunkRenderer tints them per soil). Seasonal appearances
+	(Shared/Seasons/Foliage) keep their images at hand too, found once when the part is cloned:
+	a near cube's in its near look's image order (a grass top), a Front plate's Decals (vines), so
+	ChunkRenderer recolours them in place without a search.
 
 	"Plain" templates (far levels merged into meshes, see MeshOverlay) look like those meshes:
 	SmoothPlastic in the colour the block averages to (TextureLooks.plainColour), no textures,
@@ -75,6 +78,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
 local GreedyMesher = require(Shared.Meshing.GreedyMesher)
+local Foliage = require(Shared.Seasons.Foliage)
 
 local BlockDecor = require(script.Parent.BlockDecor)
 local TextureLooks = require(script.Parent.TextureLooks)
@@ -134,7 +138,8 @@ export type PartPool = {
 	litKeys: { [number]: boolean },
 	castRule: { [number]: number },
 	sparseKeys: { [number]: boolean },
-	-- Template keys whose parts carry Decals (sprite planes), and each such part's Decals.
+	-- Template keys whose parts carry images to tint (sprite planes, seasonal appearances' near
+	-- cubes and Front plates), and each such part's images (`images`).
 	imageKeys: { [number]: boolean },
 	imagesOf: { [BasePart]: { Decal } },
 	-- Last time (os.clock) a part of each key was handed out.
@@ -452,6 +457,35 @@ end
 local lightBoxes: { [number]: number } = {}
 
 --[[
+	The images of a part just cloned (`images`): a near cube's Textures and Decals in the order of
+	its near look's images (TextureLooks.nearLook(appearance).images: they are matched by face, so
+	TextureLooks.seasonalTint's colours line up), else its Decals in child order (a sprite plane's
+	two sides, a Front plate's).
+]]
+local function imagesIn(part: BasePart, appearance: number, nearCube: boolean): { Decal }
+	local images: { Decal } = {}
+	local look = if nearCube then TextureLooks.nearLook(appearance) else nil
+	if look then
+		local children = part:GetChildren()
+		for i, image in look.images do
+			for _, child in children do
+				if (child:IsA("Texture") or child:IsA("Decal")) and (child :: Decal).Face == image.face then
+					images[i] = child :: Decal
+					break
+				end
+			end
+		end
+		return images
+	end
+	for _, child in part:GetChildren() do
+		if child:IsA("Decal") then
+			table.insert(images, child)
+		end
+	end
+	return images
+end
+
+--[[
 	A part of `appearance` (box `box` of its shape; 0 or nil: the cube; SPRITE_BOX: a sprite plane)
 	for a near / far / plain node. `dark`: a sparse light's cell that does not carry the light
 	(GreedyMesher), drawn without it (only the light's own box differs). The part is out of the
@@ -505,7 +539,13 @@ function PartPool.acquire(
 			self.litKeys[key] = true
 			self.sparseKeys[key] = isSparse(appearance)
 		end
-		if index == SPRITE_BOX and created:FindFirstChildOfClass("Decal") then
+		-- (Sprite planes' Decals; seasonal cubes' images and a vine plate's Decals, which
+		-- ChunkRenderer recolours.)
+		local sprite = index == SPRITE_BOX and created:FindFirstChildOfClass("Decal") ~= nil
+		local seasonal = not plain
+			and Foliage.isSeasonal(appearance)
+			and (created:FindFirstChildOfClass("Texture") ~= nil or created:FindFirstChildOfClass("Decal") ~= nil)
+		if sprite or seasonal then
 			self.imageKeys[key] = true
 		end
 		template = created
@@ -521,13 +561,7 @@ function PartPool.acquire(
 		end
 	end
 	if self.imageKeys[key] then
-		local decals: { Decal } = {}
-		for _, child in part:GetChildren() do
-			if child:IsA("Decal") then
-				table.insert(decals, child)
-			end
-		end
-		self.imagesOf[part] = decals
+		self.imagesOf[part] = imagesIn(part, appearance, index == 0 and not far and plain ~= true)
 	end
 	return part
 end
@@ -543,7 +577,11 @@ function PartPool.light(self: PartPool, part: BasePart): PointLight?
 	return self.lightOf[part]
 end
 
--- The Decals of a sprite plane from `acquire` (to tint them), if it carries any.
+--[[
+	The images of a part from `acquire` (to tint them), if it carries any: a sprite plane's Decals,
+	and a seasonal appearance's (Shared/Seasons/Foliage) near cube Textures in its near look's
+	image order or Front plate Decals. (A Texture is a Decal's subclass: both have Color3.)
+]]
 function PartPool.images(self: PartPool, part: BasePart): { Decal }?
 	return self.imagesOf[part]
 end

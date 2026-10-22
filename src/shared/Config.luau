@@ -723,48 +723,53 @@ local Config = {
 		--[[
 			Foliage colours by season (Shared/Seasons/Foliage, client Rendering/SeasonTint):
 			keyframes over the year's progress p (Autumn 0..0.25, Winter, Spring, Summer
-			0.75..1), each { at, colour, keep }: the colour drawn is lerp(colour, authored,
-			keep) in linear light (keep 1: the authored colour). Classes: grass, deciduous (oak,
-			acacia), birch, evergreen (spruce), tropical (jungle). Dust: how far snow cover
-			whitens a class (towards SnowColour). The sweep writes at most SweepWrites parts and
-			SweepMs a frame; far meshes are rebuilt when their palette moved more than FarDeltaE
-			(a step every FarStepDays).
+			0.75..1), each { at, colour, keep }: a keyframe is lerp(colour, authored, keep) in
+			linear light (keep 1: the authored colour), and the colour moves evenly in CIELAB
+			between keyframes. Classes: grass (grass blocks and tinted plants), deciduous (oak,
+			acacia, vines), birch, evergreen (spruce), tropical (jungle). Overrides: a biome
+			class's own keyframes for a class (dry biomes' grass yellows in summer), or the name
+			of another class's (tropical biomes keep every colour). Dust: how far full snow cover
+			moves a kind towards SnowColour (grass and plants, leaves and vines, spruce, jungle).
+			Consecutive steps (BlendDays / 24 days) stay within ΔE76 2.5 (tests/spec/Foliage: keep
+			the snow ramps and the spring green-up apart when tuning). The sweep writes at most
+			SweepWrites properties and SweepMs a frame; far meshes are rebuilt when their palette
+			moved more than FarDeltaE (ΔE76; a far palette every FarStepDays).
 		]]
 		Foliage = {
 			Enabled = true,
 			SnowColour = { 236, 240, 246 },
-			Dust = { grass = 0.85, leaves = 0.5, evergreen = 0.45, tropical = 0 },
+			Dust = { grass = 0.75, leaves = 0.5, evergreen = 0.45, tropical = 0 },
 			Keyframes = {
 				deciduous = {
 					{ at = 0.00, colour = { 150, 140, 50 }, keep = 0.4 },
-					{ at = 0.10, colour = { 210, 110, 40 }, keep = 0 },
-					{ at = 0.20, colour = { 170, 90, 50 }, keep = 0 },
-					{ at = 0.27, colour = { 110, 90, 70 }, keep = 0 },
-					{ at = 0.48, colour = { 110, 90, 70 }, keep = 0 },
-					{ at = 0.55, colour = { 130, 200, 90 }, keep = 0.3 },
-					{ at = 0.68, colour = { 0, 0, 0 }, keep = 1 },
-					{ at = 0.85, colour = { 0, 0, 0 }, keep = 1 },
-					{ at = 0.95, colour = { 110, 130, 50 }, keep = 0.6 },
+					{ at = 0.08, colour = { 210, 110, 40 }, keep = 0 },
+					{ at = 0.15, colour = { 170, 90, 50 }, keep = 0 },
+					{ at = 0.23, colour = { 110, 90, 70 }, keep = 0 },
+					{ at = 0.62, colour = { 110, 90, 70 }, keep = 0 },
+					{ at = 0.69, colour = { 130, 200, 90 }, keep = 0.3 },
+					{ at = 0.77, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.86, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.96, colour = { 110, 130, 50 }, keep = 0.6 },
 				},
 				birch = {
 					{ at = 0.00, colour = { 190, 170, 60 }, keep = 0.4 },
-					{ at = 0.10, colour = { 230, 190, 60 }, keep = 0 },
-					{ at = 0.20, colour = { 190, 150, 60 }, keep = 0 },
-					{ at = 0.27, colour = { 110, 90, 70 }, keep = 0 },
-					{ at = 0.48, colour = { 110, 90, 70 }, keep = 0 },
-					{ at = 0.55, colour = { 130, 200, 90 }, keep = 0.3 },
-					{ at = 0.68, colour = { 0, 0, 0 }, keep = 1 },
-					{ at = 0.85, colour = { 0, 0, 0 }, keep = 1 },
-					{ at = 0.95, colour = { 110, 130, 50 }, keep = 0.6 },
+					{ at = 0.08, colour = { 230, 190, 60 }, keep = 0 },
+					{ at = 0.15, colour = { 190, 150, 60 }, keep = 0 },
+					{ at = 0.23, colour = { 110, 90, 70 }, keep = 0 },
+					{ at = 0.62, colour = { 110, 90, 70 }, keep = 0 },
+					{ at = 0.69, colour = { 130, 200, 90 }, keep = 0.3 },
+					{ at = 0.77, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.86, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.96, colour = { 110, 130, 50 }, keep = 0.6 },
 				},
 				grass = {
 					{ at = 0.05, colour = { 176, 150, 72 }, keep = 0 },
-					{ at = 0.30, colour = { 128, 118, 92 }, keep = 0 },
-					{ at = 0.45, colour = { 128, 118, 92 }, keep = 0 },
-					{ at = 0.58, colour = { 120, 190, 80 }, keep = 0 },
-					{ at = 0.70, colour = { 0, 0, 0 }, keep = 1 },
-					{ at = 0.85, colour = { 0, 0, 0 }, keep = 1 },
-					{ at = 0.95, colour = { 150, 165, 70 }, keep = 0.4 },
+					{ at = 0.20, colour = { 128, 118, 92 }, keep = 0 },
+					{ at = 0.62, colour = { 128, 118, 92 }, keep = 0 },
+					{ at = 0.70, colour = { 120, 190, 80 }, keep = 0 },
+					{ at = 0.80, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.88, colour = { 0, 0, 0 }, keep = 1 },
+					{ at = 0.97, colour = { 150, 165, 70 }, keep = 0.4 },
 				},
 				evergreen = {
 					{ at = 0.10, colour = { 50, 80, 70 }, keep = 0.8 },
@@ -775,6 +780,19 @@ local Config = {
 				tropical = {
 					{ at = 0.00, colour = { 0, 0, 0 }, keep = 1 },
 				},
+			},
+			Overrides = {
+				dry = {
+					grass = {
+						{ at = 0.05, colour = { 176, 150, 72 }, keep = 0 },
+						{ at = 0.30, colour = { 140, 126, 88 }, keep = 0 },
+						{ at = 0.45, colour = { 140, 126, 88 }, keep = 0 },
+						{ at = 0.60, colour = { 0, 0, 0 }, keep = 1 },
+						{ at = 0.72, colour = { 0, 0, 0 }, keep = 1 },
+						{ at = 0.90, colour = { 200, 172, 84 }, keep = 0.2 },
+					},
+				},
+				tropical = { grass = "tropical", deciduous = "tropical", birch = "tropical", evergreen = "tropical" },
 			},
 			SweepWrites = 1500,
 			SweepMs = 0.75,

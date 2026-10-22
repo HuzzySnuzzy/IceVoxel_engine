@@ -359,4 +359,41 @@ return function(t, shared, require, _server, client)
 		t.ok(not r:finish(job, true, 2))
 		t.eq(r:stats().regions, 0)
 	end)
+
+	-- (Rendering/MeshOverlay's seasons: a mesh whose palette drifted gets a new version, as MeshRegions'
+	-- own changes do, without demoting it.)
+	t.test("regions: a stale meshed region is rebuilt in place, after the wait, ranked below parts to merge", function()
+		local r = regions(0)
+		local a, b = node(2, 0, 0), node(2, 1, 0)
+		r:add(a, 0)
+		r:add(b, 0)
+		local region = r:candidate(0, always) :: any
+		t.ok(r:finish(r:begin(region), true, 0))
+		t.eq(r:candidate(20, always), nil, "meshed and current")
+		-- Stale at 20: a new version, the mesh still shows its members.
+		region.version += 1
+		region.changedAt = 20
+		t.ok(region.meshed ~= nil, "not demoted")
+		t.eq(r:candidate(25, always), nil, "waits RebuildSeconds")
+		t.eq(r:candidate(28.5, always), region, "then a candidate again")
+		-- A region with parts to merge goes first when they waited as long (half the rank).
+		local c = node(2, 8, 0)
+		r:add(c, 20)
+		t.eq(r:candidate(30, always), r.regionOf[c], "parts to merge first")
+		-- Rebuilt: the same members, meshed at the new version, nothing demoted meanwhile.
+		local job = r:begin(region)
+		t.eq(#job.members, 2)
+		t.ok(r:finish(job, true, 31), "applied")
+		t.eq(region.meshVersion, region.version)
+		t.ok(region.meshed[a] ~= nil and region.meshed[b] ~= nil)
+		-- Stale while it builds: the build applies, and it is a candidate again later.
+		region.version += 1
+		region.changedAt = 40
+		job = r:begin(r:candidate(48.5, always) :: any)
+		region.version += 1
+		region.changedAt = 49
+		t.ok(r:finish(job, true, 50), "the running build still applies")
+		t.ok(region.meshVersion ~= region.version, "and the newer palette waits its turn")
+		t.eq(r:candidate(57.5, always), region)
+	end)
 end
