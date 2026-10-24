@@ -931,13 +931,14 @@ return function(t, shared, require, _server, client)
 		-- Appended at the end of the list (ids of the sounds before them unchanged), the distant
 		-- storms' two after them (tests/spec/DistantStorms), then Terraria's six and the wind, then
 		-- the zombie apocalypse's ten, then the fourth data sheet's eating and drinking loops, then
-		-- the weapons' 22 (was `7 + 10 + 2` after the four), then the seasons' 11.
+		-- the weapons' 22 (was `7 + 10 + 2` after the four), then the seasons' 11, then the turrets'
+		-- 3.
 		local list = SoundList.EVENTS
 		local at = {}
 		for index, entry in list do
 			at[entry.name] = index
 		end
-		local terraria = 7 + 10 + 2 + 22 + 11
+		local terraria = 7 + 10 + 2 + 22 + 11 + 3
 		t.eq(at["weather.rain"], #list - 5 - terraria, "the four come before the distant storms' and Terraria's")
 		t.eq(at["entity.lightning_bolt.impact"], #list - 2 - terraria)
 		t.eq(at["entity.lightning_bolt.thunder.far"], #list - 1 - terraria)

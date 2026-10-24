@@ -10,10 +10,11 @@
 	  * Keep a line short: the tooltip wraps it to a few rows. Numbers belong to the stat lines
 	    (Items/Tooltip works them out from the item's data), so a line here says what no number
 	    says: where the item comes from, what it is made into, what using it does.
-	  * A new item gets its line here, in the same place as in BlockList / ItemList.
+	  * A new item gets its line here, in the same place as in BlockList / ItemList (a run of
+	    blocks named alike may get theirs from a loop just before the freeze: the twelve turrets).
 ]]
 
-return table.freeze({
+local lore: { [string]: string } = {
 	-- Blocks (BlockList order) --------------------------------------------------------------------
 	Stone = "Common rock. Breaks into Cobblestone.",
 	Cobblestone = "Rough stone for tools, furnaces and walls. Smelts back into Stone.",
@@ -190,6 +191,9 @@ return table.freeze({
 	InsulatedPlanks = "Wool-lined boards. A room of them keeps its warmth far longer.",
 	InsulatedGlass = "Double panes in iron: a window that keeps the cold out.",
 	InsulatedDoor = "A padded door. Closed, it keeps a room's warmth in.",
+	-- (The twelve turrets: the loop at the end.)
+	MetalMiner = "Copies the ore block under it forever, for power. Pushes it out.",
+	AmmoPress = "Presses iron and gunpowder into 9mm, 5.56 or .308 rounds.",
 
 	-- Armor -------------------------------------------------------------------------------------
 	LeatherHelmet = "Warm hide. Leather keeps the frost off.",
@@ -422,4 +426,23 @@ return table.freeze({
 	HuntingKnife = "A sturdy hunting blade. Kills an unaware zombie from behind.",
 	PipeWrench = "Heavy steel. Hold the attack button for a crushing blow.",
 	Sledgehammer = "Slow and brutal. Breaks stone in a pinch.",
-} :: { [string]: string })
+
+	-- Turret parts ------------------------------------------------------------------------------
+	SmgBarrel = "A turret part: an SMG turret's 9mm barrel.",
+	RifleBarrel = "A turret part: a rifle turret's 5.56 barrel.",
+	SniperBarrel = "A turret part: a sniper turret's .308 barrel.",
+	BeltFeeder = "A turret part: takes the rounds a transporter brings into the gun.",
+	Receiver = "A turret part: the action that chambers and fires each round.",
+	ServoMotor = "A turret part: turns the gun towards its target.",
+	TargetingModule = "A turret part: finds targets and tells the gun when to fire.",
+	LaserSight = "Mount it on a turret: tighter shots, quicker to find a target.",
+}
+
+-- The twelve turrets (BlockList "<Tier><Type>Turret"): one line for each type's calibre.
+for type, calibre in { Smg = "9mm", Rifle = "5.56", Sniper = ".308" } do
+	for _, tier in { "Basic", "Advanced", "Elite", "Ultimate" } do
+		lore[`{tier}{type}Turret`] = `Shoots zombies with {calibre} rounds a transporter feeds it. Needs power.`
+	end
+end
+
+return table.freeze(lore)

@@ -18,11 +18,16 @@
 	Server -> client
 	  Shots   u8 count (1..MAX_SHOTS), count x shot: f64 shooter (the UserId; whole), u16 item
 	          (the firearm), u16 shot (the shooter's counter), u8 flags (bit 0 suppressed, 1 the
-	          gun jammed after this shot, 2 refused: the shooter's alone, no pellets), f32 ox, oy,
+	          gun jammed after this shot, 2 refused: the shooter's alone, no pellets, 3 plain:
+	          tracers without glow, a suppressed turret's), f32 ox, oy,
 	          oz (where it was fired from), u8 n (0..MAX_PELLETS), n x (f32 x, y, z: where the
 	          pellet's flight ended, u8 hit: Hit's kinds). 26 + 13 n bytes a shot. Non-finite
 	          numbers, positions beyond Protocol.MAX_COORDINATE + 64 (y beyond 4096), unknown
 	          flags or hits, a refused shot with pellets, a wrong length are malformed.
+	          A turret's shot (Shared/Turrets, server Turrets/TurretWorld) is a Shots record with
+	          shooter 0 (no player: clients draw it from its origin, the turret's muzzle), its
+	          stand-in gun as the item and the turret's own counter; `plain` came with the turrets
+	          (an older client refuses bit 3, so both ends ship together).
 ]]
 
 local Protocol = require(script.Parent.Protocol)
@@ -56,6 +61,8 @@ export type Shot = {
 	suppressed: boolean,
 	jammed: boolean,
 	refused: boolean,
+	-- Tracers without glow (a turret's suppressed shot: its device's `glow` false); nil: false.
+	plain: boolean?,
 	ox: number,
 	oy: number,
 	oz: number,
@@ -82,7 +89,7 @@ WeaponSync.Op = table.freeze({ Raise = 1, Lower = 2, Guard = 3, Unguard = 4 })
 -- Fire flags.
 WeaponSync.FireFlag = table.freeze({ Sights = 1, Moving = 2, Crouching = 4, Breath = 8 })
 -- Shots flags.
-WeaponSync.ShotFlag = table.freeze({ Suppressed = 1, Jammed = 2, Refused = 4 })
+WeaponSync.ShotFlag = table.freeze({ Suppressed = 1, Jammed = 2, Refused = 4, Plain = 8 })
 
 local LIMIT = Protocol.MAX_COORDINATE + 64
 local Y_LIMIT = 4096
@@ -198,7 +205,10 @@ function WeaponSync.encodeShots(shots: { Shot }): buffer
 		buffer.writeu8(
 			b,
 			o + 12,
-			(if shot.suppressed then 1 else 0) + (if shot.jammed then 2 else 0) + (if shot.refused then 4 else 0)
+			(if shot.suppressed then 1 else 0)
+				+ (if shot.jammed then 2 else 0)
+				+ (if shot.refused then 4 else 0)
+				+ (if shot.plain then 8 else 0)
 		)
 		buffer.writef32(b, o + 13, shot.ox)
 		buffer.writef32(b, o + 17, shot.oy)
@@ -241,7 +251,7 @@ function WeaponSync.decodeShots(b: buffer): { Shot }?
 		if
 			not finite(shooter)
 			or shooter ~= math.floor(shooter)
-			or flags > 7
+			or flags > 15
 			or not validPlace(ox, oy, oz)
 			or n > WeaponSync.MAX_PELLETS
 			or (refused and n > 0)
@@ -255,6 +265,7 @@ function WeaponSync.decodeShots(b: buffer): { Shot }?
 			suppressed = bit32.btest(flags, 1),
 			jammed = bit32.btest(flags, 2),
 			refused = refused,
+			plain = bit32.btest(flags, 8),
 			ox = ox,
 			oy = oy,
 			oz = oz,

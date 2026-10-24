@@ -1657,4 +1657,51 @@ do
 	table.insert(SoundList.EVENTS, event)
 end
 
+--[[
+	Turrets and the Metal Miner (Shared/Turrets, Shared/Machines kinds "miner" and "press"), after
+	the seasons so no other event's number changed. Loops on the shipped files, each replaced by a
+	Sound of its name in SoundService.IceVoxelSounds (or the override folder):
+	  block.turret.servo         a turret turning its gun: the falling wind pitched up, faint (at
+	                             most Config.Turrets.Client.ServoLoops of them, the nearest)
+	  block.metal_miner.drill    a working Metal Miner: the footsteps pitched down, a rapid clatter
+	  block.ammo_press.stamp     a working Ammo Press: the volume tick pitched down, a thud
+	The client plays them (the servo at a turning turret: Rendering/TurretView; the drill and the
+	stamp while the machine works, from its record: Rendering/TransmitterModel.machineLoop). A
+	turret's shots are the stand-in gun's own fire sounds (Rendering/ShotView), its dry click
+	item.firearm.dry.
+]]
+for _, event in
+	{
+		{
+			name = "block.turret.servo",
+			id = FALLING,
+			volume = 0.15,
+			pitch = 1.8,
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "block.metal_miner.drill",
+			id = STEPS,
+			volume = 0.3,
+			pitch = 0.6,
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "block.ammo_press.stamp",
+			id = TICK,
+			volume = 0.4,
+			pitch = 0.5,
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+	} :: { EventSpec }
+do
+	table.insert(SoundList.EVENTS, event)
+end
+
 return SoundList

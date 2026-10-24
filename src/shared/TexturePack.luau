@@ -846,6 +846,16 @@ local Icons: { [string]: string } = {
 	HuntingKnife = "",
 	PipeWrench = "",
 	Sledgehammer = "",
+	-- Turret parts and the Laser Sight (Shared/Turrets; the turrets, the Metal Miner and the Ammo
+	-- Press are machines, drawn with BlockDecor faces: never textured).
+	SmgBarrel = "",
+	RifleBarrel = "",
+	SniperBarrel = "",
+	BeltFeeder = "",
+	Receiver = "",
+	ServoMotor = "",
+	TargetingModule = "",
+	LaserSight = "",
 }
 
 export type Pack = {

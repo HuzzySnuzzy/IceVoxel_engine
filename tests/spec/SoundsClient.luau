@@ -463,7 +463,15 @@ return function(t, shared, require, _server, client)
 		-- names, played by Ui/SeasonHud through Ui/SurvivorHud's toast queue; the machines' loops:
 		-- Audio/Ambience by Rendering/TransmitterModel.machineLoop's names; the thermostat's click:
 		-- Ui/MenuLayout.BUTTON_SOUND).
-		local pending: { [string]: boolean } = {}
+		-- The turrets' and the Metal Miner's loops wait for their players (Shared/Turrets); each
+		-- comes off with the code that plays it (its own line only: the comments stay between them).
+		local pending: { [string]: boolean } = {
+			-- The servo: client Rendering/TurretView (turret builder B).
+			["block.turret.servo"] = true,
+			-- The drill and the stamp: Rendering/TransmitterModel.machineLoop's names (miner builder C).
+			["block.metal_miner.drill"] = true,
+			["block.ammo_press.stamp"] = true,
+		}
 		-- A firearm's shot is played by its class through its FirearmSpec `sound` (Rendering/
 		-- ShotRules.fireSound, called by Interaction/Firearms for the player's own shot and by
 		-- Rendering/ShotView for others'), never as a literal; every other weapon sound is one

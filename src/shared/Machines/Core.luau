@@ -37,9 +37,10 @@
 	            its own into the transporters and chests around it (Mekanism's ejector: server
 	            Transmitters/Transport and Eject)
 	  fields    data names after the header (letters, digits, "_": they double as item data keys)
-	  keep      fields kept in the item when the machine is broken (energy and tanks always are)
+	  keep      fields kept in the item when the machine is broken (energy and tanks always are),
+	            while they differ from what a fresh machine's start at (`defaults`)
 	  defaults  { [field]: number }: what a fresh machine's fields start at (default 0; a
-	            thermostat's "on" 1)
+	            thermostat's "on" 1, a turret's Lure on)
 	  tanks     { TankSpec }: fluid tanks (Mekanism's machine fluid tanks), each with a `name`, a
 	            `capacity` (mB), the `fluids` it takes (Shared/Fluids ids) and a `role`: "input"
 	            (pipes and full buckets fill it; the kind's tick drains it) or "output" (the tick
@@ -55,8 +56,10 @@
 	            a cell sees the sky) is lent for the call only.
 	  status    status(view) -> line: WAILA's and the panel's "Producing 200 J/t" (default from
 	            RATE: "Producing x/t", "Using x/t"; storage "Charging" / "Discharging")
-	  lines     lines(view) -> { line }: more lines of text for its panel, under the status line
-	            (`panel.lines` says where; at most MAX_LINES): a battery's input and output
+	  lines     lines(view, data?) -> { line }: more lines of text for its panel, under the status
+	            line (`panel.lines` says where; at most MAX_LINES): a battery's input and output.
+	            The panel passes its window's data (a turret's feed rate, which no record
+	            carries); without a window (WAILA) `data` is nil
 	  state     the name of one of its fields holding a state code, a whole number 0..MAX_STATE
 	            the kind sets in its tick to say why it is not working (Mekanism's recipe errors:
 	            the Electric Furnace's "No power"). It travels in Machines records with the header,
@@ -73,6 +76,11 @@
 	            blocks' BlockList `energy` is `{ capacity = 0 }`, `hasEnergy` is false for them,
 	            so cables never connect and the energy networks never see them; the panel draws
 	            no energy bar and WAILA no energy line (Ui/MenuLayout, Ui/WailaInfo)
+	  demand    transporters wait for it (server Transmitters/Transport's demand rule): a line
+	            whose destinations are full only because such a machine is (with rounds held or
+	            on their way) waits IDLE_DELAY ticks instead of backing off, so the next item goes
+	            as soon as there is room (a turret's tiny ammo buffer: Shared/Turrets). Every
+	            other destination is as before (`demands`)
 	  buttons   { ButtonSpec }: buttons on its panel (Minecraft's container buttons,
 	            ServerboundContainerButtonClickPacket): { id (0..MAX_BUTTON), x, y, w, h, label }
 	            in GUI pixels, drawn by Ui/MenuLayout. A click is Inventory Action
@@ -130,6 +138,10 @@
 	                    MAX_BUTTONS, MAX_BUTTON (panel buttons and their clicks), TickContext
 	                    `climate` (the room next to a machine: server Seasons/RoomWorld) and `near`
 	                    (a player within a radius), KindSpec `defaults`
+	  turrets           demands (KindSpec `demand`: server Transmitters/Transport), TickContext
+	                    `turret` (the server's turret simulation, Shared/Turrets/Types' Service:
+	                    server Turrets/TurretWorld through Machines.setTurretService; nil before
+	                    it, in a test's context or with the turrets off), `lines`' window data
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -138,6 +150,8 @@ local Items = require(script.Parent.Parent.Items)
 local Types = require(script.Parent.Parent.Inventory.Types)
 -- (Its Sample type: what TickContext.climate gives. Rooms requires only Config.)
 local Rooms = require(script.Parent.Parent.Seasons.Rooms)
+-- (Types only, requiring nothing: what TickContext.turret is.)
+local TurretTypes = require(script.Parent.Parent.Turrets.Types)
 
 type Container = Types.Container
 export type EnergySpec = Blocks.EnergySpec
@@ -281,6 +295,10 @@ export type TickContext = {
 	-- the positions of its last 1 Hz step, with the rooms off Players/PlayerPositions' now: a space
 	-- heater's standby)? nil (a test's context): a player counts as near.
 	near: ((x: number, y: number, z: number, radius: number) -> boolean)?,
+	-- The server's turret simulation (Shared/Turrets/Types' Service: server Turrets/TurretWorld,
+	-- given once a step from what Machines.setTurretService registered). nil before that, in a
+	-- test's context and with Config.Turrets.Enabled false: a turret then shows "Disabled".
+	turret: TurretTypes.Service?,
 }
 
 -- The room next to a machine (Shared/Seasons/Rooms.Sample: TickContext.climate's).
@@ -297,7 +315,7 @@ export type KindSpec = {
 	panel: PanelSpec?,
 	tick: ((container: Container, ctx: TickContext) -> ())?,
 	status: ((view: View) -> string?)?,
-	lines: ((view: View) -> { string })?,
+	lines: ((view: View, data: { number }?) -> { string })?,
 	rates: ((container: Container, energy: EnergySpec) -> (number, number))?,
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean?,
@@ -308,6 +326,7 @@ export type KindSpec = {
 	buttons: { ButtonSpec }?,
 	onButton: ((container: Container, button: number) -> ())?,
 	defaults: { [string]: number }?,
+	demand: boolean?,
 }
 
 -- A defined kind (read only).
@@ -323,7 +342,7 @@ export type Kind = {
 	size: number,
 	tick: ((container: Container, ctx: TickContext) -> ())?,
 	status: ((view: View) -> string?)?,
-	lines: ((view: View) -> { string })?,
+	lines: ((view: View, data: { number }?) -> { string })?,
 	rates: ((container: Container, energy: EnergySpec) -> (number, number))?,
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean,
@@ -347,6 +366,8 @@ export type Kind = {
 	onButton: ((container: Container, button: number) -> ())?,
 	-- A fresh machine's field values by data index (KindSpec `defaults`).
 	defaults: { [number]: number },
+	-- Transporters wait for it (KindSpec `demand`).
+	demand: boolean,
 }
 
 export type Role = "producer" | "consumer" | "storage"
@@ -729,6 +750,7 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		buttons = table.freeze(table.clone(buttons)),
 		onButton = spec.onButton,
 		defaults = table.freeze(defaults),
+		demand = spec.demand == true,
 	}
 	for _, tank in tanks do
 		describeTank(tank.name)
@@ -805,6 +827,15 @@ end
 function Machines.isFuelOnly(block: number): boolean
 	local binding = bindings[block]
 	return binding ~= nil and binding.kind.fuelOnly
+end
+
+--[[
+	Do transporters wait for the machine `block` (KindSpec `demand`: server Transmitters/Transport's
+	demand rule, a turret's ammo)? false for every other block.
+]]
+function Machines.demands(block: number): boolean
+	local binding = bindings[block]
+	return binding ~= nil and binding.kind.demand
 end
 
 --[[
@@ -1626,16 +1657,16 @@ end
 --[[
 	The panel's lines of a machine under its status line (its kind's `lines`: a battery's input and
 	output): at most MAX_LINES non-empty strings, none for kinds without them (or whose `lines`
-	fails).
+	fails). `data` is the panel's window data (read only; nil without a window: WAILA).
 ]]
-function Machines.lines(block: number, view: View): { string }
+function Machines.lines(block: number, view: View, data: { number }?): { string }
 	local binding = bindings[block]
 	local lines = if binding then binding.kind.lines else nil
 	local shown: { string } = {}
 	if lines == nil then
 		return shown
 	end
-	local ok, result = pcall(lines, view)
+	local ok, result = pcall(lines, view, data)
 	if not ok or type(result) ~= "table" then
 		return shown
 	end
@@ -1724,9 +1755,10 @@ end
 --[[
 	The item data a broken machine keeps: `energy` (J, while it holds any), what its tanks hold
 	(mB under each tank's name, and "<name>Fluid" for a tank taking several fluids; Mekanism keeps
-	a machine's fluids in its item) and its kind's `keep` fields that are not 0. nil when there is
-	nothing (its item stacks with new ones), for the creative cube and for containers that are no
-	machine's.
+	a machine's fluids in its item) and its kind's `keep` fields that differ from a fresh
+	machine's (its `defaults`, else 0: a turret's Lure switched off is kept as 0). nil when there
+	is nothing (its item stacks with new ones), for the creative cube and for containers that are
+	no machine's.
 ]]
 function Machines.save(container: Container): Items.Data?
 	local binding = bindings[container.block]
@@ -1749,8 +1781,9 @@ function Machines.save(container: Container): Items.Data?
 		end
 	end
 	for _, field in binding.kind.keep do
-		local value = number(data[binding.kind.index[field]])
-		if value ~= 0 and value > -math.huge and value < math.huge then
+		local index = binding.kind.index[field]
+		local value = number(data[index])
+		if value ~= (binding.kind.defaults[index] or 0) and value > -math.huge and value < math.huge then
 			kept[field] = value
 		end
 	end

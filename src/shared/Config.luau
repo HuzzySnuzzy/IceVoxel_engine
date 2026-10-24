@@ -2413,6 +2413,163 @@ local Config = {
 		},
 	},
 
+	-- Turrets and the Metal Miner -----------------------------------------------------------------------
+
+	--[[
+		Turrets (Shared/Turrets, Machines/Kinds/Turret; server Turrets/, client Rendering/TurretView):
+		SMG, Rifle and Sniper turrets in four tiers matching the transmitters'. A turret holds a
+		tiny buffer of its calibre's rounds that a Logistical Transporter feeds and Mekanism energy;
+		it fires at most the rate of the best transporter tier feeding it (the feeder rule), and its
+		gunfire and an idle armed turret's lure at night draw zombies. Numbers per tier are lists
+		(Basic, Advanced, Elite, Ultimate); energy is in J, ranges in blocks, angles in degrees.
+	]]
+	Turrets = {
+		-- false: the game as before: the kinds tick inert ("Disabled", no energy taken), no recipes
+		-- for turrets, parts or the Laser Sight, no service, no messages, no demand rule (blocks
+		-- and items stay registered: ids are append-only).
+		Enabled = true,
+		-- Per type: its round and stand-in gun (sound, noise; Weapons/WeaponList), damage times the
+		-- round's, J a shot, the most degrees off its aim it fires at, the barrel's length (blocks
+		-- from the pivot to the muzzle), and per tier its range, rate (rounds a minute), the rounds
+		-- its ammo slot holds, its turn rate (degrees a second) and its cone (degrees).
+		Types = {
+			smg = {
+				ammo = "Rounds9mm",
+				firearm = "Smg",
+				damageScale = 0.85,
+				shot = 30,
+				settle = 4,
+				barrel = 0.7,
+				range = { 16, 20, 24, 32 },
+				rpm = { 90, 150, 240, 360 },
+				buffer = { 2, 3, 4, 6 },
+				turn = { 180, 240, 300, 360 },
+				spread = { 1.6, 1.4, 1.2, 1.0 },
+			},
+			rifle = {
+				ammo = "Rounds556",
+				firearm = "AssaultRifle",
+				damageScale = 1.0,
+				shot = 80,
+				settle = 2,
+				barrel = 0.85,
+				range = { 24, 32, 40, 48 },
+				rpm = { 45, 75, 120, 180 },
+				buffer = { 1, 2, 3, 4 },
+				turn = { 120, 150, 180, 240 },
+				spread = { 0.6, 0.5, 0.4, 0.3 },
+			},
+			sniper = {
+				ammo = "Rounds308",
+				firearm = "HuntingRifle",
+				damageScale = 1.0,
+				shot = 300,
+				settle = 1,
+				barrel = 1.0,
+				range = { 40, 48, 56, 64 },
+				rpm = { 15, 20, 30, 40 },
+				buffer = { 1, 1, 2, 2 },
+				turn = { 60, 75, 90, 120 },
+				spread = { 0.25, 0.2, 0.15, 0.1 },
+			},
+		},
+		-- Per tier: the energy store (J, also what the network may put in a tick), J a tick idle
+		-- and while tracking a target.
+		Capacity = { 20000, 40000, 80000, 160000 },
+		IdleJoules = { 4, 8, 12, 16 },
+		TrackingJoules = { 8, 16, 24, 32 },
+		-- Optics (the optic slot): the Laser Sight tightens the cone and rescans sooner, the Rifle
+		-- Scope reaches further (to MaxRange) and lets a sniper aim at heads; the types each fits.
+		Optics = {
+			LaserSight = { spread = 0.5, scan = 5, types = { "smg", "rifle", "sniper" } },
+			-- (`head`: the sniper's only.)
+			RifleScope = { range = 1.25, head = true, types = { "rifle", "sniper" } },
+		},
+		-- Muzzle devices (the muzzle slot; every type takes them): their WeaponList numbers apply.
+		Muzzles = { "Suppressor", "ImprovisedSuppressor" },
+		-- Gunfire's noise times this (the stand-in gun's, with its muzzle device), at most once
+		-- every ShotNoiseTicks a turret.
+		NoiseScale = 0.75,
+		ShotNoiseTicks = 20,
+		-- The lure: a powered, armed turret with no target and its Lure on makes a Noise-block noise
+		-- (more at night: the director's factor) every Ticks while it is night or a blood moon, at
+		-- most one in each Cell x Cell blocks a time.
+		Lure = { Enabled = true, Noise = 24, Ticks = 600, Cell = 48 },
+		-- Targeting (ticks): a scan for a target every ScanTicks (a Laser Sight's own `scan`), sight
+		-- of the one held checked every SightTicks, lost after LoseTicks unseen; at most
+		-- MaxSightChecks candidates looked at a scan, MaxScansPerTick scans and MaxShotsPerTick shots
+		-- a tick for every turret together.
+		ScanTicks = 10,
+		SightTicks = 4,
+		LoseTicks = 10,
+		MaxSightChecks = 6,
+		MaxScansPerTick = 16,
+		MaxShotsPerTick = 32,
+		-- Nothing nearer than MinRange blocks; the gun's pitch limits (degrees); a shot flies
+		-- ExtraFlight blocks past the turret's range (at most its round's); no range beyond MaxRange;
+		-- a turret shows "Firing" for FiringTicks after a shot.
+		MinRange = 1.5,
+		PitchMin = -60,
+		PitchMax = 75,
+		ExtraFlight = 16,
+		MaxRange = 80,
+		FiringTicks = 10,
+		-- The feeder rule's look at the transporters around a turret, every FeedTicks; the panel's
+		-- "In: x/s" averages arrivals over FeedRateTicks.
+		FeedTicks = 20,
+		FeedRateTicks = 100,
+		-- Turrets messages: to players within RecordRange blocks (sideways), at most every
+		-- RecordTicks a turret, when its target, flags or ammo change or its aim moved RecordAngle
+		-- degrees, and every RecordRefresh ticks while it tracks.
+		RecordRange = 96,
+		RecordTicks = 2,
+		RecordAngle = 3,
+		RecordRefresh = 20,
+		-- The client: turrets drawn within DrawDistance blocks of the camera, at most MaxDrawn of
+		-- them from MaxParts pooled parts; a Laser Sight's beam at most BeamLength long; the servo
+		-- loop at the ServoLoops nearest turning turrets.
+		Client = { DrawDistance = 96, MaxDrawn = 48, MaxParts = 720, BeamLength = 24, ServoLoops = 4 },
+	},
+
+	--[[
+		The Metal Miner (Machines/Kinds/Miner, Machines/MinerRules): on an ore block it makes that
+		ore's drop forever for energy. Per ore: ticks an item takes, J a tick, and the least J an
+		item costs whatever its cards (`floor`: coal is never worth more energy than it burns for).
+	]]
+	Miner = {
+		-- false: the miner ticks inert and has no recipe (its block stays registered).
+		Enabled = true,
+		-- Its energy store (J; the network may fill it in a tick), before Energy Upgrades.
+		Capacity = 200000,
+		Ores = {
+			CoalOre = { ticks = 600, joules = 800, floor = 400000 },
+			IronOre = { ticks = 400, joules = 200 },
+			OsmiumOre = { ticks = 400, joules = 200 },
+			GoldOre = { ticks = 800, joules = 300 },
+			EmeraldOre = { ticks = 3600, joules = 800 },
+			DiamondOre = { ticks = 4800, joules = 800 },
+		},
+	},
+
+	--[[
+		The Ammo Press (Machines/Kinds/AmmoPress): an Iron Ingot and a Gunpowder pressed into
+		rounds of the calibre its button picks, Ticks ticks at Joules J a tick an operation.
+	]]
+	AmmoPress = {
+		-- false: the press ticks inert and has no recipe (its block stays registered).
+		Enabled = true,
+		-- Its energy store (J; the network may fill it in a tick), before Energy Upgrades.
+		Capacity = 20000,
+		Ticks = 200,
+		Joules = 50,
+		-- What one operation makes, by the Calibre button's choice (in its order).
+		Calibres = {
+			{ ammo = "Rounds9mm", count = 16 },
+			{ ammo = "Rounds556", count = 10 },
+			{ ammo = "Rounds308", count = 5 },
+		},
+	},
+
 	-- GUI scale (client) -------------------------------------------------------------------------------
 
 	--[[

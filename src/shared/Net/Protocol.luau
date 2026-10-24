@@ -304,6 +304,16 @@
 	  Projectiles    magic projectiles near the player: spawn, sync, end (Net/MagicSync)
 	  Shots          the shots fired near the player (and their own, refused or not): where each
 	                 pellet ended and what it hit (Net/WeaponSync)
+	  Turrets        u16 count, count x (i32 x, u16 y, i32 z, u16 yaw (a turn in 65536 steps), i8
+	                 pitch (whole degrees), u32 target (the mob it tracks, 0 none), u8 flags
+	                 (TurretFlag: bit 0 powered, 1 firing, 2 blocked, 3 a Laser Sight, 4 a Rifle
+	                 Scope, 5 a suppressor of either kind, 6 tracking), u8 ammo (rounds held)):
+	                 19 bytes a turret (Shared/Turrets: server Turrets/TurretWorld's aim and
+	                 target for client Rendering/TurretView). A record replaces what the client
+	                 knew about that position; a turret without one is idle (aimed level, yaw 0,
+	                 no target, nothing mounted). Sent with a chunk's edit list (the turrets not
+	                 in that state) and to the players near a change. Unknown flags or a length
+	                 that is not what the count says are malformed.
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -413,6 +423,7 @@ Protocol.ServerMessage = {
 	Projectiles = 31,
 	Survivor = 32,
 	Shots = 33,
+	Turrets = 34,
 }
 
 Protocol.EditAction = {
@@ -3583,6 +3594,95 @@ function Protocol.decodeLightning(b: buffer): LightningBolt?
 		return nil
 	end
 	return { x = x, y = y, z = z, seed = buffer.readu32(b, 12), flashes = flashes }
+end
+
+--[[ Turrets (server -> client) ]]
+
+--[[
+	A turret's aim for the client (see the header): its block, the gun's yaw and pitch (radians:
+	Shared/Turrets/TurretRules' angles; sent to a 65536th of a turn and a whole degree), the mob it
+	tracks (0: none), its TurretFlag bits and the rounds it holds. Frozen: both ends ship together.
+]]
+export type TurretRecord = {
+	x: number,
+	y: number,
+	z: number,
+	yaw: number,
+	pitch: number,
+	target: number,
+	flags: number,
+	ammo: number,
+}
+
+Protocol.TURRET_BYTES = 19
+-- Turrets flags (see the header).
+Protocol.TurretFlag = table.freeze({
+	Powered = 1,
+	Firing = 2,
+	Blocked = 4,
+	Laser = 8,
+	Scope = 16,
+	Suppressor = 32,
+	Tracking = 64,
+})
+-- Records a Turrets message carries at most (u16), and its flags' largest value.
+Protocol.MAX_TURRETS = 65535
+Protocol.MAX_TURRET_FLAGS = 127
+
+-- The first MAX_TURRETS of `records`.
+function Protocol.encodeTurrets(records: { TurretRecord }): buffer
+	local count = math.min(#records, Protocol.MAX_TURRETS)
+	local b = buffer.create(2 + count * Protocol.TURRET_BYTES)
+	buffer.writeu16(b, 0, count)
+	local o = 2
+	for i = 1, count do
+		local record = records[i]
+		local yaw = if record.yaw == record.yaw then record.yaw else 0
+		local pitch = if record.pitch == record.pitch then math.deg(record.pitch) else 0
+		buffer.writei32(b, o, record.x)
+		buffer.writeu16(b, o + 4, record.y)
+		buffer.writei32(b, o + 6, record.z)
+		buffer.writeu16(b, o + 10, math.round(yaw / (2 * math.pi) * 65536) % 65536)
+		buffer.writei8(b, o + 12, math.clamp(math.round(pitch), -128, 127))
+		buffer.writeu32(b, o + 13, clampInt(record.target, 0, 4294967295))
+		buffer.writeu8(b, o + 17, bit32.band(clampInt(record.flags, 0, 255), Protocol.MAX_TURRET_FLAGS))
+		buffer.writeu8(b, o + 18, clampInt(record.ammo, 0, 255))
+		o += Protocol.TURRET_BYTES
+	end
+	return b
+end
+
+-- The records of a Turrets message (yaw in 0..2 pi, pitch in whole degrees as radians), nil when
+-- it is malformed.
+function Protocol.decodeTurrets(b: buffer): { TurretRecord }?
+	local len = buffer.len(b)
+	if len < 2 then
+		return nil
+	end
+	local count = buffer.readu16(b, 0)
+	if len ~= 2 + count * Protocol.TURRET_BYTES then
+		return nil
+	end
+	local records: { TurretRecord } = table.create(count)
+	local o = 2
+	for i = 1, count do
+		local flags = buffer.readu8(b, o + 17)
+		if flags > Protocol.MAX_TURRET_FLAGS then
+			return nil
+		end
+		records[i] = {
+			x = buffer.readi32(b, o),
+			y = buffer.readu16(b, o + 4),
+			z = buffer.readi32(b, o + 6),
+			yaw = buffer.readu16(b, o + 10) / 65536 * 2 * math.pi,
+			pitch = math.rad(buffer.readi8(b, o + 12)),
+			target = buffer.readu32(b, o + 13),
+			flags = flags,
+			ammo = buffer.readu8(b, o + 18),
+		}
+		o += Protocol.TURRET_BYTES
+	end
+	return records
 end
 
 return Protocol

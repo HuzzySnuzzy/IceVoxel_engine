@@ -527,7 +527,8 @@ smelt("ScrapMetal", "IronNugget")
 
 --[[
 	Weapons (Shared/Weapons; DayZ makes no gun, magazine or round: the ruins and bunkers hide them,
-	Generation/ScavengeLoot):
+	Generation/ScavengeLoot; the turrets' Ammo Press, below, presses rounds from iron and
+	gunpowder):
 	  Improvised Suppressor  a Glass Bottle and Duct Tape (it muffles a few dozen shots)
 	  Crossbow Bolt          an Iron Nugget over a Stick over a Feather make four (the Iron Age's)
 ]]
@@ -565,6 +566,93 @@ shape(
 	"AirConditioner"
 )
 shape({ "I I", " C ", "I I" }, { I = "IronIngot", C = "BasicUniversalCable" }, "ElectricFan")
+
+--[[
+	Turrets and the Metal Miner (Shared/Turrets, Config.Turrets / Miner / AmmoPress; Progression/
+	Ages: the parts, the Laser Sight, the Basic, Advanced and Elite turrets, the Metal Miner and
+	the Ammo Press are the Electric Age's, the Ultimate turrets the Atomic Age's). Each block is
+	left out when its feature's `Enabled` is false (its items stay registered: ids are
+	append-only), the Servo Motor only when neither turrets nor the press take it:
+	  Servo Motor       iron over osmium round a Universal Cable, iron below: two
+	  Belt Feeder       leather over iron nuggets round an iron ingot
+	  Receiver          iron over an osmium ingot, Nails and Scrap Metal
+	  Targeting Module  glass over glow dust round an osmium ingot, a Universal Cable below
+	  Barrels           SMG three iron; rifle three iron over three osmium; sniper three osmium
+	                    over diamonds round an iron ingot
+	  Laser Sight       iron, glow dust and glass over three iron nuggets
+	  Turrets           the Basic of a type from its barrel over a servo, a receiver and a belt
+	                    feeder over osmium round a targeting module; each next tier round the one
+	                    below (Mekanism's tier shape): the alloys (gold, diamond, emerald, as the
+	                    transmitters' upgrades) in the corners, a barrel over it, servos beside it,
+	                    a targeting module under it, keeping its data (`keep`: its energy and its
+	                    Lure, as a Battery keeps its charge)
+	  Metal Miner       osmium round a Universal Cable over iron blocks round an Electric Furnace
+	                    over diamonds round a Diamond Pickaxe
+	  Ammo Press        iron round a servo over osmium round an Electric Furnace over iron round
+	                    a Block of Iron
+]]
+do
+	local Config = require(script.Parent.Parent.Config)
+	local turrets = Config.Turrets.Enabled
+	if turrets or Config.AmmoPress.Enabled then
+		shape(
+			{ " I ", "OCO", " I " },
+			{ I = "IronIngot", O = "OsmiumIngot", C = "BasicUniversalCable" },
+			"ServoMotor",
+			2
+		)
+	end
+	if turrets then
+		shape({ "LLL", "NIN" }, { L = "Leather", N = "IronNugget", I = "IronIngot" }, "BeltFeeder")
+		shape({ "III", "ONS" }, { I = "IronIngot", O = "OsmiumIngot", N = "Nails", S = "ScrapMetal" }, "Receiver")
+		shape(
+			{ " G ", "DOD", " C " },
+			{ G = "Glass", D = "GlowDust", O = "OsmiumIngot", C = "BasicUniversalCable" },
+			"TargetingModule"
+		)
+		shape({ "III" }, { I = "IronIngot" }, "SmgBarrel")
+		shape({ "III", "OOO" }, { I = "IronIngot", O = "OsmiumIngot" }, "RifleBarrel")
+		shape({ "OOO", "DID" }, { O = "OsmiumIngot", D = "Diamond", I = "IronIngot" }, "SniperBarrel")
+		shape({ "IDG", "NNN" }, { I = "IronIngot", D = "GlowDust", G = "Glass", N = "IronNugget" }, "LaserSight")
+		for _, kind in { "Smg", "Rifle", "Sniper" } do
+			local barrel = `{kind}Barrel`
+			shape({ " K ", "SRF", "OMO" }, {
+				K = barrel,
+				S = "ServoMotor",
+				R = "Receiver",
+				F = "BeltFeeder",
+				O = "OsmiumIngot",
+				M = "TargetingModule",
+			}, `Basic{kind}Turret`)
+			for tier = 2, 4 do
+				shape({ "AKA", "STS", "AMA" }, {
+					A = ALLOYS[tier - 1],
+					K = barrel,
+					S = "ServoMotor",
+					T = `{TIER_NAMES[tier - 1]}{kind}Turret`,
+					M = "TargetingModule",
+				}, `{TIER_NAMES[tier]}{kind}Turret`, 1, "T")
+			end
+		end
+	end
+	if Config.Miner.Enabled then
+		shape({ "OCO", "IEI", "DPD" }, {
+			O = "OsmiumIngot",
+			C = "BasicUniversalCable",
+			I = "IronBlock",
+			E = "ElectricFurnace",
+			D = "Diamond",
+			P = "DiamondPickaxe",
+		}, "MetalMiner")
+	end
+	if Config.AmmoPress.Enabled then
+		shape(
+			{ "ISI", "OEO", "IBI" },
+			{ I = "IronIngot", S = "ServoMotor", O = "OsmiumIngot", E = "ElectricFurnace", B = "IronBlock" },
+			"AmmoPress"
+		)
+	end
+end
 
 Recipes.fuel = {
 	Coal = 1600,

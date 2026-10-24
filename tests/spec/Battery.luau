@@ -253,7 +253,7 @@ return function(t, shared, require, server, client)
 				t.eq(recipe.keep, 1, "the dirty water, listed first")
 			end
 		end
-		t.eq(kept, 3, "the three tier upgrades")
+		t.eq(kept, 3 + 9, "the three tier upgrades (and the turrets' nine: Shared/Turrets)")
 		t.eq(mixed, 3, "the three mint cures (bottle, bowl, canteen)")
 	end)
 

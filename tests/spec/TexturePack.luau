@@ -738,8 +738,8 @@ return function(t, shared, require)
 	t.test("texture pack: appearances are keyed by textures", function()
 		t.eq(
 			#Blocks.appearances,
-			433,
-			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool; then the four ladders, rope, two rails, the fence, the cobweb, moss block and carpet, four vines, hanging roots and mossy cobblestone, and the four vines' cave twins, seasonless; then 32 halves of five doors, then the fence's 15 variants with arms; then the zombie apocalypse's 19 blocks, 367 before them: its Ceiling Lamp's cave twin shares the lamp's; then the seasons' 47, 386 before them: 8 snow layer heights, 5 heaters, insulated planks and glass, the Insulated Door's 32 halves)"
+			447,
+			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool; then the four ladders, rope, two rails, the fence, the cobweb, moss block and carpet, four vines, hanging roots and mossy cobblestone, and the four vines' cave twins, seasonless; then 32 halves of five doors, then the fence's 15 variants with arms; then the zombie apocalypse's 19 blocks, 367 before them: its Ceiling Lamp's cave twin shares the lamp's; then the seasons' 47, 386 before them: 8 snow layer heights, 5 heaters, insulated planks and glass, the Insulated Door's 32 halves; then the turrets' 14, 433 before them: twelve turrets, the Metal Miner and the Ammo Press, each its own decor)"
 		)
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin
 		-- (not a seasonless one: the same look in an appearance of its own).

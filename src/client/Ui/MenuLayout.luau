@@ -615,12 +615,13 @@ function MenuLayout.statusText(container: Container?): string
 	return Machines.status(container.block, viewOf(container)) or ""
 end
 
--- A machine's extra panel lines from its container's data (Machines.lines), none for others.
+-- A machine's extra panel lines from its container's data (Machines.lines, given the window's
+-- data too: a turret's feed rate), none for others.
 function MenuLayout.lineTexts(container: Container?): { string }
 	if container == nil or not Machines.isContainer(container) then
 		return {}
 	end
-	return Machines.lines(container.block, viewOf(container))
+	return Machines.lines(container.block, viewOf(container), container.data)
 end
 
 --[[ Buttons (Minecraft's container buttons: Shared/Machines.buttons) ]]

@@ -3,8 +3,8 @@
 	Decorated block faces: chests, crafting tables, furnaces, Mekanism's Creative Energy Cube,
 	Heat Generator, Electric Furnace and Batteries (Energy Cubes), the Oil Refinery and the
 	Combustion Generator, the seasons' Wood Stove, Oil Heater, Electric Heater, Air Conditioner
-	and Electric Fan, Minecraft's structure blocks, jigsaw blocks and TNT, and the Nuke, drawn
-	like Minecraft's pixel art.
+	and Electric Fan, the turrets' bases, the Metal Miner and the Ammo Press, Minecraft's
+	structure blocks, jigsaw blocks and TNT, and the Nuke, drawn like Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
 	painted in order over the block's own part (its material and colour show wherever no rectangle
@@ -923,6 +923,159 @@ do
 	}
 end
 
+--[[
+	Turrets and the Metal Miner (BlockList "<Tier><Type>Turret", MetalMiner, AmmoPress; Shared/
+	Turrets, Shared/Machines kinds "turret_<type>_<tier>", "miner" and "press"):
+
+	  Turrets       the gun's base (the gun itself is Rendering/TurretView's, drawn over the top):
+	                a dark steel housing with a band in the tier's colour (Transmitters/Tiers, as
+	                on cables and batteries) along the top of each side and its corners on top,
+	                the belt feed's intake on each side with the type's marks under it (an SMG's
+	                three short ones, a rifle's two, a sniper's one long one, in brass), and the
+	                turntable's ring on top.
+	  Metal Miner   a steel casing with osmium bolts, the drill housing's grille high on each side
+	                (MINER_WINDOW) with its slats dark while it is idle, the drill's collar under
+	                it, the osmium hopper on top and the drill head underneath.
+	  Ammo Press    a steel casing, the stamping window on each side (PRESS_WINDOW) with its die
+	                dark while it is idle, the chute under it, the ram's cap on top.
+	While the miner or the press works the client may light its window (Rendering/
+	TransmitterModel.machineBoxes: a glowing pane over exactly the window, miner builder C).
+	Item models show the intake, the grille and the window on the front pair only, like the
+	furnace's mouth; their tops are the same turned by a quarter.
+]]
+-- (Filled in a block of its own, so the module's main chunk stays within Luau's 200 registers.)
+local TURRET_FACES: { [string]: Faces } = {}
+do
+	local TURRET_EDGE = { 40, 42, 46 }
+	local TURRET_SHADE = { 30, 32, 36 }
+	local INTAKE_FRAME = { 58, 60, 66 }
+	local INTAKE = { 18, 18, 20 }
+	local MARK = { 196, 160, 70 }
+	local RING = { 96, 100, 108 }
+	local PLATE = { 56, 58, 64 }
+	local HUB = { 140, 144, 152 }
+	-- Each type's marks under the intake: { x, width } in a row (Shared/Turrets types).
+	local MARKS: { [string]: { { number } } } = {
+		Smg = { { 4, 2 }, { 7, 2 }, { 10, 2 } },
+		Rifle = { { 5, 2 }, { 9, 2 } },
+		Sniper = { { 5, 6 } },
+	}
+
+	local function turretSide(tier: { number }, marks: { { number } }, intakeSurfaceOnly: boolean): { Rect }
+		local rects = join(outline(TURRET_EDGE, true), {
+			rect(1, 1, 14, 2, tier),
+			rect(5, 5, 6, 5, INTAKE_FRAME, intakeSurfaceOnly),
+			rect(6, 6, 4, 3, INTAKE, intakeSurfaceOnly),
+			rect(1, 14, 14, 1, TURRET_SHADE, true),
+		})
+		for _, mark in marks do
+			table.insert(rects, rect(mark[1], 11, mark[2], 2, MARK, intakeSurfaceOnly))
+		end
+		return rects
+	end
+
+	local function turretFaces(tier: { number }, marks: { { number } }): Faces
+		return {
+			Top = join(outline(TURRET_EDGE, true), {
+				rect(0, 0, 2, 2, tier),
+				rect(14, 0, 2, 2, tier),
+				rect(0, 14, 2, 2, tier),
+				rect(14, 14, 2, 2, tier),
+				rect(2, 2, 12, 12, RING),
+				rect(4, 4, 8, 8, PLATE),
+				rect(7, 7, 2, 2, HUB),
+			}),
+			Bottom = outline(TURRET_EDGE, true),
+			Front = turretSide(tier, marks, false),
+			Back = turretSide(tier, marks, false),
+			Left = turretSide(tier, marks, true),
+			Right = turretSide(tier, marks, true),
+		}
+	end
+
+	for _, tier in Tiers.TIERS do
+		for typeName, marks in MARKS do
+			TURRET_FACES[`{tier.name}{typeName}Turret`] = turretFaces(tier.colour, marks)
+		end
+	end
+
+	local MINER_EDGE = { 92, 88, 80 }
+	local MINER_GRILLE = { 34, 32, 30 }
+	local MINER_SLAT = { 74, 70, 64 }
+	local COLLAR = { 70, 72, 78 }
+	local HOPPER = { 172, 192, 216 }
+	local HOPPER_MOUTH = { 52, 60, 72 }
+	local DRILL = { 150, 152, 156 }
+	-- The drill housing's grille on every side (pixels from the face's top left; the glow covers
+	-- exactly it).
+	BlockDecor.MINER_WINDOW = table.freeze({ x = 4, y = 3, w = 8, h = 6 })
+	local GRILLE = BlockDecor.MINER_WINDOW
+
+	local function minerSide(grilleSurfaceOnly: boolean): { Rect }
+		local w = GRILLE
+		return join(outline(MINER_EDGE, true), smelterBolts(), {
+			rect(w.x - 1, w.y - 1, w.w + 2, w.h + 2, CHAMBER_FRAME, grilleSurfaceOnly),
+			rect(w.x, w.y, w.w, w.h, MINER_GRILLE, grilleSurfaceOnly),
+			rect(w.x + 1, w.y, 1, w.h, MINER_SLAT, true),
+			rect(w.x + 3, w.y, 1, w.h, MINER_SLAT, true),
+			rect(w.x + 5, w.y, 1, w.h, MINER_SLAT, true),
+			-- The drill's collar, down to the ore.
+			rect(6, 11, 4, 4, COLLAR, grilleSurfaceOnly),
+			rect(7, 11, 2, 4, DRILL, true),
+		})
+	end
+
+	TURRET_FACES.MetalMiner = {
+		Top = join(outline(MINER_EDGE, true), smelterBolts(), {
+			rect(3, 3, 10, 10, HOPPER),
+			rect(5, 5, 6, 6, HOPPER_MOUTH),
+		}),
+		Bottom = join(outline(MINER_EDGE, true), {
+			rect(5, 5, 6, 6, COLLAR),
+			rect(6, 6, 4, 4, DRILL),
+		}),
+		Front = minerSide(false),
+		Back = minerSide(false),
+		Left = minerSide(true),
+		Right = minerSide(true),
+	}
+
+	local PRESS_EDGE = { 84, 88, 96 }
+	local PRESS_DIE = { 30, 30, 34 }
+	local PRESS_STRIPE = { 196, 160, 70 }
+	local CHUTE = { 52, 54, 60 }
+	local RAM = { 120, 124, 132 }
+	local RAM_TOP = { 160, 164, 172 }
+	-- The stamping window on every side (pixels from the face's top left; the glow covers exactly
+	-- it).
+	BlockDecor.PRESS_WINDOW = table.freeze({ x = 4, y = 3, w = 8, h = 6 })
+	local DIE = BlockDecor.PRESS_WINDOW
+
+	local function pressSide(windowSurfaceOnly: boolean): { Rect }
+		local w = DIE
+		return join(outline(PRESS_EDGE, true), smelterBolts(), {
+			rect(w.x - 1, w.y - 1, w.w + 2, w.h + 2, WINDOW_FRAME, windowSurfaceOnly),
+			rect(w.x, w.y, w.w, w.h, PRESS_DIE, windowSurfaceOnly),
+			rect(w.x, w.y + 3, w.w, 1, PRESS_STRIPE, true),
+			-- The chute the rounds leave by.
+			rect(5, 11, 6, 3, CHUTE, windowSurfaceOnly),
+			rect(5, 12, 6, 1, VENT_SLAT, true),
+		})
+	end
+
+	TURRET_FACES.AmmoPress = {
+		Top = join(outline(PRESS_EDGE, true), smelterBolts(), {
+			rect(4, 4, 8, 8, RAM),
+			rect(6, 6, 4, 4, RAM_TOP),
+		}),
+		Bottom = outline(PRESS_EDGE, true),
+		Front = pressSide(false),
+		Back = pressSide(false),
+		Left = pressSide(true),
+		Right = pressSide(true),
+	}
+end
+
 local DECORS: { [string]: Faces } = {
 	WoodStove = SEASON_FACES.WoodStove,
 	OilHeater = SEASON_FACES.OilHeater,
@@ -942,6 +1095,9 @@ local DECORS: { [string]: Faces } = {
 }
 for _, tier in Tiers.TIERS do
 	DECORS[`{tier.name}Battery`] = batteryFaces(tier.colour)
+end
+for name, faces in TURRET_FACES do
+	DECORS[name] = faces
 end
 for mode, sigil in SIGILS do
 	local face = join(structureFrame(), sigil)

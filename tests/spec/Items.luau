@@ -37,8 +37,10 @@ return function(t, shared, require)
 		-- Creative order: blocks first, then armor, materials and tools.
 		t.eq(Items.list[1].name, "Stone")
 		-- (TuxedoPants, Terraria's vanity clothes, before the zombie apocalypse's 21 items, then the
-		-- weapons' 34. Was "HerbalPoultice", the zombie apocalypse's last.)
-		t.eq(Items.list[#Items.list].name, "Sledgehammer", "the last item added (the weapons')")
+		-- weapons' 34, then the turrets' 8. Was "Sledgehammer", the weapons' last, and before it
+		-- "HerbalPoultice", the zombie apocalypse's.)
+		t.eq(Items.list[#Items.list].name, "LaserSight", "the last item added (the turrets')")
+		t.eq(Items.id.SmgBarrel, Items.id.Sledgehammer + 1, "the turrets' items after the weapons'")
 		t.eq(Items.id.StrongPotionOfResistance, Items.id.HermesBoots - 1, "the last potion, then Terraria's things")
 		t.eq(Items.get(Items.id.Planks).displayName, "Oak Planks", "a block's own display name")
 		t.eq(Items.maxStack(Items.id.IronPickaxe), 1, "tools don't stack")

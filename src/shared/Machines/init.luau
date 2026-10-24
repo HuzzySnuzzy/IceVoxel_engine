@@ -12,7 +12,9 @@
 	Refinery (the Oil Refinery: oil into fuel) and Combustion (the Combustion Generator: fuel);
 	the seasons' Heater (the Electric Heater), Cooler (the Air Conditioner and the Electric Fan),
 	Stove (the Wood Stove, fuel only) and OilHeater (the Oil Heater, fuel only), thermostats
-	and burners for rooms (Shared/Seasons/Rooms).
+	and burners for rooms (Shared/Seasons/Rooms); the turrets' Turret (twelve kinds
+	"turret_<type>_<tier>": Shared/Turrets), Miner (the Metal Miner: Machines/MinerRules) and
+	AmmoPress (the Ammo Press).
 
 	A new machine:
 	  1. BlockList: a block with `machine = { kind = "name" }` and `energy = { capacity, input?,
@@ -56,6 +58,10 @@ require(script.Kinds.Heater)
 require(script.Kinds.Cooler)
 require(script.Kinds.Stove)
 require(script.Kinds.OilHeater)
+-- (Turrets and the Metal Miner: Shared/Turrets.)
+require(script.Kinds.Turret)
+require(script.Kinds.Miner)
+require(script.Kinds.AmmoPress)
 
 Core.bindBlocks()
 

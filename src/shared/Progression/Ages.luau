@@ -36,10 +36,11 @@
 	                  Universal Cables, the Electric Furnace, basic and advanced Batteries, the
 	                  upgrade cards, the Oil Refinery and the Combustion Generator, elite
 	                  transporters, pipes and tanks, the Electric Heater, the Air Conditioner
-	                  and the Electric Fan.
+	                  and the Electric Fan, the turret parts, the Laser Sight, the Basic,
+	                  Advanced and Elite turrets, the Metal Miner and the Ammo Press.
 	  Atomic Age      (level 40, an Oil Refinery and a Basic Battery crafted) the Solar Panel,
 	                  elite and ultimate cables and Batteries, ultimate transporters, pipes and
-	                  tanks, and the Nuke (with the Fission skill too).
+	                  tanks, the Ultimate turrets, and the Nuke (with the Fission skill too).
 
 	An Age's `recipes` are the results (item names) it opens: crafting and smelting results of a
 	later Age are locked for a player who hasn't reached it (Shared/Progression.allows; how:
@@ -79,6 +80,7 @@ export type Age = {
 }
 
 local PotionList = require(script.Parent.Parent.Effects.PotionList)
+local Config = require(script.Parent.Parent.Config)
 
 local TOOLS = { "Pickaxe", "Axe", "Shovel", "Hoe", "Sword" }
 local ARMOR = { "Helmet", "Chestplate", "Leggings", "Boots" }
@@ -211,6 +213,38 @@ local atomic: { string } = {
 	"UltimateFluidTank",
 	"Nuke",
 }
+
+--[[
+	Turrets and the Metal Miner (Config.Turrets / Miner / AmmoPress: none of a feature whose
+	`Enabled` is false, as Crafting/Recipes leaves its recipes out): the turret parts, the Laser
+	Sight, the Basic, Advanced and Elite turrets, the Metal Miner and the Ammo Press are the Electric
+	Age's (Elite transporters are already), the Ultimate turrets the Atomic Age's (as Ultimate
+	transporters). No skill: the press's gunpowder is behind Demolition already.
+]]
+do
+	local turrets = Config.Turrets.Enabled
+	if turrets or Config.AmmoPress.Enabled then
+		table.insert(electric, "ServoMotor")
+	end
+	if turrets then
+		for _, name in { "BeltFeeder", "Receiver", "TargetingModule", "SmgBarrel", "RifleBarrel", "SniperBarrel" } do
+			table.insert(electric, name)
+		end
+		table.insert(electric, "LaserSight")
+		for _, kind in { "Smg", "Rifle", "Sniper" } do
+			for _, tier in { "Basic", "Advanced", "Elite" } do
+				table.insert(electric, `{tier}{kind}Turret`)
+			end
+			table.insert(atomic, `Ultimate{kind}Turret`)
+		end
+	end
+	if Config.Miner.Enabled then
+		table.insert(electric, "MetalMiner")
+	end
+	if Config.AmmoPress.Enabled then
+		table.insert(electric, "AmmoPress")
+	end
+end
 
 local list: { Age } = {
 	{

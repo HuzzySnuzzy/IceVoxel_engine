@@ -54,7 +54,9 @@
 	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace",
 	                "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace", "BasicBattery",
 	                "AdvancedBattery", "EliteBattery", "UltimateBattery", "OilRefinery",
-	                "CombustionGenerator", "Tnt", "Nuke", "StructureBlockSave", "StructureBlockLoad",
+	                "CombustionGenerator", the seasons' machines by name ("WoodStove" ...), the
+	                turrets' "<Tier><Type>Turret" ("BasicSmgTurret" ...), "MetalMiner",
+	                "AmmoPress", "Tnt", "Nuke", "StructureBlockSave", "StructureBlockLoad",
 	                "StructureBlockCorner", "StructureBlockData" and
 	                "Jigsaw<Front><Top>", e.g. "JigsawNorthUp"; client Rendering/BlockDecor). Such
 	                blocks are drawn one part per block.
@@ -255,6 +257,8 @@
 
 -- (Pure data that requires nothing, so Blocks never depends on the Transmitters logic.)
 local Tiers = require(script.Parent.Parent.Transmitters.Tiers)
+-- (Requires nothing either: the turrets', the miner's and the press's energy stores.)
+local Config = require(script.Parent.Parent.Config)
 
 -- One box of a shaped block (see `shape` above).
 export type ShapeBox = {
@@ -3877,6 +3881,72 @@ addDoor({
 			doorPiece(-5, 5, -5, 5, 4, { math.floor(c[1] * 0.9), math.floor(c[2] * 0.9), math.floor(c[3] * 0.9) }),
 		}
 	end,
+})
+
+--[[
+	Turrets and the Metal Miner (Shared/Turrets; Shared/Machines kinds "turret_<type>_<tier>",
+	"miner" and "press"), after the seasons so no other block's id changed: 486..497 the twelve
+	turrets, type by type (SMG, Rifle, Sniper) and tier by tier within each (Basic, Advanced,
+	Elite, Ultimate: Shared/Turrets.SPECS' order), 498 the Metal Miner, 499 the Ammo Press.
+	Mekanism style machine blocks (hardness 3.5, a pickaxe to drop anything, metal sounds) drawn
+	with their BlockDecor faces (never textured), which zombies never break.
+	  Turrets       a steel base whose gun the client draws on top (Rendering/TurretView): no full
+	                cube on top for anything to rest on (`sturdy = false`: no torches, no snow
+	                layers), the energy store of its tier (Config.Turrets.Capacity), filled as fast
+	                as the network gives.
+	  Metal Miner   copies the ore block under it (Config.Miner), a 200 kJ store.
+	  Ammo Press    presses iron and gunpowder into rounds (Config.AmmoPress), a 20 kJ store.
+]]
+-- (Shared/Turrets' types: their key, their part of the block name, their part of the shown name.)
+local TURRET_TYPES = {
+	{ key = "smg", name = "Smg", label = "SMG" },
+	{ key = "rifle", name = "Rifle", label = "Rifle" },
+	{ key = "sniper", name = "Sniper", label = "Sniper" },
+}
+local TURRET_TIERS = { "Basic", "Advanced", "Elite", "Ultimate" }
+for _, turret in TURRET_TYPES do
+	for tier, tierName in TURRET_TIERS do
+		local capacity = Config.Turrets.Capacity[tier]
+		local name = `{tierName}{turret.name}Turret`
+		table.insert(list, {
+			name = name,
+			displayName = `{tierName} {turret.label} Turret`,
+			color = { 70, 74, 80 },
+			material = "Metal",
+			sound = "metal",
+			hardness = 3.5,
+			tool = "pickaxe",
+			toolLevel = 0,
+			sturdy = false,
+			decor = name,
+			machine = { kind = `turret_{turret.key}_{tier}` },
+			energy = { capacity = capacity, input = capacity },
+		})
+	end
+end
+table.insert(list, {
+	name = "MetalMiner",
+	color = { 128, 122, 110 },
+	material = "Metal",
+	sound = "metal",
+	hardness = 3.5,
+	tool = "pickaxe",
+	toolLevel = 0,
+	decor = "MetalMiner",
+	machine = { kind = "miner" },
+	energy = { capacity = Config.Miner.Capacity, input = Config.Miner.Capacity },
+})
+table.insert(list, {
+	name = "AmmoPress",
+	color = { 104, 108, 116 },
+	material = "Metal",
+	sound = "metal",
+	hardness = 3.5,
+	tool = "pickaxe",
+	toolLevel = 0,
+	decor = "AmmoPress",
+	machine = { kind = "press" },
+	energy = { capacity = Config.AmmoPress.Capacity, input = Config.AmmoPress.Capacity },
 })
 
 return list

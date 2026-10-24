@@ -182,8 +182,69 @@ return function(t, shared, require)
 		-- before the five doors; 196 before the zombie apocalypse's medical supplies, barricades,
 		-- bats, blades, the hatch and concrete; 213 before the weapons' Improvised Suppressor and
 		-- Crossbow Bolts; 215 before the seasons' Snow Layer, insulation, stoves, heaters and
-		-- coolers.)
-		t.eq(#Crafting.recipes, 224, "recipes compiled")
+		-- coolers; 224 before the turrets' seven parts, the Laser Sight, twelve turrets, the Metal
+		-- Miner and the Ammo Press.)
+		t.eq(#Crafting.recipes, 246, "recipes compiled")
+	end)
+
+	t.test("crafting: the turrets' recipes each make only their own result; a tier keeps its data", function()
+		local names = {
+			"ServoMotor",
+			"BeltFeeder",
+			"Receiver",
+			"TargetingModule",
+			"SmgBarrel",
+			"RifleBarrel",
+			"SniperBarrel",
+			"LaserSight",
+			"MetalMiner",
+			"AmmoPress",
+		}
+		for _, kind in { "Smg", "Rifle", "Sniper" } do
+			for _, tier in { "Basic", "Advanced", "Elite", "Ultimate" } do
+				table.insert(names, `{tier}{kind}Turret`)
+			end
+		end
+		local wanted: { [number]: boolean } = {}
+		for _, name in names do
+			wanted[id[name]] = true
+		end
+		local first = function(set)
+			return (next(set))
+		end
+		local found = 0
+		for index = #Crafting.recipes, 1, -1 do
+			local recipe = Crafting.recipes[index]
+			if wanted[recipe.result] then
+				found += 1
+				t.eq(recipe.kind, "shaped", `{Items.get(recipe.result).name} is shaped`)
+				local cells = {}
+				for y = 0, recipe.height - 1 do
+					for x = 0, recipe.width - 1 do
+						local cell = recipe.cells[y * recipe.width + x + 1]
+						if cell then
+							cells[y * 3 + x + 1] = first(cell)
+						end
+					end
+				end
+				local made = result(cells, 3)
+				t.ok(made ~= nil and made.item == recipe.result, `{Items.get(recipe.result).name}'s grid makes it`)
+				-- (Without it, the same grid makes nothing: no other recipe takes it.)
+				table.remove(Crafting.recipes, index)
+				local other = result(cells, 3)
+				table.insert(Crafting.recipes, index, recipe)
+				t.eq(other, nil, `{Items.get(recipe.result).name}'s grid makes only it`)
+			end
+		end
+		t.eq(found, #names, "every one has its recipe")
+		-- The next tier round the one below keeps its data (its energy and its Lure).
+		local A, K, S, T, M = id.GoldIngot, id.SmgBarrel, id.ServoMotor, id.BasicSmgTurret, id.TargetingModule
+		local cells = grid({ A, K, A, S, T, S, A, M, A })
+		cells[5].data = table.freeze({ energy = 1000, lure = 0 })
+		local advanced = Crafting.match(cells, 3)
+		t.eq(advanced and advanced.item, id.AdvancedSmgTurret, "Basic to Advanced")
+		t.eq(advanced and advanced.data and advanced.data.lure, 0, "its Lure stays off")
+		t.eq(advanced and advanced.data and advanced.data.energy, 1000, "its energy stays")
 	end)
 
 	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()

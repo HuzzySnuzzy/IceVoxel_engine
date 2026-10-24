@@ -102,7 +102,8 @@ return function(t, shared, require, server, client)
 			t.eq(I[name], 4277 + index, `{name}'s id`)
 		end
 		t.eq(I.HerbalPoultice, 4277, "the apocalypse's last item before them")
-		t.eq(Items.list[#Items.list].name, "Sledgehammer", "the last item")
+		-- (Then the turrets' 8: Sledgehammer was the last item.)
+		t.eq(Items.list[#Items.list - 8].name, "Sledgehammer", "the last item before the turrets'")
 		local names = {
 			Pistol = "9mm Pistol",
 			Smg = "SMG",
@@ -400,8 +401,8 @@ return function(t, shared, require, server, client)
 			t.eq(NoiseRules.radius(name, Config.Apocalypse.Noise), 0, `{name} is no noise of NoiseRules'`)
 		end
 		t.eq(count, 22)
-		-- (Then the seasons' 11.)
-		t.eq(Sounds.count, first + 21 + 11, "the weapons' are the last events before the seasons'")
+		-- (Then the seasons' 11, then the turrets' 3.)
+		t.eq(Sounds.count, first + 21 + 11 + 3, "the weapons' are the last events before the seasons'")
 		t.eq(Sounds.get("item.firearm.rifle.fire").category, "item.firearm.fire", "a Sound replaces every class")
 		t.eq(Sounds.get("item.firearm.heavy.fire").maxDistance, 224)
 		t.eq(Sounds.get("item.firearm.far").maxDistance, 256)
@@ -674,7 +675,15 @@ return function(t, shared, require, server, client)
 		t.eq(WeaponSync.decodeShots(buffer.create(0)), nil, "empty")
 		t.eq(WeaponSync.decodeShots(patched(0, 0)), nil, "no shots")
 		t.eq(WeaponSync.decodeShots(patched(0, 65)), nil, "more than MAX_SHOTS")
-		t.eq(WeaponSync.decodeShots(patched(1 + 12, 8)), nil, "unknown flags")
+		t.eq(WeaponSync.decodeShots(patched(1 + 12, 16)), nil, "unknown flags")
+		-- Bit 3 is `plain` (tracers without glow: a suppressed turret's shot, Shared/Turrets).
+		local plainShots = WeaponSync.decodeShots(patched(1 + 12, 8)) :: { WeaponSync.Shot }
+		t.ok(plainShots ~= nil and plainShots[1].plain == true, "plain decodes")
+		t.eq(back[1].plain, false, "not plain")
+		local plainShot = table.clone(shots[3])
+		plainShot.plain = true
+		local plainBack = WeaponSync.decodeShots(WeaponSync.encodeShots({ plainShot })) :: { WeaponSync.Shot }
+		t.ok(plainBack ~= nil and plainBack[1].plain == true, "plain round trip")
 		t.eq(WeaponSync.decodeShots(patched(1 + 25, 13)), nil, "more than MAX_PELLETS")
 		t.eq(WeaponSync.decodeShots(patched(1 + 26 + 12, 7)), nil, "an unknown hit")
 		local refusedWithPellets = table.clone(shots[2])
@@ -1110,7 +1119,7 @@ return function(t, shared, require, server, client)
 	--[[ Recipes and Ages ]]
 
 	t.test("weapons: an improvised suppressor and crossbow bolts are made; bolts in the Iron Age", function()
-		t.eq(#Crafting.recipes, 224, "213 and the weapons' two (then the seasons' 9)")
+		t.eq(#Crafting.recipes, 246, "213 and the weapons' two (then the seasons' 9, the turrets' 22)")
 		local suppressor = Crafting.match({
 			[1] = { item = I.GlassBottle, count = 1 },
 			[2] = { item = I.DuctTape, count = 1 },

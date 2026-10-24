@@ -797,9 +797,18 @@ return function(t, shared, require, server, client)
 		t.ok(table.find(JeiData.CATALYSTS.smelting, "ElectricFurnace") ~= nil)
 		local smelting = #Smelting.recipes()
 		local uses = JeiData.uses(FURNACE)
-		t.eq(#uses, 1)
-		t.eq(uses[1].category, "smelting")
-		t.eq(#uses[1].entries, smelting, "every smelting recipe")
+		-- (Crafting, then smelting: the Metal Miner and the Ammo Press are built round one.)
+		t.eq(#uses, 2)
+		t.eq(uses[2].category, "smelting")
+		t.eq(#uses[2].entries, smelting, "every smelting recipe")
+		t.eq(uses[1].category, "crafting", "an ingredient too")
+		local into: { [number]: boolean } = {}
+		for _, entry in uses[1].entries do
+			if entry.output then
+				into[entry.output.item] = true
+			end
+		end
+		t.ok(into[I.MetalMiner] and into[I.AmmoPress], "of the Metal Miner and the Ammo Press")
 		t.ok(JeiData.has("uses", FURNACE))
 		local recipes = JeiData.recipes(FURNACE)
 		t.eq(recipes[1] and recipes[1].category, "crafting", "its own recipe")
