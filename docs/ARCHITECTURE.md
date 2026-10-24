@@ -7487,20 +7487,24 @@ rate), `idle` (a record that says nothing).
 optional `shown`, `describe()`, `muzzleNear` and `SERVO`. Turret positions come from the edits, as
 the pipes'; records are kept by position for chunks whose edit list is known or whose data is
 loaded; an idle record is forgotten; a block change drops its record, except that the player's own
-predicted break keeps it 5 s. Every 0.25 s (and on any change), the nearest `MaxDrawn` 48 within
-`DrawDistance` 96 whose chunk is shown, with nothing over the gun (`Turrets.headClear`) and not
-Blocked, get a pooled head (14 parts and the beam, made once and limited by `MaxParts` 720,
-re-dressed only when attachments change). A head starts at the record's aim, turns with `step` and
-is moved only when its aim or `Origin.epoch` changed, in one `BulkMoveTo` at Camera + 1
-(`IceVoxelTurrets`); CFrames come from world blocks every time, so no render position survives a
-rebase. A powered Laser Sight's beam runs to the first block that blocks sight (the turret's own
-cell left out, rechecked every 0.1 s) or to the drawn target it passes, at most `BeamLength` 24. The
-servo `block.turret.servo` loops at the `ServoLoops` 4 nearest turning guns; a tracking turret
-running dry clicks `item.firearm.dry`. Times follow the frames.
+predicted break keeps it 5 s, then drops it. Every 0.25 s (and on any change), the nearest
+`MaxDrawn` 48 within `DrawDistance` 96 whose chunk is shown, with nothing over the gun
+(`Turrets.headClear`) and not Blocked, get a pooled head (14 parts and the beam, made once and
+limited by `MaxParts` 720, re-dressed only when attachments change). A head starts at the
+record's aim, turns with `step` and is moved only when its aim or `Origin.epoch` changed, in one
+`BulkMoveTo` at Camera + 1 (`IceVoxelTurrets`); CFrames come from world blocks every time, so no
+render position survives a rebase. A powered Laser Sight's beam runs to the first block that blocks sight (the turret's own
+cell left out, rechecked every 0.1 s and as soon as the drawn aim turned a degree) or to the drawn
+target it passes, at most `BeamLength` 24. The servo `block.turret.servo` loops at the `ServoLoops`
+4 nearest turning guns. A tracking turret that runs dry clicks `item.firearm.dry`: a record with no
+rounds and no longer Firing (the server's No ammo) after one with rounds or Firing; a one-round
+turret holds none from each shot to its next round but is Firing then, so a fed one never clicks.
+Times follow the frames.
 
 **Shots, WAILA, F3.** A turret's shot (shooter `ShotRules.TURRET` = 0) sounds as its stand-in gun's
 class, is never the player's own, and `plain` removes the tracer glow; ShotView starts its flash and
-tracers at the drawn barrel's end (`setTurretMuzzle` ← `TurretView.muzzleNear`), else at the origin.
+tracers at the drawn barrel's end nearest the shot's origin, within 0.25 blocks (`setTurretMuzzle` ←
+`TurretView.muzzleNear`: a neighbour's gun aiming elsewhere is never taken), else at the origin.
 WAILA shows "Ammo 3 / 4 · 9mm" (red at 0), "Feed: Elite" / "Feed: Basic → 90 rpm" / "Feed: by hand"
 (the panel's own words), and "Fitted: Laser Sight, Suppressor"; with F3 it adds the target, the aim
 and the flags. F3: "turrets N drawn / M records, K tracking, P parts".

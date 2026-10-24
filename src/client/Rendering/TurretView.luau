@@ -16,7 +16,8 @@
 	                   WAILA's turret lines (frozen tables: read only)
 	  stats()          drawn turrets, records known, tracking, parts in use (F3's turret line)
 	and besides: `describe()` (F3's line), `muzzleNear(ox, oy, oz)` (the drawn muzzle of the turret
-	whose shot started there: ShotView, given it at `start`) and SERVO (the loop's event).
+	whose shot started there: the drawn barrel's end nearest it, ShotView, given it at `start`) and
+	SERVO (the loop's event).
 
 	Turrets: where they are only comes from edits (a turret is placed), so a chunk's are found in
 	its edit list when its data is loaded (ClientWorld onChunkLoaded, knownEdits), followed through
@@ -26,8 +27,11 @@
 	chunks whose edit list is known or asked for, or whose data is loaded, and forgotten when
 	neither is (they come again with the edit list). A change of a position's block forgets its
 	record (the server starts a new turret idle); when this player's own predicted break took it,
-	it is kept UNDO_WINDOW seconds and comes back if the server refuses the break. A record whose
-	rounds fell to 0 while it tracked clicks item.firearm.dry (Rendering/ShotRules.DRY) at the gun.
+	it is kept UNDO_WINDOW seconds and comes back if the server refuses the break (then dropped).
+	A record that tracks with no rounds and no longer Firing (the server's No ammo), after one that
+	held rounds or was Firing, clicks item.firearm.dry (Rendering/ShotRules.DRY) at the gun: a
+	one-round turret holds none from each shot to its next round but is Firing then, so a fed one
+	never clicks.
 	Drawn: every REFRESH_INTERVAL (and when something changed) the turrets within Config.Turrets
 	.Client.DrawDistance of the camera whose chunk is shown, nothing over the gun
 	(Shared/Turrets.headClear of the cell above, as the client sees it) and the record not
@@ -41,7 +45,8 @@
 	Beam: a Laser Sight on a powered turret draws a thin red Neon bar from the emitter along the
 	drawn aim to the first block that stops sight (Shared/World/VoxelRaycast with Blocks/Shapes
 	.sight, the turret's own cell left out: as the server's sight), looked at every BEAM_INTERVAL
-	seconds, or to the target it passes, at most Config.Turrets.Client.BeamLength.
+	seconds and as soon as the drawn aim turned BEAM_TURN since the last look, or to the target it
+	passes, at most Config.Turrets.Client.BeamLength.
 	Servo: block.turret.servo (SERVO; a developer's Sound of that name in the override folder
 	replaces it: Audio/SoundPlayer) loops at the ServoLoops nearest turrets that turned within
 	SERVO_HOLD seconds, on that many loops of its own (SoundPlayer.setLoop).
@@ -110,17 +115,19 @@ local REFRESH_INTERVAL = 0.25
 local PARTS_PER_HEAD = TurretModel.MAX_PARTS + 1
 -- The longest frame turned at once (seconds: after a hitch the guns catch up over a few frames).
 local MAX_DT = 0.25
--- Seconds between looks at the block a beam ends on; the beam's thickness (blocks), its
--- transparency, the smallest change of its length worth a resize (blocks), and how near a target
--- it passes to end there (blocks).
+-- Seconds between looks at the block a beam ends on, and how far (radians) the drawn aim turns
+-- before one at once; the beam's thickness (blocks), its transparency, the smallest change of its
+-- length worth a resize (blocks), and how near a target it passes to end there (blocks).
 local BEAM_INTERVAL = 0.1
+local BEAM_TURN = math.rad(1)
 local BEAM_WIDTH = 0.03
 local BEAM_TRANSPARENCY = 0.2
 local BEAM_SLACK = 0.01
 local BEAM_TARGET = 0.6
 -- A gun counts as turning (its servo heard) this long after it last moved (seconds).
 local SERVO_HOLD = 0.2
--- How far (blocks) a shot's origin may be from where a drawn barrel's end would put it.
+-- How far (blocks) a shot's origin may be from a drawn barrel's end (the drawn aim may lag the
+-- server's: on a barrel, 14 to 20 degrees).
 local MUZZLE_SLACK = 0.25
 -- Seconds the record of a turret this player broke is kept, in case the server refuses the break.
 local UNDO_WINDOW = 5
@@ -164,9 +171,12 @@ type Entry = {
 	turnedAt: number,
 	-- Squared distance (blocks) to the camera at the last refresh.
 	distance: number,
-	-- The beam's reach to the first block (blocks) and when it is looked at next.
+	-- The beam's reach to the first block (blocks), when it is looked at next, and the drawn aim
+	-- it was looked at for.
 	reach: number,
 	reachAt: number,
+	reachYaw: number,
+	reachPitch: number,
 }
 
 local TurretView = {}
@@ -312,6 +322,12 @@ local function dropChunkRecords(chunk: number)
 	end
 end
 
+-- Does `record` say it is out of rounds while it tracks (the server's No ammo: none held and no
+-- longer Firing)?
+local function dry(record: Record): boolean
+	return record.ammo == 0 and bit32.btest(record.flags, Flag.Tracking) and not bit32.btest(record.flags, Flag.Firing)
+end
+
 local function onRecords(list: { Record })
 	for _, record in list do
 		local x, y, z = record.x, record.y, record.z
@@ -319,14 +335,8 @@ local function onRecords(list: { Record })
 			local key = posKey(x, y, z)
 			local old = records[key]
 			local entry = entries[key]
-			-- Ran dry while tracking: the gun clicks.
-			if
-				entry
-				and old
-				and old.ammo > 0
-				and record.ammo == 0
-				and (bit32.btest(old.flags, Flag.Tracking) or bit32.btest(record.flags, Flag.Tracking))
-			then
+			-- Ran dry while tracking, after rounds or a shot: the gun clicks.
+			if entry and old and dry(record) and (old.ammo > 0 or bit32.btest(old.flags, Flag.Firing)) then
 				local px, py, pz = TurretRules.pivot(x, y, z)
 				SoundPlayer.play(ShotRules.DRY, px, py, pz)
 			end
@@ -484,6 +494,8 @@ local function addEntry(x: number, y: number, z: number, block: number)
 		distance = math.huge,
 		reach = 0,
 		reachAt = 0,
+		reachYaw = 0,
+		reachPitch = 0,
 	}
 	local list = entriesByChunk[chunk]
 	if list == nil then
@@ -523,7 +535,7 @@ local function onBlockChanged(x: number, y: number, z: number, block: number, pr
 		end
 	end
 	local key = posKey(x, y, z)
-	local now = os.clock()
+	local now = clock
 	local stash = undone[key]
 	undone[key] = nil
 	if Turrets.isTurret(previous) or Turrets.isTurret(block) then
@@ -618,6 +630,12 @@ end
 local function refresh()
 	sinceRefresh = 0
 	dirty = false
+	-- (A stashed record past UNDO_WINDOW is not wanted again: the break stood.)
+	for key, stash in undone do
+		if clock - stash.at > UNDO_WINDOW then
+			undone[key] = nil
+		end
+	end
 	local ex, ey, ez = cameraBlocks()
 	local reach = Config.Turrets.Client.DrawDistance
 	local limit = reach * reach
@@ -709,9 +727,16 @@ local function drawEntry(entry: Entry, head: Head, dt: number, now: number, epoc
 	local beam = 0
 	local laser = look.laser
 	if laser and bit32.btest(flags, Flag.Powered) then
-		if now >= entry.reachAt then
+		if
+			now >= entry.reachAt
+			or (
+				(yaw ~= entry.reachYaw or pitch ~= entry.reachPitch)
+				and TurretRules.offAngle(yaw, pitch, entry.reachYaw, entry.reachPitch) > BEAM_TURN
+			)
+		then
 			entry.reach = reachOf(entry, look)
 			entry.reachAt = now + BEAM_INTERVAL
+			entry.reachYaw, entry.reachPitch = yaw, pitch
 		end
 		beam = entry.reach
 		if ax and ay and az then
@@ -883,13 +908,15 @@ end
 
 --[[
 	The drawn muzzle (world blocks) of the turret whose shot started at (ox, oy, oz) (a Shots
-	record's origin: the server's muzzle, Barrel blocks from its pivot), the barrel's end where the
-	client draws it now; nil when no drawn turret's barrel ends near there.
+	record's origin: the server's muzzle, Barrel blocks from its pivot along its aim): of the drawn
+	turrets around there, the barrel's end where the client draws it now nearest the origin, within
+	MUZZLE_SLACK; nil when none ends that near (a neighbour's drawn gun aiming elsewhere is none).
 ]]
 function TurretView.muzzleNear(ox: number, oy: number, oz: number): (number?, number?, number?)
 	local bx, by, bz = math.floor(ox), math.floor(oy - TurretRules.PIVOT), math.floor(oz)
-	local best: Entry? = nil
-	local bestScore = math.huge
+	local found = false
+	local bestMiss = MUZZLE_SLACK * MUZZLE_SLACK
+	local bestX, bestY, bestZ = 0, 0, 0
 	for dy = -1, 1 do
 		local y = by + dy
 		if y >= 0 and y < HEIGHT then
@@ -897,29 +924,23 @@ function TurretView.muzzleNear(ox: number, oy: number, oz: number): (number?, nu
 				for dz = -1, 1 do
 					local entry = entries[posKey(bx + dx, y, bz + dz)]
 					if entry and entry.head then
-						local px, py, pz = TurretRules.pivot(entry.x, entry.y, entry.z)
-						local vx, vy, vz = ox - px, oy - py, oz - pz
-						local d = math.sqrt(vx * vx + vy * vy + vz * vz)
-						local miss = math.abs(d - entry.spec.barrel)
-						if miss <= MUZZLE_SLACK then
-							local fx, fy, fz = TurretRules.direction(entry.yaw, entry.pitch)
-							local along = if d > 1e-6 then (vx * fx + vy * fy + vz * fz) / d else 1
-							local score = miss + (1 - along)
-							if score < bestScore then
-								best, bestScore = entry, score
-							end
+						local record = records[entry.key]
+						local look = TurretModel.look(entry.spec, if record then record.flags else 0)
+						local mx, my, mz = TurretModel.muzzle(look, entry.x, entry.y, entry.z, entry.yaw, entry.pitch)
+						local miss = (mx - ox) ^ 2 + (my - oy) ^ 2 + (mz - oz) ^ 2
+						if miss <= bestMiss then
+							found, bestMiss = true, miss
+							bestX, bestY, bestZ = mx, my, mz
 						end
 					end
 				end
 			end
 		end
 	end
-	if best == nil then
+	if not found then
 		return nil, nil, nil
 	end
-	local record = records[best.key]
-	local look = TurretModel.look(best.spec, if record then record.flags else 0)
-	return TurretModel.muzzle(look, best.x, best.y, best.z, best.yaw, best.pitch)
+	return bestX, bestY, bestZ
 end
 
 -- What the view holds now (see Stats).

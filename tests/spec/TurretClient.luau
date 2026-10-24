@@ -787,6 +787,31 @@ return function(t, shared, require, _server, client)
 		t.eq(h.View.state(2, -1, 3), nil, "out of the world")
 	end)
 
+	t.test("turret view: a broken turret's record is kept UNDO_WINDOW, then dropped", function()
+		local h = boot()
+		local x, y, z = 4, 64, 4
+		local s = spec("rifle", 3)
+		h.set(x, y, z, s.block)
+		h.load(0, 0)
+		h.send({ rec(x, y, z, { flags = Flag.Powered + Flag.Laser + Flag.Scope, ammo = 3, yaw = 2 }) })
+		-- This player breaks it and the server agrees (the same air: nothing heard). Six seconds of
+		-- frames on, another player places one there: a new turret, idle.
+		h.set(x, y, z, B.Air, true)
+		for _ = 1, 24 do
+			h.frame(0.25)
+		end
+		h.set(x, y, z, s.block)
+		t.eq(h.View.state(x, y, z), nil, "a new turret: idle, the old record gone")
+		-- Refused two seconds on: the record back.
+		h.send({ rec(x, y, z, { flags = Flag.Powered, ammo = 2 }) })
+		h.set(x, y, z, B.Air, true)
+		for _ = 1, 8 do
+			h.frame(0.25)
+		end
+		h.set(x, y, z, s.block)
+		t.eq(h.View.state(x, y, z).ammo, 2, "refused within the window: back")
+	end)
+
 	t.test("turret view: a drawn gun is the model at its aim, starting where the record says", function()
 		local h = boot()
 		local x, y, z = 3, 64, 5
@@ -1055,6 +1080,49 @@ return function(t, shared, require, _server, client)
 		t.ok(beam.Size.Z / BLOCK <= CLIENT.BeamLength + 1e-6, "at most BeamLength")
 	end)
 
+	t.test("turret view: a turning gun's beam stops at the wall it turns onto, that frame", function()
+		local h = boot()
+		local x, y, z = 0, 64, 0
+		local s = spec("smg", 4)
+		h.set(x, y, z, s.block)
+		-- A pillar a block wide 3 blocks ahead (+Z), as high as the beam.
+		for wy = 60, 70 do
+			h.set(0, wy, 3, B.Stone)
+		end
+		h.load(0, 0)
+		local flags = Flag.Powered + Flag.Laser + Flag.Tracking
+		h.send({ rec(x, y, z, { yaw = math.rad(60), target = 9, flags = flags }) })
+		h.frame(1 / 60)
+		-- It turns onto the pillar at 360 degrees a second: 6 a frame, a look at the beam's block
+		-- every 0.1 s would leave it through the pillar for frames.
+		h.send({ rec(x, y, z, { yaw = 0, target = 9, flags = flags }) })
+		local beam = nil
+		for _, part in h.parts() do
+			if part.Name == "Beam" then
+				beam = part
+			end
+		end
+		local worst, onIt = 0, 0
+		for _ = 1, 30 do
+			h.frame(1 / 60)
+			if beam.Transparency < 1 then
+				-- The beam's start and aim, and where it reaches the pillar's face (z 3, x 0..1).
+				local aim = beam.CFrame.LookVector
+				local length = beam.Size.Z / BLOCK
+				local cx, _, cz = Origin.renderToBlocks(beam.CFrame.Position)
+				local sx, sz = cx - aim.X * length / 2, cz - aim.Z * length / 2
+				local toWall = (3 - sz) / aim.Z
+				local hx = sx + aim.X * toWall
+				if hx >= 0 and hx <= 1 then
+					onIt += 1
+					worst = math.max(worst, length - toWall)
+				end
+			end
+		end
+		t.ok(onIt > 0, "it aims at the pillar")
+		t.ok(worst < 0.02, `the beam ends on the pillar ({worst} past its face)`)
+	end)
+
 	t.test("turret view: the servo loops at the nearest turning guns, a dry gun clicks", function()
 		local h = boot()
 		local tracking = Flag.Powered + Flag.Tracking
@@ -1106,6 +1174,50 @@ return function(t, shared, require, _server, client)
 		t.eq(#h.plays, played + 1, "tracking when it fell to 0: a click")
 	end)
 
+	t.test("turret view: a fed one-round turret never clicks dry; run dry, it clicks once", function()
+		local h = boot()
+		local x, y, z = 2, 64, 3
+		local s = spec("rifle", 1)
+		t.eq(s.buffer, 1, "one round")
+		h.set(x, y, z, s.block)
+		h.load(0, 0)
+		local function clicks(): number
+			local n = 0
+			for _, play in h.plays do
+				if play.name == ShotRules.DRY then
+					n += 1
+				end
+			end
+			return n
+		end
+		local tracking = Flag.Powered + Flag.Tracking
+		local firing = tracking + Flag.Firing
+		-- Fed as the server sends it: none held after each shot (Firing), the next round a tick or
+		-- two later.
+		h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 1 }) })
+		for _ = 1, 10 do
+			h.send({ rec(x, y, z, { target = 5, flags = firing, ammo = 0 }) })
+			h.frame(0.1)
+			h.send({ rec(x, y, z, { target = 5, flags = firing, ammo = 1 }) })
+			h.frame(0.1)
+		end
+		t.eq(clicks(), 0, "fed: never a dry click")
+		-- The last round shot and none coming: when Firing ends (the server's No ammo), one click.
+		h.send({ rec(x, y, z, { target = 5, flags = firing, ammo = 0 }) })
+		t.eq(clicks(), 0, "still Firing")
+		h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 0 }) })
+		t.eq(clicks(), 1, "run dry: a click")
+		local click = h.plays[#h.plays]
+		local px, py, pz = TurretRules.pivot(x, y, z)
+		t.ok(click.x == px and click.y == py and click.z == pz, "at the gun")
+		h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 0, yaw = 0.5 }) })
+		t.eq(clicks(), 1, "once")
+		-- A round, the shot that kills its target: no longer tracking, nothing to click at.
+		h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 1 }) })
+		h.send({ rec(x, y, z, { flags = Flag.Powered, ammo = 0 }) })
+		t.eq(clicks(), 1, "not tracking: no click")
+	end)
+
 	t.test("turret view: a turret's shot leaves its drawn barrel", function()
 		local h = boot()
 		local x, y, z = 6, 64, 6
@@ -1137,6 +1249,25 @@ return function(t, shared, require, _server, client)
 		-- Nothing near: the origin stands (nil).
 		t.eq(h.finder(ox + 3, oy, oz), nil, "no barrel there")
 		t.eq(h.finder(ox, oy + 2.5, oz), nil, "nor there")
+		-- A covered turret (not drawn) next to a drawn one aiming elsewhere: its shot starts at its
+		-- origin, a barrel's length from the neighbour's pivot but not at its drawn muzzle.
+		local sniper = spec("sniper", 1)
+		local ax, ay, az, bx, by, bz = 2, 64, 2, 3, 64, 3
+		h.set(ax, ay, az, sniper.block)
+		h.set(ax, ay + 1, az, B.Stone)
+		h.set(bx, by, bz, sniper.block)
+		h.send({
+			rec(ax, ay, az, { yaw = math.pi / 2, target = 1, flags = Flag.Powered + Flag.Tracking }),
+			rec(bx, by, bz, { yaw = 0, target = 2, flags = Flag.Powered + Flag.Tracking }),
+		})
+		h.frame()
+		local ex, ey, ez = TurretRules.muzzle(ax, ay, az, math.pi / 2, 0, sniper.barrel)
+		local px, py, pz = TurretRules.pivot(bx, by, bz)
+		t.near(math.sqrt((ex - px) ^ 2 + (ey - py) ^ 2 + (ez - pz) ^ 2), sniper.barrel, 1e-9, "the barrel's length")
+		t.eq(h.finder(ex, ey, ez), nil, "not the neighbour's barrel")
+		local nx, ny, nz = TurretRules.muzzle(bx, by, bz, 0, 0, sniper.barrel)
+		local fx, _, fz = h.finder(nx, ny, nz)
+		t.ok(fx == nx and fz == nz, "the neighbour's own shot: its barrel")
 		-- ShotView's own code: shooterless turret shots go through the finder, players' don't.
 		local source = fs.readFile("src/client/Rendering/ShotView.luau")
 		t.ok(
