@@ -796,10 +796,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   osmium, lead and zinc smelting, brass, the Hazmat suit, potions),
   the **Industrial Age** (level 15, an Osmium Ingot and a Bucket: diamond gear, Mekanism's basic and
   advanced pipes, transporters and tanks, the Configurator, the Heat Generator, gunpowder and TNT,
-  potions II and long potions), the **Electric Age** (level 25, a Heat Generator: cables, the
+  uranium smelting, potions II and long potions), the **Electric Age** (level 25, a Heat Generator: cables, the
   Electric Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion Generator, elite
   pipes) and the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar Panel, the
-  ultimate tiers, uranium smelting, the Nuke). A later Age's crafting results stay out of the grid (shown greyed with
+  ultimate tiers, uranium's nuggets and blocks, the Nuke). A later Age's crafting results stay out of the grid (shown greyed with
   "Requires the Iron Age"; JEI puts a padlock on them) and furnaces take nothing that would smelt
   into one; reaching an Age is automatic, with a banner, a fanfare and a line in everyone's chat.
   Each level is a **skill point** for the skill tree (`K`): 18 small perks in three branches across
@@ -1602,8 +1602,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   Sulfur and a coal or charcoal make four Gunpowder (behind the Industrial Age and Demolition, as
   gunpowder is). The Metal Miner copies both.
 - **Uranium.** Uranium Ore (green-specked stone) needs an iron pickaxe and drops Raw Uranium, which
-  smelts into a Uranium Ingot in the Atomic Age, with Uranium Nuggets, a Block of Uranium (the
-  Nuke's core) and a Block of Raw Uranium. The **Hazmat suit** (Mekanism's Hazmat Mask, Gown,
+  smelts into a Uranium Ingot from the Industrial Age (the Age of the transporters, which feed
+  furnaces whoever's Age it is), with Uranium Nuggets, a Block of Uranium (the Nuke's core) and a
+  Block of Raw Uranium in the Atomic Age. The **Hazmat suit** (Mekanism's Hazmat Mask, Gown,
   Pants and Boots: lead ingots in White Wool padding, the mask with a glass visor; Leather's
   armor points) is the Iron Age's.
 - **Where the newer ores are found.** Each follows its mod's numbers, mapped onto this taller
@@ -2960,7 +2961,7 @@ for performance:
 | `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
 | `Radiation.Enabled` | true | Uranium is radioactive: exposure, the dose, Radiation Sickness and the Geiger counter's clicks (false: none of it; a saved dose is kept). |
 | `Radiation.Sources` | Ore 1, Raw Uranium 0.3, Ingot 12, Nugget 1.33, Block of Raw Uranium 2.7, Block of Uranium 108 | Sv/h a block or an item gives a block away or nearer (carried: times the count; a block's item as the block). |
-| `Radiation.Radius` / `Shielding` / `MaxRays` | 8 / Solid 0.5, LeadBlock 0.02, RawLeadBlock 0.1 / 32 | Blocks are looked for within the radius (inverse square, fading to 0 there); the share each block between lets through (any full solid block `Solid`, these by name); the nearest sources traced for shielding in one look (the rest take their mean). |
+| `Radiation.Radius` / `Shielding` / `MaxRays` | 8 / Solid 0.5, LeadBlock 0.02, RawLeadBlock 0.1 / 32 | Blocks are looked for within the radius (inverse square, fading to 0 there); the share each block between lets through (any full solid block `Solid`, these by name); the nearest sources traced for shielding in one look (the rest take their octant's mean, unshielded where none was traced). |
 | `Radiation.Hazmat` | 0.25 / 0.4 / 0.2 / 0.15 | The share of radiation each Hazmat piece worn keeps out (Mekanism's: the whole suit all of it). |
 | `Radiation.HalfLife` / `MinRate` / `Interval` | 600 / 0.0005 / 1 | Seconds for a dose to halve; the rate (Sv/h) below which there is none; seconds between two looks at a player. |
 | `Radiation.Sickness` | Bands 0.1 / 1 / 10, Ticks 600, HungerFrom 2, NauseaFrom 3 | The doses (Sv) of Radiation Sickness I, II and III; ticks it lasts after the dose falls below its band; the levels Hunger and Nausea come with. |

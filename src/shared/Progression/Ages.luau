@@ -31,7 +31,9 @@
 	  Industrial Age  (level 15, an Osmium Ingot smelted, a Bucket crafted) diamond tools and
 	                  armor, diamond, emerald and osmium blocks, osmium nuggets, Mekanism's basic
 	                  and advanced transporters, pipes and fluid tanks, the Configurator, the
-	                  Heat Generator, Gunpowder and TNT (with the Demolition skill too), the
+	                  Heat Generator, Gunpowder and TNT (with the Demolition skill too), uranium
+	                  smelting (no smelting result may come later: transporters feed furnaces
+	                  ungated), the
 	                  potions' strong (II) and long variants, Concrete (cracked and mossy
 	                  too) and the Oil Heater.
 	  Electric Age    (level 25, a Heat Generator crafted) basic and advanced
@@ -42,7 +44,7 @@
 	                  Advanced and Elite turrets, the Metal Miner and the Ammo Press.
 	  Atomic Age      (level 40, an Oil Refinery and a Basic Battery crafted) the Solar Panel,
 	                  elite and ultimate cables and Batteries, ultimate transporters, pipes and
-	                  tanks, the Ultimate turrets, uranium (ingots, nuggets, blocks) and the Nuke
+	                  tanks, the Ultimate turrets, uranium's nuggets and blocks and the Nuke
 	                  (with the Fission skill too).
 
 	An Age's `recipes` are the results (item names) it opens: crafting and smelting results of a
@@ -189,6 +191,9 @@ for _, name in
 		"HeatGenerator",
 		"Gunpowder",
 		"Tnt",
+		-- (Uranium smelting: a smelting result is never of an Age after the transporters', which
+		-- feed furnaces with no window and so no gate.)
+		"UraniumIngot",
 		-- (Concrete, and what smelting and vines make of it: the results are gated, not the inputs.)
 		"Concrete",
 		"CrackedConcrete",
@@ -232,8 +237,8 @@ local atomic: { string } = {
 	"UltimateMechanicalPipe",
 	"UltimateFluidTank",
 	"Nuke",
-	-- (Uranium: its ingot, nugget and blocks; the ore and Raw Uranium are mined in any Age.)
-	"UraniumIngot",
+	-- (Uranium's nugget and blocks; the ore and Raw Uranium are mined in any Age, and the ingot
+	-- smelted from the Industrial Age.)
 	"UraniumNugget",
 	"UraniumBlock",
 	"RawUraniumBlock",

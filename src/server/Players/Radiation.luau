@@ -23,8 +23,8 @@
 	             DOSE_ATTRIBUTE the dose (Sv), each to two significant figures (Radiation.round, so
 	             they change only when that does) and absent at 0. Client Audio/Geiger clicks from
 	             the rate, F3 shows both.
-	  Death      a new character starts with no dose (and its rate at 0); a dead one stops being
-	             looked at and its rate goes at once.
+	  Death      clears the dose and the rate at once (so a save before the respawn keeps none),
+	             and a new character starts with none; a dead one stops being looked at.
 	  Saved      a saved player's dose comes back on their first character, or the one standing
 	             (`restore`: World/WorldSave's player record, Save/PlayerCodec version 5; with
 	             characters Players/CharacterStore's, Save/CharacterCodec version 4), and `export`
@@ -86,6 +86,10 @@ local function publish(player: Player, name: string, value: number)
 end
 
 local function show(player: Player, state: RadiationRules.State)
+	-- (Switched off, nothing is published: a saved dose is only kept.)
+	if not Config.Radiation.Enabled then
+		return
+	end
 	publish(player, RATE, state.rate)
 	publish(player, DOSE, state.dose)
 end
@@ -166,7 +170,7 @@ end
 function RadiationServer.restore(player: Player, dose: number?)
 	local state = RadiationRules.new(dose)
 	local record = records[player]
-	if record and player.Character then
+	if record and alive(player) then
 		record.state.dose = state.dose
 		show(player, record.state)
 	else
@@ -202,9 +206,13 @@ function RadiationServer.start(world: WorldServer.World)
 		local humanoid = character:WaitForChild("Humanoid", 10)
 		if humanoid and humanoid:IsA("Humanoid") then
 			humanoid.Died:Connect(function()
+				-- (The dose goes with the body at once: a save made before the respawn, leaving on
+				-- the death screen, keeps none.)
 				if records[player] == record then
 					record.state.rate = 0
+					record.state.dose = 0
 					publish(player, RATE, 0)
+					publish(player, DOSE, 0)
 				end
 			end)
 		end

@@ -127,6 +127,16 @@ return function(t, shared, require, _server, _client)
 			t.ok(drop and drop.item == I[item] and drop.count == 1, `{ore} drops one {item}`)
 		end
 		t.eq(Blocks.soundType(B.BrassBlock), "metal")
+		-- Every storage block stands a blast as the Block of Iron does (Minecraft's 6).
+		for _, name in BLOCKS do
+			if not string.find(name, "Ore$") then
+				t.eq(
+					Blocks.get(B[name]).blastResistance,
+					Blocks.get(B.IronBlock).blastResistance,
+					`{name}'s blast resistance`
+				)
+			end
+		end
 		-- Every ore looks like no other block.
 		for _, name in BLOCKS do
 			local def = Blocks.get(B[name])
@@ -207,8 +217,24 @@ return function(t, shared, require, _server, _client)
 		for _, piece in { "Helmet", "Chestplate", "Leggings", "Boots" } do
 			t.eq(ageOf(`Hazmat{piece}`), "iron", `the Hazmat {piece}: before uranium is smelted`)
 		end
-		for _, name in { "UraniumIngot", "UraniumNugget", "UraniumBlock", "RawUraniumBlock", "Nuke" } do
+		for _, name in { "UraniumNugget", "UraniumBlock", "RawUraniumBlock", "Nuke" } do
 			t.eq(ageOf(name), "atomic", `{name}: the Atomic Age's`)
+		end
+		-- Transporters feed furnaces with no window (no gate), so nothing smelts into a result of
+		-- a later Age than theirs: uranium smelting is the Industrial Age's.
+		t.eq(ageOf("UraniumIngot"), "industrial", "uranium smelting: the transporters' Age")
+		local function index(id: string): number
+			for i, age in Ages.list do
+				if age.id == id then
+					return i
+				end
+			end
+			return 1
+		end
+		local transporters = index(ageOf("BasicLogisticalTransporter"))
+		for _, recipe in Smelting.recipes() do
+			local name = Items.get(recipe.result.item).name
+			t.ok(index(ageOf(name)) <= transporters, `{name} smelts no later than transporters come`)
 		end
 		for _, name in { "CopperOre", "LeadOre", "ZincOre", "SulfurOre", "SaltpetreOre", "UraniumOre" } do
 			t.ok((Knowledge.ORES :: any)[name] ~= nil, `{name} gives knowledge when mined`)

@@ -19,10 +19,12 @@
 	  Shielding  `transmission`: the share a ray from a source to the body gets through, each cell
 	             strictly between them (a voxel walk, Amanatides and Woo's) letting through its
 	             block's `TRANSMISSION` (Config.Radiation.Shielding: any full solid opaque block
-	             `Solid`, lead and raw lead blocks their own; anything else, and unknown cells, all
-	             of it). `scan(getBlock, x, y, z)` reads every cell of the sphere (OFFSETS, nearest
+	             `Solid` (leaves too: they are solid and opaque), lead and raw lead blocks their own;
+	             anything else, and unknown cells, all of it). `scan(getBlock, x, y, z)` reads every cell of the sphere (OFFSETS, nearest
 	             first) and traces the nearest MaxRays sources it finds; the rest take the mean
-	             share of those traced. Its cost is bounded: #OFFSETS reads and MaxRays rays of at
+	             share of those traced in their octant of directions from the body, all of it in
+	             an octant with none traced (only a player-built heap has that many within the
+	             radius; a lead wall on one side hides none in the open on the other). Its cost is bounded: #OFFSETS reads and MaxRays rays of at
 	             most 3 x (Radius + 1) cells each (`readsBound`).
 	  Hazmat     `shielding(armor)`: the share the armor worn keeps out (Config.Radiation.Hazmat:
 	             Mekanism's 0.25, 0.4, 0.2 and 0.15, summed as Mekanism's getRadiationResistance,
@@ -288,6 +290,11 @@ function Radiation.readsBound(): number
 	return Radiation.OFFSETS + MAX_RAYS * 3 * (math.ceil(RADIUS) + 1)
 end
 
+-- (`scan`'s sums per octant, reused.)
+local octantPassed: { number } = table.create(8, 0)
+local octantCount: { number } = table.create(8, 0)
+local octantUntraced: { number } = table.create(8, 0)
+
 --[[
 	The rate (Sv/h, before the Hazmat suit) the blocks around the point (x, y, z) give it (the
 	body's centre, blocks): every source within the radius, its falloff and shielding (see the
@@ -295,7 +302,13 @@ end
 ]]
 function Radiation.scan(getBlock: GetBlock, x: number, y: number, z: number): number
 	local cx, cy, cz = math.floor(x), math.floor(y), math.floor(z)
-	local total, untraced, traced, passed = 0, 0, 0, 0
+	local total, traced = 0, 0
+	-- (Per octant of directions from the body: the traced sources' summed share let through and
+	-- their count, and the untraced ones' unshielded rate.)
+	local passed, count, untraced = octantPassed, octantCount, octantUntraced
+	for octant = 1, 8 do
+		passed[octant], count[octant], untraced[octant] = 0, 0, 0
+	end
 	for i = 1, #offsetX do
 		local bx, by, bz = cx + offsetX[i], cy + offsetY[i], cz + offsetZ[i]
 		local block = getBlock(bx, by, bz)
@@ -304,19 +317,28 @@ function Radiation.scan(getBlock: GetBlock, x: number, y: number, z: number): nu
 			local dx, dy, dz = bx + 0.5 - x, by + 0.5 - y, bz + 0.5 - z
 			local share = Radiation.falloff(dx * dx + dy * dy + dz * dz)
 			if share > 0 then
+				local octant = 1 + (if dx < 0 then 1 else 0) + (if dy < 0 then 2 else 0) + (if dz < 0 then 4 else 0)
 				if traced < MAX_RAYS then
 					local pass = Radiation.transmission(getBlock, bx, by, bz, x, y, z)
 					traced += 1
-					passed += pass
+					passed[octant] += pass
+					count[octant] += 1
 					total += source * share * pass
 				else
-					untraced += source * share
+					untraced[octant] += source * share
 				end
 			end
 		end
 	end
-	if untraced > 0 then
-		total += untraced * (if traced > 0 then passed / traced else 1)
+	-- The untraced take the mean share of the traced in their octant (a wall round the body
+	-- shields them as it does the near ones), or all of it where none was traced (a lead wall on
+	-- one side hides no heap in the open on the other).
+	for octant = 1, 8 do
+		local rest = untraced[octant]
+		if rest > 0 then
+			local n = count[octant]
+			total += rest * (if n > 0 then passed[octant] / n else 1)
+		end
 	end
 	return total
 end

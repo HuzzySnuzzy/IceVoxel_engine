@@ -2224,10 +2224,11 @@ local Config = {
 		Radius = 8,
 		-- The share of radiation each block between a source and the body lets through: any full
 		-- solid block (rock, earth, wood, metal) `Solid`, these by name (lead stops nearly all).
-		-- Glass, leaves, plants and fluids let it all through.
+		-- Glass, plants and fluids let it all through (leaves are solid: Solid).
 		Shielding = { Solid = 0.5, LeadBlock = 0.02, RawLeadBlock = 0.1 },
 		-- The most sources traced for shielding in one look, nearest first (the rest take the
-		-- mean of those traced): a look reads at most the sphere and this many rays.
+		-- mean of those traced in their octant of directions, unshielded in one with none): a
+		-- look reads at most the sphere and this many rays.
 		MaxRays = 32,
 		-- The share of radiation each Hazmat piece worn keeps out (Mekanism's mask, gown, pants
 		-- and boots; the whole suit keeps out all of it), carried uranium's too.

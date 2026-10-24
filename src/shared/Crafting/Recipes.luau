@@ -415,7 +415,7 @@ shape({ "N", "G", "D" }, { N = "IronNugget", G = "Glass", D = "GlowDust" }, "The
 
 --[[
 	The Hazmat suit (Mekanism's, Shared/Radiation): lead sheet in White Wool padding, each piece in
-	its armor shape (the mask with a glass visor): 17 lead ingots and 12 wool for the suit.
+	its armor shape (the mask with a glass visor): 12 lead ingots, 12 wool and a glass for the suit.
 ]]
 do
 	local key = { L = "LeadIngot", W = "WhiteWool", G = "Glass" }

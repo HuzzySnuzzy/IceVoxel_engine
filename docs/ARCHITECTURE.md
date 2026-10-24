@@ -5379,9 +5379,12 @@ false turns all of it off (a saved dose is kept as it is).
   the server's loaded blocks (`peekBlock`: an unloaded cell is nothing, never generated). Each
   source found is traced (`transmission`: an Amanatides and Woo voxel walk to the body, each cell
   strictly between letting through its block's share: any full solid opaque block
-  `Shielding.Solid` 0.5, a Block of Lead 0.02, a Block of Raw Lead 0.1; glass, leaves, plants,
-  fluids and unknown cells all of it), the nearest `MaxRays` (32) of them; the rest take the mean
-  share of those traced. Bounded: at most `readsBound()` reads a look (3,809: the sphere and the
+  `Shielding.Solid` 0.5 (leaves too: they are solid and opaque), a Block of Lead 0.02, a Block of
+  Raw Lead 0.1; glass, plants, fluids and unknown cells all of it), the nearest `MaxRays` (32) of
+  them; the rest take the mean share of those traced in their octant of directions from the body,
+  and all of it in an octant with none traced (only a player-built heap has more within the
+  radius: a wall round the body shields them all, but a lead wall on one side hides no heap in
+  the open on the other). Bounded: at most `readsBound()` reads a look (3,809: the sphere and the
   rays, each at most the Manhattan distance), about 0.3 to 0.6 ms under Lune, once a second a
   player.
 - **The Hazmat suit** (`shielding`): `Hazmat`'s shares summed over the armor worn, at most all
@@ -5494,8 +5497,10 @@ smelted, a Bucket crafted), Electric (25, a Heat Generator crafted, 6 biomes), A
 Oil Refinery and a Basic Battery crafted). Iron smelting is the Stone Age's on purpose: smelting
 the first ingot is the way in; what is made of iron is the Iron Age's. Of the new ores, copper
 (ingots, nuggets, blocks), Sulfur and Saltpetre are the Stone Age's, lead, zinc, brass and the
-Hazmat suit the Iron Age's, and uranium's ingot, nugget and blocks the Atomic Age's (the ore and
-Raw Uranium are mined in any Age). What the mobs brought
+Hazmat suit the Iron Age's, uranium smelting the Industrial Age's and uranium's nugget and blocks
+the Atomic Age's (the ore and Raw Uranium are mined in any Age). No smelting result is of a later
+Age than the transporters' (Industrial): they feed furnaces and the Electric Furnace with no window,
+so with no gate, and `tests/spec/Ores` checks every smelting result against it. What the mobs brought
 (cooked meat, leather armor, White Wool) is the Stone Age's; the potions (Effects/PotionList)
 are brewed from the Iron Age (each potion's base variant), their level II and long variants from
 the Industrial Age (`tests/spec/Crossover` checks every one).

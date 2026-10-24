@@ -244,6 +244,47 @@ return function(t, shared, require, server)
 
 	--[[ The Hazmat suit ]]
 
+	t.test("radiation: past the traced rays, a lead wall on one side hides no heap in the open on the other", function()
+		-- Every source within the radius traced (no MaxRays), to compare.
+		local function everyRay(get: (number, number, number) -> number?, x: number, y: number, z: number): number
+			local total = 0
+			for bx = math.floor(x) - 10, math.floor(x) + 10 do
+				for by = math.floor(y) - 10, math.floor(y) + 10 do
+					for bz = math.floor(z) - 10, math.floor(z) + 10 do
+						local s = Radiation.strength(get(bx, by, bz) or 0)
+						if s > 0 then
+							local dx, dy, dz = bx + 0.5 - x, by + 0.5 - y, bz + 0.5 - z
+							local share = Radiation.falloff(dx * dx + dy * dy + dz * dz)
+							if share > 0 then
+								total += s * share * Radiation.transmission(get, bx, by, bz, x, y, z)
+							end
+						end
+					end
+				end
+			end
+			return total
+		end
+		-- 36 Blocks of Raw Uranium behind a lead wall 2.5 to 4 blocks east (more sources than
+		-- rays), and four Blocks of Uranium in the open 5.5 blocks west.
+		local w = world(air)
+		for by = 58, 72 do
+			for bz = -6, 7 do
+				w.set(2, by, bz, B.LeadBlock)
+			end
+		end
+		for by = 62, 67 do
+			for bz = -2, 3 do
+				w.set(3, by, bz, B.RawUraniumBlock)
+			end
+		end
+		for _, c in { { -5, 64, 0 }, { -5, 65, 0 }, { -5, 64, 1 }, { -5, 65, 1 } } do
+			w.set(c[1], c[2], c[3], B.UraniumBlock)
+		end
+		local x, y, z = 0.5, 64.9, 0.5
+		local scanned, full = Radiation.scan(w.get, x, y, z), everyRay(w.get, x, y, z)
+		t.ok(scanned >= full * 0.95 and scanned <= full * 1.05, `as every ray says ({scanned} against {full} Sv/h)`)
+	end)
+
 	t.test("radiation: the Hazmat suit keeps out Mekanism's shares, the whole suit all of it", function()
 		t.eq(Radiation.shielding({}), 0, "bare")
 		t.eq(Radiation.shielding({ stack(I.HazmatHelmet, 1) }), 0.25, "the mask")

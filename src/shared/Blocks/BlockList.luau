@@ -3964,8 +3964,9 @@ table.insert(list, {
 	  * Sulfur Ore (yellow crusts) and Saltpetre Ore (white ones, on Limestone's material) drop by
 	    any pickaxe, as Coal Ore does: one Sulfur, one Saltpetre.
 	  * The storage blocks: Minecraft's raw blocks' hardness 5 for every one (the Block of Copper
-	    Minecraft's 3), a stone pickaxe (iron for uranium); the metal blocks sound like metal, the
-	    raw ones like rock. Uranium's are radioactive (Shared/Radiation), as its ore is.
+	    Minecraft's 3) and its blast resistance 6, as every metal block (a Block of Lead, the
+	    radiation shield, stands a blast as iron's does), a stone pickaxe (iron for uranium); the
+	    metal blocks sound like metal, the raw ones like rock. Uranium's are radioactive (Shared/Radiation), as its ore is.
 ]]
 -- (Each metal's ore, block and raw block: name, the speck colour, the block's, the raw block's,
 -- the least tool tier.)
@@ -3991,6 +3992,7 @@ local function metalBlocks(ore: typeof(URANIUM))
 		color = ore.block,
 		material = "Metal",
 		hardness = if ore.name == "Copper" then 3 else 5,
+		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = ore.level,
 	})
@@ -4000,6 +4002,7 @@ local function metalBlocks(ore: typeof(URANIUM))
 		color = ore.raw,
 		material = "Rock",
 		hardness = 5,
+		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = ore.level,
 	})
@@ -4013,6 +4016,7 @@ table.insert(list, {
 	color = { 206, 170, 84 },
 	material = "Metal",
 	hardness = 5,
+	blastResistance = 6,
 	tool = "pickaxe",
 	toolLevel = 1,
 })

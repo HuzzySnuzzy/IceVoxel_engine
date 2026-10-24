@@ -34,9 +34,9 @@
 	                        (fuel: "Makes 10 MJ" and "2.5 kJ/t for 200 s")
 	              duplicating  the ore block, a progress bar filling over the time the Metal
 	                        Miner takes an item, its drop, "240 s, 3.84 MJ" and "800 J/t"
-	              pressing  the Iron Ingot over the Gunpowder, a progress bar filling over the
-	                        10 s an operation takes, the rounds and their count, "10 s, 10 kJ"
-	                        and "50 J/t"
+	              pressing  the Brass Ingot over the Lead Ingot, the Gunpowder beside them, a
+	                        progress bar filling over the 10 s an operation takes, the rounds
+	                        and their count, "10 s, 10 kJ" and "50 J/t"
 	            A fluid stack stands for its bucket in navigation (clicks, R / U, gamepad).
 
 	The gauges are the inventory's (Ui/ContainerPanel): the progress a white bar 2 tall across the
