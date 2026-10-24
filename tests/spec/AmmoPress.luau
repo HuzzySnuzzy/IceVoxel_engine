@@ -3,10 +3,11 @@
 	Config.AmmoPress): the block and its numbers, the slots (hand, shift-click, transporters
 	through any face, never the cards), an operation of each calibre (an Iron Ingot and a
 	Gunpowder into 16 9mm, 10 5.56 or 5 .308 rounds in 200 ticks at 50 J a tick), Mekanism's
-	upgrade maths at every card count, the Calibre button and its choice kept in the item, a
-	missing input, a full output and no power, data from elsewhere, the real server worlds
-	(transporters feeding it, its rounds pushed into a chest, the records WAILA reads, the item
-	keeping its energy and calibre), switched off, and the panel, its line and WAILA's lines.
+	upgrade maths at every card count, cards swapped mid-operation (its share kept), the Calibre
+	button and its choice kept in the item, a missing input, a full output and no power, data from
+	elsewhere, the real server worlds (transporters feeding it, its rounds pushed into a chest, the
+	records WAILA reads, the item keeping its energy and calibre), switched off, and the panel, its
+	line and WAILA's lines.
 ]]
 
 return function(t, shared, require, server, client)
@@ -281,6 +282,34 @@ return function(t, shared, require, server, client)
 		tick(container)
 		t.eq(Machines.capacity(container), CAPACITY)
 		t.eq(Machines.energy(container), CAPACITY - USE, "cut to 20 kJ, then a tick's work")
+	end)
+
+	t.test("ammo press: cards in or out mid-operation keep its share of the work, none skipped", function()
+		-- Half of the 200 ticks at 50 J/t, then 8 Speed Upgrades: half of the 20 at 5 kJ/t.
+		local container = press(CAPACITY, 3, 3)
+		tick(container, TICKS / 2)
+		container.slots[SPEED] = S(I.SpeedUpgrade, 8)
+		local took, used = operation(container, TICKS)
+		t.eq(took, 10, "100 of 200 ticks are 10 of 20")
+		t.eq(used, 10 * Machines.quantiseUp(Upgrades.energyPerTick(USE, 8, 0)), "half of 100 kJ")
+		-- Halfway through the next the cards come out: 10 of 20 ticks are 100 of 200.
+		container.slots[OUTPUT] = nil
+		for _ = 1, 10 do
+			container.data[ENERGY] = Machines.quantise(Machines.capacity(container))
+			tick(container)
+		end
+		t.eq(field(container, "progress"), 10)
+		container.slots[SPEED] = nil
+		took, used = operation(container, TICKS)
+		t.eq(took, 100, "the other half at 200 ticks")
+		t.eq(used, 100 * USE)
+		-- Rounded down, never ahead: 7 of 200 ticks are none of 20.
+		container.slots[OUTPUT] = nil
+		tick(container, 7)
+		container.slots[SPEED] = S(I.SpeedUpgrade, 8)
+		took = operation(container, TICKS)
+		t.eq(took, 20)
+		t.eq(container.slots[OUTPUT] and container.slots[OUTPUT].count, 16)
 	end)
 
 	--[[ The Calibre button ]]

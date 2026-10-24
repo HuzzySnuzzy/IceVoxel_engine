@@ -20,7 +20,10 @@
 	Electric Furnace's: the ticks an operation takes (Config.AmmoPress.Ticks x 10^(-speed/8),
 	truncated: 149 with one card, 20 with 8), the energy a tick of work uses (Joules x
 	10^((2 speed - energy)/8)) and the capacity (the block's store x 10^(energy/8)). Taking cards
-	out applies at once (energy over a smaller capacity is lost: Mekanism's setMaxEnergy).
+	out applies at once (energy over a smaller capacity is lost: Mekanism's setMaxEnergy). A
+	change of `ticksRequired` keeps the share of the operation done, not the ticks worked
+	(`Upgrades.rescale`: the progress x new / old ticks, rounded down), so a card swap never skips
+	work.
 
 	With Config.AmmoPress.Enabled false (read every tick) it is inert: it uses nothing, makes
 	nothing, keeps its progress and says "Idle" (its recipe is left out then: Crafting/Recipes,
@@ -165,6 +168,8 @@ local function tick(container: Container, ctx: Core.TickContext)
 		return
 	end
 	local ticks, energyPerTick, capacity = settings(container, ctx)
+	-- (Cards in or out keep the share of the operation done, rounded down: no work skipped.)
+	local progress = Upgrades.rescale(Core.get(container, "progress"), Core.get(container, "ticksRequired"), ticks)
 	Core.set(container, "ticksRequired", ticks)
 	Core.set(container, "energyPerTick", energyPerTick)
 	Upgrades.setCapacity(container, capacity)
@@ -176,7 +181,7 @@ local function tick(container: Container, ctx: Core.TickContext)
 	local slots = container.slots
 	local hasIngot, hasPowder = holds(container, INGOT, IRON), holds(container, GUNPOWDER, POWDER)
 	-- (Never past the end, whatever the data says: a full arrow finishes on the next tick.)
-	local progress = math.clamp(math.floor(Core.get(container, "progress")), 0, ticks)
+	progress = math.clamp(math.floor(progress), 0, ticks)
 	local state, working = IDLE, false
 	if not (hasIngot and hasPowder) then
 		-- Nothing to press: idle when empty, waiting for the other input with one of them.

@@ -6080,8 +6080,12 @@ cards installed (the slot's own card only, whole, 0..8, whatever a stack says), 
 Mekanism's with its maxUpgradeMultiplier 10, for n speed and e energy cards: `ticks` = base x
 10^(-n/8), truncated (getTicks: 200 becomes 149 with one card and 20 with 8; at least 1),
 `energyPerTick` = base x 10^((2n - e)/8), `capacity` = base x 10^(e/8), and `production` = base x
-10^(n/8), the Solar Panel's (Mekanism's solar generators take no upgrades). The cards are slot
-contents like any other: they drop when the machine is broken (Mekanism keeps them in its item).
+10^(n/8), the Solar Panel's (Mekanism's solar generators take no upgrades). `rescale(progress,
+from, to)` is the progress once an operation of `from` ticks takes `to`: the same share of the
+work, rounded down (`progress` x `to` // `from`; as it is while `from` is under 1), the Metal
+Miner's and the Ammo Press's (Mekanism and the other kinds keep the ticks worked). The cards are
+slot contents like any other: they drop when the machine is broken (Mekanism keeps them in its
+item).
 
 **The Solar Panel** (kind "solar", `Machines/Kinds/Solar`; Mekanism Generators' Solar Generator).
 BlockList `SolarPanel` has `energy = { capacity = 96 000, output = 100 }`, a producer, and
@@ -7311,19 +7315,22 @@ require it):
   rounded up to a whole quantum (so ticks x J a tick is exact and at least the floor): a coal costs
   at least 400 kJ at every card count (the floor binds in the 36 counts with more Energy than Speed
   Upgrades), against 320 kJ a coal in a Heat Generator and 355.6 kJ burnt as a Block of Coal; the
-  Combustion Generator burns only refinery fuel. 8 Speed + 8 Energy Upgrades: a diamond every 480
-  ticks at 8 kJ/t (3.84 MJ, as without cards) in a 2 MJ store; 8 Speed alone 80 kJ/t. Then, as the
-  Electric Furnace: no room in the output for one more drop (the same item, within its stack) is
-  "Output full" and less than a tick's J "No power", both with the progress waiting and nothing
-  used; else it works (RATE minus the J, ACTIVE through `showActive`'s delay) and at `ticksRequired`
-  puts one drop (Coal, Raw Iron, Raw Osmium, Raw Gold, an Emerald, a Diamond: `Items.blockDrops`,
-  never the ore) into the output in a new stack, which the ejector pushes into chests next to it and
-  NORMAL and PULL transporter sides take; nothing reaches the cards. Only its energy goes into its
-  item. With `Config.Miner.Enabled` false it is inert (nothing used or made, "Idle"). Its panel's
-  two lines at (8, 32): "Makes Diamond" and, from the window's ticksRequired, "4:00 an item" (tenths
-  when not whole: "0:14.9"); none without an ore. On a Heat Generator's 200 J/t a diamond miner
-  works a tick in four and glows steadily; a generator burning coal into the cheapest coal miner
-  gets 15 coal back for 20 burnt.
+  Combustion Generator burns only refinery fuel. Cards put in or taken out mid-item keep the share
+  of the item made, not the ticks worked (`Upgrades.rescale`: the progress x new / old ticks,
+  rounded down), so no swap of cards at any time makes a coal cost under its floor (0 Speed and 8
+  Energy Upgrades to 59 of 600 ticks, then 8 and 8: 5 of 60, 479 kJ in all). 8 Speed + 8 Energy
+  Upgrades: a diamond every 480 ticks at 8 kJ/t (3.84 MJ, as without cards) in a 2 MJ store; 8 Speed
+  alone 80 kJ/t. Then, as the Electric Furnace: no room in the output for one more drop (the same
+  item, within its stack) is "Output full" and less than a tick's J "No power", both with the
+  progress waiting and nothing used; else it works (RATE minus the J, ACTIVE through `showActive`'s
+  delay) and at `ticksRequired` puts one drop (Coal, Raw Iron, Raw Osmium, Raw Gold, an Emerald, a
+  Diamond: `Items.blockDrops`, never the ore) into the output in a new stack, which the ejector
+  pushes into chests next to it and NORMAL and PULL transporter sides take; nothing reaches the
+  cards. Only its energy goes into its item. With `Config.Miner.Enabled` false it is inert (nothing
+  used or made, "Idle"). Its panel's two lines at (8, 32): "Makes Diamond" and, from the window's
+  ticksRequired, "4:00 an item" (tenths when not whole: "0:14.9"); none without an ore. On a Heat
+  Generator's 200 J/t a diamond miner works a tick in four and glows steadily; a generator burning
+  coal into the cheapest coal miner gets 15 coal back for 20 burnt.
 - The Ammo Press (`Machines/Kinds/AmmoPress`, kind "press"). Frozen: slots 1 Iron Ingots and 2
   Gunpowder (both through every face), 3 the output (pushed out every 10 ticks, given through every
   face), 4-5 the cards (`Upgrades.slots(8, 53)`); data 7 progress, 8 ticksRequired, 9 energyPerTick,
@@ -7338,10 +7345,11 @@ require it):
   progress: every calibre costs the same, and what comes out is the calibre chosen when the
   operation finishes; a calibre from elsewhere reads as 9mm. Mekanism's card maths as the Electric
   Furnace's (149 ticks with one Speed card, 20 with 8 at 5 kJ/t, so 100 kJ an operation; 8 + 8 cards
-  bring it back to 10 kJ in a 200 kJ store). `Config.AmmoPress.Enabled` false (read every tick):
-  inert, nothing used or made, the progress kept, "Idle". Its line names what an operation makes
-  ("16 9mm Rounds", from the window's data); `info` gives ticks, joules, capacity and each round's
-  count by its item name.
+  bring it back to 10 kJ in a 200 kJ store); cards in or out mid-operation keep its share done
+  (`Upgrades.rescale`, as the miner's), so a swap skips no work. `Config.AmmoPress.Enabled` false
+  (read every tick): inert, nothing used or made, the progress kept, "Idle". Its line names what an
+  operation makes ("16 9mm Rounds", from the window's data); `info` gives ticks, joules, capacity
+  and each round's count by its item name.
 
 **The feed** (the turrets design's measurements on this code; `tests/spec/TurretFeed` holds them):
 - The feeder rule: a turret fires at most `Turrets.rpm(spec, feed)`, its type's rate at the lower

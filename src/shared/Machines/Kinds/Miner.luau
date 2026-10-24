@@ -32,7 +32,10 @@
 	Every tick (with Config.Miner.Enabled; switched off it is inert: nothing used or made,
 	"Idle"), as the Electric Furnace's: `MinerRules.settings` works out the ticks an item takes,
 	the J a tick of work and the store from the ore and the cards installed (Mekanism's maths:
-	4800 ticks become 480 with 8 Speed Upgrades, never under the ore's floor), and then
+	4800 ticks become 480 with 8 Speed Upgrades, never under the ore's floor; a change of
+	`ticksRequired` keeps the share of the item made, not the ticks worked: `Upgrades.rescale`,
+	the progress x new / old ticks rounded down, so no card swap at any time skips work and a coal
+	costs at least its floor), and then
 	  * no ore under it (another block, or nothing ever seen there): NO_ORE, the progress 0;
 	  * another ore than `mining`: the progress starts over (the cell is read every tick, so an ore
 	    mined away or replaced mid-cycle stops it or restarts it at once);
@@ -122,6 +125,8 @@ local function tick(container: Container, ctx: Core.TickContext)
 	if ore then
 		ticks, energyPerTick, capacity = MinerRules.settings(ore, speed, energy, ctx.energy.capacity)
 	end
+	-- (Cards in or out keep the share of the item made, rounded down: a coal costs its floor.)
+	progress = Upgrades.rescale(progress, Core.get(container, "ticksRequired"), ticks)
 	Core.set(container, "ticksRequired", ticks)
 	Core.set(container, "energyPerTick", energyPerTick)
 	Upgrades.setCapacity(container, capacity)

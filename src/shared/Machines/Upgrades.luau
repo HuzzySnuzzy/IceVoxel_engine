@@ -19,6 +19,8 @@
 	  production     base x 10^(speed/8): the Solar Panel's (Mekanism's solar generators take no
 	                 upgrades; here Speed Upgrades raise what one makes as they speed up a machine's
 	                 work, tenfold with 8, and Energy Upgrades its store)
+	  rescale        the progress when the ticks change: the share of the work kept, rounded down
+	                 (the Metal Miner's and the Ammo Press's; Mekanism keeps the ticks worked)
 
 	Counts come from the slots' stacks (`installed`): only the slot's own card counts, at most MAX,
 	whatever a stack from elsewhere says.
@@ -135,6 +137,20 @@ end
 -- J/t a generator making `base` J/t makes with `speed` cards (the Solar Panel; see the header).
 function Upgrades.production(base: number, speed: number): number
 	return base * Upgrades.MULTIPLIER ^ fraction(speed)
+end
+
+--[[
+	The progress of an operation that took `from` ticks once the cards make it take `to` (the Metal
+	Miner's and the Ammo Press's; Mekanism keeps the ticks worked): the same share of the work,
+	rounded down, so cards put in or taken out mid-operation never skip work, and an operation costs
+	at least what it costs whole at the cheapest count it was worked at (a coal its floor).
+	`progress` as it is while `from` is under a tick (a fresh machine's 0, or no ore last tick).
+]]
+function Upgrades.rescale(progress: number, from: number, to: number): number
+	if from >= 1 and to ~= from then
+		return progress * to // from
+	end
+	return progress
 end
 
 --[[

@@ -1,14 +1,14 @@
 --[[
 	The Metal Miner (Shared/Machines/Kinds/Miner, Machines/MinerRules; BlockList MetalMiner): the
 	block, its frozen layout and `info`; every ore's drop, time and energy; Mekanism's card maths
-	with the floor at every card count (coal never pays: measured against the real Heat
-	Generator's coal and Block of Coal, and in a closed loop on the real worlds); no ore, another
-	block, an ore mined away or replaced mid-cycle; an unknown (unloaded) cell below keeps it
-	mining; a full output stops it; energy starvation (the progress waits, a Heat Generator's
-	200 J/t runs a diamond miner a tick in four and it glows steadily); its drops pushed into a
-	chest and taken by a transporter on the real MachineWorld and TransmitterWorld; its energy
-	kept in its item; switched off it is inert; its panel lines, status and WAILA; the client's
-	glow and drill loop (and the Ammo Press's window and stamp).
+	with the floor at every card count and through any card swap mid-coal (coal never pays:
+	measured against the real Heat Generator's coal and Block of Coal, and in a closed loop on the
+	real worlds); no ore, another block, an ore mined away or replaced mid-cycle; an unknown
+	(unloaded) cell below keeps it mining; a full output stops it; energy starvation (the progress
+	waits, a Heat Generator's 200 J/t runs a diamond miner a tick in four and it glows steadily);
+	its drops pushed into a chest and taken by a transporter on the real MachineWorld and
+	TransmitterWorld; its energy kept in its item; switched off it is inert; its panel lines,
+	status and WAILA; the client's glow and drill loop (and the Ammo Press's window and stamp).
 ]]
 
 local Loader = require("../lib/Loader")
@@ -266,7 +266,8 @@ return function(t, shared, require, server, client)
 		t.near(Machines.capacity(container), 2000000, 1e-6)
 		t.eq(field(container, "energyPerTick"), Upgrades.energyPerTick(800, 8, 8))
 		t.eq(MenuLayout.lineTexts(container)[2], "0:24 an item")
-		-- 300 ticks into the next, the speed cards come out: 4800 ticks again, at 80 J/t.
+		-- 300 ticks into the next, the speed cards come out: 4800 ticks again, at 80 J/t, and the
+		-- share of the diamond made is kept (300 of 480 ticks are 3000 of 4800).
 		for _ = 1, 300 do
 			container.data[ENERGY] = Machines.capacity(container)
 			tick(container, cell)
@@ -276,7 +277,7 @@ return function(t, shared, require, server, client)
 		container.data[ENERGY] = Machines.capacity(container)
 		tick(container, cell)
 		t.eq(field(container, "ticksRequired"), 4800)
-		t.eq(field(container, "progress"), 301, "the progress goes on")
+		t.eq(field(container, "progress"), 3001, "the share goes on")
 		t.eq(field(container, "rate"), -Machines.quantiseUp(Upgrades.energyPerTick(800, 0, 8)))
 		-- The energy cards out: the store is 200 kJ again, what was over it lost (setMaxEnergy).
 		container.slots[ENERGY_CARDS] = nil
@@ -284,12 +285,14 @@ return function(t, shared, require, server, client)
 		tick(container, cell)
 		t.eq(Machines.capacity(container), CAPACITY)
 		t.eq(Machines.energy(container), CAPACITY - 800, "cut to 200 kJ before the tick's 800 J")
-		-- A full arrow (more cards took the ticks below the progress) finishes on the next tick.
+		-- More cards mid-item skip no work: 300 of iron's 400 ticks are 30 of 40, ten to go.
 		local quick = miner(CAPACITY)
 		tick(quick, { block = B.IronOre }, 300)
 		quick.slots[SPEED] = S(I.SpeedUpgrade, 8)
-		tick(quick, { block = B.IronOre })
-		t.eq(quick.slots[OUTPUT] and quick.slots[OUTPUT].item, I.RawIron, "300 is past 40: done")
+		local left, cost = untilItem(quick, { block = B.IronOre }, 100)
+		t.eq(left, 10, "the last quarter at 40 ticks an item")
+		t.eq(cost, 10 * Machines.quantiseUp(Upgrades.energyPerTick(200, 8, 0)), "at 20 kJ/t")
+		t.eq(quick.slots[OUTPUT] and quick.slots[OUTPUT].item, I.RawIron)
 		t.eq(field(quick, "progress"), 0)
 		-- One card: 299 ticks (Upgrades.ticks truncates), shown in tenths.
 		local one = miner(CAPACITY, 1)
@@ -348,6 +351,101 @@ return function(t, shared, require, server, client)
 		-- The Combustion Generator burns only the refinery's fuel: no slot takes a coal.
 		t.eq(Machines.containerSize(B.CombustionGenerator), 0, "no slots")
 		t.eq(#Machines.insertSlots(B.CombustionGenerator, 1), 0)
+	end)
+
+	--[[
+		A coal miner kept full until a coal comes out (at most 5000 ticks), its cards set before
+		every tick to what `cards(progress)` says ({ speed, energy }; nil: left as they are):
+		(J the coal cost, ticks it took).
+	]]
+	local function coalWith(container: any, cards: (progress: number) -> { number }?): (number, number)
+		local cell = { block = B.CoalOre }
+		local before = if container.slots[OUTPUT] then container.slots[OUTPUT].count else 0
+		local used, ticks = 0, 0
+		repeat
+			local want = cards(field(container, "progress"))
+			if want then
+				container.slots[SPEED] = if want[1] > 0 then S(I.SpeedUpgrade, want[1]) else nil
+				container.slots[ENERGY_CARDS] = if want[2] > 0 then S(I.EnergyUpgrade, want[2]) else nil
+			end
+			container.data[ENERGY] = Machines.capacity(container)
+			local had = Machines.energy(container)
+			tick(container, cell)
+			used += had - Machines.energy(container)
+			ticks += 1
+			local now = if container.slots[OUTPUT] then container.slots[OUTPUT].count else 0
+		until now > before or ticks >= 5000
+		return used, ticks
+	end
+
+	t.test("miner: no card swap mid-coal beats the floor (the share of the coal made is kept)", function()
+		local FLOOR = 400000
+		-- 0 Speed and 8 Energy Upgrades (the floor's 667 J/t) to 59 of 600 ticks, then 8 and 8:
+		-- keeping the ticks worked, one tick of 60 at 8 kJ/t finished it (47 kJ for a coal).
+		local swapped = false
+		local used, ticks = coalWith(miner(0), function(progress: number): { number }?
+			swapped = swapped or progress >= 59
+			return if swapped then { 8, 8 } else { 0, 8 }
+		end)
+		t.eq(ticks, 59 + 55, "59 of 600 ticks are 5 of 60: 55 to go")
+		t.eq(used, 59 * Machines.quantiseUp(FLOOR / 600) + 55 * Machines.quantiseUp(Upgrades.energyPerTick(800, 8, 8)))
+		t.ok(used >= FLOOR, `{used} J: at least the floor`)
+		-- Every pair of counts, swapped at the first tick, a third, two thirds and the last tick
+		-- before the end, and swapped back halfway through the rest.
+		local counts = {}
+		for _, speed in { 0, 1, 4, 7, 8 } do
+			for _, energy in { 0, 8 } do
+				table.insert(counts, { speed, energy })
+			end
+		end
+		local ore = MinerRules.ore(B.CoalOre) :: any
+		local runs = 0
+		for _, first in counts do
+			local firstTicks = MinerRules.settings(ore, first[1], first[2], CAPACITY)
+			for _, second in counts do
+				local secondTicks = MinerRules.settings(ore, second[1], second[2], CAPACITY)
+				for _, at in { 1, firstTicks // 3, 2 * firstTicks // 3, firstTicks - 1 } do
+					local halfway = (at * secondTicks // firstTicks + secondTicks) // 2
+					for _, back in { false, true } do
+						local phase = 1
+						local cost = coalWith(miner(0), function(progress: number): { number }?
+							if phase == 1 and progress >= at then
+								phase = 2
+							elseif phase == 2 and back and progress >= halfway then
+								phase = 3
+							end
+							return if phase == 2 then second else first
+						end)
+						runs += 1
+						if cost < FLOOR then
+							t.ok(false, `{first[1]}S/{first[2]}E to {second[1]}S/{second[2]}E at {at}: {cost} J`)
+						end
+					end
+				end
+			end
+		end
+		t.eq(runs, 10 * 10 * 4 * 2)
+		-- Cards changed at random (a fixed sequence) every 1 to 40 ticks: no coal under the floor.
+		local seed = 12345
+		local function roll(n: number): number
+			seed = seed * 16807 % 2147483647
+			return seed % n
+		end
+		local container = miner(0)
+		local wait = 0
+		local cheapest = math.huge
+		for _ = 1, 40 do
+			local cost = coalWith(container, function(): { number }?
+				wait -= 1
+				if wait > 0 then
+					return nil
+				end
+				wait = 1 + roll(40)
+				return { roll(9), roll(9) }
+			end)
+			cheapest = math.min(cheapest, cost)
+		end
+		t.ok(cheapest >= FLOOR, `the cheapest of 40 coals: {cheapest} J`)
 	end)
 
 	--[[ On the server ]]

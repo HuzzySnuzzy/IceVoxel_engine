@@ -1,9 +1,9 @@
 --[[
 	Mekanism's upgrade cards (Shared/Machines/Upgrades, ItemList SpeedUpgrade / EnergyUpgrade): the
-	items and their recipes, Mekanism's maths (ticks, energy per tick, capacity, production), the
-	upgrade slots' rules (only the slot's own card, 8 at most, by hand and shift-click, never by
-	transporters) and what the cards do in the Electric Furnace (fewer ticks, more or less energy a
-	tick, a bigger store), its panel's upgrade slots with their outlines.
+	items and their recipes, Mekanism's maths (ticks, energy per tick, capacity, production) and
+	`rescale`, the upgrade slots' rules (only the slot's own card, 8 at most, by hand and
+	shift-click, never by transporters) and what the cards do in the Electric Furnace (fewer ticks,
+	more or less energy a tick, a bigger store), its panel's upgrade slots with their outlines.
 ]]
 
 return function(t, shared, require, server, client)
@@ -151,6 +151,13 @@ return function(t, shared, require, server, client)
 		t.eq(Upgrades.production(50, 0), 50)
 		t.near(Upgrades.production(50, 4), 158.11, 0.01)
 		t.near(Upgrades.production(50, 8), 500, 1e-9)
+		-- The progress when the ticks change (the miner's and the press's): its share, rounded down.
+		t.eq(Upgrades.rescale(300, 480, 4800), 3000)
+		t.eq(Upgrades.rescale(59, 600, 60), 5, "5.9 of 60: never ahead")
+		t.eq(Upgrades.rescale(5, 60, 600), 50)
+		t.eq(Upgrades.rescale(7, 200, 20), 0)
+		t.eq(Upgrades.rescale(40, 200, 200), 40, "the same ticks: as it is")
+		t.eq(Upgrades.rescale(12, 0, 600), 12, "no ticks before (a fresh machine's): as it is")
 		-- Counting the cards of a slot.
 		t.eq(Upgrades.installed(nil, SPEED), 0)
 		t.eq(Upgrades.installed(S(SPEED, 5), SPEED), 5)

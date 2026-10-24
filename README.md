@@ -1525,7 +1525,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   tick (never more energy than the coal burns for), Iron and Osmium Ore their raw ore every 20 s at
   200 J a tick, Gold Ore every 40 s at 300, Emerald Ore an Emerald every 3 minutes and Diamond Ore
   a Diamond every 4 minutes at 800 (`Config.Miner`), faster with Speed Upgrades and cheaper with
-  Energy Upgrades (Mekanism's maths; coal never under its floor). It needs a real ore block where it
+  Energy Upgrades (Mekanism's maths; coal never under its floor, and cards put in or taken out
+  mid-item keep the share made, so no swap makes a coal cheaper). It needs a real ore block where it
   lies (ores can't be moved) and keeps mining with nobody near. Its panel: the output, the arrow,
   the status ("Mining Diamond Ore", "No power", "Output full", "No ore below"), two lines ("Makes
   Diamond", "4:00 an item"), the upgrade slots and the energy bar (200 kJ). Recipe: osmium around
@@ -1534,8 +1535,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   drills. JEI's "Duplicating" lists each ore, its drop, time and energy (`U` on the miner).
 - **Ammo Press.** Presses an Iron Ingot and a Gunpowder into 16 9mm, 10 5.56 or 5 .308 rounds in
   10 seconds at 50 J a tick (`Config.AmmoPress`), the calibre picked by its Calibre button (kept in
-  its item), with upgrade cards; the rounds are pushed out on their own. Gunpowder needs the
-  Demolition skill, so ammo stays the real cost of defence. Recipe: iron around a Servo Motor, over
+  its item), with upgrade cards (swapped mid-operation they keep the share done); the rounds are
+  pushed out on their own. Gunpowder needs the Demolition skill, so ammo stays the real cost of
+  defence. Recipe: iron around a Servo Motor, over
   osmium around an Electric Furnace, over iron around a Block of Iron (the Electric Age's). Its
   status says "Using 50 J/t", "No input" (one input without the other), "Output full" or "No
   power"; switching the calibre mid-operation keeps the progress. While it works its window glows
