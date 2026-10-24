@@ -35,7 +35,7 @@
 	            (`restoreTank`).
 	  Items     stacks in Logistical Transporters (Transmitters/Transport).
 	  Feeds     which transporters brought each turret its rounds, and when (the feeder rule,
-	            `feedTier`).
+	            `feedTier`; after a restart it starts from the feed the turret's state kept).
 
 	Each `step` (20 a second): queued network work, then Transport.step (items move, transporters
 	pull, and take what furnaces and machines push out), then Fluids.step (pipes pull from and
@@ -57,7 +57,9 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Coords = require(Shared.World.Coords)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local Transmitters = require(Shared.Transmitters)
+local Turrets = require(Shared.Turrets)
 local InventoryTypes = require(Shared.Inventory.Types)
 
 local EditRules = require(script.Parent.Parent.Network.EditRules)
@@ -129,6 +131,7 @@ function TransmitterWorld.new(env: Env): World
 		searchBudget = 0,
 		pullFrom = nil,
 		feeds = {},
+		demanders = 0,
 		ops = {},
 		dirtyNodes = {},
 		dirtyTanks = {},
@@ -155,17 +158,51 @@ function TransmitterWorld.network(world: World, x: number, y: number, z: number)
 	return if node then node.network else nil
 end
 
+-- The tier transporter `node` on side `side` of the machine `block` feeds it at: its side towards
+-- the block joined to it and giving items (NORMAL or PUSH: Transmitters.outputs) into a face the
+-- block takes items through (a turret's ammo, never through its top); the Restrictive
+-- Transporter as Basic. 0: it cannot feed it.
+local function feeding(node: Node?, side: number, block: number): number
+	if node == nil or node.kind ~= "item" then
+		return 0
+	end
+	local back = Transmitters.opposite(side)
+	if
+		has(node.acceptors, back)
+		and Transmitters.outputs(Transmitters.modeOf(node.modes, back))
+		and #Transmitters.insertSlots(block, side) > 0
+	then
+		return if Transmitters.isRestrictive(node.block) then 1 else Transmitters.tierOf(node.block) or 1
+	end
+	return 0
+end
+
+-- Is the machine `block` (its `slots`) full: no room for one more of `stack` (nil: of what it
+-- holds) through any face it takes items by?
+local function full(block: number, slots: Transmitters.Slots, stack: Items.Stack?): boolean
+	for face = 0, 5 do
+		local into = Transmitters.insertSlots(block, face)
+		local one = stack or (if into[1] then slots[into[1]] else nil)
+		if #into > 0 and (one == nil or Transmitters.room(block, face, slots, one) >= 1) then
+			return false
+		end
+	end
+	return true
+end
+
 --[[
 	The feeder rule (Shared/Turrets.rpm, server Turrets/): the best tier (1..4) among the Logistical
 	Transporters next to the machine `block` at (x, y, z) that feed it, 0 when none does (by
 	hand). One feeds it when it brings it items: some are on their way through it, or came
 	through it (Transport keeps that for the machines that demand their items, the turrets)
-	within the last FEED_MEMORY ticks or before it was last seen full here (nothing can come
-	then); and its side towards the block is still joined to it and gives items (NORMAL or PUSH:
-	Transmitters.outputs) into a face the block takes items through (a turret's ammo, never
-	through its top). So a transporter that brings it nothing never counts: a dead stub, one its
-	rounds cannot enter (another colour), a line passing by with other items. The Restrictive
-	Transporter counts as Basic. One that stopped bringing them is forgotten.
+	within the last FEED_MEMORY ticks, or since this rule last found the block with room while it
+	has been found full lately (nothing can come then); and it can feed it (`feeding`). So a
+	transporter that brings it nothing never counts: a dead stub, one its rounds cannot enter
+	(another colour), a line passing by with other items. One that stopped bringing them is
+	forgotten (once the block had room, FEED_MEMORY ticks after its last ones), and so is one
+	broken or replaced. Feeds are not saved: the first time the rule looks at a block with no
+	record (after a restart), the transporters that can feed it, up to the tier the rule gave it
+	before (kept in its state: Shared/Turrets.unpackState), count as having just brought items.
 ]]
 function TransmitterWorld.feedTier(world: World, x: number, y: number, z: number, block: number): number
 	local key = Grid.key(x, y, z)
@@ -186,36 +223,45 @@ function TransmitterWorld.feedTier(world: World, x: number, y: number, z: number
 			end
 		end
 	end
-	if feed == nil then
-		return 0
-	end
 	local container = world.env.containers:peek(x, y, z)
-	local slots = if container and container.block == block then container.slots else {}
+	local own = container ~= nil and container.block == block
+	local slots = if container and own then container.slots else {}
+	if feed == nil then
+		-- (No record yet: what it was fed by before a restart, as far as the transporters around
+		-- it can feed it.)
+		local record: Types.Feed = { at = {} }
+		local _, kept = Turrets.unpackState(if container and own then Machines.state(container) else 0)
+		for side = 0, 5 do
+			local via = Grid.neighbour(key, side)
+			local tier = feeding(if via then world.nodes[via] else nil, side, block)
+			if via and tier >= 1 and tier <= kept then
+				record.at[via] = world.tick
+			end
+		end
+		world.feeds[key] = record
+		feed = record
+	end
+	assert(feed, "feed")
+	local isFull = full(block, slots, feed.stack)
+	local room, seen = feed.room, feed.full
+	if isFull then
+		feed.full = world.tick
+	else
+		feed.room = world.tick
+	end
 	local best = 0
 	for via, at in feed.at do
-		local node = world.nodes[via]
 		local side = Grid.sideBetween(key, via)
-		if node == nil or node.kind ~= "item" or side == nil or world.tick - at > FEED_MEMORY then
+		local node = world.nodes[via]
+		local lately = world.tick - at <= FEED_MEMORY
+		-- (Full since it brought them: nothing can come.)
+		local waited = (room == nil or at >= room) and (isFull or (seen ~= nil and world.tick - seen <= FEED_MEMORY))
+		if node == nil or node.kind ~= "item" or side == nil or not (lately or waited) then
 			-- (Gone, or it stopped bringing them.)
 			feed.at[via] = nil
 			continue
 		end
-		local back = Transmitters.opposite(side)
-		if
-			has(node.acceptors, back)
-			and Transmitters.outputs(Transmitters.modeOf(node.modes, back))
-			and #Transmitters.insertSlots(block, side) > 0
-		then
-			-- (Full, nothing can come: it counts on from now.)
-			if Transmitters.room(block, side, slots, feed.stack) < 1 then
-				feed.at[via] = world.tick
-			end
-			local tier = if Transmitters.isRestrictive(node.block) then 1 else Transmitters.tierOf(node.block) or 1
-			best = math.max(best, tier)
-		end
-	end
-	if next(feed.at) == nil then
-		world.feeds[key] = nil
+		best = math.max(best, feeding(node, side, block))
 	end
 	return best
 end
@@ -594,6 +640,8 @@ local function addNode(world: World, key: number, x: number, y: number, z: numbe
 		waits = nil,
 		rescan = 0,
 		waited = 0,
+		kinds = nil,
+		demanders = 0,
 		sentModes = 0,
 		sentColour = 0,
 		sentFluid = 0,
@@ -669,8 +717,19 @@ function TransmitterWorld.blockChanged(world: World, x: number, y: number, z: nu
 	if key == nil then
 		return
 	end
-	-- (A turret gone or replaced: what fed it is forgotten.)
+	-- (A turret gone or replaced: what fed it is forgotten, and so is a transporter gone or
+	-- replaced next to one. A pull waiting for turrets looks at its routes again.)
 	world.feeds[key] = nil
+	for side = 0, 5 do
+		local neighbour = Grid.neighbour(key, side)
+		local feed = if neighbour then world.feeds[neighbour] else nil
+		if feed then
+			feed.at[key] = nil
+		end
+	end
+	if Machines.demands(old) or Machines.demands(new) then
+		world.demanders += 1
+	end
 	local node = world.nodes[key]
 	if node then
 		removeNode(world, node)

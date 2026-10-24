@@ -10,19 +10,24 @@
 	The contract (the turrets design's tables, measured on the same code): a turret fed through
 	one transporter of its tier or better holds its full rate; through a lower tier exactly that
 	tier's rate; longer lines deliver its buffer once a trip (within 5 % of the measured table); a
-	line branching to several turrets feeds each as it would alone, evenly when it cannot.
+	line branching to several turrets feeds each as it would alone, evenly when it cannot, and
+	each through its cheapest route. The feeder rule counts only transporters that bring the
+	turret rounds, forgets one that stopped or was replaced, and keeps a full turret's feeder
+	across a restart.
 	And every other destination is exactly as before: a machine that demands nothing reproduces
 	the deliveries measured on the Transport before the demand rule, chests and furnaces still
 	back off, and with Config.Turrets.Enabled false no line waits for a turret. A line waiting for
 	a full turret costs what a backoff would: it searches its routes on the same ticks as with the
 	turrets off, so every other line pulls as it did then, and pulls take turns when the tick's
-	searches run out.
+	searches run out; yet it sees a turret placed on it or another calibre in its chest within 3
+	ticks, and one pull's rounds into many turrets work out their turns once.
 ]]
 
 local Loader = require("../lib/Loader")
 
 return function(t, shared, require, server)
 	local Blocks = require(shared.Blocks)
+	local Config = require(shared.Config)
 	local Coords = require(shared.World.Coords)
 	local Items = require(shared.Items)
 	local Machines = require(shared.Machines)
@@ -51,8 +56,8 @@ return function(t, shared, require, server)
 		A world of blocks (air elsewhere): a chest of `item` at x = 0, `length` transporters of tier
 		`tier` (the first pulling from the chest), the destination `block` after them and, under it,
 		a Creative Energy Cube (touching machines share energy). `service` answers the turrets'
-		ticks. Returns the world's parts (`set` places more blocks) and a stepper that refills the
-		chest every 100 ticks.
+		ticks. Returns the world's parts (`set` places more blocks, `restart` starts the server
+		again) and a stepper that refills the chest every 100 ticks.
 	]]
 	local function line(tier: number, length: number, block: number, item: number, service: any?): any
 		local blocks: { [number]: number } = {}
@@ -60,23 +65,27 @@ return function(t, shared, require, server)
 		local function getBlock(x: number, y: number, z: number): number?
 			return blocks[Coords.posKey(x, y, z)] or AIR
 		end
-		local pipes = TransmitterWorld.new({
-			getBlock = getBlock,
-			containers = containers,
-			inventoryChanged = function() end,
-			drop = function() end,
-		})
-		local machines = MachineWorld.new({
-			getBlock = getBlock,
-			containers = containers,
-			transmitters = pipes,
-			dayTime = function()
-				return 6000
-			end,
-			turret = function()
-				return service
-			end,
-		})
+		local pipes, machines
+		local function worlds()
+			pipes = TransmitterWorld.new({
+				getBlock = getBlock,
+				containers = containers,
+				inventoryChanged = function() end,
+				drop = function() end,
+			})
+			machines = MachineWorld.new({
+				getBlock = getBlock,
+				containers = containers,
+				transmitters = pipes,
+				dayTime = function()
+					return 6000
+				end,
+				turret = function()
+					return service
+				end,
+			})
+		end
+		worlds()
 		local function set(x: number, y: number, z: number, new: number)
 			local key = Coords.posKey(x, y, z)
 			local old = blocks[key] or AIR
@@ -100,6 +109,23 @@ return function(t, shared, require, server)
 		set(at, Y - 1, 0, B.CreativeEnergyCube)
 		set(at, Y, 0, block)
 		local s = { pipes = pipes, machines = machines, containers = containers, x = at, ticks = 0, set = set }
+		-- A server restart: new pipes and machines on the same blocks and containers (saved, the
+		-- turret's state with them), the puller's PULL side put back (the pipes' saved modes).
+		function s.restart()
+			worlds()
+			s.pipes, s.machines = pipes, machines
+			local keys = {}
+			for key in blocks do
+				table.insert(keys, key)
+			end
+			table.sort(keys)
+			for _, key in keys do
+				local x, y, z = Coords.decodePosKey(key)
+				TransmitterWorld.blockChanged(pipes, x, y, z, AIR, blocks[key])
+				MachineWorld.blockChanged(machines, x, y, z, AIR, blocks[key])
+			end
+			TransmitterWorld.setMode(pipes, 1, Y, 0, WEST, M.PULL)
+		end
 		function s.step(n: number)
 			for _ = 1, n do
 				s.ticks += 1
@@ -121,17 +147,27 @@ return function(t, shared, require, server)
 
 	--[[
 		A stand-in for the server's simulation (server Turrets/TurretWorld's place): a target always
-		held, a shot whenever the order may fire, the feeder rule's tier on the real pipes. Counts
-		the shots it fired (the kind takes exactly those: ready, armed, powered, not blocked), in
-		all and by turret (`byKey`, pos keys).
+		held (or while `firing(tick)`, the world's ticks), a shot whenever the order may fire, the
+		feeder rule's tier on the real pipes (every tick, or as the simulation looks: at a turret's
+		first tick and every `every` ticks). Counts the shots it fired (the kind takes exactly
+		those: ready, armed, powered, not blocked), in all and by turret (`byKey`, pos keys);
+		`feed` holds each turret's last look.
 	]]
-	local function shooter(): (any, () -> any, (any) -> ())
+	local function shooter(firing: ((number) -> boolean)?, every: number?): (any, () -> any, (any) -> ())
 		local s: any = nil
-		local counter = { shots = 0, byKey = {} }
+		local counter = { shots = 0, byKey = {}, feed = {} }
 		local function service(order: any, out: any): any
-			out.feed = TransmitterWorld.feedTier(s.pipes, order.x, order.y, order.z, order.block)
+			local key = order.key
+			if every == nil or counter.feed[key] == nil or s.ticks % every == 0 then
+				counter.feed[key] = TransmitterWorld.feedTier(s.pipes, order.x, order.y, order.z, order.block)
+			end
+			out.feed = counter.feed[key]
 			out.tracking = true
-			out.fired = order.ready and order.armed and order.powered and not order.blocked
+			out.fired = (firing == nil or firing(s.ticks))
+				and order.ready
+				and order.armed
+				and order.powered
+				and not order.blocked
 			out.status = if out.fired then STATUS.FIRING elseif not order.armed then STATUS.NO_AMMO else STATUS.TARGETING
 			if out.fired then
 				counter.shots += 1
@@ -253,9 +289,15 @@ return function(t, shared, require, server)
 	--[[
 		Rounds a second each turret of `spec` at `turrets` ({ x, z }, a Creative Energy Cube under
 		each) fires, fed by one puller of its tier on a chest (a line of one, no destination) and the
-		transporters of its tier at `arms` ({ x, z }) joined to it.
+		transporters of its tier at `arms` ({ x, z }) joined to it, with the sides `cut` ({ x, z,
+		side }) set to NONE.
 	]]
-	local function branched(spec: Turrets.Spec, arms: { { number } }, turrets: { { number } }): { number }
+	local function branched(
+		spec: Turrets.Spec,
+		arms: { { number } },
+		turrets: { { number } },
+		cut: { { number } }?
+	): { number }
 		local counter, get, bindWorld = shooter()
 		local s = line(spec.tier, 1, AIR, spec.ammo, get())
 		bindWorld(s)
@@ -266,6 +308,9 @@ return function(t, shared, require, server)
 		for _, at in turrets do
 			s.set(at[1], Y - 1, at[2], B.CreativeEnergyCube)
 			s.set(at[1], Y, at[2], spec.block)
+		end
+		for _, at in cut or {} do
+			assert(TransmitterWorld.setMode(s.pipes, at[1], Y, at[2], at[3], M.NONE))
 		end
 		s.step(WARM)
 		table.clear(counter.byKey)
@@ -304,6 +349,22 @@ return function(t, shared, require, server)
 			for i, rate in rates do
 				local share = 2 / #rates
 				t.near(rate, share, 0.05 * share, `{#rates} Basic SMGs, turret {i}: {rate} a second`)
+			end
+		end
+	end)
+
+	t.test("turret feed: a turret two transporters reach takes its turn through the cheaper", function()
+		-- ProbeRegF (the review's): a line bending round turret A (beside two of its transporters)
+		-- with turret B beside the line in between: A fires what it fires reached through one of
+		-- them, and so does B (before, after B's turn A's rounds took the long way: an Elite SMG
+		-- 2.7 a second instead of 4, a Basic rifle half its rate).
+		local bend = { { 2, 0 }, { 3, 0 }, { 3, 1 }, { 3, 2 } }
+		local turrets = { { 2, 1 }, { 4, 0 } }
+		for _, spec in { Turrets.of("smg", 3), Turrets.of("rifle", 1), Turrets.of("rifle", 2) } do
+			local one = branched(spec, bend, turrets, { { 3, 1, WEST } })
+			local two = branched(spec, bend, turrets)
+			for i, name in { "A", "B" } do
+				t.ok(two[i] >= 0.95 * one[i], `{spec.name} {name}: {two[i]} a second (one route to A: {one[i]})`)
 			end
 		end
 	end)
@@ -428,6 +489,95 @@ return function(t, shared, require, server)
 		end)
 		t.eq(tier, 4, "an Ultimate one that brings them")
 		t.ok(rate >= 0.99 * spec.rpm / 60, `its rate ({rate} a second)`)
+	end)
+
+	t.test("turret feed: a transporter that stopped bringing rounds or was replaced is forgotten", function()
+		--[[
+			ProbeRegG (the review's): an Ultimate SMG on one Advanced transporter, looked at as the
+			simulation does (every FeedTicks), with targets for its first 200 ticks and none after
+			(so full). An Ultimate transporter beside it brought it 6 rounds while it fired and
+			none since, or a Basic one bringing it rounds was replaced by an Ultimate one bringing
+			none: the Advanced line is its feeder (before, the Ultimate one counted on however long
+			the turret sat full: 7 rounds in its first second of targets, Advanced's cap 2.5).
+		]]
+		local spec = Turrets.of("smg", 4)
+		local EAST = 5
+		local function feeding(beside: number): (any, any)
+			local _, get, bindWorld = shooter(function(tick: number): boolean
+				return tick <= 200
+			end, Config.Turrets.FeedTicks)
+			local s = line(2, 1, spec.block, spec.ammo, get())
+			bindWorld(s)
+			s.set(s.x + 2, Y, 0, B.Chest)
+			s.set(s.x + 1, Y, 0, T[beside])
+			assert(TransmitterWorld.setMode(s.pipes, s.x + 1, Y, 0, EAST, M.PULL))
+			return s, s.containers:get(s.x + 2, Y, 0, B.Chest)
+		end
+		local function tier(s: any): number
+			return TransmitterWorld.feedTier(s.pipes, s.x, Y, 0, spec.block)
+		end
+		local s, chest = feeding(4)
+		s.step(150)
+		chest.slots[1] = Items.newStack(spec.ammo, 6)
+		s.step(650)
+		t.eq(chest.slots[1] and chest.slots[1].count or 0, 0, "the Ultimate one brought its 6")
+		t.eq(tier(s), 2, "full for 600 ticks since: the Advanced line")
+		local r, other = feeding(1)
+		other.slots[1] = Items.newStack(spec.ammo, 64)
+		r.step(400)
+		t.ok((other.slots[1] and other.slots[1].count or 0) < 64, "the Basic one brought rounds")
+		t.eq(tier(r), 2, "both bring them: Advanced")
+		r.set(r.x + 1, Y, 0, AIR)
+		r.set(r.x + 1, Y, 0, T[4])
+		r.step(600)
+		t.eq(tier(r), 2, "the Ultimate one in its place brings none")
+	end)
+
+	t.test("turret feed: after a restart a full turret keeps its feeder until rounds come", function()
+		--[[
+			ProbeRegG3 (the review's): an Ultimate SMG on one Basic transporter, with an Ultimate
+			transporter beside it that brings it nothing, full and idle when the server restarts
+			(the feeder rule's records are not saved). Idle and full it still reads Basic, and once
+			targets come it fires at Basic's rate (before: by hand, its buffer at its own rate, 6
+			rounds in its first second). Filled by hand it stays by hand.
+		]]
+		local spec = Turrets.of("smg", 4)
+		local targets = false
+		local counter, get, bindWorld = shooter(function(): boolean
+			return targets
+		end, Config.Turrets.FeedTicks)
+		local function tier(s: any): number
+			return TransmitterWorld.feedTier(s.pipes, s.x, Y, 0, spec.block)
+		end
+		local s = line(1, 1, spec.block, spec.ammo, get())
+		bindWorld(s)
+		s.set(s.x, Y, 1, T[4])
+		s.step(600)
+		t.eq(tier(s), 1, "before: Basic")
+		s.restart()
+		table.clear(counter.feed)
+		s.step(399)
+		t.eq(tier(s), 1, "after the restart, full for 399 ticks: Basic")
+		targets = true
+		counter.shots = 0
+		s.step(20)
+		local cap = Turrets.rpm(spec, 1) / 60
+		t.ok(counter.shots <= math.ceil(cap), `{counter.shots} rounds in its first second (Basic's {cap} a second)`)
+		s.step(400)
+		t.eq(tier(s), 1, "rounds came: Basic")
+		-- By hand: no line, the Ultimate one beside it.
+		targets = false
+		local h = line(1, 1, spec.block, spec.ammo, get())
+		bindWorld(h)
+		table.clear(counter.feed)
+		h.set(1, Y, 0, AIR)
+		h.set(h.x, Y, 1, T[4])
+		h.container().slots[1] = Items.newStack(spec.ammo, spec.buffer)
+		h.step(100)
+		h.restart()
+		table.clear(counter.feed)
+		h.step(100)
+		t.eq(tier(h), 0, "after the restart: by hand")
 	end)
 
 	--[[ Every other destination exactly as before ]]
@@ -592,9 +742,11 @@ return function(t, shared, require, server)
 		}
 		local blocks: { [number]: number } = {}
 		local containers = env.require(serverRoot.Players.Containers).new()
-		local w: any = { m = m, containers = containers }
+		-- (`reads`: the blocks the pipes asked for.)
+		local w: any = { m = m, containers = containers, reads = 0 }
 		w.pipes = m.TransmitterWorld.new({
 			getBlock = function(x: number, y: number, z: number): number?
+				w.reads += 1
 				return blocks[m.Coords.posKey(x, y, z)] or m.Blocks.AIR
 			end,
 			containers = containers,
@@ -770,5 +922,81 @@ return function(t, shared, require, server)
 		local least, most = math.min(table.unpack(sent)), math.max(table.unpack(sent))
 		print(`    pulls each in 200 ticks: {least} to {most}`)
 		t.ok(least >= 0.6 * most, `every puller takes its turn ({least} to {most})`)
+	end)
+
+	t.test("turret feed: a pull's rounds going on to many turrets work out the turns once", function()
+		-- ProbeRegL (the review's): one Ultimate pull of 64 rounds into a line between 400 Basic
+		-- SMGs with room for one each sends 64 items and reads each turret's block about once, not
+		-- once a round (before, each round looked at every route again: four such pulls into 400
+		-- turrets took 43 ms).
+		local w = pipesWith(true)
+		local m = w.m
+		local B = m.Blocks.id
+		local ammo = m.Items.id.Rounds9mm
+		local n = 400
+		local length = n // 2 + 1
+		for x = 0, length do
+			w.set(x, Y, 0, B.UltimateLogisticalTransporter)
+		end
+		for x = 1, length - 1 do
+			for _, z in { 1, -1 } do
+				w.set(x, Y, z, B.BasicSmgTurret)
+				w.containers:get(x, Y, z, B.BasicSmgTurret).slots[1] = m.Items.newStack(ammo, 1)
+			end
+		end
+		w.chest(-1, Y, 0, { m.Items.newStack(ammo, 64) })
+		assert(m.TransmitterWorld.setMode(w.pipes, 0, Y, 0, WEST, m.Transmitters.MODES.PULL))
+		w.reads = 0
+		w.step()
+		print(`    blocks read in the pulling tick: {w.reads} for {n} turrets`)
+		t.eq(w.pipes.itemCount, 64, "a round to each of 64 turrets")
+		t.ok(w.reads <= 2 * n, `{w.reads} blocks read for {n} turrets`)
+	end)
+
+	t.test("turret feed: a waiting line sees a turret placed on it or another calibre within 3 ticks", function()
+		--[[
+			ProbeRegH (the review's): an Advanced line of 10 from a chest of 9mm into a full SMG,
+			waiting. An SMG placed beside its 5th transporter, or 5.56 put in the chest with a rifle
+			turret there, has a round on its way within the 3 tick look, as when every look searched
+			(before, up to the backoff's 40 ticks).
+		]]
+		local function waited(rifle: boolean, offset: number): number
+			local w = pipesWith(true)
+			local m = w.m
+			local B, I = m.Blocks.id, m.Items.id
+			local source = w.chest(0, Y, 0, { m.Items.newStack(I.Rounds9mm, 64) })
+			for x = 1, 10 do
+				w.set(x, Y, 0, B.AdvancedLogisticalTransporter)
+			end
+			assert(m.TransmitterWorld.setMode(w.pipes, 1, Y, 0, WEST, m.Transmitters.MODES.PULL))
+			w.set(11, Y, 0, B.BasicSmgTurret)
+			w.containers:get(11, Y, 0, B.BasicSmgTurret).slots[1] = m.Items.newStack(I.Rounds9mm, 2)
+			if rifle then
+				w.set(5, Y, 1, B.BasicRifleTurret)
+			end
+			for _ = 1, 400 + offset do
+				w.step()
+			end
+			if rifle then
+				source.slots[2] = m.Items.newStack(I.Rounds556, 64)
+			else
+				w.set(5, Y, 1, B.BasicSmgTurret)
+			end
+			local key = m.Coords.posKey(5, Y, 1)
+			for i = 1, 100 do
+				w.step()
+				if w.pipes.incoming[key] then
+					return i
+				end
+			end
+			return math.huge
+		end
+		for _, rifle in { false, true } do
+			for offset = 0, 2 do
+				local n = waited(rifle, offset)
+				local what = if rifle then "5.56 for the rifle" else "a new SMG"
+				t.ok(n <= Transport.IDLE_DELAY, `{what}, {offset} ticks on: a round on its way after {n} ticks`)
+			end
+		end
 	end)
 end

@@ -1485,7 +1485,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   a dead stub, a transporter of another colour or a line passing by with other items doesn't
   count), so its full rate needs a transporter of its tier or better; fed through one it holds
   that rate, and each further transporter costs its trip. A line into a full turret waits for
-  room instead of backing off, looking at the turret alone, so it costs no more than a backoff
+  room instead of backing off, looking at the turret and its chest alone (a turret placed on the
+  line or another calibre put in the chest is seen within 3 ticks), so it costs no more than a backoff
   (Mekanism's backoff is unchanged for chests, furnaces and every other machine), and a line
   branching to several turrets feeds them all, taking turns when it cannot keep up. Filled by
   hand (no transporter) a turret fires its buffer at its own rate, then shows "No ammo". Energy:

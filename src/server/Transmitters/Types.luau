@@ -76,10 +76,13 @@ export type Node = {
 	-- Transporters, while a pull waits for such machines (the demand rule): those it waits for
 	-- (nil: no wait), the ticks until it searches its routes again all the same, and its waiting
 	-- pulls since it last sent (with its failures, they time those searches as a failed pull's
-	-- backoff).
+	-- backoff); the item types its inventories gave it and the world's `demanders` when it began
+	-- waiting (either changed ends the wait).
 	waits: { Wait }?,
 	rescan: number,
 	waited: number,
+	kinds: { Stack }?,
+	demanders: number,
 	-- The record clients last got (a new transmitter is in the default state: 0, 0, 0, 0): modes,
 	-- colour, a pipe's fill byte and its fluid id.
 	sentModes: number,
@@ -93,8 +96,10 @@ export type Node = {
 export type Wait = { inventory: number, block: number, face: number, stack: Stack }
 
 -- What brought a machine that demands its items (a turret) its items: the tick each transporter
--- next to it (pos key) last did, and one of the last stack that came (Transport's arrive).
-export type Feed = { at: { [number]: number }, stack: Stack }
+-- next to it (pos key) last did and one of the last stack that came (Transport's arrive), and
+-- the ticks the feeder rule (TransmitterWorld.feedTier) last found it with room and full (nil:
+-- never).
+export type Feed = { at: { [number]: number }, stack: Stack?, room: number?, full: number? }
 
 export type Tank = {
 	key: number,
@@ -192,8 +197,10 @@ export type World = {
 	searchBudget: number,
 	pullFrom: number?,
 	-- Machines that demand their items (turrets, pos key): the transporters that brought them
-	-- items (the feeder rule, TransmitterWorld.feedTier).
+	-- items (the feeder rule, TransmitterWorld.feedTier); and how many such machines were placed
+	-- or broken so far (a pull waiting for some looks at its routes again after one was).
 	feeds: { [number]: Feed },
+	demanders: number,
 	-- Transport ops since the last takeTransport (adds carry startTime 0: the caller sets it).
 	ops: { TransportOp },
 	-- Transmitters and tanks whose record may have changed.
