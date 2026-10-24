@@ -73,6 +73,13 @@ export type Node = {
 	-- Transporters: the machine that demands its items (Transport's demand rule) it sent items to
 	-- last (pos key; such machines take turns), nil none.
 	fed: number?,
+	-- Transporters, while a pull waits for such machines (the demand rule): those it waits for
+	-- (nil: no wait), the ticks until it searches its routes again all the same, and its waiting
+	-- pulls since it last sent (with its failures, they time those searches as a failed pull's
+	-- backoff).
+	waits: { Wait }?,
+	rescan: number,
+	waited: number,
 	-- The record clients last got (a new transmitter is in the default state: 0, 0, 0, 0): modes,
 	-- colour, a pipe's fill byte and its fluid id.
 	sentModes: number,
@@ -80,6 +87,10 @@ export type Node = {
 	sentFluid: number,
 	sentFluidId: number,
 }
+
+-- A machine that demands its items a waiting pull waits for (Transport's demand rule): its pos
+-- key and block, the face the items would enter it by and the stack the pull would send.
+export type Wait = { inventory: number, block: number, face: number, stack: Stack }
 
 export type Tank = {
 	key: number,
@@ -172,8 +183,10 @@ export type World = {
 	-- Items on their way to each inventory (pos key), to predict what it will hold.
 	incoming: { [number]: { [number]: Item } },
 	-- Transporters the tick's route searches may still visit before waiting items and pulls stop
-	-- looking (Transmitters/Transport.SEARCH_BUDGET a tick).
+	-- looking (Transmitters/Transport.SEARCH_BUDGET a tick), and the puller they ran out at last
+	-- (pos key: the next tick's pulls start there; nil: anywhere).
 	searchBudget: number,
+	pullFrom: number?,
 	-- Transport ops since the last takeTransport (adds carry startTime 0: the caller sets it).
 	ops: { TransportOp },
 	-- Transmitters and tanks whose record may have changed.

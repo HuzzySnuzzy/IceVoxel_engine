@@ -13,7 +13,10 @@
 	line branching to several turrets feeds each as it would alone, evenly when it cannot.
 	And every other destination is exactly as before: a machine that demands nothing reproduces
 	the deliveries measured on the Transport before the demand rule, chests and furnaces still
-	back off, and with Config.Turrets.Enabled false no line waits for a turret.
+	back off, and with Config.Turrets.Enabled false no line waits for a turret. A line waiting for
+	a full turret costs what a backoff would: it searches its routes on the same ticks as with the
+	turrets off, so every other line pulls as it did then, and pulls take turns when the tick's
+	searches run out.
 ]]
 
 local Loader = require("../lib/Loader")
@@ -486,5 +489,204 @@ return function(t, shared, require, server)
 		t.eq(held and held.slots[1] and held.slots[1].count, 1, "its one round")
 		local p = OffPipes.node(pipes, 1, Y, 0) :: any
 		t.ok(p.pullFailures >= 3, `failures counted ({p.pullFailures})`)
+	end)
+
+	--[[ The demand rule's cost: what a backoff would cost ]]
+
+	-- The pipes' modules with the turrets on or off (Config.Turrets.Enabled), and a world of
+	-- blocks (air elsewhere) on them: `set` places a block, `chest` one holding `stacks`.
+	local function pipesWith(enabled: boolean): any
+		local env = Loader.new()
+		local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
+		local serverRoot = env.mount("src/server", "ServerScriptService", "IceVoxel")
+		env.require(root.Config).Turrets.Enabled = enabled
+		local m = {
+			Blocks = env.require(root.Blocks),
+			Coords = env.require(root.World.Coords),
+			Items = env.require(root.Items),
+			Transmitters = env.require(root.Transmitters),
+			TransmitterWorld = env.require(serverRoot.Transmitters.TransmitterWorld),
+			Transport = env.require(serverRoot.Transmitters.Transport),
+		}
+		local blocks: { [number]: number } = {}
+		local containers = env.require(serverRoot.Players.Containers).new()
+		local w: any = { m = m, containers = containers }
+		w.pipes = m.TransmitterWorld.new({
+			getBlock = function(x: number, y: number, z: number): number?
+				return blocks[m.Coords.posKey(x, y, z)] or m.Blocks.AIR
+			end,
+			containers = containers,
+			inventoryChanged = function() end,
+			drop = function() end,
+		})
+		function w.set(x: number, y: number, z: number, block: number)
+			local key = m.Coords.posKey(x, y, z)
+			local old = blocks[key] or m.Blocks.AIR
+			blocks[key] = block
+			m.TransmitterWorld.blockChanged(w.pipes, x, y, z, old, block)
+		end
+		function w.chest(x: number, y: number, z: number, stacks: { any }): any
+			w.set(x, y, z, m.Blocks.id.Chest)
+			local chest = containers:get(x, y, z, m.Blocks.id.Chest)
+			for slot, stack in stacks do
+				chest.slots[slot] = stack
+			end
+			return chest
+		end
+		-- One tick; the transporters its route searches visited.
+		function w.step(): number
+			m.TransmitterWorld.step(w.pipes)
+			return m.Transport.SEARCH_BUDGET - w.pipes.searchBudget
+		end
+		return w
+	end
+
+	-- `n` stacks of 64 `item`.
+	local function stacksOf(m: any, item: number, n: number): { any }
+		local list = {}
+		for _ = 1, n do
+			table.insert(list, m.Items.newStack(item, 64))
+		end
+		return list
+	end
+
+	t.test("turret feed: a line waiting for a full turret searches its routes as a backoff would", function()
+		-- A storage line (a chest of 26 kinds and 9mm, 10 Ultimate transporters past 30 full
+		-- chests) into a full Basic SMG that never fires: its searches, tick by tick, with the
+		-- turrets on and off.
+		local function searches(enabled: boolean): ({ number }, any)
+			local w = pipesWith(enabled)
+			local m = w.m
+			local B = m.Blocks.id
+			local kinds = { B.Dirt, B.Stone, B.Sand, B.Gravel, B.Planks, B.Glass, B.Cobblestone }
+			for id = 1, 400 do
+				local def = m.Blocks.get(id)
+				if #kinds < 26 and def and m.Items.isValid(id) and not table.find(kinds, id) then
+					if m.Items.maxStack(id) == 64 and def.container == 0 then
+						table.insert(kinds, id)
+					end
+				end
+			end
+			local source = {}
+			for slot, kind in kinds do
+				source[slot] = m.Items.newStack(kind, 64)
+			end
+			source[27] = m.Items.newStack(m.Items.id.Rounds9mm, 60)
+			w.chest(0, Y, 0, source)
+			for x = 1, 10 do
+				w.set(x, Y, 0, B.UltimateLogisticalTransporter)
+				w.chest(x, Y, 1, stacksOf(m, B.Cobblestone, 27))
+				w.chest(x, Y, -1, stacksOf(m, B.Cobblestone, 27))
+				w.chest(x, Y + 1, 0, stacksOf(m, B.Cobblestone, 27))
+			end
+			assert(m.TransmitterWorld.setMode(w.pipes, 1, Y, 0, WEST, m.Transmitters.MODES.PULL))
+			w.set(11, Y, 0, B.BasicSmgTurret)
+			w.containers:get(11, Y, 0, B.BasicSmgTurret).slots[1] = m.Items.newStack(m.Items.id.Rounds9mm, 2)
+			local visited = {}
+			for tick = 1, 400 do
+				visited[tick] = w.step()
+			end
+			return visited, m.TransmitterWorld.node(w.pipes, 1, Y, 0)
+		end
+		local on, puller = searches(true)
+		local off = searches(false)
+		local count = 0
+		for tick, n in on do
+			t.eq(n, off[tick], `tick {tick}: the same search as the backoff's`)
+			if n > 0 then
+				count += 1
+			end
+		end
+		t.ok(count <= 400 / 40 + 4, `{count} searches in 400 ticks`)
+		t.eq(puller.pullFailures, 0, "waiting, not failing")
+		t.ok(puller.waits ~= nil and #puller.waits == 1, "it waits for the turret")
+	end)
+
+	t.test("turret feed: lines waiting for turrets leave every other line its pulls", function()
+		--[[
+			ProbeFeedB (the review's): 3000 Ultimate transporters into a full Basic SMG, 8 of them
+			pulling 9mm from chests, and 6 unrelated Basic lines of cobblestone between chests far
+			away: what those deliver with the turrets on is what they deliver with them off (before,
+			two of them got nothing).
+		]]
+		local function delivered(enabled: boolean): { number }
+			local w = pipesWith(enabled)
+			local m = w.m
+			local B = m.Blocks.id
+			local ammo = m.Items.id.Rounds9mm
+			for x = 1, 3000 do
+				w.set(x, Y, 0, B.UltimateLogisticalTransporter)
+			end
+			w.set(3001, Y, 0, B.BasicSmgTurret)
+			w.containers:get(3001, Y, 0, B.BasicSmgTurret).slots[1] = m.Items.newStack(ammo, 2)
+			for i = 1, 8 do
+				w.chest(i * 3, Y, -1, { m.Items.newStack(ammo, 64) })
+				assert(m.TransmitterWorld.setMode(w.pipes, i * 3, Y, 0, 2, m.Transmitters.MODES.PULL))
+			end
+			local into = {}
+			for j = 1, 6 do
+				local z = 200 + j * 4
+				w.chest(0, Y, z, stacksOf(m, B.Cobblestone, 27))
+				w.set(1, Y, z, B.BasicLogisticalTransporter)
+				assert(m.TransmitterWorld.setMode(w.pipes, 1, Y, z, WEST, m.Transmitters.MODES.PULL))
+				w.set(2, Y, z, B.BasicLogisticalTransporter)
+				into[j] = w.chest(3, Y, z, {})
+			end
+			for _ = 1, 300 do
+				w.step()
+			end
+			local counts = {}
+			for j, chest in into do
+				local n = 0
+				for _, stack in chest.slots do
+					n += stack.count
+				end
+				counts[j] = n
+			end
+			return counts
+		end
+		local on, off = delivered(true), delivered(false)
+		for j, n in on do
+			t.eq(n, off[j], `line {j}: as with the turrets off`)
+		end
+		print(`    unrelated lines: {table.concat(on, "/")} (turrets off: {table.concat(off, "/")})`)
+	end)
+
+	t.test("turret feed: pulls take turns when the tick's searches run out", function()
+		-- A 32 x 32 sheet of transporters (a search visits all 1024: 4 a tick) with 48 chests on
+		-- its north and west edges pulled into it, each wanting a pull every 10 ticks (4.8 a
+		-- tick), and empty chests along its east edge: every one pulls, about as often as the
+		-- others (before, those late in the order never did).
+		local w = pipesWith(true)
+		local m = w.m
+		local B = m.Blocks.id
+		for x = 0, 31 do
+			for z = 0, 31 do
+				w.set(x, Y, z, B.BasicLogisticalTransporter)
+			end
+			w.chest(32, Y, x, {})
+		end
+		local pullers = {}
+		for i = 1, 48 do
+			local x, z, px, pz, toward = i - 1, -1, i - 1, 0, 2
+			if i > 32 then
+				x, z, px, pz, toward = -1, i - 32, 0, i - 32, WEST
+			end
+			w.chest(x, Y, z, stacksOf(m, B.Cobblestone, 27))
+			assert(m.TransmitterWorld.setMode(w.pipes, px, Y, pz, toward, m.Transmitters.MODES.PULL))
+			table.insert(pullers, m.TransmitterWorld.node(w.pipes, px, Y, pz))
+		end
+		local sent = table.create(#pullers, 0)
+		for _ = 1, 200 do
+			w.step()
+			for i, node in pullers do
+				if node.pullDelay == m.Transmitters.PULL_DELAY - 1 then
+					sent[i] += 1
+				end
+			end
+		end
+		local least, most = math.min(table.unpack(sent)), math.max(table.unpack(sent))
+		print(`    pulls each in 200 ticks: {least} to {most}`)
+		t.ok(least >= 0.6 * most, `every puller takes its turn ({least} to {most})`)
 	end)
 end

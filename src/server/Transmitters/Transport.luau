@@ -20,19 +20,22 @@
 	the time). When items were there but nothing took them, and a destination the pull could reach
 	(on a NORMAL or PUSH side, not the inventory pulled from) is a machine that demands them
 	(Machines.demands: KindSpec `demand`, a turret) whose slots through that face would take one
-	were they empty (Transmitters.room over no slots), the pull "waits": it looks again after 3
-	ticks (IDLE_DELAY) instead of backing off, its failures left as they were. So a line sends the
-	next round as soon as the turret has room (with rounds on their way counted, as always), and a
-	turret fed through one transporter of its tier or better holds its full rate (tests/spec/
-	TurretFeed). Machines that demand the items take turns (a pull that would send to one goes to
-	the next after the one its transporter sent to last, in the routes' order, that has room),
-	and what is left of the pull amount goes on to the next of them with room, so a line
-	branching to several turrets feeds each as it would feed it alone while its pull amount
-	covers them all, and gives each an even share when it does not (a Basic line's one item a
-	pull). The pull's result ranks sent, then waiting, then failed, then nothing. Lines into
-	chests, furnaces and every other machine are exactly as before; with Config.Turrets.Enabled
-	false no machine demands anything. The cost: an idle, full turret's line searches its route
-	every 3 ticks, inside SEARCH_BUDGET.
+	were they empty (Transmitters.room over no slots), the pull "waits" instead of backing off,
+	its failures left as they were: every 3 ticks (IDLE_DELAY) it looks at those machines alone
+	(their room, with the items on their way counted) and pulls as soon as one has room. So a line
+	sends the next round as soon as the turret has room, and a turret fed through one transporter
+	of its tier or better holds its full rate (tests/spec/TurretFeed). A waiting pull's routes are
+	searched again only when the backoff would have ended (its waits in a row counted as
+	failures), and that search, off the 3 tick looks, sends nothing to such machines: a full
+	turret's line searches and chooses among destinations as often as a full chest's, and feeds
+	the turret as a pull every 3 ticks would. Machines that demand the items take turns (a pull
+	that would send to one goes to the next after the one its transporter sent to last, in the
+	routes' order, that has room), and what is left of the pull amount goes on to the next of
+	them with room, so a line branching to several turrets feeds each as it would feed it alone
+	while its pull amount covers them all, and gives each an even share when it does not (a Basic
+	line's one item a pull). The pull's result ranks sent, then waiting, then failed, then
+	nothing. Lines into chests, furnaces and every other machine are exactly as before; with
+	Config.Turrets.Enabled false no machine demands anything.
 
 	Ejected items (Mekanism's ejector: TileComponentEjector into canReceiveFrom sides). A furnace
 	or a machine with output slots (Transmitters.ejects) pushes its results out on its own into
@@ -60,7 +63,9 @@
 	(Mekanism's items wander along the transporters instead.) A search visits MAX_SEARCH (4096)
 	transporters at most, and once a tick's searches have visited SEARCH_BUDGET (4096), waiting
 	items and pulls wait for a later tick, so big networks full of waiting items cannot stall the
-	server.
+	server. (The budget counts the transporters searched, not the choosing among the inventories
+	they reach.) The next tick's pulls start at the first transporter left waiting, so pullers
+	late in the order are not starved when the searches run out tick after tick.
 
 	Moving. Every tick an item's progress grows by its transporter's speed (5 / 10 / 20 / 50 a
 	tick, 100 = one block). Halfway through it checks the way ahead (the next transporter still
@@ -96,6 +101,7 @@ type World = Types.World
 type Node = Types.Node
 type Item = Types.Item
 type Stack = Types.Stack
+type Wait = Types.Wait
 type Slots = Transmitters.Slots
 type TransportOp = Types.TransportOp
 
@@ -112,7 +118,8 @@ local RETRY_TICKS = 20
 local MAX_SEARCH = 4096
 --[[
 	Transporters the route searches may visit per tick before waiting items stop looking and
-	pulls stop (both carry on the next tick; a search that starts finishes, so a tick visits at
+	pulls stop (both carry on the next tick, the pulls from the transporter they stopped at; a
+	search that starts finishes, so a tick visits at
 	most this plus MAX_SEARCH for them). Items already moving always find their way. Without it,
 	items waiting in a big network (say 200 in 4096 transporters) would each search it every
 	RETRY_TICKS ticks, hundreds of milliseconds a tick.
@@ -380,7 +387,7 @@ end
 	The first candidate that takes at least one of `stack` and how many it takes. Without `home`:
 	inventories on NORMAL / PUSH sides but `skip` (where the item came from). With `home`: only
 	that inventory, through any side joined to it. `except` is the item being routed (its own
-	prediction does not count).
+	prediction does not count). `others`: no machine that demands its items (the demand rule).
 ]]
 local function choose(
 	world: World,
@@ -388,7 +395,8 @@ local function choose(
 	stack: Stack,
 	skip: number?,
 	home: number?,
-	except: Item?
+	except: Item?,
+	others: boolean?
 ): (Candidate?, number)
 	local cache: { [number]: Slots } = {}
 	for _, candidate in candidates do
@@ -396,7 +404,7 @@ local function choose(
 		local wanted = if home then inventory == home else candidate.outputs and inventory ~= skip
 		if wanted then
 			local block, x, y, z = inventoryAt(world, inventory)
-			if block then
+			if block and not (others and Machines.demands(block)) then
 				local slots = cache[inventory]
 				if slots == nil then
 					slots = predicted(world, inventory, block, x, y, z, except)
@@ -660,18 +668,34 @@ local function isResult(results: { Stack }, item: number): boolean
 end
 
 --[[
-	The demand rule (see the header): would a machine that demands it (Machines.demands), reached
-	through one of `candidates` on a side that gives items (not `skip`, where it came from), take
-	some of `stack` were its slots empty? Then the pull waits for it instead of failing.
+	The demand rule (see the header): the machines that demand it (Machines.demands), reached
+	through `candidates` on a side that gives items (not `skip`, where it came from), that would
+	take some of `stack` were their slots empty, added to `waits`. The pull waits for them instead
+	of failing.
 ]]
-local function demanded(world: World, candidates: { Candidate }, stack: Stack, skip: number): boolean
+local function demanded(world: World, candidates: { Candidate }, stack: Stack, skip: number, waits: { Wait })
 	for _, candidate in candidates do
 		local inventory = candidate.inventory
 		if candidate.outputs and inventory ~= skip then
 			local block = inventoryAt(world, inventory)
 			if block and Machines.demands(block) and Transmitters.room(block, candidate.face, EMPTY, stack) >= 1 then
-				return true
+				table.insert(waits, { inventory = inventory, block = block, face = candidate.face, stack = stack })
 			end
+		end
+	end
+end
+
+-- Is a waiting pull's wait over: has one of the machines it waits for room now (the items on
+-- their way there counted), or is it gone?
+local function waitOver(world: World, waits: { Wait }): boolean
+	for _, wait in waits do
+		local block, x, y, z = inventoryAt(world, wait.inventory)
+		if block == nil or block ~= wait.block then
+			return true
+		end
+		local slots = predicted(world, wait.inventory, block, x, y, z, nil)
+		if Transmitters.room(block, wait.face, slots, wait.stack) >= 1 then
+			return true
 		end
 	end
 	return false
@@ -683,14 +707,17 @@ end
 	"failed" (items there, nowhere to send them) or "none" (nothing to take). `routes` gives the
 	route search, which is the same for every side of the transporter (it is only run when
 	needed). `ejected`: a NORMAL side taking what a furnace or machine pushes out (its output
-	slots only), else a PULL side.
+	slots only), else a PULL side. A waiting pull adds the machines it waits for to `waits`.
+	`others`: it sends nothing to machines that demand the items (a wait's search, see `pull`).
 ]]
 local function pullSide(
 	world: World,
 	node: Node,
 	side: number,
 	routes: () -> ({ Candidate }, { [number]: number }),
-	ejected: boolean
+	ejected: boolean,
+	waits: { Wait },
+	others: boolean
 ): string
 	local inventory = Grid.neighbour(node.key, side)
 	if inventory == nil then
@@ -718,7 +745,7 @@ local function pullSide(
 	for _, kind in types do
 		local most = if ejects then math.min(Items.maxStack(kind.item), Items.MAX_STACK) else pull
 		local want = Items.withCount(kind, math.min(kind.count, most)) :: Stack
-		local candidate, room = choose(world, candidates, want, inventory, nil, nil)
+		local candidate, room = choose(world, candidates, want, inventory, nil, nil, others)
 		-- (The demand rule: machines that demand the items take turns.)
 		if candidate and demanding(world, candidate) then
 			candidate, room = chooseTurn(world, candidates, want, inventory, node.fed)
@@ -770,7 +797,7 @@ local function pullSide(
 			-- (The demand rule: what is left of the pull amount goes on to the next machine that
 			-- demands the items, so a line branching to several turrets feeds them all.)
 			local left = want.count - taken.count
-			if left < 1 then
+			if left < 1 or others then
 				break
 			end
 			want = Items.withCount(kind, left) :: Stack
@@ -780,26 +807,50 @@ local function pullSide(
 			return "sent"
 		end
 	end
-	-- (The demand rule: a turret that will have room for them.)
+	-- (The demand rule: the turrets that will have room for them.)
+	local before = #waits
 	for _, kind in types do
 		local most = if ejects then math.min(Items.maxStack(kind.item), Items.MAX_STACK) else pull
-		if demanded(world, candidates, Items.withCount(kind, math.min(kind.count, most)) :: Stack, inventory) then
-			return "waiting"
-		end
+		demanded(world, candidates, Items.withCount(kind, math.min(kind.count, most)) :: Stack, inventory, waits)
 	end
-	return "failed"
+	return if #waits > before then "waiting" else "failed"
 end
 
--- The PULL sides of transporter `node`, and its NORMAL sides on furnaces and machines that push
--- their results out, when its pull timer is up.
-local function pull(world: World, node: Node)
-	if node.pullDelay > 0 then
+-- Ticks a pull backs off after `failures` failed pulls in a row (Mekanism: min(40, e^failures)).
+local function backoff(failures: number): number
+	return math.min(MAX_BACKOFF, math.floor(math.exp(failures)))
+end
+
+--[[
+	The PULL sides of transporter `node`, and its NORMAL sides on furnaces and machines that push
+	their results out, when its pull timer is up. False when it was due but the tick's searches
+	were used up (it pulls on a later tick).
+]]
+local function pull(world: World, node: Node): boolean
+	-- (The demand rule's wait: when the pull timer is up, every IDLE_DELAY ticks, only the
+	-- machines it waits for are looked at, and it pulls when one has room; its routes are
+	-- searched again when a failed pull would have looked again, and then, off the timer, it
+	-- sends nothing to machines that demand the items.)
+	local waits = node.waits
+	local due = node.pullDelay <= 0
+	if waits then
+		node.rescan -= 1
+		if node.rescan > 0 and not (due and waitOver(world, waits)) then
+			node.pullDelay = if due then IDLE_DELAY - 1 else node.pullDelay - 1
+			return true
+		end
+	elseif not due then
 		node.pullDelay -= 1
-		return
-	elseif world.searchBudget <= 0 then
-		-- (The tick's searches are used up: it stays due and pulls on a later tick.)
-		return
+		return true
 	end
+	if world.searchBudget <= 0 then
+		-- (The tick's searches are used up: it stays due and pulls on a later tick, its timer
+		-- running on.)
+		node.pullDelay = math.max(node.pullDelay - 1, 0)
+		return false
+	end
+	node.waits = nil
+	local found: { Wait } = {}
 	local sent, waiting, failed = false, false, false
 	local candidates: { Candidate }? = nil
 	local back: { [number]: number }? = nil
@@ -814,7 +865,7 @@ local function pull(world: World, node: Node)
 		if has(node.acceptors, side) and Transmitters.receives(mode) then
 			-- (A NORMAL side only takes what a furnace or machine pushes out: from anything else
 			-- there is nothing to take.)
-			local result = pullSide(world, node, side, routes, mode ~= PULL)
+			local result = pullSide(world, node, side, routes, mode ~= PULL, found, not due)
 			if result == "sent" then
 				sent = true
 			elseif result == "waiting" then
@@ -827,26 +878,61 @@ local function pull(world: World, node: Node)
 	if sent then
 		node.pullFailures = 0
 		node.pullDelay = PULL_DELAY - 1
+		node.waited = 0
 	elseif failed and not waiting then
 		node.pullFailures += 1
-		node.pullDelay = math.min(MAX_BACKOFF, math.floor(math.exp(node.pullFailures))) - 1
+		node.pullDelay = backoff(node.pullFailures) - 1
+	elseif waiting then
+		-- (The demand rule's wait, the failures in a row as they were: its searches come when a
+		-- failed pull's backoff, its waits counted as failures, would have ended.)
+		node.waited += 1
+		node.waits = found
+		node.rescan = backoff(node.pullFailures + node.waited)
+		node.pullDelay = if due then IDLE_DELAY - 1 else node.pullDelay - 1
 	else
-		-- (Nothing to take, or the demand rule's wait: look again soon, the failures in a row as
-		-- they were.)
+		-- (Nothing to take: look again soon, the failures in a row as they were.)
 		node.pullDelay = IDLE_DELAY - 1
 	end
+	return true
 end
 
 --[[ Entry points ]]
 
--- One tick: every item moves, then every transporter with PULL sides on inventories pulls.
+--[[
+	One tick: every item moves, then every transporter with PULL sides on inventories pulls, from
+	the one the last tick's searches ran out at round to the one before it, so pullers late in the
+	order are not starved when the searches run out every tick.
+]]
 function Transport.step(world: World)
 	world.searchBudget = SEARCH_BUDGET
 	for _, item in world.items do
 		move(world, item)
 	end
-	for _, node in world.pullers do
-		pull(world, node)
+	local pullers = world.pullers
+	local from = world.pullFrom
+	if from ~= nil and pullers[from] == nil then
+		from = nil
+	end
+	world.pullFrom = nil
+	local function pullAt(key: number, node: Node)
+		if not pull(world, node) and world.pullFrom == nil then
+			world.pullFrom = key
+		end
+	end
+	local started = from == nil
+	for key, node in pullers do
+		started = started or key == from
+		if started then
+			pullAt(key, node)
+		end
+	end
+	if from ~= nil then
+		for key, node in pullers do
+			if key == from then
+				break
+			end
+			pullAt(key, node)
+		end
 	end
 end
 

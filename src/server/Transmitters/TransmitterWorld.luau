@@ -121,6 +121,7 @@ function TransmitterWorld.new(env: Env): World
 		nextItem = 1,
 		incoming = {},
 		searchBudget = 0,
+		pullFrom = nil,
 		ops = {},
 		dirtyNodes = {},
 		dirtyTanks = {},
@@ -464,7 +465,7 @@ end
 	and what follows: a pipe whose links changed is queued for its network with the pipes it
 	joined or left; a pipe's network knows its pipes on tanks; transporters with PULL sides on
 	inventories, or NORMAL sides on furnaces and machines that push their results out, are the
-	pullers.
+	pullers, and a transporter's pull that waits for a turret looks at its routes again.
 ]]
 local function relink(world: World, node: Node)
 	local function getBlock(x: number, y: number, z: number): number?
@@ -504,10 +505,14 @@ local function relink(world: World, node: Node)
 		elseif network then
 			network.ports[node.key] = nil
 		end
-	elseif bit32.band(acceptors, pullMask(node.modes)) ~= 0 or receivesEjected(world, node, acceptors) then
-		world.pullers[node.key] = node
 	else
-		world.pullers[node.key] = nil
+		-- (A pull waiting for a turret searches its routes again: they may have changed.)
+		node.waits = nil
+		if bit32.band(acceptors, pullMask(node.modes)) ~= 0 or receivesEjected(world, node, acceptors) then
+			world.pullers[node.key] = node
+		else
+			world.pullers[node.key] = nil
+		end
 	end
 end
 
@@ -541,6 +546,9 @@ local function addNode(world: World, key: number, x: number, y: number, z: numbe
 		pullDelay = 0,
 		pullFailures = 0,
 		fed = nil,
+		waits = nil,
+		rescan = 0,
+		waited = 0,
 		sentModes = 0,
 		sentColour = 0,
 		sentFluid = 0,

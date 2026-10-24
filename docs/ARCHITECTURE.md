@@ -5698,20 +5698,24 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
     When items were there but nothing took them and a destination the pull reaches (a NORMAL or
     PUSH side, not the source) is a machine that demands them (`Machines.demands`, KindSpec
     `demand`: the turrets) whose slots through that face would take one were they empty
-    (`Transmitters.room` over no slots), the pull "waits": 3 ticks, its failures as they were,
-    instead of the backoff. A pull's result ranks sent, waiting, failed, nothing. So a line sends
-    the next round as soon as the turret has room (rounds on their way counted), and a turret fed
+    (`Transmitters.room` over no slots), the pull "waits" instead of the backoff, its failures as
+    they were: every 3 ticks it looks at those machines alone (their room, rounds on their way
+    counted) and pulls as soon as one has room. A pull's result ranks sent, waiting, failed,
+    nothing. So a line sends the next round as soon as the turret has room, and a turret fed
     through one transporter of its tier or better holds its full rate (Turrets and the Metal Miner:
-    the feed). Machines that demand the items take turns (a pull that would send to one goes to the
-    next with room after the one its transporter sent to last, in the routes' order), and what is
-    left of the pull amount goes on to the next of them with room, so a line branching to several
-    turrets feeds each as it would feed it alone while its pull amount covers them all, and gives
-    each an even share when it does not (a Basic line's one round a pull). Every other destination
-    is exactly as before: `tests/spec/TurretFeed` reproduces the deliveries measured before the
-    rule for a machine that demands nothing and shows chests and furnaces still backing off, and
-    the Transport and MachinePipes specs are untouched. With `Config.Turrets.Enabled` false no
-    kind demands anything. An idle full turret's line searches its
-    route every 3 ticks, inside the tick's search budget. `TransmitterWorld.feedTier` is the
+    the feed). A waiting pull searches its routes again only when the backoff would have ended
+    (its waits in a row counted as failures), and that search, off the 3 tick looks, sends nothing
+    to such machines: a full turret's line searches and chooses among destinations exactly when a
+    full chest's would (`tests/spec/TurretFeed` compares them tick by tick), and feeds the turret
+    as a pull every 3 ticks would. Machines that demand the items take turns (a pull that would
+    send to one goes to the next with room after the one its transporter sent to last, in the
+    routes' order), and what is left of the pull amount goes on to the next of them with room, so
+    a line branching to several turrets feeds each as it would feed it alone while its pull amount
+    covers them all, and gives each an even share when it does not (a Basic line's one round a
+    pull). Every other destination is exactly as before: `tests/spec/TurretFeed` reproduces the
+    deliveries measured before the rule for a machine that demands nothing and shows chests and
+    furnaces still backing off, and the Transport and MachinePipes specs are untouched. With
+    `Config.Turrets.Enabled` false no kind demands anything. `TransmitterWorld.feedTier` is the
     feeder rule's look at the transporters next to a block.
   - Routes: Dijkstra from the item's transporter, adding `pathCost` for each transporter entered
     and only entering ones that `carries` its colour. The cheapest inventory (then fewest steps)
@@ -5719,9 +5723,12 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
     their way there (Mekanism's TransporterManager). The source inventory is excluded except as
     "home" (reachable through any joined side; a furnace's or machine's results have no home, so
     they never go back in); with neither, the item waits in the middle of its transporter and
-    looks again every 20 ticks. A search visits at most 4096 transporters, and
-    once a tick's searches have visited 4096, waiting items and pulls carry on the next tick
-    (moving items always re-route), so big networks full of waiting items cannot stall the server.
+    looks again every 20 ticks. A search visits at most 4096 transporters, and once a tick's
+    searches have visited 4096, waiting items and pulls carry on the next tick (moving items always
+    re-route), so big networks full of waiting items cannot stall the server; the budget counts
+    the transporters searched, not the choosing among the inventories they reach. The next tick's
+    pulls start at the first transporter left waiting, so pullers late in the order are not starved
+    when the searches run out tick after tick.
   - Moving: progress grows by the transporter's speed each tick (100 = a block). Halfway, the way
     ahead is checked (and re-routed if closed); at 100 the item enters the next transporter, or the
     inventory: what fits goes in (viewers get a snapshot, a furnace wakes) and the rest re-routes.
@@ -7368,17 +7375,18 @@ require it):
   Basic; 0 by hand: its own rate until its buffer is empty). The simulation works it out every
   `FeedTicks` and returns it as the Outcome's `feed`; the kind caps the next tick's rate with it.
 - The demand rule (Mekanism pipes: Items): a line into a full turret waits 3 ticks instead of
-  backing off. With it a line delivers the turret's buffer once a trip (its transit, 20 / 10 / 5 /
-  2 ticks a block from Basic to Ultimate, plus at most 3), and the buffers (SMG 2 / 3 / 4 / 6,
-  rifle 1 / 2 / 3 / 4, sniper 1 / 1 / 2 / 2) are chosen so that the matching tier fed through one
-  transporter holds the full rate: every turret, through one transporter of its tier or better,
-  holds 100 % of its rate, a lower feeder exactly that tier's rate, longer lines within 2 % of the
-  design's table. Without the rule a Basic rifle on one Basic transporter got 69 %. One line
-  branching to several turrets feeds each as it would alone while its pull amount covers them all
-  (two of a kind off a line of their tier, three transporters away: Elite and Ultimate at their
-  rate), and the turrets take turns when it does not (Basic SMGs next to one Basic puller: 1 a
-  second each for two, 0.67 for three); before, the turret first in the routes' order took every
-  pull.
+  backing off (looking at the turret alone; its routes are searched no more often than the
+  backoff's, so it costs what a line into a full chest does). With it a line delivers the
+  turret's buffer once a trip (its transit, 20 / 10 / 5 / 2 ticks a block from Basic to Ultimate,
+  plus at most 3), and the buffers (SMG 2 / 3 / 4 / 6, rifle 1 / 2 / 3 / 4, sniper 1 / 1 / 2 / 2)
+  are chosen so that the matching tier fed through one transporter holds the full rate: every
+  turret, through one transporter of its tier or better, holds 100 % of its rate, a lower feeder
+  exactly that tier's rate, longer lines within 2 % of the design's table. Without the rule a
+  Basic rifle on one Basic transporter got 69 %. One line branching to several turrets feeds each
+  as it would alone while its pull amount covers them all (two of a kind off a line of their
+  tier, three transporters away: Elite and Ultimate at their rate), and the turrets take turns
+  when it does not (Basic SMGs next to one Basic puller: 1 a second each for two, 0.67 for
+  three); before, the turret first in the routes' order took every pull.
 
 **The service seam and the require cycle.** Players/ToughAsNails requires server Machines and
 Mobs requires ToughAsNails, so server Machines never requires the turrets (which need Mobs). A
