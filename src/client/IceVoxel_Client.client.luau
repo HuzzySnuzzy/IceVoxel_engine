@@ -514,7 +514,11 @@ BlockInteraction.start(world)
 Firearms.start(world)
 MeleeInput.start()
 ShotView.start(world)
-TurretView.start(world)
+-- (Guns are drawn only where their chunk is on screen, as the pipes are.)
+TurretView.start(world, function(cx: number, cz: number): boolean
+	local node = streamer.nodes[Coords.chunkKey(cx, cz)]
+	return node ~= nil and node.shown
+end)
 GameModeSwitcher.start()
 DebugOverlay.start(streamer)
 Waila.start(world, generator)

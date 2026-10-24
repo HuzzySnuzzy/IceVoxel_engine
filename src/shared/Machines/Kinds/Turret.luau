@@ -244,7 +244,7 @@ local function define(spec: Spec): Core.Kind
 	return Core.define(spec.kind, {
 		slots = {
 			{
-				x = 26,
+				x = 8,
 				y = 35,
 				accepts = accepts(SLOT.AMMO),
 				limit = spec.buffer,
@@ -252,8 +252,8 @@ local function define(spec: Spec): Core.Kind
 				insert = { 0, 2, 3, 4, 5 },
 				ghost = Turrets.GHOSTS.ammo,
 			},
-			{ x = 62, y = 35, accepts = accepts(SLOT.OPTIC), limit = 1, insert = {}, ghost = Turrets.GHOSTS.optic },
-			{ x = 80, y = 35, accepts = accepts(SLOT.MUZZLE), limit = 1, insert = {}, ghost = Turrets.GHOSTS.muzzle },
+			{ x = 26, y = 35, accepts = accepts(SLOT.OPTIC), limit = 1, insert = {}, ghost = Turrets.GHOSTS.optic },
+			{ x = 44, y = 35, accepts = accepts(SLOT.MUZZLE), limit = 1, insert = {}, ghost = Turrets.GHOSTS.muzzle },
 		},
 		fields = { "credit", "state", "lure", "held", "feedRate", "activeDelay" },
 		keep = { "lure" },
@@ -263,7 +263,8 @@ local function define(spec: Spec): Core.Kind
 		demand = Config.Turrets.Enabled,
 		panel = {
 			status = { x = 8, y = 20 },
-			lines = { x = 98, y = 18 },
+			-- (Right of the slots: 94 pixels to the energy bar, room for "Feed: Advanced → 150 rpm".)
+			lines = { x = 66, y = 18 },
 		},
 		buttons = {
 			{ id = LURE_BUTTON, x = 8, y = 56, w = 40, h = 14, label = "Lure" },

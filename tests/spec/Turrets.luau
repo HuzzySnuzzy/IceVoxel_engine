@@ -9,7 +9,8 @@
 	no power, blocked by what is over it, snow layers 1 and 2, no ammo, the feed's cap by tier,
 	hand-filled it fires its buffer then shows "No ammo", the Lure kept in the item, attachments
 	never worn, the ammo slot taking only its calibre up to its buffer, no transporter reaching the
-	attachments, inert with the turrets off or no service), the stub simulation's statuses,
+	attachments, inert with the turrets off or no service), the simulation's statuses from the
+	order alone (no turret block, no hostiles),
 	MachineWorld handing the service once a step, the panels and their lines, the miner's and the
 	press's frozen layouts, the decor, and the game with the features switched off.
 ]]
@@ -686,7 +687,7 @@ return function(t, shared, require, server, client)
 		t.ok(not Machines.demands(B.ElectricFurnace) and not Machines.demands(B.Chest), "nothing else does")
 	end)
 
-	t.test("turret kind: inert without a service or with the turrets off; the stub simulation's statuses", function()
+	t.test("turret kind: inert without a service or with the turrets off; the simulation without targets", function()
 		local spec = Turrets.of("smg", 2)
 		local r = rig(spec)
 		r.ctx.turret = nil
@@ -707,7 +708,8 @@ return function(t, shared, require, server, client)
 		t.eq(status, STATUS.DISABLED, "the turrets off: Disabled")
 		t.eq(r.calls, 0, "the service never asked")
 		t.eq(Machines.energy(r.container), spec.capacity, "nothing taken")
-		-- The stub simulation (server Turrets/TurretWorld until builder A's): from the order alone.
+		-- The simulation (server Turrets/TurretWorld; tests/spec/TurretWorld has the rest): an order
+		-- for a block that is no turret is answered from the order alone, nothing kept.
 		local world = TurretWorld.new({
 			getBlock = function(): number?
 				return nil
@@ -760,18 +762,18 @@ return function(t, shared, require, server, client)
 		t.eq(#TurretWorld.takeShots(world), 0)
 		t.eq(#TurretWorld.takeRecords(world), 0)
 		t.eq(#TurretWorld.chunkRecords(world, 0, 0), 0)
-		-- The kind on the stub: what the stub says.
+		-- The kind on the simulation with no hostiles about: No ammo, then No target.
 		r = rig(spec)
 		r.ctx.turret = function(order: any, out: any): any
 			return TurretWorld.step(world, order, out)
 		end
 		r.tick()
 		status = r.state()
-		t.eq(status, STATUS.NO_AMMO, "the stub's No ammo")
+		t.eq(status, STATUS.NO_AMMO, "No ammo")
 		r.load(1)
 		r.tick()
 		status = r.state()
-		t.eq(status, STATUS.NO_TARGET, "the stub's No target")
+		t.eq(status, STATUS.NO_TARGET, "No target")
 		t.eq(r.rounds(), 1, "never firing")
 	end)
 
@@ -987,8 +989,10 @@ return function(t, shared, require, server, client)
 		t.eq(Machines.get(container, "calibre"), 1, "round again")
 		t.eq(Machines.info(B.AmmoPress).Rounds308, 5)
 		t.eq(Machines.info(B.AmmoPress).ticks, 200)
-		-- The stub ticks (builders C and D): state 0, nothing used.
+		-- The press's stub tick (builder D): state 0, nothing used. The miner's tick (builder C,
+		-- tests/spec/Miner): on a diamond ore it mines at once, 800 J a tick.
 		for _, block in { B.MetalMiner, B.AmmoPress } do
+			local mining = block == B.MetalMiner
 			local stub = Machines.newContainer(block)
 			stub.data[ENERGY] = 1000
 			Machines.tick(stub, {
@@ -1003,8 +1007,9 @@ return function(t, shared, require, server, client)
 					return B.DiamondOre
 				end,
 			})
-			t.eq(Machines.state(stub), 0, `{Blocks.get(block).name}: state 0`)
-			t.eq(Machines.energy(stub), 1000, "nothing used")
+			local state = if mining then MinerRules.packState(MinerRules.STATE.MINING, 6) else 0
+			t.eq(Machines.state(stub), state, `{Blocks.get(block).name}: state {state}`)
+			t.eq(Machines.energy(stub), if mining then 1000 - 800 else 1000, "the miner's 800 J, else nothing used")
 			t.eq(select(1, Machines.rates(stub)), Machines.capacity(stub), "takes its capacity a tick")
 		end
 	end)

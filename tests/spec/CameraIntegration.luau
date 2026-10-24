@@ -139,6 +139,7 @@ return function(t, shared, require, _server, client)
 			IceVoxelItems = 1,
 			IceVoxelProjectiles = 1,
 			IceVoxelShots = 1,
+			IceVoxelTurrets = 1,
 			IceVoxelTransmitters = 1,
 			IceVoxelFirstPersonBody = 2,
 			IceVoxelWeatherState = 2,
