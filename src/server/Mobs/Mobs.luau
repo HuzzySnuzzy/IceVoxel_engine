@@ -100,6 +100,11 @@
 	  Mobs.targets(player, x, y, z, radius)   the live mobs a shot may hit (WeaponTarget: id,
 	                       kind, variant, feet, yaw) with where `player`'s client was last sent
 	                       each one (sx, sy, sz; nil when it knows none): lag compensation
+	  Mobs.hostiles(into)  the live, unfrozen monsters (Hostile: id, kind, variant, feet, yaw)
+	                       filled into a reused list, their count returned, nothing allocated
+	                       (server Turrets/: what turrets may aim at, never players or animals)
+	  Mobs.target(id, into?)   one of those by id (filled into `into`), nil when it is gone,
+	                       dying, frozen or no monster
 	  Mobs.ignite(id, ticks)   sets a mob burning for at least `ticks` (the spark's fire)
 	  Mobs.spawn(kind, x, y, z, variant?)    a mob of a MobList name at a position, in a variant
 	                       (a zombie's look and skin: MobList.lookVariant; random when nil), or 0
@@ -184,6 +189,17 @@ export type WeaponTarget = {
 	sx: number?,
 	sy: number?,
 	sz: number?,
+}
+
+-- A live monster for the turrets (`hostiles`, `target`): its kind, variant, feet and yaw.
+export type Hostile = {
+	id: number,
+	kind: MobList.Kind,
+	variant: number,
+	x: number,
+	y: number,
+	z: number,
+	yaw: number,
 }
 
 local Settings = Config.Mobs
@@ -780,6 +796,63 @@ function Mobs.targets(player: Player, x: number, y: number, z: number, radius: n
 		})
 	end
 	return found
+end
+
+-- A hostile mob as the turrets see it (`hostiles`, `target`): fill `into` with mob `mob`.
+local function fillHostile(into: Hostile, mob: MobWorld.Mob)
+	local body = mob.body
+	into.id = mob.id
+	into.kind = mob.kind
+	into.variant = mob.variant
+	into.x, into.y, into.z = body.x, body.y, body.z
+	into.yaw = body.yaw
+end
+
+-- May a turret aim at `mob`: alive (not dying), awake (its chunk ticked: not frozen), a monster?
+local function turretTarget(mob: MobWorld.Mob): boolean
+	return not mob.removed and not mob.dead and not mob.frozen and mob.kind.hostile
+end
+
+--[[
+	The live, unfrozen monsters (MobList `hostile`: every zombie, any later monster; never a
+	player or an animal) for server Turrets/TurretWorld, in id order: fills `into[1..n]` with them
+	(Hostile: id, kind, variant, feet, yaw), reusing the tables already there (a new one only when
+	there were never so many), and returns n. Entries past n are left as they were: stale, never
+	read. Nothing else is allocated, so the turrets can ask every tick.
+]]
+function Mobs.hostiles(into: { Hostile }): number
+	local mobs = mobWorld
+	if mobs == nil then
+		return 0
+	end
+	local n = 0
+	for _, mob in mobs.order do
+		if turretTarget(mob) then
+			n += 1
+			local entry = into[n]
+			if entry == nil then
+				entry = { id = 0, kind = mob.kind, variant = 0, x = 0, y = 0, z = 0, yaw = 0 }
+				into[n] = entry
+			end
+			fillHostile(entry, mob)
+		end
+	end
+	return n
+end
+
+--[[
+	Mob `id` as `hostiles` gives it, filled into `into` (a new table when nil); nil when it is
+	gone, dying, frozen or no monster.
+]]
+function Mobs.target(id: number, into: Hostile?): Hostile?
+	local mobs = mobWorld
+	local mob = if mobs then mobs:get(id) else nil
+	if mob == nil or not turretTarget(mob) then
+		return nil
+	end
+	local entry: Hostile = into or { id = 0, kind = mob.kind, variant = 0, x = 0, y = 0, z = 0, yaw = 0 }
+	fillHostile(entry, mob)
+	return entry
 end
 
 function Mobs.ignite(id: number, ticks: number): boolean
