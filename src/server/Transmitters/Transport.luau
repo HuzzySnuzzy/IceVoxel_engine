@@ -24,7 +24,12 @@
 	ticks (IDLE_DELAY) instead of backing off, its failures left as they were. So a line sends the
 	next round as soon as the turret has room (with rounds on their way counted, as always), and a
 	turret fed through one transporter of its tier or better holds its full rate (tests/spec/
-	TurretFeed). The pull's result ranks sent, then waiting, then failed, then nothing. Lines into
+	TurretFeed). Machines that demand the items take turns (a pull that would send to one goes to
+	the next after the one its transporter sent to last, in the routes' order, that has room),
+	and what is left of the pull amount goes on to the next of them with room, so a line
+	branching to several turrets feeds each as it would feed it alone while its pull amount
+	covers them all, and gives each an even share when it does not (a Basic line's one item a
+	pull). The pull's result ranks sent, then waiting, then failed, then nothing. Lines into
 	chests, furnaces and every other machine are exactly as before; with Config.Turrets.Enabled
 	false no machine demands anything. The cost: an idle, full turret's line searches its route
 	every 3 ticks, inside SEARCH_BUDGET.
@@ -407,6 +412,54 @@ local function choose(
 	return nil, 0
 end
 
+-- Is the inventory of `candidate` a machine that demands its items (Machines.demands: a turret)?
+local function demanding(world: World, candidate: Candidate): boolean
+	local block = inventoryAt(world, candidate.inventory)
+	return block ~= nil and Machines.demands(block)
+end
+
+--[[
+	`choose` among the machines that demand their items (the demand rule, see the header) on
+	NORMAL / PUSH sides but `skip`, taking turns: from the one after `last` (the machine the
+	transporter sent to last) in `candidates`' order, round to the first.
+]]
+local function chooseTurn(
+	world: World,
+	candidates: { Candidate },
+	stack: Stack,
+	skip: number,
+	last: number?
+): (Candidate?, number)
+	local turn: { Candidate } = {}
+	local start = 1
+	for _, candidate in candidates do
+		if candidate.outputs and candidate.inventory ~= skip and demanding(world, candidate) then
+			table.insert(turn, candidate)
+			if candidate.inventory == last then
+				start = #turn + 1
+			end
+		end
+	end
+	local cache: { [number]: Slots } = {}
+	for n = 0, #turn - 1 do
+		local candidate = turn[(start - 1 + n) % #turn + 1]
+		local inventory = candidate.inventory
+		local block, x, y, z = inventoryAt(world, inventory)
+		if block then
+			local slots = cache[inventory]
+			if slots == nil then
+				slots = predicted(world, inventory, block, x, y, z, nil)
+				cache[inventory] = slots
+			end
+			local room = Transmitters.room(block, candidate.face, slots, stack)
+			if room >= 1 then
+				return candidate, room
+			end
+		end
+	end
+	return nil, 0
+end
+
 --[[ Replication ]]
 
 -- The Transport add for `item` as it is now (startTime 0: the caller knows the clock), and its
@@ -666,7 +719,12 @@ local function pullSide(
 		local most = if ejects then math.min(Items.maxStack(kind.item), Items.MAX_STACK) else pull
 		local want = Items.withCount(kind, math.min(kind.count, most)) :: Stack
 		local candidate, room = choose(world, candidates, want, inventory, nil, nil)
-		if candidate then
+		-- (The demand rule: machines that demand the items take turns.)
+		if candidate and demanding(world, candidate) then
+			candidate, room = chooseTurn(world, candidates, want, inventory, node.fed)
+		end
+		local sent = false
+		while candidate do
 			local count = math.min(want.count, room)
 			local newSlots: Slots, taken: Stack?
 			if ejected then
@@ -674,37 +732,52 @@ local function pullSide(
 			else
 				newSlots, taken = Transmitters.extract(block, face, container.slots, count, kind)
 			end
-			if taken then
-				store(world, x, y, z, block, newSlots)
-				-- (A furnace's or machine's results pulled out: smelted, for its last user.)
-				local resultsTaken = world.env.resultsTaken
-				if resultsTaken and results and isResult(results, taken.item) then
-					resultsTaken(x, y, z, container, taken)
-				end
-				local id = world.nextItem
-				world.nextItem += 1
-				local item: Item = {
-					id = id,
-					stack = taken,
-					colour = node.colour,
-					route = routeTo(back, node.key, candidate),
-					hop = 1,
-					target = "dest",
-					face = candidate.face,
-					progress = 0,
-					wait = 0,
-					from = inventory,
-					-- (A furnace's or machine's results never go back into it.)
-					home = if ejects then nil else inventory,
-					sentHop = 1,
-					sentSpeed = 0,
-				}
-				world.items[id] = item
-				world.itemCount += 1
-				track(world, item)
-				sendAdd(world, item)
-				return "sent"
+			if taken == nil then
+				break
 			end
+			store(world, x, y, z, block, newSlots)
+			-- (A furnace's or machine's results pulled out: smelted, for its last user.)
+			local resultsTaken = world.env.resultsTaken
+			if resultsTaken and results and isResult(results, taken.item) then
+				resultsTaken(x, y, z, container, taken)
+			end
+			local id = world.nextItem
+			world.nextItem += 1
+			local item: Item = {
+				id = id,
+				stack = taken,
+				colour = node.colour,
+				route = routeTo(back, node.key, candidate),
+				hop = 1,
+				target = "dest",
+				face = candidate.face,
+				progress = 0,
+				wait = 0,
+				from = inventory,
+				-- (A furnace's or machine's results never go back into it.)
+				home = if ejects then nil else inventory,
+				sentHop = 1,
+				sentSpeed = 0,
+			}
+			world.items[id] = item
+			world.itemCount += 1
+			track(world, item)
+			sendAdd(world, item)
+			sent = true
+			if demanding(world, candidate) then
+				node.fed = candidate.inventory
+			end
+			-- (The demand rule: what is left of the pull amount goes on to the next machine that
+			-- demands the items, so a line branching to several turrets feeds them all.)
+			local left = want.count - taken.count
+			if left < 1 then
+				break
+			end
+			want = Items.withCount(kind, left) :: Stack
+			candidate, room = chooseTurn(world, candidates, want, inventory, node.fed)
+		end
+		if sent then
+			return "sent"
 		end
 	end
 	-- (The demand rule: a turret that will have room for them.)

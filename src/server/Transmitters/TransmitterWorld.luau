@@ -540,6 +540,7 @@ local function addNode(world: World, key: number, x: number, y: number, z: numbe
 		network = nil,
 		pullDelay = 0,
 		pullFailures = 0,
+		fed = nil,
 		sentModes = 0,
 		sentColour = 0,
 		sentFluid = 0,

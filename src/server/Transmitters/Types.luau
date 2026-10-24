@@ -70,6 +70,9 @@ export type Node = {
 	-- furnaces and machines push out), and failed pulls in a row (backoff).
 	pullDelay: number,
 	pullFailures: number,
+	-- Transporters: the machine that demands its items (Transport's demand rule) it sent items to
+	-- last (pos key; such machines take turns), nil none.
+	fed: number?,
 	-- The record clients last got (a new transmitter is in the default state: 0, 0, 0, 0): modes,
 	-- colour, a pipe's fill byte and its fluid id.
 	sentModes: number,

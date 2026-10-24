@@ -9,7 +9,8 @@
 
 	The contract (the turrets design's tables, measured on the same code): a turret fed through
 	one transporter of its tier or better holds its full rate; through a lower tier exactly that
-	tier's rate; longer lines deliver its buffer once a trip (within 5 % of the measured table).
+	tier's rate; longer lines deliver its buffer once a trip (within 5 % of the measured table); a
+	line branching to several turrets feeds each as it would alone, evenly when it cannot.
 	And every other destination is exactly as before: a machine that demands nothing reproduces
 	the deliveries measured on the Transport before the demand rule, chests and furnaces still
 	back off, and with Config.Turrets.Enabled false no line waits for a turret.
@@ -47,7 +48,8 @@ return function(t, shared, require, server)
 		A world of blocks (air elsewhere): a chest of `item` at x = 0, `length` transporters of tier
 		`tier` (the first pulling from the chest), the destination `block` after them and, under it,
 		a Creative Energy Cube (touching machines share energy). `service` answers the turrets'
-		ticks. Returns the world's parts and a stepper that refills the chest every 100 ticks.
+		ticks. Returns the world's parts (`set` places more blocks) and a stepper that refills the
+		chest every 100 ticks.
 	]]
 	local function line(tier: number, length: number, block: number, item: number, service: any?): any
 		local blocks: { [number]: number } = {}
@@ -94,7 +96,7 @@ return function(t, shared, require, server)
 		local at = length + 1
 		set(at, Y - 1, 0, B.CreativeEnergyCube)
 		set(at, Y, 0, block)
-		local s = { pipes = pipes, machines = machines, containers = containers, x = at, ticks = 0 }
+		local s = { pipes = pipes, machines = machines, containers = containers, x = at, ticks = 0, set = set }
 		function s.step(n: number)
 			for _ = 1, n do
 				s.ticks += 1
@@ -117,11 +119,12 @@ return function(t, shared, require, server)
 	--[[
 		A stand-in for the server's simulation (server Turrets/TurretWorld's place): a target always
 		held, a shot whenever the order may fire, the feeder rule's tier on the real pipes. Counts
-		the shots it fired (the kind takes exactly those: ready, armed, powered, not blocked).
+		the shots it fired (the kind takes exactly those: ready, armed, powered, not blocked), in
+		all and by turret (`byKey`, pos keys).
 	]]
 	local function shooter(): (any, () -> any, (any) -> ())
 		local s: any = nil
-		local counter = { shots = 0 }
+		local counter = { shots = 0, byKey = {} }
 		local function service(order: any, out: any): any
 			out.feed = TransmitterWorld.feedTier(s.pipes, order.x, order.y, order.z, order.block)
 			out.tracking = true
@@ -129,6 +132,7 @@ return function(t, shared, require, server)
 			out.status = if out.fired then STATUS.FIRING elseif not order.armed then STATUS.NO_AMMO else STATUS.TARGETING
 			if out.fired then
 				counter.shots += 1
+				counter.byKey[order.key] = (counter.byKey[order.key] or 0) + 1
 			end
 			return out
 		end
@@ -241,6 +245,64 @@ return function(t, shared, require, server)
 		end
 		local turret = Machines.kindOf(spec.block)
 		t.ok(turret ~= nil and turret.demand, "the turret demands its rounds")
+	end)
+
+	--[[
+		Rounds a second each turret of `spec` at `turrets` ({ x, z }, a Creative Energy Cube under
+		each) fires, fed by one puller of its tier on a chest (a line of one, no destination) and the
+		transporters of its tier at `arms` ({ x, z }) joined to it.
+	]]
+	local function branched(spec: Turrets.Spec, arms: { { number } }, turrets: { { number } }): { number }
+		local counter, get, bindWorld = shooter()
+		local s = line(spec.tier, 1, AIR, spec.ammo, get())
+		bindWorld(s)
+		s.set(s.x, Y - 1, 0, AIR)
+		for _, at in arms do
+			s.set(at[1], Y, at[2], T[spec.tier])
+		end
+		for _, at in turrets do
+			s.set(at[1], Y - 1, at[2], B.CreativeEnergyCube)
+			s.set(at[1], Y, at[2], spec.block)
+		end
+		s.step(WARM)
+		table.clear(counter.byKey)
+		s.step(TICKS)
+		local rates = {}
+		for _, at in turrets do
+			table.insert(rates, (counter.byKey[Coords.posKey(at[1], Y, at[2])] or 0) / (TICKS / 20))
+		end
+		return rates
+	end
+
+	t.test("turret feed: a line branching to turrets feeds each, an even share when short", function()
+		-- One puller, a T, a turret at the end of each arm (three transporters away): each fires
+		-- what it fires there alone, and at Elite and Ultimate its rate (the trip caps Basic and the
+		-- Advanced SMG there).
+		local tee = { { 2, 0 }, { 2, 1 }, { 2, -1 } }
+		local worst = math.huge
+		for _, spec in Turrets.SPECS do
+			local full = spec.rpm / 60
+			local alone = branched(spec, tee, { { 2, 2 } })[1]
+			local pair = branched(spec, tee, { { 2, 2 }, { 2, -2 } })
+			for i, rate in pair do
+				worst = math.min(worst, rate / alone)
+				t.ok(rate >= 0.95 * alone, `{spec.name}, turret {i} of two: {rate} a second (alone {alone})`)
+				if spec.tier >= 3 then
+					t.ok(rate >= 0.95 * full, `{spec.name}, turret {i} of two: its rate ({full})`)
+				end
+			end
+		end
+		print(`    the worst share of the rate alone, one of two on a branch: {math.round(worst * 100) / 100}`)
+		-- Basic SMGs (1.5 a second each) next to the puller itself share a Basic line's one round a
+		-- pull (2 a second) evenly.
+		local smg = Turrets.of("smg", 1)
+		for _, turrets in { { { 1, 1 }, { 1, -1 } }, { { 1, 1 }, { 1, -1 }, { 2, 0 } } } do
+			local rates = branched(smg, {}, turrets)
+			for i, rate in rates do
+				local share = 2 / #rates
+				t.near(rate, share, 0.05 * share, `{#rates} Basic SMGs, turret {i}: {rate} a second`)
+			end
+		end
 	end)
 
 	t.test("turret feed: the feeder rule reads the transporters next to it", function()
