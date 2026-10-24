@@ -33,9 +33,8 @@
 	                  and advanced transporters, pipes and fluid tanks, the Configurator, the
 	                  Heat Generator, Gunpowder and TNT (with the Demolition skill too), uranium
 	                  smelting (no smelting result may come later: transporters feed furnaces
-	                  ungated), the
-	                  potions' strong (II) and long variants, Concrete (cracked and mossy
-	                  too) and the Oil Heater.
+	                  ungated), the potions' strong (II) and long variants, Concrete (cracked
+	                  and mossy too) and the Oil Heater.
 	  Electric Age    (level 25, a Heat Generator crafted) basic and advanced
 	                  Universal Cables, the Electric Furnace, basic and advanced Batteries, the
 	                  upgrade cards, the Oil Refinery and the Combustion Generator, elite
