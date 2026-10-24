@@ -2505,11 +2505,13 @@ local Config = {
 		MaxSightChecks = 6,
 		MaxScansPerTick = 16,
 		MaxShotsPerTick = 32,
-		-- Nothing nearer than MinRange blocks; the gun's pitch limits (degrees); a shot flies
+		-- Nothing nearer than MinRange blocks; the gun's pitch limits (degrees: PitchMin the lowest
+		-- at which the drawn gun and its muzzle clear its own block at every yaw, with the pivot
+		-- Shared/Turrets/TurretRules.PIVOT; tests/spec/TurretClient sweeps it); a shot flies
 		-- ExtraFlight blocks past the turret's range (at most its round's); no range beyond MaxRange;
 		-- a turret shows "Firing" for FiringTicks after a shot.
 		MinRange = 1.5,
-		PitchMin = -60,
+		PitchMin = -51,
 		PitchMax = 75,
 		ExtraFlight = 16,
 		MaxRange = 80,

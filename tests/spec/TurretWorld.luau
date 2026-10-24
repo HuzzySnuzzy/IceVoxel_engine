@@ -552,7 +552,7 @@ return function(t, shared, require, server)
 	end)
 
 	t.test(
-		"turret world: its own cell is air (it fires down past its edge); below -60 degrees is a dead zone",
+		"turret world: its own cell is air (it fires down past its edge); below -51 degrees is a dead zone",
 		function()
 			local spec = Turrets.of("smg", 1)
 			local e = newGame()
@@ -569,17 +569,19 @@ return function(t, shared, require, server)
 			end
 			e.set(TX, TY, TZ, spec.block)
 			e.set(TX, TY - 1, TZ, STONE)
-			-- Down beside the pillar: the line to it passes through the turret's own cell.
-			local zombie = e.add(ZOMBIE, 2.5, base - 2, 0.5)
+			-- Down beside the pillar, along the diagonal: the line to it passes through the turret's
+			-- own cell, by its corner (from the pivot 0.82 over the top only a line steeper than
+			-- about -49 degrees does, and PitchMin is -51).
+			local zombie = e.add(ZOMBIE, 2.5, base - 2.4, 2.5)
 			local _, wantPitch = TurretRules.aim(PX, PY, PZ, TurretWorld.aimPoint(zombie, false))
 			t.ok(TurretRules.inPitch(wantPitch), "within the pitch limits")
-			-- (The line enters the turret's own cell: x 0..1, y 64..65.)
+			-- (The line enters the turret's own cell: x and z 0..1, y 64..65.)
 			local r = newSim(e)
 			local turret = r.add(spec, nil, nil, nil, { ready = true })
 			r.step(30)
 			t.eq(r.state(turret).target, zombie.id, "seen through its own cell")
 			t.ok(#e.hurts > 0, "and shot")
-			-- Hugging the pillar's foot: steeper than -60 degrees, never.
+			-- Hugging the pillar's foot: steeper than -51 degrees, never.
 			local e2 = newGame()
 			e2.blocks = e.blocks
 			local hugging = e2.add(ZOMBIE, 1.4, base - 4, 0.5)

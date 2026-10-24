@@ -1,12 +1,13 @@
 --[[
 	The client's turrets: the gun's model (Rendering/TurretModel: its boxes by type, tier and what
 	is mounted, the pivot, the barrel along the aim and never turned half a turn, the muzzle the
-	server's), the view's rules (where a drawn gun turns to, at its turn rate, the short way across
-	+-180 degrees), Rendering/TurretView on fakes (records decoded into its state, heads pooled,
-	hidden and freed, the floating origin, the beam, the servo, the dry click, a turret shot's
-	drawn muzzle, its cost a frame with 48 turrets), the turret shots' effects (Rendering/ShotRules:
-	`plain`, the stand-in gun's class sound, suppressed and far), Entities/MobRenderer.aimPoint,
-	WAILA's turret lines (Ui/WailaInfo) and F3's (Debug/DebugOverlay).
+	server's, never into its own block at any aim the pitch limits allow), the view's rules (where
+	a drawn gun turns to, at its turn rate, the short way across +-180 degrees),
+	Rendering/TurretView on fakes (records decoded into its state, heads pooled, hidden and freed,
+	the floating origin, the beam, the servo, the dry click, a turret shot's drawn muzzle, its cost
+	a frame with 48 turrets), the turret shots' effects (Rendering/ShotRules: `plain`, the stand-in
+	gun's class sound, suppressed and far), Entities/MobRenderer.aimPoint, WAILA's turret lines
+	(Ui/WailaInfo) and F3's (Debug/DebugOverlay).
 ]]
 
 local fs = require("@lune/fs")
@@ -277,34 +278,163 @@ return function(t, shared, require, _server, client)
 		t.eq(TurretModel.laserStart(TurretModel.look(s, 0), 0, 0, 0, 0, 0), nil, "no laser, no beam")
 	end)
 
-	t.test("turret client: the gun sits on the base and clears its top over the pitch it aims at", function()
-		local numbers = {}
-		for _, s in Turrets.SPECS do
-			local look = TurretModel.look(s, Flag.Laser + Flag.Scope + Flag.Suppressor)
-			local x, y, z = 10, 64, -7
-			-- The turntable on the block's top (no face shared with it), the pivot over it.
-			local turntable = boxNamed(look, "Turntable") :: TurretModel.Box
-			local bottom = y + TurretRules.PIVOT + turntable.offset[2] - turntable.size[2] / 2
-			t.ok(bottom > y + 1 and bottom < y + 1.01, `{s.name}: the turntable on the top ({bottom - y})`)
-			-- (Pitched down further, a barrel's end dips over its own block's edge: the pivot is
-			-- 0.3 over the top, Shared/Turrets/TurretRules.PIVOT, and the pitch goes to -60.)
-			for _, pitch in { 0, math.rad(Config.Turrets.PitchMax), math.rad(30), math.rad(-10) } do
-				for _, yaw in { 0, 1, -2.2 } do
-					TurretModel.place(look, x, y, z, yaw, pitch, numbers)
-					for i, box in look.boxes do
-						for _, corner in corners(numbers, i, box) do
-							-- Never into its own block (below its top, over its footprint).
-							local reach = math.max(math.abs(corner[1] - x - 0.5), math.abs(corner[3] - z - 0.5))
-							t.ok(
-								corner[2] >= y + 1 - 1e-9 or reach >= 0.5,
-								`{s.name} {box.name}: out of its block at {math.deg(pitch)}°`
-							)
-							-- (Within the cell over the turret sideways, but for the barrel's reach.)
-							t.ok(reach <= 0.5 + s.barrel, `{s.name} {box.name}: near its block`)
+	-- How far (blocks) the box `place` wrote at `at` goes down into the block (x, y, z) (0: not into
+	-- it): the block's top less the box's lowest point over the block's footprint, which is a corner
+	-- over it, where an edge crosses the footprint's side, or where one of the footprint's four
+	-- upright edges passes through the box. Exact for a box; nothing allocated.
+	local axisX, axisY, axisZ, half = { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }
+	local function depthIn(
+		numbers: { number },
+		at: number,
+		box: TurretModel.Box,
+		x: number,
+		y: number,
+		z: number
+	): number
+		local o = (at - 1) * TurretModel.STRIDE
+		-- (From the middle of the block's top.)
+		local cx, cy, cz = numbers[o + 1] - x - 0.5, numbers[o + 2] - y - 1, numbers[o + 3] - z - 0.5
+		local down, acrossX, acrossZ = 0, 0, 0
+		for i = 1, 3 do
+			axisX[i], axisY[i], axisZ[i] = numbers[o + 3 + i], numbers[o + 6 + i], numbers[o + 9 + i]
+			half[i] = box.size[i] / 2
+			down += half[i] * math.abs(axisY[i])
+			acrossX += half[i] * math.abs(axisX[i])
+			acrossZ += half[i] * math.abs(axisZ[i])
+		end
+		-- Wholly over the top or beside the footprint.
+		if cy - down >= 0 or math.abs(cx) - acrossX >= 0.5 or math.abs(cz) - acrossZ >= 0.5 then
+			return 0
+		end
+		local lowest = math.huge
+		-- The edges along each axis (from the corner at its minus end), their ends the corners.
+		for i = 1, 3 do
+			local j, k = i % 3 + 1, (i + 1) % 3 + 1
+			local dx, dy, dz = 2 * half[i] * axisX[i], 2 * half[i] * axisY[i], 2 * half[i] * axisZ[i]
+			for sj = -1, 1, 2 do
+				for sk = -1, 1, 2 do
+					local sx = cx + sj * half[j] * axisX[j] + sk * half[k] * axisX[k] - dx / 2
+					local sy = cy + sj * half[j] * axisY[j] + sk * half[k] * axisY[k] - dy / 2
+					local sz = cz + sj * half[j] * axisZ[j] + sk * half[k] * axisZ[k] - dz / 2
+					for c = 1, 6 do
+						local along = if c == 1
+							then 0
+							elseif c == 2 then 1
+							elseif c <= 4 then (if dx ~= 0 then ((if c == 3 then -0.5 else 0.5) - sx) / dx else -1)
+							else (if dz ~= 0 then ((if c == 5 then -0.5 else 0.5) - sz) / dz else -1)
+						if along >= 0 and along <= 1 then
+							local px, py, pz = sx + dx * along, sy + dy * along, sz + dz * along
+							if math.abs(px) <= 0.5 + 1e-12 and math.abs(pz) <= 0.5 + 1e-12 and py < lowest then
+								lowest = py
+							end
 						end
 					end
 				end
 			end
+		end
+		-- The footprint's upright edges through the box: (q - centre) . axis within its half.
+		for qx = -0.5, 0.5, 1 do
+			for qz = -0.5, 0.5, 1 do
+				local lo, hi = -math.huge, math.huge
+				for i = 1, 3 do
+					local k = (qx - cx) * axisX[i] + (qz - cz) * axisZ[i] - cy * axisY[i]
+					if math.abs(axisY[i]) < 1e-12 then
+						if math.abs(k) > half[i] then
+							lo = math.huge
+						end
+					else
+						local a, b = (-half[i] - k) / axisY[i], (half[i] - k) / axisY[i]
+						lo, hi = math.max(lo, math.min(a, b)), math.min(hi, math.max(a, b))
+					end
+				end
+				if lo <= hi and lo < lowest then
+					lowest = lo
+				end
+			end
+		end
+		return if lowest < 0 then -lowest else 0
+	end
+
+	t.test("turret client: the gun sits on the base, level in the cell above, never into its block", function()
+		local numbers = {}
+		local x, y, z = 10, 64, -7
+		local settings = Config.Turrets
+		-- A sniper's can pointing straight down goes in (what is checked does see it).
+		local straight = TurretModel.look(spec("sniper", 1), Flag.Suppressor)
+		TurretModel.place(straight, x, y, z, 0, math.rad(-90), numbers)
+		local canAt = table.find(straight.boxes, boxNamed(straight, "Suppressor")) :: number
+		local straightDepth = depthIn(numbers, canAt, straight.boxes[canAt], x, y, z)
+		t.near(straightDepth, 2 - TurretRules.PIVOT, 1e-9, "straight down: its front a block under the pivot")
+		local placed = 0
+		for _, s in Turrets.SPECS do
+			-- Every mount (the Scope flag only where it fits: one look for both).
+			local seen = {}
+			for bits = 0, 7 do
+				local look = TurretModel.look(
+					s,
+					(if bits % 2 == 1 then Flag.Laser else 0)
+						+ (if (bits // 2) % 2 == 1 then Flag.Scope else 0)
+						+ (if bits >= 4 then Flag.Suppressor else 0)
+				)
+				if not seen[look] then
+					seen[look] = true
+					-- The turntable on the block's top (no face shared with it), the pivot over it.
+					local turntable = boxNamed(look, "Turntable") :: TurretModel.Box
+					local bottom = y + TurretRules.PIVOT + turntable.offset[2] - turntable.size[2] / 2
+					t.ok(bottom > y + 1 and bottom < y + 1.01, `{s.name}: the turntable on the top ({bottom - y})`)
+					-- Held level, under the cell above's top (no face shared with a block over it).
+					TurretModel.place(look, x, y, z, 0, 0, numbers)
+					for i, box in look.boxes do
+						for _, corner in corners(numbers, i, box) do
+							t.ok(corner[2] < y + 2 - 1e-3, `{s.name} {box.name}: level, in the cell above`)
+						end
+					end
+					-- Every 5 degrees of yaw round the turn, every degree from PitchMin to PitchMax:
+					-- never into its own block, and the server's shot origin out of it.
+					for yawDeg = 0, 355, 5 do
+						local yaw = math.rad(yawDeg)
+						for pitchDeg = settings.PitchMin, settings.PitchMax do
+							local pitch = math.rad(pitchDeg)
+							TurretModel.place(look, x, y, z, yaw, pitch, numbers)
+							placed += 1
+							for i, box in look.boxes do
+								local depth = depthIn(numbers, i, box, x, y, z)
+								if depth > 1e-9 then
+									t.ok(
+										false,
+										`{s.name} {box.name}: {depth} into its block at {yawDeg}°, {pitchDeg}°`
+									)
+								end
+								local o = (i - 1) * TurretModel.STRIDE
+								local reach =
+									math.max(math.abs(numbers[o + 1] - x - 0.5), math.abs(numbers[o + 3] - z - 0.5))
+								if reach > 0.5 + s.barrel then
+									t.ok(false, `{s.name} {box.name}: near its block ({reach})`)
+								end
+							end
+							local mx, my, mz = TurretRules.muzzle(x, y, z, yaw, pitch, s.barrel)
+							if my < y + 1 and math.abs(mx - x - 0.5) < 0.5 and math.abs(mz - z - 0.5) < 0.5 then
+								t.ok(false, `{s.name}: the muzzle in its block at {yawDeg}°, {pitchDeg}°`)
+							end
+						end
+					end
+				end
+			end
+		end
+		t.eq(placed, (4 * 4 + 8 * 8) * 72 * (settings.PitchMax - settings.PitchMin + 1), "every look and aim")
+		-- The nearest, a sniper's can, at every half degree of a quarter turn (every yaw: the block's
+		-- footprint turns into itself): clear at PitchMin, into its block a degree under it, so
+		-- PitchMin is the lowest that clears them all.
+		local can = TurretModel.look(spec("sniper", 1), Flag.Suppressor)
+		for _, case in { { settings.PitchMin, false }, { settings.PitchMin - 1, true } } do
+			local deepest = 0
+			for tenths = 0, 900, 5 do
+				TurretModel.place(can, x, y, z, math.rad(tenths / 10), math.rad(case[1]), numbers)
+				for i, box in can.boxes do
+					deepest = math.max(deepest, depthIn(numbers, i, box, x, y, z))
+				end
+			end
+			t.eq(deepest > 1e-9, case[2], `the can at {case[1]}°: {deepest} into its block`)
 		end
 	end)
 

@@ -1511,7 +1511,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   takes the nearest it can see, with a little weight on how far it must turn, and keeps it until
   it dies, leaves its range or stays hidden half a second. It turns at its tier's rate (SMG
   180–360 degrees a second, rifle 120–240, sniper 60–120) and fires once on target. Glass and
-  leaves hide a zombie from it, torches and water don't, and a zombie more than 60 degrees below
+  leaves hide a zombie from it, torches and water don't, and a zombie more than 51 degrees below
   the gun (hugging the wall it stands on) is safe. Shots are traced like a player's but never
   shatter glass or break a block, and a kill credits nobody (no Knowledge, no kill count, no
   player-only loot), as an iron golem's. A scoped sniper aims at heads. Gunfire draws zombies (SMG
@@ -2839,7 +2839,7 @@ for performance:
 | `Turrets.Lure` | Enabled, Noise 24, Ticks 600, Cell 48 | The lure: a powered, armed turret with no target and its Lure on makes a Noise-block noise (more at night) every Ticks while it is night or a blood moon, at most one a Cell × Cell blocks. |
 | `Turrets.ScanTicks` / `SightTicks` / `LoseTicks` / `MaxSightChecks` | 10 / 4 / 10 / 6 | Targeting: a scan every ScanTicks (a Laser Sight's own 5), the target's sight checked every SightTicks and lost after LoseTicks unseen, at most MaxSightChecks candidates looked at a scan. |
 | `Turrets.MaxScansPerTick` / `MaxShotsPerTick` | 16 / 32 | Every turret together a tick (a scan over it waits a tick; a shot over it waits a tick, losing none). |
-| `Turrets.MinRange` / `PitchMin` / `PitchMax` / `ExtraFlight` / `MaxRange` / `FiringTicks` | 1.5 / -60 / 75 / 16 / 80 / 10 | Nothing nearer than MinRange; the gun's pitch limits (degrees: below -60 a dead zone); a shot flies ExtraFlight past the turret's range; no range beyond MaxRange (a scope's included); "Firing" shows FiringTicks after a shot. |
+| `Turrets.MinRange` / `PitchMin` / `PitchMax` / `ExtraFlight` / `MaxRange` / `FiringTicks` | 1.5 / -51 / 75 / 16 / 80 / 10 | Nothing nearer than MinRange; the gun's pitch limits (degrees: below -51 a dead zone, the lowest the drawn gun clears its own block at); a shot flies ExtraFlight past the turret's range; no range beyond MaxRange (a scope's included); "Firing" shows FiringTicks after a shot. |
 | `Turrets.FeedTicks` / `FeedRateTicks` | 20 / 100 | The feeder rule's look at the transporters around a turret every FeedTicks; the panel's "In: x/s" averages arrivals over FeedRateTicks. |
 | `Turrets.RecordRange` / `RecordTicks` / `RecordAngle` / `RecordRefresh` | 96 / 2 / 3 / 20 | Turrets messages: to players within RecordRange blocks sideways, at most every RecordTicks a turret, when its target, flags or rounds change or its aim moved RecordAngle degrees, and every RecordRefresh ticks while it tracks. |
 | `Turrets.Client` | DrawDistance 96, MaxDrawn 48, MaxParts 720, BeamLength 24, ServoLoops 4 | The client: turrets drawn within DrawDistance of the camera, at most MaxDrawn from MaxParts pooled parts; a Laser Sight's beam at most BeamLength; the servo loop at the ServoLoops nearest turning turrets. |

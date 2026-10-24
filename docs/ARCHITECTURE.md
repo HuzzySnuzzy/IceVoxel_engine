@@ -7264,16 +7264,16 @@ require it):
   transporter or deeper snow make it "Blocked"; nil is clear), `optic(spec, item)` (a Laser Sight:
   the cone x 0.5, a rescan every 5 ticks; a Rifle Scope on a rifle or sniper: the range x 1.25 to
   `MaxRange`, a sniper aiming at heads) and the slots' `GHOSTS`.
-- `TurretRules` (both sides; signatures frozen): the pivot (x + 0.5, y + 1.3, z + 0.5), angles in
+- `TurretRules` (both sides; signatures frozen): the pivot (x + 0.5, y + 1.82, z + 0.5), angles in
   radians (yaw 0 faces +Z, facing (sin yaw, cos yaw) as mobs'), `direction`, `aim`, `muzzle`,
   `turn` (each axis at most a step, the short way across +-pi, never past), `offAngle`, `inPitch`
-  (-60 to 75 degrees), the cadence (`cadence`: an exact whole credit, + rpm a powered tick, CREDIT
-  1200 a shot, held at CREDIT while the shot may not go, so a rate of r fires exactly 10 r shots in
-  12 000 ticks; a float credit or capping before the shot's subtraction both fire too slowly, and
-  the spec proves both), `spread` (with a Laser Sight and a working muzzle device), `range`,
-  `shotNoise` (the stand-in gun's `Handling.noise` with its device x `NoiseScale` 0.75: SMG 36,
-  rifle 60, sniper 72 blocks, suppressed 9 / 15 / 18), `score` (distance + 0.05 a degree to turn)
-  and `feedRate` (the panel's "In: x/s", an average over `FeedRateTicks`).
+  (-51 to 75 degrees: see The model), the cadence (`cadence`: an exact whole credit, + rpm a
+  powered tick, CREDIT 1200 a shot, held at CREDIT while the shot may not go, so a rate of r fires
+  exactly 10 r shots in 12 000 ticks; a float credit or capping before the shot's subtraction both
+  fire too slowly, and the spec proves both), `spread` (with a Laser Sight and a working muzzle
+  device), `range`, `shotNoise` (the stand-in gun's `Handling.noise` with its device x `NoiseScale`
+  0.75: SMG 36, rifle 60, sniper 72 blocks, suppressed 9 / 15 / 18), `score` (distance + 0.05 a
+  degree to turn) and `feedRate` (the panel's "In: x/s", an average over `FeedRateTicks`).
 - `Types` (types only, requiring nothing, so Machines/Core can name them): `Order` (a turret's
   question each tick: tick, key, cell, block, powered, blocked, armed, ready, optic, muzzle and
   its durability left, ammo, held, lure), `Outcome` (status, fired, tracking, feed) and `Service`.
@@ -7391,7 +7391,7 @@ machines read (never generating terrain), for the simulation's Env.
   - **Targets**: only the Env's hostiles (`Mobs.hostiles`: live, unfrozen `hostile` kinds; never
     players or animals). It aims at the body box's centre (Ballistics.mobBoxes), a scoped sniper at
     the head's, within `MinRange` and `TurretRules.range` of the pivot and the pitch limits (below
-    −60° a dead zone).
+    −51° a dead zone).
   - **Scans** (no target): every `ScanTicks` (a Laser Sight's 5), staggered by cell, at most
     `MaxScansPerTick` a tick for every turret (one over waits a tick). Hostiles are hashed into
     16-block columns once a machine tick, only when a turret scans or shoots, ranked by
@@ -7468,9 +7468,14 @@ tier's bands in its colour (one at Basic, two from Advanced); a heat shroud from
 targeting module's glowing eye at Ultimate; a Laser Sight's emitter under the receiver; and a Rifle
 Scope's tube on top (only on the types that take one). The bore runs through the pivot along the aim
 and ends exactly `Spec.barrel` out, so the drawn muzzle is `TurretRules.muzzle`, the server's shot
-origin. Looks (`look(spec, flags)`) are made once and frozen. `place` writes each box's centre and
-its rotation as `CFrame.new`'s twelve numbers, with the columns right, up and back. A part's
-LookVector is therefore the aim and its Size is (across, up, along). No Model pivots are used
+origin. The pivot is 0.82 over the block's top, on a post up from the turntable: held level the gun
+stays under the top of the cell above (the scope's top 0.005 under it), and at every yaw and pitch
+the server allows no box and no muzzle goes into the turret's own block. `PitchMin` −51 is the
+lowest pitch at which that holds for every type, tier and mount (a degree lower a sniper's can
+reaches in at some yaw; `tests/spec/TurretClient` sweeps every look, yaw and pitch). Looks
+(`look(spec, flags)`) are made once and frozen. `place` writes each box's centre and its rotation
+as `CFrame.new`'s twelve numbers, with the columns right, up and back. A part's LookVector is
+therefore the aim and its Size is (across, up, along). No Model pivots are used
 (Model.WorldPivot is ignored once a model has a PrimaryPart), and no part is turned half a turn (an
 earlier bug held guns backwards). The view's rules are pure too: `want` (the target as the client
 draws it — `MobRenderer.aimPoint`: Ballistics' body-box centre, a scoped sniper's head — within the
@@ -9362,8 +9367,10 @@ Saving worlds).
   nothing. Server Machines never requires the turrets (the service comes in through
   `Machines.setTurretService`); the Turrets message and WeaponSync's `plain` ship with both ends.
   TurretView builds every CFrame from world blocks, with the epoch as part of each head's
-  placement key. The bore runs through the pivot and the muzzle is `Spec.barrel` out. Turret
-  parts are placed one by one, never through Model pivots.
+  placement key. The bore runs through the pivot and the muzzle is `Spec.barrel` out; at every
+  aim within the pitch limits no part of the drawn gun and no muzzle is inside the turret's own
+  block (`TurretRules.PIVOT` and `PitchMin` change together). Turret parts are placed one by one,
+  never through Model pivots.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.
 - The structure library is part of world generation: the server, every client and every worker

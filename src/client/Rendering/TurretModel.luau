@@ -6,7 +6,7 @@
 
 	The base is the block itself (Rendering/BlockDecor "<Tier><Type>Turret": the housing, the
 	tier's bands, the belt intake, the turntable's ring painted on top). Over its top, turning about
-	the pivot (Shared/Turrets/TurretRules.pivot: 0.3 block over the top, the block's centre):
+	the pivot (Shared/Turrets/TurretRules.pivot: 0.82 block over the top, the block's centre):
 	  base frame (turns with the yaw only)
 	    turntable  a steel plate on the block's top
 	    post       the mount up from the turntable to the gun's trunnions
@@ -26,7 +26,10 @@
 	    laser      a Laser Sight's emitter under the receiver's front (TurretFlag.Laser): the beam
 	               (Rendering/TurretView) starts at its front and runs along the aim
 	    scope      a Rifle Scope's tube on top (TurretFlag.Scope; the types that take one)
-	At most MAX_PARTS boxes (an Ultimate sniper with all three mounted has 13), plus the beam.
+	At most MAX_PARTS boxes (an Ultimate sniper with all three mounted has 13), plus the beam. Held
+	level the gun stays under the top of the cell above (the scope's top 0.005 under it); at every
+	yaw and pitch within Config.Turrets' limits no box goes into the turret's own block (a
+	sniper's can is the nearest: a degree under PitchMin it would).
 
 	Frames. Every box is given in its frame's axes, in blocks from the pivot: `right`, `up` and
 	`forward` (along the aim). At yaw, pitch (TurretRules' angles: yaw 0 faces +Z, growing towards

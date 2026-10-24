@@ -3,8 +3,10 @@
 	A turret's maths, pure, the one rule both sides keep (the server aims and fires with it,
 	server Turrets/TurretWorld; the client draws the gun turning with it, Rendering/TurretView):
 
-	  Pivot      the gun turns about (x + 0.5, y + PIVOT, z + 0.5) of its block: over the base's
-	             top, where the client draws its turntable
+	  Pivot      the gun turns about (x + 0.5, y + PIVOT, z + 0.5) of its block: 0.82 over the
+	             base's top, on the post the client draws up from its turntable, so the gun held
+	             level stays in the cell above (under its top) and at PitchMin no part of it, nor
+	             the muzzle, goes into its own block (Rendering/TurretModel; the specs sweep it)
 	  Angles     radians. Yaw 0 faces +Z and grows towards +X: facing (sin yaw, cos yaw), as mobs'
 	             bodies (Entities/MobPhysics); pitch up from the horizontal. `direction` is the
 	             unit vector, `aim` the angles and distance from the pivot to a point, `muzzle`
@@ -12,7 +14,8 @@
 	  Turning    `turn` moves each axis at most `step` towards the angles wanted, the short way
 	             round (across +-pi) and never past them; `offAngle` is how far the aim is from
 	             them (the firing gate's settle). The pitch stays within Config.Turrets.PitchMin
-	             .. PitchMax (`inPitch`): below -60 degrees is a dead zone
+	             .. PitchMax (`inPitch`): below -51 degrees (the lowest the gun clears its own
+	             block at, every type and yaw) is a dead zone
 	  Cadence    an exact whole credit: every powered tick `credit` + rpm; with CREDIT (1200: the
 	             ticks of a minute) or more and leave to fire it fires and loses CREDIT, else it is
 	             held at CREDIT at most. So a rate of r rounds a minute fires exactly r x 10 shots in
@@ -40,8 +43,8 @@ type Spec = Turrets.Spec
 
 local TurretRules = {}
 
--- The pivot's height over the block's bottom (blocks).
-TurretRules.PIVOT = 1.3
+-- The pivot's height over the block's bottom (blocks; see the header).
+TurretRules.PIVOT = 1.82
 -- The cadence's credit a shot costs: the ticks of a minute (rates are rounds a minute).
 TurretRules.CREDIT = 1200
 -- Ticks a second.
