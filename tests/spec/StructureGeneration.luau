@@ -36,13 +36,12 @@ return function(t, shared, require)
 		isPlant[id] = Blocks.isPlant(id)
 		isLeaves[id] = string.find(Blocks.get(id).name, "Leaves") ~= nil
 	end
-	for _, name in
-		{ "CoalOre", "IronOre", "GoldOre", "DiamondOre", "EmeraldOre", "OsmiumOre", "Diorite", "Andesite", "Granite" }
-	do
-		isOre[Blocks.id[name]] = true
+	for _, ore in require(shared.Generation.Ores).FEATURES do
+		isOre[ore.block] = true
 	end
-	-- Ores only exist in each chunk's core and lichen at the padding's edge may differ (see
-	-- tests/spec/Generation and CaveLichen).
+	-- Ores (every block of Ores.FEATURES: the newer ores and the sulfur vents too) only exist in
+	-- each chunk's core and lichen at the padding's edge may differ (see tests/spec/Generation and
+	-- CaveLichen).
 	local function norm(id: number): number
 		if Blocks.isCaveTwin(id) then
 			return Blocks.CAVE_AIR

@@ -14,18 +14,12 @@ return function(t, shared, require)
 	-- Ores (and stone varieties) only exist in a chunk's own core, so treat them as stone when
 	-- comparing borders. Glow lichen in the outermost padding ring may differ from the neighbour's
 	-- core (it can't see past the padding), so treat it as the cave air it grows in
-	-- (tests/spec/CaveLichen checks those cells and that the difference is harmless).
-	local ORE = {
-		[Blocks.id.CoalOre] = true,
-		[Blocks.id.IronOre] = true,
-		[Blocks.id.GoldOre] = true,
-		[Blocks.id.DiamondOre] = true,
-		[Blocks.id.EmeraldOre] = true,
-		[Blocks.id.OsmiumOre] = true,
-		[Blocks.id.Diorite] = true,
-		[Blocks.id.Andesite] = true,
-		[Blocks.id.Granite] = true,
-	}
+	-- (tests/spec/CaveLichen checks those cells and that the difference is harmless). (Every
+	-- block of Ores.FEATURES: the newer ores and the sulfur vents are core-only too.)
+	local ORE: { [number]: boolean } = {}
+	for _, ore in Ores.FEATURES do
+		ORE[ore.block] = true
+	end
 	local function norm(id: number): number
 		if Blocks.isCaveTwin(id) then
 			return Blocks.CAVE_AIR
@@ -370,7 +364,17 @@ return function(t, shared, require)
 
 	t.test("ores: adding osmium moved no earlier ore (saved worlds keep theirs)", function()
 		-- Checksums of every non-osmium ore cell in all-stone chunks, taken before osmium existed:
-		-- the features before it in Ores.FEATURES must keep drawing the same numbers.
+		-- the features before it in Ores.FEATURES must keep drawing the same numbers. (The ores
+		-- after osmium only replace stone left over, so they are left out too; OreGeneration pins
+		-- osmium and the rest against them.)
+		local later: { [number]: boolean } = {}
+		local after = false
+		for _, ore in Ores.FEATURES do
+			after = after or ore.block == Blocks.id.OsmiumOre
+			if after then
+				later[ore.block] = true
+			end
+		end
 		local height = 700
 		local expected = { "922:1760838665", "921:2061121151", "914:384238489" }
 		for i, chunk in { { 0, 0 }, { 3, -2 }, { -57, 1201 } } do
@@ -382,7 +386,7 @@ return function(t, shared, require)
 			local sum, n = 0, 0
 			for cell = 0, buffer.len(data) // 2 - 1 do
 				local id = buffer.readu16(data, cell * 2)
-				if id ~= Blocks.id.Stone and id ~= Blocks.id.Air and id ~= Blocks.id.OsmiumOre then
+				if id ~= Blocks.id.Stone and id ~= Blocks.id.Air and not later[id] then
 					sum = (sum * 31 + cell * 7 + id) % 2147483647
 					n += 1
 				end

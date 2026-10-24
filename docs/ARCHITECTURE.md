@@ -82,7 +82,8 @@ node key) and `posKey(x, y, z)` for block positions.
    the same rock in a chunk's padding as in its neighbour's core; then water lakes (point-sampled
    up to `Config.StructureMaxLevel`) and puddles (full detail only; `Lakes.luau`, see Lakes and
    puddles). After the ores (step 6) a full detail chunk with caves may sink an underground lava
-   lake into a cave floor (not within 2 blocks of a library piece or a mineshaft's piece).
+   lake into a cave floor (not within 2 blocks of a library piece or a mineshaft's piece); then
+   the ores' sulfur vents crust the lava lakes' barriers and the oil deposits (`Ores.vents`).
 6. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
    bands (diorite, andesite and granite blobs low to high, emeralds only inside high mountains).
    Each feature in `Ores.FEATURES` has `veins` per 128 blocks of height and `size` walk steps.
@@ -97,6 +98,38 @@ node key) and `posKey(x, y, z)` for block positions.
    7 above y 197 (2 per 128 blocks). Osmium is about as common as iron below y 197 and about half
    as common above. Every feature draws from one random stream per chunk, in list order: new
    features go at the end, so earlier ores never move (a Generation test pins them).
+   The newer ores follow, mapped the same way (Minecraft's ground under the sea, y -64..64, is the
+   low band y 5..197: 1.5 blocks a block; measured in `tests/spec/OreGeneration` over 48 all-stone
+   chunks, against iron in the same band):
+   - **copper**: Minecraft's 16 veins of 10 per chunk on a trapezoid over y 48..304 (its -16..112),
+     densest near y 176: 1.6 times iron over that band, 2.4 around y 130..230, 0.3 below y 90;
+   - **lead**: Mekanism's 8 of 9 on a trapezoid from below bedrock to the top of the low band
+     (y -31..197, densest near y 83): 0.87 times iron below y 197 (0.9 times osmium), none above;
+   - **zinc**: Create's veins of 12 (uniform, its -63..70: the low band) at gold's rate instead of
+     Create's (brass takes one zinc to three copper): 0.9 times gold, 0.34 times iron;
+   - **uranium**: Mekanism's small (veins of 4, y 5..133) and buried (veins of 9, y -35..93,
+     plateau 24) features at a quarter of Mekanism's counts (1 and 1.75 a chunk): 0.5 times iron
+     below y 50, 0.4 below 100, never in the mountains. `buried = 0.75` is Minecraft's
+     discardChanceOnAirExposure: that share of the cells next to air or cave air stays stone (a
+     per-cell hash, so the stream is unchanged), so uranium rarely shows on a cave wall;
+   - **sulfur**: 3 veins of 8 a chunk in the cave lava's band (y 1..33, 1.9 times iron there),
+     plus `Ores.vents`;
+   - **saltpetre**: 4 veins of 8 a chunk (`depth = true`) starting 4..36 blocks under the top block
+     of columns whose biome never rains (`dry`: Desert, Savanna, Windswept Savanna; `Ores.isDry`)
+     above the sea, about 24 a dry chunk, as much as coal in those layers. `Ores.place` takes each
+     padded column's surface height and biome for it (TerrainGenerator's `heights` and `biomes`);
+     without them (tests) it draws the same numbers and places nothing. It replaces stone only,
+     like every ore: a desert's sandstone is only the 5 blocks under its sand, and "ores only
+     replace stone, in the core" is what CaveDecor's rock rule and the border checks lean on.
+   `Ores.vents` runs after the underground lava lake (so no lake barrier covers it again): sulfur
+   veins of 6 started on the stone barrier cells (`Lava.BARRIER`) of every lava lake near the
+   chunk and the one just sunk into it (one per 16 barrier cells, some 20 blocks a lake), and
+   veins of 8 started one block outside every nearby oil deposit's sphere (one per 64 square
+   blocks of its surface, 35-75 blocks a small or medium well). Each lake's and well's veins come
+   from its own stream (seeded by its position), so every chunk walks the same ones and writes its
+   own core's part: a vent crosses chunk borders unbroken. The newer ores add about a fifth of the
+   ore walk's steps (334 of 1,780 in a 700 tall chunk): `Ores.place` costs ~0.2 ms there instead
+   of ~0.15 ms, and ores with vents ~0.12 ms of a real chunk's ~3 ms.
 7. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`; never
    on a city's asphalt, sidewalks or lots, nor on a bunker's collar), then the structure library's
    jigsaw structures (`StructureGen.luau`), whose air clears trees and whose structure voids keep
@@ -9535,7 +9568,10 @@ Saving worlds).
   slots (`output = true` slots are pushed out); `Transmitters/Inventories` is the one place the
   faces are decided.
 - Ore features (`Generation/Ores`) are placed in list order from one random stream per chunk:
-  append new ones, never reorder or change earlier ones, or every unedited world's ores move.
+  append new ones, never reorder or change earlier ones, or every unedited world's ores move. A
+  feature that places nothing somewhere (saltpetre under wet land, a buried cell) must still draw
+  the same numbers there, and anything placed by what the chunk holds (`Ores.vents`) draws from a
+  stream of its own.
 - Ground plants (`Generation/Foliage`) decide each column from the seed, its (x, z) and its own
   blocks only, so a chunk's padding grows what its neighbour's core grows; keep it so. A plant's
   shape has at most 4 boxes (each is a part per plant in the world), and a tall plant is placed

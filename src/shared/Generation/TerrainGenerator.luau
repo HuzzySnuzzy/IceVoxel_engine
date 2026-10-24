@@ -21,11 +21,12 @@
 	Order of a chunk: fill, caves (Caves.luau, cave air), cave entrances and ravines
 	(SurfaceCaves.luau, air open to the surface), lava below LavaLevel, surface lava lakes and oil
 	wells (Lava.luau, OilWells.luau), water lakes and puddles (Lakes.luau), ores, underground lava
-	lakes (kept off mineshafts), trees and library structures, mineshafts (Mineshafts.luau, full
-	detail only: their entrance shafts last), glow lichen, ground plants. Trees ask the worms (not
-	the chunk) whether a surface cave opens under them, so every chunk agrees on every tree; no
-	surface cave is carved next to a structure's piece, a surface lava or water lake, a puddle, a
-	geyser's oil lake or a mineshaft's entrance, and no tree grows in one.
+	lakes (kept off mineshafts), sulfur on the lava lakes' barriers and around the oil deposits
+	(Ores.vents), trees and library structures, mineshafts (Mineshafts.luau, full detail only:
+	their entrance shafts last), glow lichen, ground plants. Trees ask the worms (not the chunk)
+	whether a surface cave opens under them, so every chunk agrees on every tree; no surface cave
+	is carved next to a structure's piece, a surface lava or water lake, a puddle, a geyser's oil
+	lake or a mineshaft's entrance, and no tree grows in one.
 
 	Locating (/locate: Generation/Locate, Players/LocateCommands): `locateKinds` lists what this
 	world can have on cell grids, each with a probe that never fills a cache (a library
@@ -996,7 +997,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		-- SurfaceCaves.MAX_LEVEL: far ravines show as cuts), lava below LavaLevel, surface lava
 		-- lakes, oil wells and water lakes (point-sampled up to StructureMaxLevel) and puddles (full
 		-- detail only), then ores (full detail only; they only replace stone, so they never fill
-		-- carved air) and an underground lava lake.
+		-- carved air), an underground lava lake and the ores' sulfur vents.
 		local carved: Caves.Carved? = nil
 		if level == 0 and Config.Caves.Enabled then
 			carved = carveCaves(data, originX, originZ, heights, cells, yield)
@@ -1062,10 +1063,12 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			end
 		end
 		if level == 0 then
-			Ores.place(data, seed, nx, nz, cells)
+			-- (Saltpetre goes under dry land: the columns' heights and biomes.)
+			Ores.place(data, seed, nx, nz, cells, heights, biomes)
 			-- An underground lava lake, sunk into a cave floor (decided from this chunk's blocks; it
 			-- never reaches the neighbours' padding), not into a library structure's piece nor
 			-- near a mineshaft or [ruins] a bunker.
+			local sunk: Lava.Lake? = nil
 			if carved then
 				local blocked: ((number, number, number, number, number, number) -> boolean)? = nil
 				local taken: { number } = {}
@@ -1109,9 +1112,12 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 						return false
 					end
 				end
-				local _, map = lava.underground(data, cells, nx, nz, heights, carved, blocked)
-				carved = map
+				local lake, map = lava.underground(data, cells, nx, nz, heights, carved, blocked)
+				sunk, carved = lake, map
 			end
+			-- Sulfur on the stone barriers of the lava lakes (the surface ones near and the one just
+			-- sunk) and around the oil deposits, after both so no barrier covers it again.
+			Ores.vents(data, seed, nx, nz, cells, lavaLakes, nearWells, sunk)
 		end
 		-- (The steps below run 1-4 ms together on a cold chunk: a yield between each.)
 		if yield then

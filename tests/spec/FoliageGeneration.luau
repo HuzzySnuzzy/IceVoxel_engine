@@ -41,12 +41,11 @@ return function(t, shared, require)
 		return string.find(name, "Log") ~= nil or string.find(name, "Leaves") ~= nil
 	end
 
-	-- Ores and stone varieties only exist in a chunk's own core.
+	-- Ores and stone varieties only exist in a chunk's own core (every block of Ores.FEATURES: the
+	-- newer ores and the sulfur vents too).
 	local ORE: { [number]: boolean } = {}
-	for _, name in
-		{ "CoalOre", "IronOre", "GoldOre", "DiamondOre", "EmeraldOre", "OsmiumOre", "Diorite", "Andesite", "Granite" }
-	do
-		ORE[id[name]] = true
+	for _, ore in require(shared.Generation.Ores).FEATURES do
+		ORE[ore.block] = true
 	end
 	local function norm(block: number): number
 		return if ORE[block] then id.Stone else block

@@ -1586,6 +1586,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   Nuke's core) and a Block of Raw Uranium. The **Hazmat suit** (Mekanism's Hazmat Mask, Gown,
   Pants and Boots: lead ingots in White Wool padding, the mask with a glass visor; Leather's
   armor points) is the Iron Age's.
+- **Where the newer ores are found.** Each follows its mod's numbers, mapped onto this taller
+  world (Minecraft's ground under the sea is y 5-197 here):
+  - **Copper Ore** (Minecraft's: 16 veins of 10 a chunk) at middle heights, from y 48 to 304 and
+    thickest around y 176, under hills: more than iron there (2.4 times around y 130-230), less
+    deep down.
+  - **Lead Ore** (Mekanism's: 8 veins of 9) low to middle, from bedrock to y 197, thickest around
+    y 83: a little less than osmium; none in the mountains.
+  - **Zinc Ore** (Create's veins of 12) anywhere from y 5 to 197, about as common as gold.
+  - **Uranium Ore** (Mekanism's small and buried veins, a quarter as many) deep: near bedrock and
+    in the deep caves up to y 133, never in the mountains; rare (about half as common as iron
+    below y 50, four times the diamonds), and mostly buried in the rock: three in four of its
+    cells that would face a cave stay stone.
+  - **Sulfur Ore** where it is volcanic: in the rock of the cave lava's band (bedrock to y 33), in
+    crusts on the stone rim of every lava lake (on the surface and sunk into cave floors, about 20
+    a lake), and in the rock around oil deposits (35-75 around a small or medium well).
+  - **Saltpetre Ore** under dry land: 4 to 36 blocks below the surface of deserts, savannas and
+    windswept savannas (the biomes where it never rains), about 24 a chunk, as much as coal there.
 - **Item data.** Items carry a little data of their own, Minecraft's item NBT kept flat: up to 16
   named numbers, strings or flags. A Fluid Tank broken in survival keeps its fluid in its item
   ("Lava: 12,000 mB" under its name in the inventory) and gets it back when placed again, as in
@@ -2252,7 +2269,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
     Relief                  terrain heights (JJThunder To The Max style)
     Noise                   seeded noise on top of math.noise
-    Caves, Ores             full detail only (Ores: every ore feature, Mekanism's osmium included)
+    Caves, Ores             full detail only (Ores: every ore feature, Mekanism's osmium and the
+                            newer ores included, and the sulfur vents on lava lakes and oil)
     SurfaceCaves            cave entrances and ravines (worms carved as air; full detail and LOD
                             levels 1-2)
     Lava                    lava below LavaLevel (levels 0-2), Minecraft's lava lakes
