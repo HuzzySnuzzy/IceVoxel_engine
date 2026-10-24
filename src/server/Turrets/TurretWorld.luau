@@ -59,14 +59,19 @@
 	             grid: hostiles hashed into 16-block columns with their body's aim point once a
 	             machine tick, only when a turret scans or shoots; none killed this tick) ranked
 	             by TurretRules.score (distance + 0.05 a degree to turn: one two blocks nearer but
-	             behind the gun loses; worked out only for those near enough to rank), the best
-	             MaxSightChecks looked at in that order (FireRules.wallBetween's rule, on
+	             behind the gun loses; worked out only for those near enough to rank),
+	             MaxSightChecks of them looked at in order (FireRules.wallBetween's rule, on
 	             VoxelRaycast.distance: Shapes.sight's collision boxes, so glass and leaves stop
-	             sight, torches and water don't; looked along from the candidate's end, where a
-	             wall a horde presses on stands), the first in sight taken. A scan that finds none
-	             in sight leaves the next to look further down the ranking (past the last it
-	             looked at, from the best again once past the end), so however many hidden ones
-	             rank first, one in sight k-th is looked at within ceil(k / MaxSightChecks) scans.
+	             sight, torches and water don't, and a cell the server does not hold stops it, as
+	             it stops the shot's trace; looked along from the pivot, as the trace runs, so a
+	             line exactly through a cell's edge or corner meets what a shot would), the first
+	             in sight taken: first the best two (TOP_CHECKS), every scan, so one in sight
+	             among them is taken at the next scan however many hidden ones there are, and
+	             before any further down; then the rest walk down the ranking, past the last the
+	             walk looked at in vain (from the third again once past the end). With n in
+	             reach, while the ranking holds, every one is looked at within
+	             ceil((n - 2) / (MaxSightChecks - 2)) + 1 scans, the k-th of a fresh walk within
+	             ceil((k - 2) / (MaxSightChecks - 2)).
 	  Tracking   sticky (never a switch to a nearer one): turning at its turn rate
 	             (TurretRules.turn, `turn` degrees a second), its sight checked every SightTicks,
 	             lost after LoseTicks unseen, at once when it is gone (env.mob nil: dead, removed,
@@ -181,8 +186,8 @@ type Turret = {
 	pitch: number,
 	-- The mob it tracks (0: none), the tick it was last seen and last looked at, and whether
 	-- it was in sight then; the tick its due scan and its shot have waited since for the
-	-- tick's budget (math.huge: none waits); the last candidate its scans looked at in vain
-	-- (score and id; -math.huge: none), the next scan looking past it.
+	-- tick's budget (math.huge: none waits); the last candidate its scans' walk looked at in
+	-- vain (score and id; -math.huge: none), the next scan's walk looking past it.
 	target: number,
 	seenAt: number,
 	sightAt: number,
@@ -280,12 +285,15 @@ export type World = {
 	flight: Ballistics.ShotSpec,
 	rules: Ballistics.BlockRules,
 	-- The cell `sight` reads as air (the turret looking or shooting), and `sight`: env.getBlock
-	-- but for it.
+	-- but for it (a shot's trace stops at a nil cell itself); `look`: `sight` with a nil cell
+	-- as UNKNOWN, for sight checks.
 	ownX: number,
 	ownY: number,
 	ownZ: number,
 	sight: (x: number, y: number, z: number) -> number?,
-	-- Shapes.sight of `sight`: which blocks stop a ray, and their outlines.
+	look: (x: number, y: number, z: number) -> number?,
+	-- Shapes.sight of `sight`: which blocks stop a ray, and their outlines (UNKNOWN stops it as
+	-- a whole block).
 	stops: (id: number) -> boolean,
 	outline: (id: number, x: number, y: number, z: number) -> { number }?,
 	-- Shots records waiting for takeShots (the first `shotCount` of the pool), the list handed
@@ -302,6 +310,9 @@ export type World = {
 local STATUS = Turrets.STATUS
 local Flag = Protocol.TurretFlag
 local AIR = Blocks.AIR
+-- What a sight check reads in a cell the server does not hold (nil): it stops sight, as the
+-- shot's trace stops there (Ballistics.trace), so no round goes into terrain it doesn't know.
+local UNKNOWN = -1
 -- The grid's columns (blocks).
 local GRID = 16
 -- Shots records kept for takeShots at most (a glue that never takes them loses no more memory).
@@ -313,6 +324,9 @@ local FLIGHT_REACH = 0.75
 -- The coordinates a Shots message may carry (Net/WeaponSync): sideways, and up or down.
 local LIMIT = Protocol.MAX_COORDINATE + 64
 local Y_LIMIT = 4096
+-- A scan's sight checks on the best of the ranking (at most half of MaxSightChecks; the rest
+-- walk down it).
+local TOP_CHECKS = 2
 -- The most a turn adds to a candidate's score (TurretRules.score: half a turn, blocks).
 local TURN_MOST = TurretRules.score(0, math.pi)
 local HALF_PI = math.pi / 2
@@ -332,7 +346,20 @@ function TurretWorld.new(env: Env): World
 		end
 		return world.env.getBlock(x, y, z)
 	end
-	local stops, outline = Shapes.sight(sight)
+	local function look(x: number, y: number, z: number): number?
+		local block = sight(x, y, z)
+		return if block == nil then UNKNOWN else block
+	end
+	local shapeStops, shapeOutline = Shapes.sight(sight)
+	local function stops(id: number): boolean
+		return id == UNKNOWN or shapeStops(id)
+	end
+	local function outline(id: number, x: number, y: number, z: number): { number }?
+		if id == UNKNOWN then
+			return nil
+		end
+		return shapeOutline(id, x, y, z)
+	end
 	world = {
 		env = env,
 		tick = 0,
@@ -385,6 +412,7 @@ function TurretWorld.new(env: Env): World
 		ownY = math.huge,
 		ownZ = math.huge,
 		sight = sight,
+		look = look,
 		stops = stops,
 		outline = outline,
 		shotPool = {},
@@ -615,10 +643,10 @@ local function ensureGrid(world: World)
 end
 
 --[[
-	Is a block between (ax, ay, az) and (bx, by, bz), cell (cx, cy, cz) read as air?
-	FireRules.wallBetween's rule (Shapes.sight's collision boxes) on VoxelRaycast.distance, which
-	makes no Hit: a sight check allocates nothing, a blocked one neither. (For the specs too, which
-	hold it to FireRules.wallBetween.)
+	Is a block between (ax, ay, az) and (bx, by, bz), cell (cx, cy, cz) read as air and a cell
+	the server does not hold (nil) as a block? FireRules.wallBetween's rule (Shapes.sight's
+	collision boxes) on VoxelRaycast.distance, which makes no Hit: a sight check allocates
+	nothing, a blocked one neither. (For the specs too, which hold it to FireRules.wallBetween.)
 ]]
 local function sightBlocked(
 	world: World,
@@ -638,15 +666,15 @@ local function sightBlocked(
 	if distance < 1e-6 then
 		return false
 	end
-	local hit = VoxelRaycast.distance(ax, ay, az, dx, dy, dz, distance, world.sight, world.stops, world.outline)
+	local hit = VoxelRaycast.distance(ax, ay, az, dx, dy, dz, distance, world.look, world.stops, world.outline)
 	return hit ~= nil and hit < distance - 1e-6
 end
 TurretWorld.sightBlocked = sightBlocked
 
 --[[
 	Is a block between the turret's pivot and a point (its own cell air)? A sight check counted.
-	(Looked along from the point: the wall a horde presses on stands near it, so a hidden one's
-	ray ends after a block or two.)
+	(Looked along from the pivot, as the shot's trace runs: a line exactly through a cell's edge
+	or corner meets the cells the trace meets, whichever way the point lies.)
 ]]
 local function wall(
 	world: World,
@@ -659,7 +687,7 @@ local function wall(
 	z: number
 ): boolean
 	world.sights += 1
-	return sightBlocked(world, turret.x, turret.y, turret.z, x, y, z, px, py, pz)
+	return sightBlocked(world, turret.x, turret.y, turret.z, px, py, pz, x, y, z)
 end
 
 -- Candidate k's score from the pivot (px, py, pz), the gun along (gx, gy, gz).
@@ -680,17 +708,16 @@ end
 
 --[[
 	Scores the `n` candidates of the turret's scan that may be among its best `most` ranked after
-	its floor (TurretRules.score, then the id: the last candidate its scans looked at in vain),
+	the floor (`floorScore`, `floorId`: TurretRules.score, then the id; -math.huge: from the best),
 	into `picks` and `scores`; returns how many. A score is at least the distance, so none further
 	than the worst score of the `most` nearest surely past the floor needs its angle worked out
 	(one acos, from the gun's direction: TurretRules.offAngle's angle).
 ]]
-local function rank(world: World, turret: Turret, n: number, most: number): number
+local function rank(world: World, turret: Turret, n: number, most: number, floorScore: number, floorId: number): number
 	if most < 1 then
 		return 0
 	end
 	local list, candidates, distances = world.hostiles, world.candidates, world.distances
-	local floorScore, floorId = turret.floorScore, turret.floorId
 	local px, py, pz = TurretRules.pivot(turret.x, turret.y, turret.z)
 	local gx, gy, gz = TurretRules.direction(turret.yaw, turret.pitch)
 	-- The `most` nearest of those surely past the floor (distance, candidate).
@@ -727,6 +754,54 @@ local function rank(world: World, turret: Turret, n: number, most: number): numb
 		end
 	end
 	return count
+end
+
+--[[
+	Looks at the best `most` of the `count` candidates `rank` scored, in order (each found by a
+	pass: nothing sorted, nothing made); the first in sight becomes the target. With `walking`
+	the turret's floor follows each one hidden (its next scan's walk looks past it). Returns
+	whether one was taken and the last looked at in vain (score and id; -math.huge: none).
+]]
+local function lookAt(
+	world: World,
+	turret: Turret,
+	count: number,
+	most: number,
+	walking: boolean
+): (boolean, number, number)
+	local list, candidates = world.hostiles, world.candidates
+	local aimX, aimY, aimZ = world.aimX, world.aimY, world.aimZ
+	local picks, scores = world.picks, world.scores
+	local px, py, pz = TurretRules.pivot(turret.x, turret.y, turret.z)
+	local lastScore, lastId = -math.huge, 0
+	for _ = 1, math.min(count, most) do
+		local best, bestScore, bestId = 0, math.huge, 0
+		for m = 1, count do
+			local score = scores[m]
+			if score <= bestScore and score < math.huge then
+				local id = list[candidates[picks[m]]].id
+				if score < bestScore or id < bestId then
+					best, bestScore, bestId = m, score, id
+				end
+			end
+		end
+		if best == 0 then
+			break
+		end
+		scores[best] = math.huge
+		local k = picks[best]
+		if not wall(world, turret, px, py, pz, aimX[k], aimY[k], aimZ[k]) then
+			setTarget(world, turret, bestId)
+			turret.seenAt, turret.sightAt, turret.visible = world.tick, world.tick, true
+			turret.floorScore, turret.floorId = -math.huge, 0
+			return true, lastScore, lastId
+		end
+		lastScore, lastId = bestScore, bestId
+		if walking then
+			turret.floorScore, turret.floorId = bestScore, bestId
+		end
+	end
+	return false, lastScore, lastId
 end
 
 --[[
@@ -773,41 +848,30 @@ local function scan(world: World, turret: Turret, range: number, head: boolean):
 			end
 		end
 	end
+	-- The best TOP_CHECKS of the ranking first, every scan.
 	local most = s.MaxSightChecks
-	local count = rank(world, turret, n, most)
-	if count == 0 and turret.floorScore > -math.huge then
-		-- (Past the last of the ranking: from the best again.)
-		turret.floorScore, turret.floorId = -math.huge, 0
-		count = rank(world, turret, n, most)
-	end
-	-- The best few in order (each found by a pass: nothing sorted, nothing made); the next scan
-	-- looks past the last of them that is hidden.
-	local picks, scores = world.picks, world.scores
-	for _ = 1, math.min(count, most) do
-		local best, bestScore, bestId = 0, math.huge, 0
-		for m = 1, count do
-			local score = scores[m]
-			if score <= bestScore and score < math.huge then
-				local id = list[candidates[picks[m]]].id
-				if score < bestScore or id < bestId then
-					best, bestScore, bestId = m, score, id
-				end
-			end
-		end
-		if best == 0 then
-			break
-		end
-		scores[best] = math.huge
-		local k = picks[best]
-		if not wall(world, turret, px, py, pz, aimX[k], aimY[k], aimZ[k]) then
-			setTarget(world, turret, bestId)
-			turret.seenAt, turret.sightAt, turret.visible = world.tick, world.tick, true
-			turret.floorScore, turret.floorId = -math.huge, 0
+	local top = math.min(TOP_CHECKS, most // 2)
+	local found, lastScore, lastId = false, -math.huge, 0
+	if top > 0 then
+		found, lastScore, lastId = lookAt(world, turret, rank(world, turret, n, top, -math.huge, 0), top, false)
+		if found then
 			return true
 		end
-		turret.floorScore, turret.floorId = bestScore, bestId
 	end
-	return false
+	-- Then the walk with the rest, past the last it looked at in vain (and past those best few).
+	local walk = most - top
+	local floorScore, floorId = turret.floorScore, turret.floorId
+	local walking = floorScore > lastScore or (floorScore == lastScore and floorId > lastId)
+	if not walking then
+		floorScore, floorId = lastScore, lastId
+	end
+	local count = rank(world, turret, n, walk, floorScore, floorId)
+	if count == 0 and walking then
+		-- (Past the last of the ranking: from the best few again.)
+		turret.floorScore, turret.floorId = -math.huge, 0
+		count = rank(world, turret, n, walk, lastScore, lastId)
+	end
+	return (lookAt(world, turret, count, walk, true))
 end
 
 --[[ Shots ]]

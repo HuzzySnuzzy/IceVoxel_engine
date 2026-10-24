@@ -517,9 +517,11 @@ return function(t, shared, require, server)
 			until r.state(turret).target == inside.id or r.tick >= 400
 			return scans, r.state(turret).target == inside.id
 		end
+		-- (The best two every scan, the walk the rest: the k-th of a fresh walk by scan
+		-- ceil((k - 2) / (MaxSightChecks - 2)).)
 		for _, waiting in { 6, 10, 30 } do
 			local scans, got = breach(waiting)
-			local most = math.ceil((waiting + 1) / S.MaxSightChecks)
+			local most = math.ceil((waiting + 1 - 2) / (S.MaxSightChecks - 2))
 			t.ok(got and scans <= most, `{waiting} at the wall: the one inside taken by scan {scans} (at most {most})`)
 		end
 		-- A cave under the base (8 down, 12 out: within the pitch limits) with 8 zombies in it, and
@@ -554,6 +556,105 @@ return function(t, shared, require, server)
 		for _, mob in below do
 			t.ok(r.state(turret).target ~= mob.id, "none in the cave")
 		end
+	end)
+
+	t.test("turret world: every scan looks at the best two: one in sight by the gun is taken next, mid-walk", function()
+		-- A base's wall in front of the gun (z 4, three high) with 30 zombies pressing on it, one in
+		-- sight far behind the gun (the ranking's last), and, while the scans walk down the hidden
+		-- crowd, one come in 2 blocks in front of the gun (the best): taken at the next scan, before
+		-- the far one.
+		local spec = Turrets.of("rifle", 2)
+		local tried = 0
+		for delay = 1, 80, 3 do
+			local e = newGame()
+			for x = -20, 20 do
+				for y = FLOOR, FLOOR + 2 do
+					e.set(x, y, 4, STONE)
+				end
+			end
+			for i = 1, 30 do
+				e.add(ZOMBIE, -9.5 + (i - 1) % 20, FLOOR, 5.5 + (i - 1) // 20)
+			end
+			e.add(ZOMBIE, 0.5, FLOOR, -18.5)
+			local r = newSim(e)
+			local turret = r.add(spec)
+			r.step(delay)
+			if r.state(turret).target == 0 then
+				tried += 1
+				local near = e.add(ZOMBIE, 0.5, FLOOR, 2.5)
+				local scans = 0
+				repeat
+					r.step(1)
+					scans += TurretWorld.stats(r.world).scans
+				until scans >= 1
+				t.eq(r.state(turret).target, near.id, `come at tick {delay}: taken at the next scan`)
+			end
+		end
+		t.ok(tried >= 20, `mid-walk arrivals ({tried})`)
+	end)
+
+	t.test("turret world: sight is the shot's line from the pivot, through a cell's corner too", function()
+		-- A zombie at a block's centre on the turret's diagonal (the line from the pivot runs exactly
+		-- through cells' edges), a stone in one of the two cells the line touches there: the scan
+		-- decides as a cast from the pivot does, whichever side the stone is on.
+		local seen = {}
+		for _, case in { { 0, 1 }, { 1, 0 } } do
+			local e = newGame()
+			local zombie = e.add(ZOMBIE, TX + 3.5, FLOOR, TZ + 3.5)
+			local ax, ay, az = TurretWorld.aimPoint(zombie, false)
+			local cy = math.floor(PY + (ay - PY) / 3)
+			e.set(TX + case[1], cy, TZ + case[2], STONE)
+			local blocked = FireRules.wallBetween(e.getBlock, PX, PY, PZ, ax, ay, az)
+			local r = newSim(e)
+			local turret = r.add(Turrets.of("rifle", 2), nil, nil, nil, { ready = true })
+			r.step(60)
+			local taken = r.state(turret).target == zombie.id
+			t.eq(
+				taken,
+				not blocked,
+				`stone at ({case[1]}, {cy}, {case[2]}): taken {taken}, from the pivot blocked {blocked}`
+			)
+			t.eq(#e.hurts > 0, taken, "shot only when seen")
+			seen[blocked] = true
+		end
+		t.ok(seen[true] and seen[false], "one side blocks the line, the other doesn't")
+	end)
+
+	t.test("turret world: a cell the server does not hold stops its sight, so no round goes into it", function()
+		for _, unloaded in { false, true } do
+			local spec = Turrets.of("rifle", 2)
+			local e = newGame()
+			local getBlock = e.env.getBlock
+			-- (Its chunk the machines read from its edit list alone: the turret, nil around it.)
+			e.env.getBlock = function(x: number, y: number, z: number): number?
+				if unloaded and x >= 0 and x < 16 and z >= 0 and z < 16 then
+					return if x == TX and y == TY and z == TZ then spec.block else nil
+				end
+				return getBlock(x, y, z)
+			end
+			-- A zombie in the next chunk, in plain sight on open ground.
+			local zombie = e.add(ZOMBIE, 0.5, FLOOR, 24.5)
+			local r = newSim(e)
+			local turret = r.add(spec, nil, nil, nil, { auto = true })
+			r.step(200)
+			if unloaded then
+				t.eq(r.state(turret).target, 0, "unknown cells between: not seen")
+				t.eq(turret.shots, 0, "no round spent")
+				t.eq(#e.noises, 0, "no noise made")
+			else
+				t.eq(r.state(turret).target, zombie.id, "known: seen")
+				t.ok(turret.shots > 0 and #e.hurts > 0, "and shot")
+			end
+		end
+		-- Its own cell is air even when unknown.
+		local e = newGame()
+		local getBlock = e.env.getBlock
+		e.env.getBlock = function(x: number, y: number, z: number): number?
+			return if x == TX and y == TY and z == TZ then nil else getBlock(x, y, z)
+		end
+		local world = TurretWorld.new(e.env)
+		t.ok(not TurretWorld.sightBlocked(world, TX, TY, TZ, PX, PY, PZ, PX + 0.4, TY + 0.2, PZ - 0.3), "its own cell")
+		t.ok(TurretWorld.sightBlocked(world, 7, 70, 7, PX, PY, PZ, PX + 0.4, TY + 0.2, PZ - 0.3), "another's: unknown")
 	end)
 
 	t.test("turret world: sight stopped by blocks, glass and leaves; torches and water let it by", function()

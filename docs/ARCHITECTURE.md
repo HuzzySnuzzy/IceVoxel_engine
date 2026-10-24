@@ -7434,13 +7434,17 @@ machines read (never generating terrain), for the simulation's Env.
     however late the machines tick it). Hostiles are hashed into 16-block columns with their
     body's aim point once a machine tick, only when a turret scans or shoots, ranked by
     `TurretRules.score` (the angle worked out only for those near enough to rank: a score is at
-    least the distance; a mob killed earlier in the tick skipped). The best `MaxSightChecks` are
+    least the distance; a mob killed earlier in the tick skipped). `MaxSightChecks` of them are
     looked at with FireRules.wallBetween's rule on `VoxelRaycast.distance` (nothing allocated;
-    glass and leaves stop sight, torches and water don't; its own cell is air; looked along from
-    the candidate's end, where the wall a horde presses on stands). A scan that finds none in
-    sight leaves the next to look further down the ranking (from the best again past its end),
-    so a crowd hidden behind a wall or in a cave below never hides one in sight: k-th in the
-    ranking, it is looked at within ceil(k / MaxSightChecks) scans.
+    glass and leaves stop sight, torches and water don't; its own cell is air; a cell the server
+    does not hold stops it, as it stops the shot's trace, so no round goes into terrain it doesn't
+    know; looked along from the pivot, as the trace runs, so a line exactly through a cell's edge
+    or corner meets what the shot would): every scan the best two, so one in sight among them
+    (next to the gun, with a crowd hidden behind a wall or in a cave below) is taken at the next
+    scan, before any further down; then the other `MaxSightChecks` − 2 walk down the ranking,
+    past the last the walk looked at in vain (from the third again past its end). With n in
+    reach, while the ranking holds, every one is looked at within ceil((n − 2) / 4) + 1 scans,
+    the k-th of a fresh walk within ceil((k − 2) / 4).
   - **Tracking**: sticky, at the tier's turn rate (`TurretRules.turn`), its sight every
     `SightTicks`, lost after `LoseTicks` unseen, at once when gone (dead, removed, frozen) or out of
     reach. Idle, powered and not blocked, the pitch eases level at the turn rate and the yaw holds
@@ -7473,9 +7477,9 @@ machines read (never generating terrain), for the simulation's Env.
   - Nothing allocates in scans, sight checks, tracking, the lure or records; a shot allocates only
     its trace's impacts (about 1 KB). Lune, 50 turrets and 100 zombies in a fight: 0.3–0.8 ms a tick
     native (0.85 interpreted), 0.8 scans, 12 sight checks, 4.3 shots a tick; a siege with every
-    sight check failing 0.25–0.6 ms; the blood moon's siege, 150 turrets and 260 zombies, 0.9 ms
-    (2.9 interpreted; 16 scans and 87 sight checks a tick). The design's budget: 1.5 ms native, 4
-    interpreted.
+    sight check failing 0.25–0.6 ms; the blood moon's siege, 150 turrets and 260 zombies, 1.0–1.2
+    ms (2.7–2.9 interpreted; 16 scans and 89 sight checks a tick, each from the pivot). The
+    design's budget: 1.5 ms native, 4 interpreted.
 - `Turrets` (the glue): `start(net, world)` builds the Env (`Machines.knownBlock`, `Mobs.hostiles`
   and `Mobs.target`, `Mobs.weaponDamage` with no player: nobody credited, no Knowledge, no kill
   count, no `byPlayer` loot, as an iron golem's kills; `NoiseBus.emit`, so the director's night,
