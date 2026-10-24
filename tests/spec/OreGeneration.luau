@@ -768,7 +768,9 @@ return function(t, shared, require)
 			Ores.vents(data, SEED, cx, cz, r.height, lakes, wells)
 			placing += os.clock() - t0
 		end
-		t.ok(best < 1e-3, `Ores.place on a 700 tall chunk: {best * 1000} ms`)
+		-- (About 0.25 ms alone; late in the full suite everything runs some four times slower, as
+		-- the other cost specs see, so the bound leaves room for that.)
+		t.ok(best < 2e-3, `Ores.place on a 700 tall chunk: {best * 1000} ms`)
 		t.ok(placing < 0.12 * generating, `ores {placing / 12 * 1000} ms of {generating / 12 * 1000} ms a chunk`)
 		print(
 			string.format(
