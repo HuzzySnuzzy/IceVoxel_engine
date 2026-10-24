@@ -14,17 +14,25 @@
 	  STATE      the miner's state codes: MINING, NO_POWER, OUTPUT_FULL, NO_ORE ("No ore below")
 	  packState  its state field: code + 8 x the ore's index in ORES (0: none), frozen;
 	             unpackState reads it back
+	  settings   what an ore costs with `speed` Speed and `energy` Energy Upgrades installed
+	             (Mekanism's maths, Machines/Upgrades, as the Electric Furnace's): the ticks an
+	             item takes (`Upgrades.ticks`: its ticks x 10^(-speed/8), truncated), the J a tick
+	             of work uses and the store (`Upgrades.capacity` of the block's capacity). The J a
+	             tick is `Upgrades.energyPerTick` (its J x 10^((2 speed - energy)/8)), but never
+	             under the ore's floor over its ticks (the floor / ticks, up to a whole QUANTUM),
+	             so an item costs at least its floor at every card count: a coal at least 400 kJ,
+	             more than the 320 kJ it burns for in a Heat Generator (355.6 kJ a coal in a Block
+	             of Coal), so coal is never energy-positive
 
 	Checked as this loads: every ore is a block whose drop is an item, Config.Miner.Ores names each
 	of them and nothing else.
-
-	FOUNDATION: ORES, ore, STATE and the packing. Miner builder C adds the rest here (`settings`:
-	the ticks, energy a tick and capacity with upgrade cards and the floor) with the kind's tick.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
 local Config = require(script.Parent.Parent.Config)
 local Items = require(script.Parent.Parent.Items)
+local Core = require(script.Parent.Core)
+local Upgrades = require(script.Parent.Upgrades)
 
 -- One ore the miner copies (see the header).
 export type Ore = {
@@ -101,6 +109,22 @@ function MinerRules.unpackState(state: number): (number, number)
 		return MinerRules.STATE.MINING, 0
 	end
 	return code, index
+end
+
+--[[
+	What mining `ore` costs with `speed` Speed and `energy` Energy Upgrades (0..8 each; Upgrades
+	clamps them) and a store of `baseCapacity` J before cards: (ticks an item, J a tick of work,
+	capacity). ticks x the J a tick is never under the ore's floor: the J a tick is at least the
+	floor / ticks rounded up to a whole QUANTUM, so the product is exact and at least the floor
+	(Core.use takes a tick's J rounded up the same way).
+]]
+function MinerRules.settings(ore: Ore, speed: number, energy: number, baseCapacity: number): (number, number, number)
+	local ticks = Upgrades.ticks(ore.ticks, speed)
+	local energyPerTick = Upgrades.energyPerTick(ore.joules, speed, energy)
+	if ore.floor > 0 then
+		energyPerTick = math.max(energyPerTick, Core.quantiseUp(ore.floor / ticks))
+	end
+	return ticks, energyPerTick, Upgrades.capacity(baseCapacity, energy)
 end
 
 return MinerRules

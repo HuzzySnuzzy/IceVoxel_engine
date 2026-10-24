@@ -469,8 +469,6 @@ return function(t, shared, require, _server, client)
 			-- The servo: client Rendering/TurretView (turret builder B).
 			["block.turret.servo"] = true,
 			-- The drill and the stamp: Rendering/TransmitterModel.machineLoop's names (miner builder C).
-			["block.metal_miner.drill"] = true,
-			["block.ammo_press.stamp"] = true,
 		}
 		-- A firearm's shot is played by its class through its FirearmSpec `sound` (Rendering/
 		-- ShotRules.fireSound, called by Interaction/Firearms for the player's own shot and by

@@ -38,7 +38,10 @@
 	           (`glowColour`); a burning stove or oil heater also casts a warm light
 	           (`machineLight`: Rendering/TransmitterRenderer gives the cell a PointLight), and
 	           every one of them hums, roars or crackles (`machineLoop`: Audio/Ambience plays it
-	           looped while the record says it works).
+	           looped while the record says it works). A working Metal Miner lights its drill
+	           housing's grille yellow-orange and drills (`block.metal_miner.drill`), a working
+	           Ammo Press its stamping window and stamps (`block.ammo_press.stamp`): both from the
+	           record's ACTIVE (their kinds' `showActive`, held on through short stops).
 
 	Aiming (`pickSide`): the Configurator acts on the side it points at, as in Mekanism: an arm's
 	side when the ray hits that arm (aimed at as wide as its collar, or its plate into an
@@ -325,6 +328,9 @@ TransmitterModel.GLOW_DEPTH = 0.2
 local GLOW_COLOURS: { [string]: { number } } = {
 	ElectricHeater = table.freeze({ 255, 72, 40 }),
 	AirConditioner = table.freeze({ 96, 224, 255 }),
+	-- The Metal Miner's drill housing, lit yellow-orange through its grille (the Ammo Press's
+	-- hot die is GLOW_COLOUR).
+	MetalMiner = table.freeze({ 255, 186, 52 }),
 }
 --[[
 	The light a burning Wood Stove or Oil Heater casts (`machineLight`): Minecraft's light level
@@ -336,8 +342,9 @@ TransmitterModel.MACHINE_LIGHT = 10
 TransmitterModel.MACHINE_LIGHT_COLOUR = table.freeze({ 255, 156, 80 })
 local LIGHTS: { [string]: boolean } = { WoodStove = true, OilHeater = true }
 --[[
-	What each of the seasons' machines plays looped while it works (Shared/Sounds/SoundList events;
-	each overridable by a same-named Sound in SoundService.IceVoxelSounds), by BlockList `decor`.
+	What each of the seasons' machines, the Metal Miner and the Ammo Press plays looped while it
+	works (Shared/Sounds/SoundList events; each overridable by a same-named Sound in
+	SoundService.IceVoxelSounds), by BlockList `decor`.
 ]]
 local LOOPS: { [string]: string } = {
 	ElectricHeater = "block.electric_heater.hum",
@@ -345,6 +352,8 @@ local LOOPS: { [string]: string } = {
 	ElectricFan = "block.fan.loop",
 	WoodStove = "block.wood_stove.crackle",
 	OilHeater = "block.oil_heater.burn",
+	MetalMiner = "block.metal_miner.drill",
+	AmmoPress = "block.ammo_press.stamp",
 }
 
 -- Machines whose window lights while they work, by BlockList `decor`: the window on each side face
@@ -360,6 +369,9 @@ local GLOWS: { [string]: { x: number, y: number, w: number, h: number } } = {
 	OilHeater = BlockDecor.OIL_HEATER_WINDOW,
 	ElectricHeater = BlockDecor.ELECTRIC_HEATER_WINDOW,
 	AirConditioner = BlockDecor.AIR_CONDITIONER_WINDOW,
+	-- The Metal Miner's drill housing grille and the Ammo Press's stamping window.
+	MetalMiner = BlockDecor.MINER_WINDOW,
+	AmmoPress = BlockDecor.PRESS_WINDOW,
 }
 local SIDE_FACES = { "Front", "Back", "Left", "Right" }
 
@@ -468,9 +480,10 @@ end
 --[[
 	The boxes drawn over the machine `block` from what its record says (`look`, nil: none came, an
 	idle, empty machine), and a signature of what they show (equal signatures, equal boxes):
-	  * a Heat Generator or Combustion Generator that burns, an Electric Furnace that smelts or an
-	    Oil Refinery that refines (active) lights its window on its four sides: a thin glowing pane
-	    GLOW_DEPTH out of each face over the window its decor draws;
+	  * a Heat Generator or Combustion Generator that burns, an Electric Furnace that smelts, an
+	    Oil Refinery that refines, a Metal Miner that mines or an Ammo Press that presses (active;
+	    the seasons' machines too) lights its window on its four sides: a thin glowing pane
+	    GLOW_DEPTH out of each face over the window its decor draws, in `glowColour`;
 	  * a Battery fills each side's gauge from the bottom with its charge (`chargeRows` of the
 	    gauge's height), glowing in the energy bar's colour for that fill (Machines.energyColour:
 	    red when nearly empty to green when full), so the boxes only change when a whole row does.
