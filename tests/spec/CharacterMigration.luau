@@ -191,8 +191,9 @@ return function(t, shared, require, server)
 		t.eq((keptProgress :: any).points, 340)
 		t.eq(lock, nil, "nobody holds it until it is selected")
 		-- (The zombie apocalypse's survivor record, CharacterCodec version 2: a migrated character
-		-- starts it afresh, healthy, and keeps it through its key. 3 since the food bar.)
-		t.eq(CharacterCodec.VERSION, 3)
+		-- starts it afresh, healthy, and keeps it through its key. 3 since the food bar, 4 since
+		-- the radiation dose.)
+		t.eq(CharacterCodec.VERSION, 4)
 		local stored = back :: CharacterCodec.Record
 		t.eq(stored.alive + stored.kills + stored.moons + stored.infection, 0, "a fresh survivor record")
 	end)
@@ -432,8 +433,9 @@ return function(t, shared, require, server)
 	end)
 
 	t.test("character migration: a survivor record (version 3) round trips; versions 1 and 2 read zeros", function()
-		-- (4 since Minecraft's food bar: the test below.)
-		t.eq(PlayerCodec.VERSION, 4, "bumped for the survivor record, then the food bar")
+		-- (4 since Minecraft's food bar: the test below; 5 since the radiation dose, tests/spec/
+		-- Radiation.)
+		t.eq(PlayerCodec.VERSION, 5, "bumped for the survivor record, the food bar, then the dose")
 		local record = oldRecord()
 		record.alive, record.kills, record.moons, record.infection = 50000, 12, 2, 30001
 		local back = PlayerCodec.fromText(PlayerCodec.toText(record)) :: any

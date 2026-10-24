@@ -192,6 +192,18 @@ EffectIcons.GLYPHS = table.freeze({
 		".C..C..C.",
 		".........",
 	},
+	-- Radiation Sickness: the radiation trefoil (two blades above, one below, round a white hub).
+	radiation = {
+		".KK...KK.",
+		"KLCK.KCLK",
+		"KCCK.KCCK",
+		".KCKKKCK.",
+		"..KKWKK..",
+		"...KKK...",
+		"..KCCCK..",
+		".KLCCCDK.",
+		".KKKKKKK.",
+	},
 })
 
 -- The glyph named `icon` (the drop for an unknown one).

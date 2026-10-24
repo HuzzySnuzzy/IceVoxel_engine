@@ -26,8 +26,9 @@
 	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill; then
 	Terraria's mana and max, Player/ManaState, and the magic projectiles flying, Rendering/
 	ProjectileView), and the status effects (Player/EffectState: each one's name, level and time
-	left, "**:**" for one that never ends), and the weather at the player (Weather/: what falls
-	there, the precipitation, thunder and cloud cover, the wind and the weather clock, a /weather
+	left, "**:**" for one that never ends) with the radiation the server publishes (Audio/Geiger:
+	the exposure rate and the dose, Shared/Radiation.format), and the weather at the player
+	(Weather/: what falls there, the precipitation, thunder and cloud cover, the wind and the weather clock, a /weather
 	override's share; the cloud parts and rings, the rain strips drawn, the bolts showing). Under the frame
 	rate, the world: its name, world type, difficulty, seed and whether commands are allowed
 	(Shared/WorldSettings.info, from the server's attributes). The panel grows to fit its lines.
@@ -76,6 +77,7 @@ local TurretView = require(script.Parent.Parent.Rendering.TurretView)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local WeatherClient = require(script.Parent.Parent.Weather)
 local Ambience = require(script.Parent.Parent.Audio.Ambience)
+local Geiger = require(script.Parent.Parent.Audio.Geiger)
 local Music = require(script.Parent.Parent.Audio.Music)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local Notices = require(script.Parent.Parent.Net.Notices)
@@ -94,6 +96,7 @@ local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
 local LodTree = require(Shared.World.LodTree)
 local Protocol = require(Shared.Net.Protocol)
+local Radiation = require(Shared.Radiation)
 local SeasonClimate = require(Shared.Seasons.SeasonClimate)
 local Temperature = require(Shared.ToughAsNails.Temperature)
 local WorldSettings = require(Shared.WorldSettings)
@@ -256,6 +259,11 @@ local function effectsLine(): string
 		parts[i] = `{Effects.levelName(entry.effect, entry.amplifier)} {Effects.formatTicks(entry.ticks)}`
 	end
 	return `effects {table.concat(parts, ", ")}`
+end
+
+-- The radiation the server publishes (Audio/Geiger): the exposure rate and the dose.
+local function radiationLine(): string
+	return `radiation {Radiation.format(Geiger.rate(), "Sv/h")}  dose {Radiation.format(Geiger.dose(), "Sv")}`
 end
 
 -- Movement hull line (blocks; speeds in blocks per second).
@@ -560,6 +568,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			musicLine(),
 			survivalLine(),
 			effectsLine(),
+			radiationLine(),
 		}, "\n")
 	end)
 end

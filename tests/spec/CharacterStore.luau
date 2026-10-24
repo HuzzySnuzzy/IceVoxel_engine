@@ -467,8 +467,9 @@ return function(t, shared, require, server)
 	t.test("character store: the survivor record and infection are saved (version 2; version 1 reads 0)", function()
 		-- (The zombie apocalypse: server Apocalypse/Survival's record and Apocalypse/Infection's
 		-- progress, Save/CharacterCodec version 2.)
-		-- (3 since Minecraft's food bar, the test below.)
-		t.eq(CharacterCodec.VERSION, 3, "bumped for the survivor record, then the food bar")
+		-- (3 since Minecraft's food bar, the test below; 4 since the radiation dose, tests/spec/
+		-- Radiation.)
+		t.eq(CharacterCodec.VERSION, 4, "bumped for the survivor record, the food bar, then the dose")
 		local record = newRecord(5, "Survivor")
 		t.eq(record.alive, 0, "a new character starts at 0")
 		t.eq(record.infection, 0, "healthy")

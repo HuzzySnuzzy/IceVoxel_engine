@@ -450,7 +450,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   its last 10 s), Blindness (fog closing in to 5 blocks, no sprinting), Nausea (the camera rolls and
   the view sways, building up over 8 s), Instant Health and Instant Damage (4 and 6 half hearts,
   doubling a level) and Glowing (an outline everyone sees through walls); the apocalypse adds
-  Bleeding and the Infection (see Surviving the apocalypse). They stack and refresh
+  Bleeding and the Infection (see Surviving the apocalypse), uranium Radiation Sickness (see
+  Radiation). They stack and refresh
   as Minecraft's (a stronger effect wins, a weaker longer one waits underneath and comes back), run
   on the server, and the client's movement and mining prediction use the same numbers as the
   server's checks. Creative and spectator players get them too, but nothing hurts them. Death
@@ -474,6 +475,25 @@ A fast, Minecraft-style voxel engine for Roblox.
   Soaked**, 20 s after leaving): fire catches at once, burning lasts three times as long, and a
   blast that reaches you sets you alight. A swim washes both off. The fluids' effects are data
   (`FluidList` `effects`), and `Config.Effects.FluidEffects` turns them off.
+- **Radiation.** Uranium is radioactive, Mekanism's way simplified: Uranium Ore, the Block of Raw
+  Uranium and the Block of Uranium near you, and the uranium you carry (Raw Uranium, ingots, nuggets
+  and those blocks, by the count in your inventory, armor slots, hand and crafting grid; not what is
+  in a chest) give an exposure rate in Sv/h. It falls off with the square of the distance (out to 8
+  blocks), and blocks between shield it: half through each block of rock, earth or wood, nearly
+  nothing through a Block of Lead; glass and water let it through. The refined metal is far hotter
+  than the ore: a lump of Raw Uranium is 0.3 Sv/h, an ingot 12, a Block of Uranium 108. The rate
+  builds a dose (Sv) that halves every 10 minutes once you are away, and the dose brings **Radiation
+  Sickness** (Mekanism's bands): I from 0.1 Sv (a half heart every 15 s, through armor), II from 1
+  Sv (every 7.5 s, with Hunger), III from 10 Sv (every 3.75 s, with Hunger II and Nausea), and it
+  kills. It lasts up to 30 s after your dose falls below its band. Mining a uranium vein bare
+  skinned for a few minutes makes you mildly sick, a stack of Raw Uranium carried for several
+  minutes sick, standing next to a Block of Uranium is dangerous, and a vein a few blocks into the
+  rock is safe.
+  The **Hazmat suit** (lead and wool) keeps it out: the mask a quarter, the gown two fifths, the
+  pants a fifth, the boots the rest, the whole suit all of it. While you are exposed you hear a
+  Geiger counter click, faster the stronger it is (up to 16 clicks a second), which also finds a vein
+  hidden in the rock nearby. Creative and spectator players are never exposed. Death clears the
+  dose; a saved world and a character keep it. F3 shows the rate and the dose (`Config.Radiation`).
 - **Potions.** Brewed in a crafting grid (the game has no brewing stand): a Purified Water Bottle
   with an ingredient makes a potion, the potion with Glow Dust (the game's glowstone) its level II
   and with a coal or charcoal its long variant, Minecraft's durations: Swiftness (Mint Leaves),
@@ -1659,8 +1679,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   players near as long as the food or drink is held, a hit landing (players' and bullets'), the
   9mm, 5.56 and .308 shots and their silenced ones (the other calibres keep their gun class's),
   lava's bubbling, the machines' hum (the Electric Furnace, heater, air conditioner and Ammo
-  Press; the Metal Miner and Oil Refinery a heavier one) and a Geiger counter's click, kept for
-  radiation (each with the stand-in as its fallback should it fail to load). Each one can be replaced by your own sound (see Extending).
+  Press; the Metal Miner and Oil Refinery a heavier one) and a Geiger counter's click while you are
+  exposed to radiation (each with the stand-in as its fallback should it fail to load). Each one can be replaced by your own sound (see Extending).
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
   falling sand and gravel (which break into an item on a torch or a flower, Minecraft's torch
@@ -2212,8 +2232,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools (and status effects' Haste and Mining Fatigue)
   Effects/  EffectList      status effects (Minecraft's MobEffects, Oil Coated, Fuel Soaked, Tough
-                            As Nails' four, Mana Sickness, Bleeding, the Infection and Minecraft's
-                            Hunger): the
+                            As Nails' four, Mana Sickness, Bleeding, the Infection, Minecraft's
+                            Hunger and Radiation Sickness): the
                             registry, the modifiers movement, mining, combat and burning read,
                             ticking rules, the HUD's order and flashing;
             PotionList      the potions (ingredients, levels, durations: items, recipes, drinks)
@@ -2224,6 +2244,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             the container tables: bottles, canteens, bowls; the teas), Exertion
                             (movement that costs thirst and food), Boiling (dirty water boiled clean on a
                             campfire)
+  Radiation/                Mekanism's radiation, pure: the sources (uranium's blocks and items),
+                            the falloff, the shielding and the scan, the Hazmat suit, the dose,
+                            Radiation Sickness's bands and renewal, the Geiger counter's click rate
   Mana/                     Terraria's mana, pure: init (capacity, 1.4.4's regeneration at 20 Hz,
                             spending, Mana Sickness), StarFall (when and where Fallen Stars fall)
   Magic/                    Projectiles (the spark, bolt and water kinds, the deterministic step
@@ -2484,7 +2507,10 @@ src/server   -> ServerScriptService.IceVoxel
                             /knowledge and /age, the DataStore),
                             Mana (each player's mana: regeneration, the Mana message, potions,
                             crystals), Magic (casts and the projectiles' flights and hits),
-                            FallenStars (stars at night, gone at dawn)
+                            FallenStars (stars at night, gone at dawn),
+                            Radiation + RadiationRules (each player's exposure, dose and Radiation
+                            Sickness once a second, the attributes the clicks follow, saving; the
+                            look pure)
 
 src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
@@ -2571,7 +2597,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             mood), CaveMood (Minecraft's mood, pure), Music + MusicRules (the
                             background music; when and which, surface, night or cave, pure),
                             SoundRules (the pure rules), UseSounds + UseSoundRules (eating and
-                            drinking loops, every player's; the rules pure)
+                            drinking loops, every player's; the rules pure), Geiger (the Geiger
+                            counter's clicks while exposed to radiation)
   Entities/EntityRenderer   dropped items; MobRenderer (mobs: boxes, zombies' R15 rigs, flames,
                             groans), MobParts (the mobs' Parts, Fire and BulkMoveTo, shared with
                             the Studio probe), MobModel (the pure glide, move-op baseline,
@@ -2929,6 +2956,13 @@ for performance:
 | `Effects.Hud` | true | The status effect icons in the top right corner, the row in the open inventory's band and the list beside the other open screens (off: the status icons' badges show Climate Clemency, Internal Warmth and Chill too). |
 | `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the Distortion Effects setting squared (Minecraft's screenEffectScale). |
 | `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
+| `Radiation.Enabled` | true | Uranium is radioactive: exposure, the dose, Radiation Sickness and the Geiger counter's clicks (false: none of it; a saved dose is kept). |
+| `Radiation.Sources` | Ore 1, Raw Uranium 0.3, Ingot 12, Nugget 1.33, Block of Raw Uranium 2.7, Block of Uranium 108 | Sv/h a block or an item gives a block away or nearer (carried: times the count; a block's item as the block). |
+| `Radiation.Radius` / `Shielding` / `MaxRays` | 8 / Solid 0.5, LeadBlock 0.02, RawLeadBlock 0.1 / 32 | Blocks are looked for within the radius (inverse square, fading to 0 there); the share each block between lets through (any full solid block `Solid`, these by name); the nearest sources traced for shielding in one look (the rest take their mean). |
+| `Radiation.Hazmat` | 0.25 / 0.4 / 0.2 / 0.15 | The share of radiation each Hazmat piece worn keeps out (Mekanism's: the whole suit all of it). |
+| `Radiation.HalfLife` / `MinRate` / `Interval` | 600 / 0.0005 / 1 | Seconds for a dose to halve; the rate (Sv/h) below which there is none; seconds between two looks at a player. |
+| `Radiation.Sickness` | Bands 0.1 / 1 / 10, Ticks 600, HungerFrom 2, NauseaFrom 3 | The doses (Sv) of Radiation Sickness I, II and III; ticks it lasts after the dose falls below its band; the levels Hunger and Nausea come with. |
+| `Radiation.Clicks` | PerSvh 2.5, Max 16 | The Geiger counter: clicks a second at 1 Sv/h (with the rate's square root), and the most a second. |
 | `Server.GenerationBudgetMs` / `UrgentGenerationBudgetMs` | 4 / 8 | Milliseconds a frame the server spends generating the chunks around players (a second generator, sliced: World/GenQueue); the urgent budget while a player's own chunk or one next to it is missing or more than `UrgentBacklog` (49) chunks wait. |
 | `Server.FrameBudgetMs` / `MinGenerationBudgetMs` | 12 / 1 | The slice never takes the frame's work so far past FrameBudgetMs, but is always at least MinGenerationBudgetMs. |
 | `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
@@ -3391,7 +3425,7 @@ named `item.firearm.fire` or `item.firearm.suppressed` still replaces them all. 
 (within 16 blocks). The working machines loop their hum: category `machine.hum` for the Electric
 Furnace, Electric Heater, Air Conditioner and Ammo Press, `machine.heavy_hum` for the Metal Miner
 and Oil Refinery (a Sound of either name replaces its group). `ambient.radiation.click` is the
-Geiger counter's click, registered for radiation and played by nothing yet.
+Geiger counter's click, played flat while the player is exposed to radiation (client Audio/Geiger).
 
 Client scripts can play any event for the local player alone:
 

@@ -18,10 +18,12 @@
 	            blood `moons` survived: server Apocalypse/Survival) and its bite's `infection`
 	            (the progress, 0 healthy: Shared/Apocalypse/Infection), and Minecraft's food bar
 	            (`hunger`: food, saturation, exhaustion, timer, Shared/Hunger; nil: a full one, as
-	            a new character's). Where it stands and its
+	            a new character's), and its radiation dose (`radiation`, Sv: Shared/Radiation,
+	            server Players/Radiation; 0 none). Where it stands and its
 	            game mode are each world's (Save/WorldCharacterCodec); its Knowledge, Ages and
 	            skills are a table beside the bytes in the value (Shared/Progression.toRecord).
-	  Bytes     u8 VERSION, u8 flags (bit 0 thirst, 1 temperature, 2 dead, 3 legacy, 4 hunger),
+	  Bytes     u8 VERSION, u8 flags (bit 0 thirst, 1 temperature, 2 dead, 3 legacy, 4 hunger,
+	            5 radiation),
 	            u32 id,
 	            text name, u8 difficulty, f64 created, f64 lastPlayed, f64 played, u32 deaths,
 	            u16 n + n bytes of look (Appearance.encode), f32 health, f32 maxHealth, f32 mana,
@@ -30,15 +32,17 @@
 	            vanity accessories), stack (Save/SaveCodec)), [5 x f32 thirst], [10 x f32
 	            temperature], u8 n + n x (u8 effect, u8 amplifier, i32 ticks, u8 ambient), u8 n +
 	            n x text (imported world ids), then (version 2 on) u32 alive, u16 kills, u16 moons,
-	            u32 infection, then (version 3 on) [4 x f32 hunger]. 100 bytes to 3 KB: far below
-	            a key's 4 MB. A version 1 record (before the apocalypse) reads with its survivor
-	            record and infection at 0, a version 1 or 2 one (before hunger) with no food bar.
+	            u32 infection, then (version 3 on) [4 x f32 hunger], then (version 4 on) [f32 dose]
+	            (only above 0). 100 bytes to 3 KB: far below a key's 4 MB. A version 1 record
+	            (before the apocalypse) reads with its survivor record and infection at 0, a
+	            version 1 or 2 one (before hunger) with no food bar, a version 1 to 3 one with no
+	            dose.
 	            Decoding checks every number; anything odd is a damaged record (nil), an unknown
 	            item is dropped and counted (`dropped`, as PlayerCodec's: such a record is not
 	            written back this session).
-	  Things    `keepThings`: one record's inventory, equipment, mana, Mana Crystals, effects and
-	            infection copied into another (Players/CharacterStore saves a visit that stopped being fair
-	            with the things it had then).
+	  Things    `keepThings`: one record's inventory, equipment, mana, Mana Crystals, effects,
+	            infection and radiation dose copied into another (Players/CharacterStore saves a
+	            visit that stopped being fair with the things it had then).
 	  Value     what the DataStore key "u<UserId>/c<id>" holds: { v = 1, data = base85 bytes,
 	            progress = Progression's record or nil, lock = { job, at, released? } } (the lock is
 	            Save/SaveLock's, inside the value so that loading with it and every later save are
@@ -103,6 +107,8 @@ export type Record = {
 	infection: number,
 	-- Minecraft's food bar (nil: none kept, a full one).
 	hunger: PlayerCodec.Hunger?,
+	-- The radiation dose (Sv; 0: none).
+	radiation: number,
 	-- Stacks of items this version doesn't know, left out while reading (never written).
 	dropped: number,
 }
@@ -116,8 +122,9 @@ export type Index = {
 
 local CharacterCodec = {}
 
--- (2 before the food bar, 1 before the zombie apocalypse's survivor record and infection.)
-CharacterCodec.VERSION = 3
+-- (3 before the radiation dose, 2 before the food bar, 1 before the zombie apocalypse's survivor
+-- record and infection.)
+CharacterCodec.VERSION = 4
 CharacterCodec.VALUE_VERSION = 1
 CharacterCodec.INDEX_VERSION = 1
 -- Most imported world ids a record keeps (the oldest go first).
@@ -172,6 +179,7 @@ function CharacterCodec.new(
 		moons = 0,
 		infection = 0,
 		hunger = nil,
+		radiation = 0,
 		dropped = 0,
 	}
 end
@@ -200,7 +208,8 @@ end
 
 --[[
 	Sets `record`'s things to copies of `from`'s: the inventory (slots, armor, cursor, the selected
-	slot), the equipment and its hidden bits, mana, the Mana Crystals and the effects. Players/
+	slot), the equipment and its hidden bits, mana, the Mana Crystals, the effects, the infection
+	and the radiation dose (an unfair visit cures neither). Players/
 	CharacterStore saves a visit that stopped being fair with the things it had then.
 ]]
 function CharacterCodec.keepThings(record: Record, from: Record)
@@ -214,6 +223,7 @@ function CharacterCodec.keepThings(record: Record, from: Record)
 	record.hidden = from.hidden
 	record.mana, record.crystals = from.mana, from.crystals
 	record.infection = from.infection
+	record.radiation = from.radiation
 	local effects: { PlayerCodec.Effect } = {}
 	for _, effect in from.effects do
 		table.insert(effects, table.clone(effect))
@@ -242,11 +252,14 @@ end
 function CharacterCodec.encode(record: Record): buffer
 	local w = SaveCodec.writer(512)
 	SaveCodec.u8(w, CharacterCodec.VERSION)
+	local dose = record.radiation
+	local hasDose = type(dose) == "number" and finite(dose) and dose > 0
 	local flags = (if record.thirst then 1 else 0)
 		+ (if record.temperature then 2 else 0)
 		+ (if record.dead then 4 else 0)
 		+ (if record.legacy then 8 else 0)
 		+ (if record.hunger then 16 else 0)
+		+ (if hasDose then 32 else 0)
 	SaveCodec.u8(w, flags)
 	SaveCodec.u32(w, record.id)
 	SaveCodec.text(w, record.name)
@@ -321,6 +334,9 @@ function CharacterCodec.encode(record: Record): buffer
 	if record.hunger then
 		writeFields(w, record.hunger, PlayerCodec.HUNGER_FIELDS)
 	end
+	if hasDose then
+		SaveCodec.f32(w, math.min(dose, PlayerCodec.MAX_DOSE))
+	end
 	return SaveCodec.finish(w)
 end
 
@@ -343,7 +359,7 @@ local function decode(bytes: buffer): Record
 		error("not a character of this version", 0)
 	end
 	local flags = SaveCodec.readU8(r)
-	if flags > (if version >= 3 then 31 else 15) then
+	if flags > (if version >= 4 then 63 elseif version >= 3 then 31 else 15) then
 		error("bad character flags", 0)
 	end
 	local id = SaveCodec.readU32(r)
@@ -434,6 +450,13 @@ local function decode(bytes: buffer): Record
 	end
 	if bit32.btest(flags, 16) then
 		record.hunger = readFields(r, PlayerCodec.HUNGER_FIELDS, "hunger")
+	end
+	if bit32.btest(flags, 32) then
+		local dose = SaveCodec.readF32(r)
+		if not finite(dose) or dose < 0 then
+			error("bad radiation dose", 0)
+		end
+		record.radiation = dose
 	end
 	if not SaveCodec.atEnd(r) then
 		error("character has bytes left over", 0)

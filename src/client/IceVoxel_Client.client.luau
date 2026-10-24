@@ -75,7 +75,8 @@
 	                             swimming, landings), Ambience (a lit furnace, Heat or
 	                             Combustion Generator, lava, fire, Minecraft's cave mood:
 	                             CaveMood), UseSounds (players eating and drinking: the loops,
-	                             UseSoundRules),
+	                             UseSoundRules), Geiger (the Geiger counter's clicks while the
+	                             server says the player is exposed to radiation),
 	                             Music (surface, night and cave tracks, Minecraft's timing:
 	                             MusicRules)
 	  Ui/MusicToast              the "Now Playing" toast in the top right corner
@@ -203,6 +204,7 @@ local Map = require(Client.Map)
 local SoundPlayer = require(Client.Audio.SoundPlayer)
 local MovementSounds = require(Client.Audio.MovementSounds)
 local Ambience = require(Client.Audio.Ambience)
+local Geiger = require(Client.Audio.Geiger)
 local Music = require(Client.Audio.Music)
 local UseSounds = require(Client.Audio.UseSounds)
 local MusicToast = require(Client.Ui.MusicToast)
@@ -528,6 +530,7 @@ UseSounds.start()
 Ambience.start(function(x: number, y: number, z: number): number?
 	return world:getBlock(x, y, z)
 end)
+Geiger.start()
 MusicToast.start()
 Music.start()
 -- (After the music toast: the saving toast goes under it while it shows.)

@@ -70,7 +70,9 @@
 	 10. survival   -> Tough As Nails' thirst and body temperature (Players/ToughAsNails:
 	                   drinking, dehydration, hypothermia and hyperthermia, the HUD's state), and
 	                   each player's mana (Players/Mana: Terraria's, kept with the character:
-	                   regeneration, potions, Mana Crystals), magic weapons and their
+	                   regeneration, potions, Mana Crystals), radiation (Players/Radiation:
+	                   uranium around and carried, the dose, Radiation Sickness, the rate the
+	                   Geiger counter clicks at), magic weapons and their
 	                   projectiles (Players/Magic: casts, server-simulated flights, hits on mobs)
 	                   and Fallen Stars at night (Players/FallenStars)
 	 11. mobs      -> cows, sheep, pigs, chickens and the apocalypse's zombies
@@ -173,6 +175,7 @@ local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
 local Mana = require(Server.Players.Mana)
+local Radiation = require(Server.Players.Radiation)
 local Magic = require(Server.Players.Magic)
 local FallenStars = require(Server.Players.FallenStars)
 local Mobs = require(Server.Mobs.Mobs)
@@ -293,6 +296,9 @@ local function startWorld(settings: WorldSettings.Settings)
 	ToughAsNails.start(net, world)
 	-- Mana after inventories (what is held) and effects (Mana Sickness).
 	Mana.start(net)
+	-- Radiation after inventories (the uranium carried, the Hazmat suit) and effects (Radiation
+	-- Sickness).
+	Radiation.start(world)
 	-- Magic weapons (HeldUse, the projectiles; hits on mobs once they start) and Fallen Stars
 	-- (items: after Entities).
 	Magic.start(net, world)

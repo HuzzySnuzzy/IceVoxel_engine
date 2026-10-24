@@ -2188,6 +2188,74 @@ local Config = {
 		NightVisionAmbient = 150,
 	},
 
+	-- Radiation (Mekanism's, simplified) --------------------------------------------------------------
+
+	--[[
+		Uranium is radioactive (Shared/Radiation, server Players/Radiation, client Audio/Geiger): its
+		ore and blocks near a player and the uranium they carry give an exposure rate in Sv/h (as
+		Mekanism's Geiger Counter reads it), which builds up a dose (Sv) that decays slowly; the
+		dose's bands bring Radiation Sickness I, II and III. A Hazmat suit keeps it out, and the
+		client clicks like a Geiger counter while the player is exposed. Survival and adventure
+		players only: creative and spectator players are never exposed (their dose only decays).
+	]]
+	Radiation = {
+		-- false: nothing is radioactive (no exposure, sickness or clicks); a saved dose is kept as
+		-- it is, for when it is back.
+		Enabled = true,
+		-- Sv/h a source gives a block away or nearer, or carried, by block or item name (a block's
+		-- item radiates as the block, by the stack's count). An ore's uranium is spread through
+		-- rock, and Raw Uranium is mostly rock too; an ingot is the refined metal (forty lumps'
+		-- worth), a nugget a ninth of it; the storage blocks are nine of their item. So mining a
+		-- vein bare skinned for a few minutes makes you mildly sick (I), a stack of Raw Uranium
+		-- carried for several minutes sick (II), a Block of Uranium beside you is dangerous (II
+		-- within a minute or two, III if you stay), and a vein a few blocks into the rock is safe
+		-- (tests/spec/Radiation plays these out).
+		Sources = {
+			UraniumOre = 1,
+			RawUraniumBlock = 2.7,
+			UraniumBlock = 108,
+			RawUranium = 0.3,
+			UraniumIngot = 12,
+			UraniumNugget = 1.33,
+		},
+		-- Blocks are looked for within this many blocks of the body (a sphere). Exposure falls off
+		-- with the square of the distance from a block away in (Mekanism's magnitude /
+		-- max(1, d^2)), less its value at this radius, so it fades to nothing there.
+		Radius = 8,
+		-- The share of radiation each block between a source and the body lets through: any full
+		-- solid block (rock, earth, wood, metal) `Solid`, these by name (lead stops nearly all).
+		-- Glass, leaves, plants and fluids let it all through.
+		Shielding = { Solid = 0.5, LeadBlock = 0.02, RawLeadBlock = 0.1 },
+		-- The most sources traced for shielding in one look, nearest first (the rest take the
+		-- mean of those traced): a look reads at most the sphere and this many rays.
+		MaxRays = 32,
+		-- The share of radiation each Hazmat piece worn keeps out (Mekanism's mask, gown, pants
+		-- and boots; the whole suit keeps out all of it), carried uranium's too.
+		Hazmat = { HazmatHelmet = 0.25, HazmatChestplate = 0.4, HazmatLeggings = 0.2, HazmatBoots = 0.15 },
+		-- Seconds for a dose to halve (Mekanism's 0.9995 a second is 23 minutes: a game's pace
+		-- is quicker).
+		HalfLife = 600,
+		-- Rates below this (Sv/h) are none: no dose and no clicks.
+		MinRate = 0.0005,
+		-- Seconds between two looks at a player (the server spreads the players over them).
+		Interval = 1,
+		Sickness = {
+			-- The doses (Sv) from which Radiation Sickness I, II and III come (Mekanism's bands).
+			Bands = { 0.1, 1, 10 },
+			-- Ticks it (and what comes with it) lasts once the dose falls below its band; renewed
+			-- while the dose holds.
+			Ticks = 600,
+			-- Minecraft's Hunger comes with it from this level (Hunger I at II, II at III), and
+			-- Nausea from this one.
+			HungerFrom = 2,
+			NauseaFrom = 3,
+		},
+		-- The Geiger counter (client): clicks a second at 1 Sv/h, growing with the rate's square
+		-- root (a vein in the rock nearby a click every few seconds, one beside you a few a
+		-- second, a stack of Raw Uranium a dozen), at most Max.
+		Clicks = { PerSvh = 2.5, Max = 16 },
+	},
+
 	-- Characters (Terraria's player files) -----------------------------------------------------------
 
 	--[[

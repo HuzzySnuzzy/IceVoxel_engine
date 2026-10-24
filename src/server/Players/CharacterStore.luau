@@ -40,7 +40,8 @@
 	             world's mark waits for this character's first save with it, confirmImport), then its
 	             inventory and equipment (Players/Inventories.restore, restoreEquipment), Tough
 	             As Nails and the food bar, effects, the zombie apocalypse's survivor record and infection
-	             (Apocalypse/Survival.restore), mana and crystals (Players/Mana) and progress
+	             (Apocalypse/Survival.restore), the radiation dose (Players/Radiation.restore),
+	             mana and crystals (Players/Mana) and progress
 	             (Players/Progression.restore); its health on its first body, the leftovers of an
 	             old record dropped at its feet, the nametag (Humanoid.DisplayName) its name.
 	             `look` gives Players/WorldMenu the look it spawns with.
@@ -112,6 +113,7 @@ local Inventories = require(script.Parent.Inventories)
 local Mana = require(script.Parent.Mana)
 local Progression = require(script.Parent.Progression)
 local ProgressStore = require(script.Parent.ProgressStore)
+local Radiation = require(script.Parent.Radiation)
 local ToughAsNails = require(script.Parent.ToughAsNails)
 local Survival = require(Server.Apocalypse.Survival)
 local SurvivalRules = require(Server.Apocalypse.SurvivalRules)
@@ -145,6 +147,7 @@ type Cache = {
 	hunger: any,
 	effects: any,
 	survivor: SurvivalRules.Saved?,
+	radiation: number?,
 	progress: unknown?,
 }
 
@@ -523,6 +526,8 @@ local function capture(player: Player, user: User, selected: Selected): Record
 		record.alive, record.kills, record.moons = base.alive, base.kills, base.moons
 		record.infection = base.infection
 	end
+	-- (The radiation dose: Players/Radiation.)
+	record.radiation = Radiation.export(player) or cache.radiation or base.radiation
 	local kept = selected.kept
 	if kept then
 		-- (Not a fair visit: the things it had then.)
@@ -1034,6 +1039,10 @@ local function refreshCache(player: Player, selected: Selected, progress: boolea
 	if survivor then
 		cache.survivor = survivor
 	end
+	local dose = Radiation.export(player)
+	if dose then
+		cache.radiation = dose
+	end
 	if progress then
 		local exported = Progression.export(player)
 		if exported ~= nil then
@@ -1142,6 +1151,7 @@ local function apply(player: Player, user: User, selected: Selected, leftovers: 
 	local survivor: SurvivalRules.Saved =
 		{ alive = record.alive, kills = record.kills, moons = record.moons, infection = record.infection }
 	Survival.restore(player, survivor)
+	Radiation.restore(player, record.radiation)
 	selected.progressWritable = Progression.restore(player, selected.progress)
 	-- (Mana after the progress and the accessory slots its Age opens: the max it is held to from
 	-- the next tick counts every accessory the character wears, a Band of Starpower included.)
@@ -1162,6 +1172,7 @@ local function apply(player: Player, user: User, selected: Selected, leftovers: 
 		hunger = record.hunger,
 		effects = record.effects,
 		survivor = survivor,
+		radiation = record.radiation,
 		progress = selected.progress,
 	}
 	local character = player.Character

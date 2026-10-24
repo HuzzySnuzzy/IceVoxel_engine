@@ -144,8 +144,9 @@ return function(t, shared, require, server)
 		t.eq(Items.get(I.SodaCan).displayName, "Soda")
 		t.eq(Effects.id.Bleeding, 26)
 		t.eq(Effects.id.Infection, 27)
-		-- (Minecraft's Hunger came after the apocalypse's two: 28, Shared/Hunger.)
-		t.eq(Effects.COUNT, 28)
+		-- (Minecraft's Hunger came after the apocalypse's two: 28, Shared/Hunger; then Radiation
+		-- Sickness, 29: Shared/Radiation.)
+		t.eq(Effects.COUNT, 29)
 		t.eq(Effects.get(Effects.id.Bleeding).lethal, false, "bleeding never kills")
 		t.eq(Effects.get(Effects.id.Infection).external, true, "Survival keeps the infection")
 		for _, name in

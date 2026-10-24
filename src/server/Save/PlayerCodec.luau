@@ -25,22 +25,26 @@
 	            kills, blood moons survived) and its bite's infection progress (0 healthy: server
 	            Apocalypse/Survival; version 3; with characters the character keeps them); and
 	            Minecraft's food bar (food, saturation, exhaustion, timer: Shared/Hunger; optional,
-	            version 4; with characters the character keeps it).
+	            version 4; with characters the character keeps it); and the radiation dose (Sv:
+	            Shared/Radiation, server Players/Radiation; optional, version 5; with characters the
+	            character keeps it).
 	  Bytes     u8 VERSION, u8 flags (bit 0 position, 1 thirst, 2 temperature, 3 hidden looks,
-	            4 mana, 5 survivor record, 6 hunger), [f64 x, y, z, f32 yaw], f32 health, u8 mode and u8 previous (GameMode
+	            4 mana, 5 survivor record, 6 hunger, 7 radiation), [f64 x, y, z, f32 yaw], f32 health, u8 mode and u8 previous (GameMode
 	            ids, 255 none), u8 selected, [u16 hidden], u8 n + n x (u8 place:
 	            Inventory/Types.PLACE_*: 1..36 slots, 37..40 armor, 41 cursor, 42..48 accessories,
 	            49..52 vanity armor, 53..59 vanity accessories; stack), [5 x f32 thirst], [10 x
 	            f32 temperature],
 	            [f32 mana, u8 crystals], u8 n + n x (u8 effect, u8 amplifier, i32 ticks, u8
 	            ambient), [u32 alive, u16 kills, u16 moons, u32 infection] (version 3 on, only
-	            when not all 0), [4 x f32 hunger] (version 4 on). Typical: 60-430 bytes.
+	            when not all 0), [4 x f32 hunger] (version 4 on), [f32 dose] (version 5 on, only
+	            when above 0). Typical: 60-430 bytes.
 	  Versions  2 added the equipment places, the hidden bits and the mana; 3 the survivor record
-	            and the infection; 4 the food bar. A version 1 record (places up to 41, flags up to
-	            7) still reads, a version 1 or 2 one with its survivor record and infection at 0, a
-	            version 1 to 3 one with no food bar (nil: the player gets a full one, 20 food, 5
-	            saturation, as a new one does), and an older server refuses a newer one, so it
-	            never writes over what it can't keep.
+	            and the infection; 4 the food bar; 5 the radiation dose. A version 1 record (places
+	            up to 41, flags up to 7) still reads, a version 1 or 2 one with its survivor record
+	            and infection at 0, a version 1 to 3 one with no food bar (nil: the player gets a
+	            full one, 20 food, 5 saturation, as a new one does), a version 1 to 4 one with no
+	            dose, and an older server refuses a newer one, so it never writes over what it
+	            can't keep.
 	Decoding checks every number: non-finite ones, unknown modes, slots and effects are a damaged
 	record (nil), and unknown items are dropped (SaveCodec.readStack) and counted (`dropped`: such
 	a record is not written back this session, World/WorldSave).
@@ -108,15 +112,22 @@ export type Record = {
 	infection: number,
 	-- Minecraft's food bar (nil: none kept, the player starts full).
 	hunger: Hunger?,
+	-- The radiation dose (Sv; 0: none).
+	radiation: number,
 	-- Stacks of items this version doesn't know, left out while reading (never written).
 	dropped: number,
 }
 
 local PlayerCodec = {}
 
--- (3 before the food bar, 2 before the zombie apocalypse's survivor record and infection, 1
--- before the equipment.)
-PlayerCodec.VERSION = 4
+-- (4 before the radiation dose, 3 before the food bar, 2 before the zombie apocalypse's
+-- survivor record and infection, 1 before the equipment.)
+PlayerCodec.VERSION = 5
+-- The most dose a record keeps (Sv).
+PlayerCodec.MAX_DOSE = 1e6
+-- The flags each version knew (by version): 1 up to the hidden looks, 2 the mana, 3 the survivor
+-- record, 4 the food bar, 5 the dose.
+local FLAGS_UP_TO = { 7, 31, 63, 127, 255 }
 local NONE = 255
 local CURSOR = Types.PLACE_CURSOR
 local THIRST_FIELDS = { "thirst", "hydration", "exhaustion", "effect", "timer" }
@@ -153,6 +164,7 @@ function PlayerCodec.new(): Record
 		moons = 0,
 		infection = 0,
 		hunger = nil,
+		radiation = 0,
 		dropped = 0,
 	}
 end
@@ -169,13 +181,15 @@ export type Live = {
 	mana: boolean,
 	-- Apocalypse/Survival has their survivor record (a character made it, or it was restored).
 	survivor: boolean?,
+	-- Players/Radiation has their dose (a character made it).
+	radiation: boolean?,
 }
 
 --[[
 	`record` (captured now) completed from the saved record `waiting` that no character has used
 	yet (the player sits on the title screen, or their client never finished loading): where they
-	stood and their health while no character stands, Tough As Nails and the food bar, the effects and the survivor
-	record while nothing live has them yet. The inventory and game mode came back at once, so they are `record`'s own.
+	stood and their health while no character stands, Tough As Nails and the food bar, the effects, the survivor
+	record and the radiation dose while nothing live has them yet. The inventory and game mode came back at once, so they are `record`'s own.
 	Without it, leaving (or an autosave) before their first character would write a fresh player
 	over the saved one. nil `waiting`: `record` as it is.
 ]]
@@ -201,6 +215,9 @@ function PlayerCodec.withWaiting(record: Record, waiting: Record?, live: Live): 
 	if not live.survivor then
 		record.alive, record.kills, record.moons = waiting.alive, waiting.kills, waiting.moons
 		record.infection = waiting.infection
+	end
+	if not live.radiation then
+		record.radiation = waiting.radiation
 	end
 	return record
 end
@@ -235,6 +252,8 @@ function PlayerCodec.encode(record: Record): buffer
 	local moons, infection = whole(record.moons, 65535), whole(record.infection, 4294967295)
 	local hasSurvivor = alive + kills + moons + infection > 0
 	local hunger = record.hunger
+	local dose = record.radiation
+	local hasDose = type(dose) == "number" and finite(dose) and dose > 0
 	local flags = (if position then 1 else 0)
 		+ (if record.thirst then 2 else 0)
 		+ (if record.temperature then 4 else 0)
@@ -242,6 +261,7 @@ function PlayerCodec.encode(record: Record): buffer
 		+ (if hasMana then 16 else 0)
 		+ (if hasSurvivor then 32 else 0)
 		+ (if hunger then 64 else 0)
+		+ (if hasDose then 128 else 0)
 	SaveCodec.u8(w, flags)
 	if position then
 		SaveCodec.f64(w, record.x)
@@ -325,6 +345,10 @@ function PlayerCodec.encode(record: Record): buffer
 			SaveCodec.f32(w, if type(value) == "number" and finite(value) then value else 0)
 		end
 	end
+	if hasDose then
+		-- (Far above any dose a source gives: an f32 keeps it.)
+		SaveCodec.f32(w, math.min(dose, PlayerCodec.MAX_DOSE))
+	end
 	return SaveCodec.finish(w)
 end
 
@@ -336,7 +360,7 @@ local function decode(bytes: buffer): Record
 	end
 	local record = PlayerCodec.new()
 	local flags = SaveCodec.readU8(r)
-	if flags > (if version >= 4 then 127 elseif version >= 3 then 63 elseif version >= 2 then 31 else 7) then
+	if flags > FLAGS_UP_TO[version] then
 		error("bad player flags", 0)
 	end
 	if bit32.btest(flags, 1) then
@@ -448,6 +472,13 @@ local function decode(bytes: buffer): Record
 			hunger[field] = value
 		end
 		record.hunger = hunger
+	end
+	if bit32.btest(flags, 128) then
+		local dose = SaveCodec.readF32(r)
+		if not finite(dose) or dose < 0 then
+			error("bad radiation dose", 0)
+		end
+		record.radiation = dose
 	end
 	if not SaveCodec.atEnd(r) then
 		error("player record has bytes left over", 0)

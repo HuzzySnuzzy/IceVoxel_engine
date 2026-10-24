@@ -464,9 +464,9 @@ return function(t, shared, require, _server, client)
 		-- Audio/Ambience by Rendering/TransmitterModel.machineLoop's names; the thermostat's click:
 		-- Ui/MenuLayout.BUTTON_SOUND).
 		-- So did the turrets' and the Metal Miner's (the servo: Rendering/TurretView; the machines'
-		-- hums: Rendering/TransmitterModel.machineLoop's names). The fifth sheet's Geiger counter
-		-- click waits for the radiation that plays it (the uranium to come).
-		local pending: { [string]: boolean } = { ["ambient.radiation.click"] = true }
+		-- hums: Rendering/TransmitterModel.machineLoop's names), and the fifth sheet's Geiger
+		-- counter click with the radiation that plays it (Audio/Geiger).
+		local pending: { [string]: boolean } = {}
 		-- A firearm's shot is played by its class through its FirearmSpec `sound` (Rendering/
 		-- ShotRules.fireSound, called by Interaction/Firearms for the player's own shot and by
 		-- Rendering/ShotView for others'), never as a literal; every other weapon sound is one

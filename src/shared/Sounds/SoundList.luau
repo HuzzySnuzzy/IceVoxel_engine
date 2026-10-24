@@ -1746,8 +1746,8 @@ end
 	                                     most energy, 200 J a tick and more)
 	  ambient.radiation.click            one click of a Geiger counter ("geiger counter click":
 	                                     heard without an item, a sign of radiation exposure), flat
-	                                     for the player exposed alone; played once the game has
-	                                     radiation (the uranium to come)
+	                                     for the player exposed alone: client Audio/Geiger clicks
+	                                     at random, faster the higher the rate (Shared/Radiation)
 	Each falls back on a stand-in when its recording fails to load (the class's shot, the generic
 	suppressed shot, the old wind, the volume tick).
 ]]

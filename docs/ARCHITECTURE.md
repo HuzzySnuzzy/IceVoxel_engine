@@ -5220,7 +5220,8 @@ append only, sent in the Effects message): 1 Speed, 2 Slowness, 3 Haste, 4 Minin
 Strength, 6 Instant Health, 7 Instant Damage, 8 Jump Boost, 9 Nausea, 10 Regeneration, 11
 Resistance, 12 Fire Resistance, 13 Blindness, 14 Night Vision, 15 Weakness, 16 Poison, 17 Wither, 18
 Glowing, 19 Oil Coated, 20 Fuel Soaked, 21 Thirst, 22 Internal Warmth, 23 Internal Chill, 24 Climate
-Clemency, 25 Mana Sickness, 26 Bleeding, 27 Infection, 28 Hunger. A record holds its name, `/effect` id
+Clemency, 25 Mana Sickness, 26 Bleeding, 27 Infection, 28 Hunger, 29 Radiation Sickness
+(Radiation). A record holds its name, `/effect` id
 (Minecraft's), colour (MobEffect's int), category (beneficial, harmful, neutral), HUD glyph and what
 it does as data. `find` takes a name, a display name or an `/effect` id with or without a namespace;
 `levelName` writes "Speed II" (roman to X), `formatTicks` "m:ss" / "h:mm:ss" / "**:**".
@@ -5350,6 +5351,85 @@ fit, and nothing behind panel screens (skill tree, Options: `Screens.panelOpen`)
 orders children over parents (ZIndexBehavior Sibling, as Style's builders expect: under
 Instance.new's Global ordering each list panel's outline covered its own face and text). It is
 rebuilt only when a message comes. F3 lists every effect.
+
+## Radiation (`Radiation/`, server `Players/Radiation`, `Players/RadiationRules`, client `Audio/Geiger`)
+
+Mekanism's radiation, simplified: uranium in the world and in a player's hands gives an exposure
+rate (Sv/h), the rate builds a dose (Sv) that decays slowly, the dose's bands bring Radiation
+Sickness, a Hazmat suit keeps it out, and the client clicks like a Geiger counter. The rules are
+pure and shared (`Shared/Radiation`); server `Players/RadiationRules` is one player's look, pure
+too; `Players/Radiation` the glue. `tests/spec/Radiation` tests them, plays the feel out over a
+fake world and inventory (below) and measures a look. Numbers in `Config.Radiation`; `Enabled`
+false turns all of it off (a saved dose is kept as it is).
+
+- **Sources** (`Config.Radiation.Sources` by name: Sv/h a block away or nearer, or carried; one
+  table by id, a block item's id being its block's): Uranium Ore 1 (a lump's uranium spread through
+  rock), the Block of Raw Uranium 2.7, the Block of Uranium 108, Raw Uranium 0.3 (mostly rock), the
+  Uranium Ingot 12 (the refined metal: forty lumps' worth) and Nugget 1.33; each storage block is
+  nine of its item. Carried (`carried`): every stack of the 36 slots, the armor and the cursor,
+  and the open window's own crafting grid (the inventory screen's 2 x 2, a crafting table's
+  3 x 3; results left out), at its strength times its count. Chests and furnaces aren't looked
+  into.
+- **Falloff** (`falloff`): from the body's centre (feet + 0.9) to each block's centre, Mekanism's
+  magnitude / max(1, d^2), less its value at `Radius` (8), so it fades to nothing there instead of
+  stopping as a player walks away.
+- **The scan** (`scan`): every cell of the sphere (`OFFSETS`: 2,945 cells, nearest first) through
+  the server's loaded blocks (`peekBlock`: an unloaded cell is nothing, never generated). Each
+  source found is traced (`transmission`: an Amanatides and Woo voxel walk to the body, each cell
+  strictly between letting through its block's share: any full solid opaque block
+  `Shielding.Solid` 0.5, a Block of Lead 0.02, a Block of Raw Lead 0.1; glass, leaves, plants,
+  fluids and unknown cells all of it), the nearest `MaxRays` (32) of them; the rest take the mean
+  share of those traced. Bounded: at most `readsBound()` reads a look (3,809: the sphere and the
+  rays, each at most the Manhattan distance), about 0.3 to 0.6 ms under Lune, once a second a
+  player.
+- **The Hazmat suit** (`shielding`): `Hazmat`'s shares summed over the armor worn, at most all
+  of it (Mekanism's getRadiationResistance: the mask 0.25, the gown 0.4, the pants 0.2, the boots
+  0.15), taken off the blocks' and the carried alike (`exposure`); under `MinRate` (0.0005 Sv/h)
+  is none.
+- **The dose** (`dose`): dD/dt = rate / 3600 - D ln 2 / `HalfLife`, solved exactly over each look
+  (Mekanism adds magnitude / 3600 a second and multiplies by its decay rate), so a steady rate
+  settles at rate x HalfLife / (3600 ln 2), about a quarter of the rate (`settled`), and without
+  one the dose halves every `HalfLife` (600 s; Mekanism's 0.9995 a second is 23 minutes).
+  Creative and spectator players are never exposed and their dose only decays; death clears it.
+- **Sickness** (`level`, `symptoms`, `renewal`): the level is the highest of `Sickness.Bands`
+  reached (Mekanism's 0.1, 1 and 10 Sv); it brings Radiation Sickness (EffectList 29, a plain data
+  effect: `interval = 300, damage = 1, lethal = true`, a half heart every 15, 7.5, 3.75 s by
+  magic, and it kills) at the level's amplifier, Minecraft's Hunger from `HungerFrom` (Hunger I at
+  II, II at III) and Nausea from `NauseaFrom` (III), given through `Players/Effects`. A symptom is
+  given afresh (`Sickness.Ticks`, 600) when absent or weaker, left while a stronger one runs out,
+  and the same one, once it ran down a step (its interval >> amplifier; `RENEW_TICKS` 200 for
+  Hunger and Nausea), gets whole steps back: its countdown keeps its phase, which
+  `isDurationTick` reads, so the hurt lands exactly every interval however often the server looks
+  (refreshed to its full time every look, an interval effect would act on every refresh). They
+  lapse `Sickness.Ticks` after the dose falls below their band. `/effect` gives and clears it like
+  any other; the next look gives it back while the dose holds.
+- **Published** (server `Players/Radiation`, a look every `Interval` (1) s a player, the players
+  spread over it on a 20 Hz count as Tough As Nails' looks): player attributes `IceVoxelRadiation`
+  (the rate after the suit) and `IceVoxelRadiationDose`, to two significant figures (`round`, so
+  they change only when they show a change) and absent at 0; attributes replicate by themselves,
+  as Inventory/Types.USE_ATTRIBUTE does. A dead player's rate goes at once.
+- **The clicks** (client `Audio/Geiger`): `ambient.radiation.click`, flat (the event is an
+  interface one), as a Poisson process: every Heartbeat frame clicks with the chance
+  `clickRate(rate)` x dt (`Clicks.PerSvh` 2.5 x the rate's square root, at most `Max` 16 a second,
+  at most one a frame: `clicks`). A vein three blocks down a tunnel clicks about once a second
+  (prospecting by ear), one beside you a few times a second, a stack of Raw Uranium about ten, a
+  Block of Uranium at the cap. F3's `radiation` line shows the rate and the dose with Mekanism's SI
+  prefixes (`format`); the effect's icon is a trefoil (`Ui/EffectIcons` `radiation`). No HUD hint
+  beyond them.
+- **Saved**: the dose rides in the player record (`Save/PlayerCodec` version 5, flag bit 7, an f32
+  after the food bar) and the character (`Save/CharacterCodec` version 4, flag bit 5), written only
+  above 0; older records read none, and an older server refuses the newer ones as before.
+  `World/WorldSave` and `Players/CharacterStore` capture it (`Radiation.export`, their caches for a
+  leaving player: the glue forgets a leaving player only after every PlayerRemoving handler ran),
+  give it back on entering (`Radiation.restore`: the standing character, else the next), and
+  `keepThings` keeps it with the effects (an unfair visit cures nothing); `PlayerCodec.withWaiting`
+  keeps a saved one while nothing live has it yet.
+- **How play feels** (the spec plays each out): mining a six-ore vein bare skinned (an ore every
+  30 s, the lumps kept) is Radiation Sickness I after about four minutes, never II; a stack of 64
+  Raw Uranium carried is I within the first minute and II after about four, settling below III;
+  standing beside a Block of Uranium is II within two minutes and III after about twenty; a vein
+  four or more blocks down a tunnel through rock never makes anyone sick. One lump in a pocket
+  settles below I; one ingot settles above II.
 
 ## Knowledge, Ages and skills (`Progression/`, server `Players/Progression`, client `Player/ProgressionState`)
 
@@ -7827,8 +7907,8 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
     `machine.heavy_hum` ("Heavy Electric Hum": `block.metal_miner.hum`, `block.oil_refinery.hum`,
     the two using the most energy); TransmitterModel.machineLoop names them per decor, so a
     working Electric Furnace or Oil Refinery hums like the seasons' and turrets' machines;
-  - `ambient.radiation.click` (a Geiger counter's click; source ambient, ui, client), registered
-    for radiation and played by nothing yet (SoundsClient lists it as pending).
+  - `ambient.radiation.click` (a Geiger counter's click; source ambient, ui, client): client
+    `Audio/Geiger` clicks it flat while the player is exposed to radiation (see Radiation).
 
 **Who plays what** (Minecraft's split between server and client):
 
@@ -8240,7 +8320,8 @@ its regions and its players.
   the running status effects, and (version 3, flag bit 5, written only when not all 0) the
   apocalypse's survivor record and infection with `Characters.Enabled` off (Infection and
   bleeding), and (version 4, flag bit 6) Minecraft's food bar (food, saturation, exhaustion,
-  timer; older records have none: a full bar). Knowledge, Ages and skills stay in Players/ProgressStore, for every world. 60-400
+  timer; older records have none: a full bar), and (version 5, flag bit 7, written only above 0)
+  the radiation dose (Radiation). Knowledge, Ages and skills stay in Players/ProgressStore, for every world. 60-400
   bytes. A record holding items this version doesn't know is applied (what it can read) but
   never written that session. The world's options carry its `ruins` setting; a record from before
   the ruins has no key and reads it as off (World types).
@@ -8658,7 +8739,7 @@ second, half hearts). The shared groundwork (data, codecs, messages), then how e
   title screen before the world. A character carries its look, name, difficulty (Classic keeps
   everything on death, Mediumcore drops it, Hardcore dies for good), inventory and equipment,
   health, mana and Mana Crystals, effects, Tough As Nails, its food bar (CharacterCodec version 3,
-  flag bit 4: Minecraft's hunger) and its Knowledge/Ages/skills between worlds; a world keeps only where each character stood, its game mode and a spawn point.
+  flag bit 4: Minecraft's hunger), its radiation dose (version 4, flag bit 5) and its Knowledge/Ages/skills between worlds; a world keeps only where each character stood, its game mode and a spawn point.
   `Save/CharacterCodec` is the record (inventory places 1..59: `Inventory/Types.PLACE_*`), its
   DataStore value (`{ v, data, progress, lock }`: the session lock inside the value, so loading
   with it and every save are one UpdateAsync each) and the user's index (`{ v, next, chars }`);

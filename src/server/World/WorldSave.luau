@@ -57,7 +57,8 @@
 	             (WorldStore's `order`). Their equipment (accessories, vanity, hidden looks) and
 	             their mana and Mana Crystals (Players/Mana: put back at once) are in the record
 	             too (PlayerCodec version 2), and the zombie apocalypse's survivor record and
-	             infection (Apocalypse/Survival.export and restore; version 3).
+	             infection (Apocalypse/Survival.export and restore; version 3), and the radiation
+	             dose (Players/Radiation.export and restore; version 5).
 	  Characters with Config.Characters on, a player's things are their character's (Players/
 	             CharacterStore keeps and saves the character: inventory, equipment, health,
 	             mana, Tough As Nails, effects, progress) and a world keeps only what is its own
@@ -131,6 +132,7 @@ local Inventories = require(Server.Players.Inventories)
 local Mana = require(Server.Players.Mana)
 local Operators = require(Server.Players.Operators)
 local PlayerPositions = require(Server.Players.PlayerPositions)
+local Radiation = require(Server.Players.Radiation)
 local Spawning = require(Server.Players.Spawning)
 local ToughAsNails = require(Server.Players.ToughAsNails)
 local CharacterCodec = require(Server.Save.CharacterCodec)
@@ -626,6 +628,11 @@ local function capture(player: Player, ps: PlayerState): (Record, number)
 		record.alive, record.kills, record.moons = survivor.alive, survivor.kills, survivor.moons
 		record.infection = survivor.infection
 	end
+	-- (The radiation dose: nil before their first character.)
+	local dose = Radiation.export(player)
+	if dose then
+		record.radiation = dose
+	end
 	-- (Until a character stands, the saved record's place and the rest are what they have.)
 	local waiting = ps.waiting
 	if standing then
@@ -637,6 +644,7 @@ local function capture(player: Player, ps: PlayerState): (Record, number)
 		effects = effects ~= nil,
 		mana = mana ~= nil,
 		survivor = survivor ~= nil,
+		radiation = dose ~= nil,
 	})
 	return record, captures
 end
@@ -662,6 +670,9 @@ local function finalRecord(player: Player, ps: PlayerState): (Record, number)
 	if cached and Survival.export(player) == nil then
 		fresh.alive, fresh.kills, fresh.moons = cached.alive, cached.kills, cached.moons
 		fresh.infection = cached.infection
+	end
+	if cached and Radiation.export(player) == nil then
+		fresh.radiation = cached.radiation
 	end
 	return fresh, order
 end
@@ -701,6 +712,7 @@ local function applyRecord(player: Player, ps: PlayerState, record: Record)
 		player,
 		{ alive = record.alive, kills = record.kills, moons = record.moons, infection = record.infection }
 	)
+	Radiation.restore(player, record.radiation)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if character and humanoid and humanoid.Health > 0 then
