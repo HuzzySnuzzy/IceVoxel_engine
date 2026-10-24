@@ -150,6 +150,10 @@ return function(t, shared, require, server, client)
 		end
 		-- The uploads: the moods, the loops and the blocks' break and place recordings, no others.
 		local recorded = { [SoundList.RECORDED["break"]] = true, [SoundList.RECORDED.place] = true }
+		-- (And the fifth sheet's: the entity hit, the hums, the lava, the calibres' shots, the click.)
+		for _, id in SoundList.FIFTH_SHEET do
+			recorded[id] = true
+		end
 		for _, event in Sounds.events do
 			if uploaded(event.id) then
 				t.ok(

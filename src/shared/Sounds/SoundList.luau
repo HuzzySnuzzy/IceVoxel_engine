@@ -133,6 +133,16 @@ local TICK = "rbxasset://sounds/volume_slider.ogg" -- the settings menu's volume
 local GENERIC_BREAK = "rbxassetid://73168198865721"
 local GENERIC_PLACE = "rbxassetid://101534882480796"
 
+-- The fifth data sheet's "Main SFX" (the shots are with the weapons' events, the Geiger counter's
+-- click with the last ones): "Entity Hit" ("replace all entity hit sounds with this": a blow or a
+-- bullet landing on a mob or a player), the machines' hums ("Electric Hum", 7 s looped; "Heavy
+-- Electric Hum", 9 s looped, "For more consuming machines") and "Lava Ambient" (1:14 looped,
+-- bubbling included).
+local ENTITY_HIT = "rbxassetid://139520673393967"
+local ELECTRIC_HUM = "rbxassetid://120250063764346"
+local HEAVY_HUM = "rbxassetid://138159989881933"
+local LAVA_AMBIENT = "rbxassetid://318794788"
+
 -- The first footstep of the walking loop (seconds of the file).
 local ONE_STEP = 0.3
 
@@ -525,8 +535,10 @@ SoundList.EVENTS = {
 
 	--[[
 		Lava (Minecraft 1.20.1). LavaFluid.animateTick: lava open to the air above pops now and
-		then (block.lava.pop, cue volume 0.2..0.4, pitch 0.9..1.05) and bubbles (block.lava.ambient,
-		the same), each client by itself (Audio/Ambience). LiquidBlock.fizz: lava hardening against
+		then (block.lava.pop, cue volume 0.2..0.4, pitch 0.9..1.05), each client by itself
+		(Audio/Ambience); its bubbling is the fifth sheet's "Lava Ambient" (block.lava.ambient, the
+		old wind its fallback), looped at the nearest lava open to the air the client has found
+		(Audio/Ambience, SoundRules.lavaLoop) instead of Minecraft's one bubble in 200. LiquidBlock.fizz: lava hardening against
 		water and lava turning water to stone hiss (block.lava.extinguish, volume 0.5, pitch
 		2.6 +- 0.8; server Behaviours/Fluid). A bucket filled with lava or oil, or emptied, sounds
 		thicker than water (item.bucket.fill_lava, item.bucket.empty_lava; Fluids `fillSound`,
@@ -549,11 +561,9 @@ SoundList.EVENTS = {
 	},
 	{
 		name = "block.lava.ambient",
-		id = FALLING,
+		id = LAVA_AMBIENT,
 		volume = 0.6,
-		pitch = 0.45,
-		pitchVariance = 0.08,
-		duration = 1.5,
+		fallback = { id = FALLING, pitch = 0.45, duration = 1.5 },
 		source = "blocks",
 		side = "client",
 	},
@@ -834,7 +844,8 @@ table.insert(SoundList.EVENTS, {
 	the eater's client plays its own, the server the last one to everyone else; the bites now play
 	only when the eating loop's recording fails to load: entity.generic.eating). Stand-ins told
 	apart by pitch: the ouch and the oof for hurts and deaths (low for cows and the brute, high for
-	chickens and the screamer), the landing thud into the hits, a footstep into a bite. The
+	chickens and the screamer), the landing thud into the hits (now only their fallback: the hits
+	are the fifth sheet's "Entity Hit"), a footstep into a bite. The
 	zombies' groans, door bashing and screams, and the bunker hatch, are with the apocalypse's
 	sounds at the end of the list.
 
@@ -888,20 +899,21 @@ for _, event in
 		{
 			name = "entity.player.attack.strong",
 			category = "entity.player.attack",
-			id = LAND,
+			id = ENTITY_HIT,
 			volume = 0.6,
-			pitch = 1.3,
-			pitchVariance = 0.1,
+			pitchVariance = 0.08,
+			fallback = { id = LAND, pitch = 1.3 },
 			source = "players",
 			side = "server",
 		},
 		{
 			name = "entity.player.attack.weak",
 			category = "entity.player.attack",
-			id = LAND,
+			id = ENTITY_HIT,
 			volume = 0.35,
-			pitch = 1.8,
-			pitchVariance = 0.1,
+			pitch = 1.15,
+			pitchVariance = 0.08,
+			fallback = { id = LAND, pitch = 1.8 },
 			source = "players",
 			side = "server",
 		},
@@ -1338,7 +1350,10 @@ end
 	(beyond Config.Weapons.FarSound) a low rolling boom; the crossbow's twang a rustle pitched up.
 	A dry trigger and a jam click the volume tick; reloading, chambering and attaching are thuds
 	pitched up; a round loaded a tick; unloading a rustle. Bullets hitting a block a high tap,
-	flesh a dull thud. The melee rework's swing and heavy swing are rustles, a blocked hit a thud.
+	flesh the fifth sheet's "Entity Hit" (the dull thud its fallback). The melee rework's swing and
+	heavy swing are rustles, a blocked hit a thud. The calibres the fifth sheet recorded (9mm,
+	5.56, .308) have their own shots, after the last events: Rendering/ShotRules.fireSound plays
+	those for a gun of that calibre instead of its class's.
 
 	  side       client: each client plays them (the shooter at once, the others from the Shots
 	             message), never sent; predicted: the player's own client at once, the server to
@@ -1481,10 +1496,10 @@ for _, event in
 		},
 		{
 			name = "entity.bullet.flesh",
-			id = LAND,
+			id = ENTITY_HIT,
 			volume = 0.5,
-			pitch = 1.1,
-			pitchVariance = 0.1,
+			pitchVariance = 0.08,
+			fallback = { id = LAND, pitch = 1.1 },
 			maxDistance = 24,
 			source = "players",
 			side = "client",
@@ -1527,8 +1542,9 @@ end
 	The seasons (Shared/Seasons), after the rest so no other event's number changed. Stand-ins on
 	the shipped files, each replaced by a Sound of its name in SoundService.IceVoxelSounds (or the
 	override folder):
-	  block.electric_heater.hum      a working Electric Heater: the falling wind pitched down, low
-	  block.air_conditioner.hum      a working Air Conditioner: the same, a little higher
+	  block.electric_heater.hum      a working Electric Heater: the fifth sheet's "Electric Hum"
+	                                 (category machine.hum; the wind pitched down its fallback)
+	  block.air_conditioner.hum      a working Air Conditioner: the same, a little lower
 	  block.fan.loop                 a running Electric Fan: the wind pitched up
 	  block.wood_stove.crackle       a burning Wood Stove: the furnace's crackle, deeper
 	  block.oil_heater.burn          a burning Oil Heater: the wind pitched far down, a roar
@@ -1543,18 +1559,21 @@ for _, event in
 	{
 		{
 			name = "block.electric_heater.hum",
-			id = FALLING,
+			category = "machine.hum",
+			id = ELECTRIC_HUM,
 			volume = 0.25,
-			pitch = 0.45,
+			fallback = { id = FALLING, pitch = 0.45 },
 			maxDistance = 12,
 			source = "blocks",
 			side = "client",
 		},
 		{
 			name = "block.air_conditioner.hum",
-			id = FALLING,
+			category = "machine.hum",
+			id = ELECTRIC_HUM,
 			volume = 0.25,
-			pitch = 0.6,
+			pitch = 0.92,
+			fallback = { id = FALLING, pitch = 0.6 },
 			maxDistance = 12,
 			source = "blocks",
 			side = "client",
@@ -1659,14 +1678,16 @@ end
 
 --[[
 	Turrets and the Metal Miner (Shared/Turrets, Shared/Machines kinds "miner" and "press"), after
-	the seasons so no other event's number changed. Loops on the shipped files, each replaced by a
-	Sound of its name in SoundService.IceVoxelSounds (or the override folder):
+	the seasons so no other event's number changed. Loops, each replaced by a Sound of its name in
+	SoundService.IceVoxelSounds (or the override folder):
 	  block.turret.servo         a turret turning its gun: the falling wind pitched up, faint (at
 	                             most Config.Turrets.Client.ServoLoops of them, the nearest)
-	  block.metal_miner.drill    a working Metal Miner: the footsteps pitched down, a rapid clatter
-	  block.ammo_press.stamp     a working Ammo Press: the volume tick pitched down, a thud
-	The client plays them (the servo at a turning turret: Rendering/TurretView; the drill and the
-	stamp while the machine works, from its record: Rendering/TransmitterModel.machineLoop). A
+	  block.metal_miner.hum      a working Metal Miner: the fifth sheet's "Heavy Electric Hum"
+	                             (category machine.heavy_hum; the old clatter its fallback)
+	  block.ammo_press.hum       a working Ammo Press: its "Electric Hum" (category
+	                             machine.hum; the old thud its fallback)
+	The client plays them (the servo at a turning turret: Rendering/TurretView; the hums while the
+	machine works, from its record: Rendering/TransmitterModel.machineLoop). A
 	turret's shots are the stand-in gun's own fire sounds (Rendering/ShotView), its dry click
 	item.firearm.dry.
 ]]
@@ -1682,19 +1703,22 @@ for _, event in
 			side = "client",
 		},
 		{
-			name = "block.metal_miner.drill",
-			id = STEPS,
-			volume = 0.3,
-			pitch = 0.6,
+			name = "block.metal_miner.hum",
+			category = "machine.heavy_hum",
+			id = HEAVY_HUM,
+			volume = 0.35,
+			fallback = { id = STEPS, pitch = 0.6, volume = 0.3 },
 			maxDistance = 12,
 			source = "blocks",
 			side = "client",
 		},
 		{
-			name = "block.ammo_press.stamp",
-			id = TICK,
-			volume = 0.4,
-			pitch = 0.5,
+			name = "block.ammo_press.hum",
+			category = "machine.hum",
+			id = ELECTRIC_HUM,
+			volume = 0.3,
+			pitch = 0.95,
+			fallback = { id = TICK, pitch = 0.5, volume = 0.4 },
 			maxDistance = 12,
 			source = "blocks",
 			side = "client",
@@ -1703,5 +1727,139 @@ for _, event in
 do
 	table.insert(SoundList.EVENTS, event)
 end
+
+--[[
+	The fifth data sheet's sounds that are events of their own, after the rest so no other event's
+	number changed (its "Entity Hit", hums and "Lava Ambient" replaced older events' ids):
+	  item.firearm.<calibre>.fire        a shot of a gun of that calibre ("9mm gunshot", "5.56
+	                                     gunshot", ".308 gunshot": calibres 9mm, 556 and 308;
+	                                     category item.firearm.fire, as the classes' shots), which
+	                                     Rendering/ShotRules.fireSound plays instead of the gun's
+	                                     class shot; heard as far as that class's
+	  item.firearm.<calibre>.suppressed  the same through a working suppressor ("... silenced";
+	                                     category item.firearm.suppressed), instead of the generic
+	                                     item.firearm.suppressed
+	  block.electric_furnace.hum         a working Electric Furnace: "Electric Hum" (category
+	                                     machine.hum)
+	  block.oil_refinery.hum             a working Oil Refinery: "Heavy Electric Hum" (category
+	                                     machine.heavy_hum: it and the Metal Miner use the
+	                                     most energy, 200 J a tick and more)
+	  ambient.radiation.click            one click of a Geiger counter ("geiger counter click":
+	                                     heard without an item, a sign of radiation exposure), flat
+	                                     for the player exposed alone; played once the game has
+	                                     radiation (the uranium to come)
+	Each falls back on a stand-in when its recording fails to load (the class's shot, the generic
+	suppressed shot, the old wind, the volume tick).
+]]
+local function calibreShot(calibre: string, id: string, class: EventSpec, silenced: string): { EventSpec }
+	return {
+		{
+			name = `item.firearm.{calibre}.fire`,
+			category = "item.firearm.fire",
+			id = id,
+			volume = 1,
+			pitchVariance = 0.04,
+			fallback = { id = class.id, volume = class.volume, pitch = class.pitch, duration = class.duration },
+			maxDistance = class.maxDistance,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = `item.firearm.{calibre}.suppressed`,
+			category = "item.firearm.suppressed",
+			id = silenced,
+			volume = 0.6,
+			pitchVariance = 0.04,
+			fallback = { id = EXPLOSION, volume = 0.3, pitch = 3.6, duration = 0.08 },
+			maxDistance = 32,
+			source = "players",
+			side = "client",
+		},
+	}
+end
+local function event(name: string): EventSpec
+	for _, spec in SoundList.EVENTS do
+		if spec.name == name then
+			return spec
+		end
+	end
+	error(`no event {name}`)
+end
+local fifth: { EventSpec } = {}
+for _, shots in
+	{
+		calibreShot(
+			"9mm",
+			"rbxassetid://138905044369113",
+			event("item.firearm.pistol.fire"),
+			"rbxassetid://89214508659473"
+		),
+		calibreShot("556", "rbxassetid://5910000043", event("item.firearm.rifle.fire"), "rbxassetid://94291108433840"),
+		calibreShot(
+			"308",
+			"rbxassetid://135793582032227",
+			event("item.firearm.heavy.fire"),
+			"rbxassetid://71834414905709"
+		),
+	}
+do
+	table.move(shots, 1, #shots, #fifth + 1, fifth)
+end
+for _, spec in
+	{
+		{
+			name = "block.electric_furnace.hum",
+			category = "machine.hum",
+			id = ELECTRIC_HUM,
+			volume = 0.25,
+			pitch = 1.05,
+			fallback = { id = FALLING, pitch = 0.5 },
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "block.oil_refinery.hum",
+			category = "machine.heavy_hum",
+			id = HEAVY_HUM,
+			volume = 0.35,
+			pitch = 0.95,
+			fallback = { id = FALLING, pitch = 0.35 },
+			maxDistance = 12,
+			source = "blocks",
+			side = "client",
+		},
+		{
+			name = "ambient.radiation.click",
+			id = "rbxassetid://123303121160543",
+			volume = 0.5,
+			pitchVariance = 0.05,
+			fallback = { id = TICK, pitch = 1.6 },
+			source = "ambient",
+			ui = true,
+			side = "client",
+		},
+	} :: { EventSpec }
+do
+	table.insert(fifth, spec)
+end
+for _, spec in fifth do
+	table.insert(SoundList.EVENTS, spec)
+end
+
+-- The fifth data sheet's recordings (its "Main SFX" ids, every one an event's id here).
+SoundList.FIFTH_SHEET = table.freeze({
+	ENTITY_HIT,
+	ELECTRIC_HUM,
+	HEAVY_HUM,
+	LAVA_AMBIENT,
+	"rbxassetid://138905044369113",
+	"rbxassetid://89214508659473",
+	"rbxassetid://5910000043",
+	"rbxassetid://94291108433840",
+	"rbxassetid://135793582032227",
+	"rbxassetid://71834414905709",
+	"rbxassetid://123303121160543",
+}) :: { string }
 
 return SoundList

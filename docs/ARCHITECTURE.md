@@ -7050,7 +7050,8 @@ inventory prediction, and draws its own shot at once. Everything that decides is
   crossbow, which has only its chamber), fire modes with their rates, damage scale, spread,
   recoil, sway, noise, zero distance, its reload, chamber and per-round ticks, whether it jams,
   its mounts (or a built-in `scope`), whether it racks after a shot (`cycle`), its fire sound
-  (`item.firearm.<class>.fire`, the crossbow's `item.crossbow.fire`) and its `look` (where the
+  (`item.firearm.<class>.fire`, the crossbow's `item.crossbow.fire`; ShotRules plays its
+  calibre's own shot instead where the catalogue has one) and its `look` (where the
   hand holds it, the muzzle, the sight line, the mounts; model pixels at the gun's `scale`). An
   `AmmoSpec`'s `recover` is a switch: the chance a spent bolt is found again is
   `Config.Weapons.BoltRecover` alone. `level` turns a durability fraction into the survival look's
@@ -7542,7 +7543,7 @@ brass marks, the turntable ring on top), the miner ("MetalMiner", the drill hous
 `MINER_WINDOW`, the osmium hopper, the drill head) and the press ("AmmoPress", the stamping window
 `PRESS_WINDOW`, the chute, the ram's cap); TransmitterModel lights the two windows while their
 records say they work (ACTIVE): the miner's grille yellow-orange, the press's window the furnaces'
-orange; `machineLoop` gives them `block.metal_miner.drill` and `block.ammo_press.stamp`
+orange; `machineLoop` gives them `block.metal_miner.hum` and `block.ammo_press.hum`
 (Audio/Ambience loops them). MenuLayout passes a panel's window data to `Machines.lines`.
 
 **The model.** `Rendering/TurretModel` (pure; `tests/spec/TurretClient`) is the gun drawn over the
@@ -7691,7 +7692,8 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
 - Lookups: `block(block, action)`, `container(block, opened)` (chest lids), `equip(old, new)`
   (armor put on), `fall(halfHearts)` (small up to 4, else big), `lookupNames` (override names).
 - Lava (appended at the end of the list): `block.lava.pop` and `block.lava.ambient` (lava open to
-  the air, each client by itself), `block.lava.extinguish` (LiquidBlock.fizz: lava hardening and
+  the air, each client by itself; the second is the fifth sheet's "Lava Ambient" loop, its old
+  bubbling rumble the fallback), `block.lava.extinguish` (LiquidBlock.fizz: lava hardening and
   lava turning water into stone; volume 0.5, pitch 2.6), `item.bucket.fill_lava` and
   `item.bucket.empty_lava` (lava's and oil's buckets: Fluids `fillSound`, `emptySound`; their
   categories are the plain bucket sounds), `entity.generic.burn` (a lava hurt, a player's or an
@@ -7717,10 +7719,26 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
   (`SoundList.ARMOR` prefixes "Straw" and "Leaf").
 - Turrets and the Metal Miner (appended after the seasons', the last events): `block.turret.servo`
   (a turning turret: the falling wind pitched up, at most `Config.Turrets.Client.ServoLoops` of
-  them; Rendering/TurretView), `block.metal_miner.drill` and `block.ammo_press.stamp` (a working
+  them; Rendering/TurretView), `block.metal_miner.hum` and `block.ammo_press.hum` (a working
   miner and press, from their records: TransmitterModel.machineLoop's names, Audio/Ambience), each
   replaced by a Sound of its name in `SoundService.IceVoxelSounds`. A turret's shots are its stand-in gun's
-  class fire sounds (ShotView), its dry click `item.firearm.dry`.
+  fire sounds (ShotView, through `ShotRules.fireSound`), its dry click `item.firearm.dry`.
+- The fifth data sheet (appended after the turrets', the last events). Its recordings, each with
+  the stand-in it replaced as its `fallback` (`SoundList.FIFTH_SHEET` lists the ids):
+  - "Entity Hit" for `entity.player.attack.strong` / `.weak` and `entity.bullet.flesh` (their
+    old numbers and categories);
+  - per calibre (`calibreShot`): `item.firearm.<calibre>.fire` (category item.firearm.fire, the
+    class shot's distance; fallback the class shot) and `item.firearm.<calibre>.suppressed`
+    (category item.firearm.suppressed), for 9mm, 556 and 308. `ShotRules.fireSound` looks them up
+    by the gun's `calibre` (a table built once from Weapons.FIREARMS); a calibre without them keeps
+    its class shot and the generic `item.firearm.suppressed`;
+  - the machines' hums, by category: `machine.hum` ("Electric Hum": `block.electric_furnace.hum`,
+    `block.electric_heater.hum`, `block.air_conditioner.hum`, `block.ammo_press.hum`) and
+    `machine.heavy_hum` ("Heavy Electric Hum": `block.metal_miner.hum`, `block.oil_refinery.hum`,
+    the two using the most energy); TransmitterModel.machineLoop names them per decor, so a
+    working Electric Furnace or Oil Refinery hums like the seasons' and turrets' machines;
+  - `ambient.radiation.click` (a Geiger counter's click; source ambient, ui, client), registered
+    for radiation and played by nothing yet (SoundsClient lists it as pending).
 
 **Who plays what** (Minecraft's split between server and client):
 
@@ -7839,11 +7857,14 @@ What the client plays itself:
   - every Heat or Combustion Generator whose record says it burns, within 16 blocks of the
     listener (`SoundRules.crackles`, `TransmitterRenderer.activeMachines`): the same crackle, at
     the generator;
-  - lava with air (or cave air) above it pops and bubbles (`SoundRules.lavaTick`, LavaFluid
-    .animateTick): Minecraft's client picks 667 random blocks a tick within 16 blocks of the player
-    and 667 within 32, and lava pops one time in 100 and bubbles one in 200; here LAVA_SAMPLES (24)
-    of each a tick stand for those 667, with the odds scaled to match: the same sounds on average
-    for 48 block reads a tick instead of 1,334 (volume x 0.2-0.4, pitch x 0.9-1.05);
+  - lava with air (or cave air) above it pops (`SoundRules.lavaTick`, LavaFluid.animateTick):
+    Minecraft's client picks 667 random blocks a tick within 16 blocks of the player and 667
+    within 32, and lava pops one time in 100; here LAVA_SAMPLES (24) of each a tick stand for those
+    667, with the odds scaled to match: the same pops on average for 48 block reads a tick instead
+    of 1,334 (volume x 0.2-0.4, pitch x 0.9-1.05). Minecraft's random bubbles (one in 200) are
+    one loop instead, `block.lava.ambient`: `lavaTick` keeps the nearest open lava it samples
+    (`SoundRules.LavaLoop`) and `lavaLoopAt` plays the loop on top of it while it stays lava open
+    to the air within `LAVA_LOOP_RANGE` (16) blocks, forgetting it otherwise;
   - Minecraft's cave mood (`Audio/CaveMood`, pure; `BiomeAmbientSoundsHandler` with the
     overworld's `AmbientMoodSettings.LEGACY_CAVE_SETTINGS`: ambient.cave, tick delay 6000, search
     extent 8, sound offset 2), every game tick:

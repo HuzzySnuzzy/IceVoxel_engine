@@ -122,7 +122,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   Creative and spectator players never burn. Dropped items burn up in it. You wade through it with
   Minecraft's lava physics (0.78 blocks a second, 40% of water's, sinking slowly, jump to rise; a
   fall into it hurts less), and with your eyes in it the view closes in to a block of orange fog.
-  Lava open to the air pops and bubbles. A Lava Bucket picks it up and burns 20,000 ticks in a
+  Lava open to the air pops, and the nearest bubbles in a long loop. A Lava Bucket picks it up and burns 20,000 ticks in a
   furnace (100 items; the empty bucket stays in the fuel slot). One PointLight per 16 × 16 × 16
   blocks of its drawn surface lights its surroundings (about one a chunk on a lava sea; those more
   than 96 blocks away, `Caves.LavaLightDistance`, 48 on phones, switch off but still glow), and the
@@ -1542,7 +1542,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   Diamond", "4:00 an item"), the upgrade slots and the energy bar (200 kJ). Recipe: osmium around
   a Universal Cable, over Blocks of Iron around an Electric Furnace, over diamonds around a
   Diamond Pickaxe (the Electric Age's). While it works its grille glows yellow-orange and it
-  drills. JEI's "Duplicating" lists each ore, its drop, time and energy (`U` on the miner).
+  hums heavily. JEI's "Duplicating" lists each ore, its drop, time and energy (`U` on the miner).
 - **Ammo Press.** Presses an Iron Ingot and a Gunpowder into 16 9mm, 10 5.56 or 5 .308 rounds in
   10 seconds at 50 J a tick (`Config.AmmoPress`), the calibre picked by its Calibre button (kept in
   its item), with upgrade cards (swapped mid-operation they keep the share done); the rounds are
@@ -1551,7 +1551,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   osmium around an Electric Furnace, over iron around a Block of Iron (the Electric Age's). Its
   status says "Using 50 J/t", "No input" (one input without the other), "Output full" or "No
   power"; switching the calibre mid-operation keeps the progress. While it works its window glows
-  and it stamps. JEI's "Pressing" lists its three calibres (`U` on the press).
+  and it hums. JEI's "Pressing" lists its three calibres (`U` on the press).
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
   pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
   Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
@@ -1610,9 +1610,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   ships, told apart by pitch, so nothing has to be uploaded, and players hear what others do within
   16 blocks. The game ships real recordings for the rest: the weather (thunder, rain, wind), the
   zombies' groans, growl and deaths (every kind, at its own pitch), a block broken and placed (every
-  material, at its own pitch and volume) and a loop while a player eats or drinks, heard by the
-  players near as long as the food or drink is held (each with the stand-in as its fallback should
-  it fail to load). Each one can be replaced by your own sound (see Extending).
+  material, at its own pitch and volume), a loop while a player eats or drinks, heard by the
+  players near as long as the food or drink is held, a hit landing (players' and bullets'), the
+  9mm, 5.56 and .308 shots and their silenced ones (the other calibres keep their gun class's),
+  lava's bubbling, the machines' hum (the Electric Furnace, heater, air conditioner and Ammo
+  Press; the Metal Miner and Oil Refinery a heavier one) and a Geiger counter's click, kept for
+  radiation (each with the stand-in as its fallback should it fail to load). Each one can be replaced by your own sound (see Extending).
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
   falling sand and gravel (which break into an item on a torch or a flower, Minecraft's torch
@@ -3222,8 +3225,8 @@ the codecs; only Studio shows the look, the sound, the feel and the cost on a de
   "240 s, 3.84 MJ" in its 72 pixels, the Duplicating and Pressing tab icons.
 - **The Metal Miner:** on a diamond ore in an unloaded chunk (and after a server restart) it keeps
   mining and its chest fills; its grille's glow; transporters taking its output.
-- **Sounds:** the three loops' stand-ins (the drill, the stamp, the servo; Ambience's nearest-loops
-  cap) and their overrides from `SoundService.IceVoxelSounds`.
+- **Sounds:** the miner's and press's hums and the servo (Ambience's nearest-loops cap) and their
+  overrides from `SoundService.IceVoxelSounds`.
 - **The lure:** zombies drawn by the lure and gunfire at night feel like "the turrets protect the
   base", not like a swarm: tune `Turrets.NoiseScale`, `Lure` and the rates from play.
 - **Now:** a Basic Rifle Turret fed from a chest through one Basic transporter fills to its one
@@ -3330,6 +3333,18 @@ scripts can play any event to the players near a point:
 local Sounds = require(game.ServerScriptService.IceVoxel.Audio.Sounds)
 Sounds.play("block.glass.break", x + 0.5, y + 0.5, z + 0.5) -- block coordinates
 ```
+
+The fifth data sheet's recordings are events like the rest. `entity.player.attack.strong` /
+`.weak` and `entity.bullet.flesh` play "Entity Hit"; a gun of a calibre with its own recording
+plays `item.firearm.<calibre>.fire` (`9mm`, `556`, `308`) and `item.firearm.<calibre>.suppressed`
+through a suppressor (Rendering/ShotRules.fireSound), heard as far as its class's shot, and every
+other calibre keeps its class's (`item.firearm.<class>.fire`, `item.firearm.suppressed`); one Sound
+named `item.firearm.fire` or `item.firearm.suppressed` still replaces them all. Lava's
+`block.lava.ambient` is one loop at the nearest lava open to the air the client has sampled
+(within 16 blocks). The working machines loop their hum: category `machine.hum` for the Electric
+Furnace, Electric Heater, Air Conditioner and Ammo Press, `machine.heavy_hum` for the Metal Miner
+and Oil Refinery (a Sound of either name replaces its group). `ambient.radiation.click` is the
+Geiger counter's click, registered for radiation and played by nothing yet.
 
 Client scripts can play any event for the local player alone:
 

@@ -4,8 +4,10 @@
 	ShotView draws what it says, Interaction/Firearms asks it for the player's own predicted shot,
 	tests/spec/WeaponClient checks it).
 
-	  Sound     at the shooter: the gun's class shot (FirearmSpec `sound`: item.firearm.<class>.fire,
-	            item.crossbow.fire), item.firearm.suppressed through a working suppressor, and
+	  Sound     at the shooter: its calibre's recorded shot where there is one (item.firearm.
+	            <calibre>.fire: 9mm, 556, 308), else the gun's class shot (FirearmSpec `sound`:
+	            item.firearm.<class>.fire, item.crossbow.fire); through a working suppressor its
+	            calibre's item.firearm.<calibre>.suppressed, else item.firearm.suppressed; and
 	            beyond Config.Weapons.FarSound blocks from the listener the low rolling
 	            item.firearm.far instead (a suppressed shot that far is not heard: `fireSound`).
 	            The empty click is item.firearm.dry, a jammed or Ruined gun's item.firearm.jam;
@@ -41,6 +43,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Handling = require(Shared.Weapons.Handling)
+local Sounds = require(Shared.Sounds)
 local WeaponSync = require(Shared.Net.WeaponSync)
 local Weapons = require(Shared.Weapons)
 
@@ -66,6 +69,20 @@ local ShotRules = {}
 
 ShotRules.SUPPRESSED = "item.firearm.suppressed"
 ShotRules.FAR = "item.firearm.far"
+
+-- The calibres with recorded shots of their own (Sounds/SoundList: item.firearm.<calibre>.fire and
+-- .suppressed, the fifth data sheet's), found once: calibre -> { fire, suppressed } event names.
+local CALIBRE_SHOTS: { [string]: { fire: string?, suppressed: string? } } = {}
+for _, item in Weapons.FIREARMS do
+	local calibre = (Weapons.firearm(item) :: Weapons.FirearmSpec).calibre
+	if CALIBRE_SHOTS[calibre] == nil then
+		local fire, suppressed = `item.firearm.{calibre}.fire`, `item.firearm.{calibre}.suppressed`
+		CALIBRE_SHOTS[calibre] = {
+			fire = if Sounds.find(fire) then fire else nil,
+			suppressed = if Sounds.find(suppressed) then suppressed else nil,
+		}
+	end
+end
 ShotRules.DRY = "item.firearm.dry"
 ShotRules.JAM = "item.firearm.jam"
 ShotRules.CHAMBER = "item.firearm.chamber"
@@ -104,7 +121,11 @@ function ShotRules.fireSound(spec: Weapons.FirearmSpec?, suppressed: boolean, di
 	if distance > Config.Weapons.FarSound then
 		return if suppressed then nil else ShotRules.FAR
 	end
-	return if suppressed then ShotRules.SUPPRESSED else spec.sound
+	local own = CALIBRE_SHOTS[spec.calibre]
+	if suppressed then
+		return own and own.suppressed or ShotRules.SUPPRESSED
+	end
+	return own and own.fire or spec.sound
 end
 
 -- Is there a muzzle flash (none when suppressed)?

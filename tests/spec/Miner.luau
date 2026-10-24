@@ -917,8 +917,8 @@ return function(t, shared, require, server, client)
 		t.ok(yellow[1] == 255 and yellow[2] > TransmitterModel.GLOW_COLOUR[2] and yellow[3] < 100, "yellow-orange")
 		t.eq(TransmitterModel.glowColour(B.AmmoPress), TransmitterModel.GLOW_COLOUR)
 		-- The loops, while the record says it works (Audio/Ambience).
-		t.eq(TransmitterModel.machineLoop(MINER), "block.metal_miner.drill")
-		t.eq(TransmitterModel.machineLoop(B.AmmoPress), "block.ammo_press.stamp")
+		t.eq(TransmitterModel.machineLoop(MINER), "block.metal_miner.hum")
+		t.eq(TransmitterModel.machineLoop(B.AmmoPress), "block.ammo_press.hum")
 		t.eq(TransmitterModel.machineLoop(B.DiamondOre), nil)
 		-- A working miner's own record lights it: the record's ACTIVE (its kind's showActive).
 		local container = miner(CAPACITY)

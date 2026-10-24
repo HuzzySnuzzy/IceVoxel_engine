@@ -39,9 +39,12 @@
 	           (`machineLight`: Rendering/TransmitterRenderer gives the cell a PointLight), and
 	           every one of them hums, roars or crackles (`machineLoop`: Audio/Ambience plays it
 	           looped while the record says it works). A working Metal Miner lights its drill
-	           housing's grille yellow-orange and drills (`block.metal_miner.drill`), a working
-	           Ammo Press its stamping window and stamps (`block.ammo_press.stamp`): both from the
-	           record's ACTIVE (their kinds' `showActive`, held on through short stops).
+	           housing's grille yellow-orange, a working Ammo Press its stamping window: both from
+	           the record's ACTIVE (their kinds' `showActive`, held on through short stops). The
+	           electric machines hum while they work, the fifth data sheet's recordings: the
+	           Electric Furnace, the heater, the air conditioner and the press the "Electric Hum"
+	           (machine.hum), the Metal Miner and the Oil Refinery, which use the most
+	           energy, the "Heavy Electric Hum" (machine.heavy_hum).
 
 	Aiming (`pickSide`): the Configurator acts on the side it points at, as in Mekanism: an arm's
 	side when the ray hits that arm (aimed at as wide as its collar, or its plate into an
@@ -352,8 +355,10 @@ local LOOPS: { [string]: string } = {
 	ElectricFan = "block.fan.loop",
 	WoodStove = "block.wood_stove.crackle",
 	OilHeater = "block.oil_heater.burn",
-	MetalMiner = "block.metal_miner.drill",
-	AmmoPress = "block.ammo_press.stamp",
+	MetalMiner = "block.metal_miner.hum",
+	AmmoPress = "block.ammo_press.hum",
+	ElectricFurnace = "block.electric_furnace.hum",
+	OilRefinery = "block.oil_refinery.hum",
 }
 
 -- Machines whose window lights while they work, by BlockList `decor`: the window on each side face

@@ -13,6 +13,9 @@
 	             play them, by event name.
 	  Main SFX   the catalogue events (Sounds/SoundList) whose ids they are: the eating and
 	             drinking loops, every block sound type's break and place.
+
+	The fifth sheet (icevoxel.xlsx, SHEET5) brought only main sounds: each the catalogue events
+	playing it, the stand-in it replaced as their fallback.
 ]]
 
 local fs = require("@lune/fs")
@@ -104,6 +107,42 @@ local SHEET4 = {
 	},
 }
 
+-- The fifth sheet's: { id, the catalogue events playing it }.
+local SHEET5 = {
+	textures = {},
+	music = {},
+	mobs = {},
+	main = {
+		-- "Entity Hit": a player's hit landing, light or strong, and a bullet in flesh.
+		{
+			"139520673393967",
+			{ "entity.player.attack.strong", "entity.player.attack.weak", "entity.bullet.flesh" },
+		},
+		-- "Electric Hum": the light machines.
+		{
+			"120250063764346",
+			{
+				"block.electric_furnace.hum",
+				"block.electric_heater.hum",
+				"block.air_conditioner.hum",
+				"block.ammo_press.hum",
+			},
+		},
+		-- "Heavy Electric Hum": the machines drawing the most energy.
+		{ "138159989881933", { "block.metal_miner.hum", "block.oil_refinery.hum" } },
+		{ "318794788", { "block.lava.ambient" } },
+		-- The guns, by calibre, and the same "silenced".
+		{ "138905044369113", { "item.firearm.9mm.fire" } },
+		{ "89214508659473", { "item.firearm.9mm.suppressed" } },
+		{ "5910000043", { "item.firearm.556.fire" } },
+		{ "94291108433840", { "item.firearm.556.suppressed" } },
+		{ "135793582032227", { "item.firearm.308.fire" } },
+		{ "71834414905709", { "item.firearm.308.suppressed" } },
+		-- The Geiger counter's click.
+		{ "123303121160543", { "ambient.radiation.click" } },
+	},
+}
+
 -- Every new id of a sheet table (the textures marked `old` left out), each once.
 local function newIds(sheet: any): { string }
 	local ids, seen = {}, {}
@@ -149,6 +188,7 @@ return function(t, shared, require, _server, _client)
 	local Blocks = require(shared.Blocks)
 	local MusicList = require(shared.Sounds.MusicList)
 	local Sounds = require(shared.Sounds)
+	local SoundList = require(shared.Sounds.SoundList)
 
 	local function asset(id: string): string
 		return `rbxassetid://{id}`
@@ -278,6 +318,37 @@ return function(t, shared, require, _server, _client)
 					t.eq(event and event.id, asset(id), `{name} plays {id}`)
 				end
 			end
+		end
+	end)
+
+	t.test("data sheet 5: eleven new ids, every one used, as the catalogue's events", function()
+		local ids = newIds(SHEET5)
+		t.eq(#ids, 11, "the sheet's eleven new asset ids")
+		local text = table.concat(sources("src", {}), "\n")
+		for _, id in ids do
+			t.ok(string.find(text, `rbxassetid://{id}"`, 1, true) ~= nil, `{id} is used`)
+			t.ok(table.find(SoundList.FIFTH_SHEET, asset(id)) ~= nil, `{id} is a known upload`)
+		end
+		t.eq(#SoundList.FIFTH_SHEET, #ids, "and no others")
+		for _, row in SHEET5.main do
+			local id, names = row[1], row[2]
+			for _, name in names do
+				local event = Sounds.get(name) :: any
+				t.ok(event ~= nil, `{name} is an event`)
+				t.eq(event and event.id, asset(id), `{name} plays {id}`)
+				local fallback = event and event.fallback
+				t.ok(
+					fallback ~= nil and string.sub(fallback.id, 1, 18) == "rbxasset://sounds/",
+					`{name}: a shipped stand-in its fallback`
+				)
+			end
+		end
+		-- One override Sound per kind of hum.
+		for _, name in { "block.electric_furnace.hum", "block.electric_heater.hum", "block.ammo_press.hum" } do
+			t.eq((Sounds.get(name) :: any).category, "machine.hum", `{name}'s category`)
+		end
+		for _, name in { "block.metal_miner.hum", "block.oil_refinery.hum" } do
+			t.eq((Sounds.get(name) :: any).category, "machine.heavy_hum", `{name}'s category`)
 		end
 	end)
 end

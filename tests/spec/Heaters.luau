@@ -633,7 +633,13 @@ return function(t, shared, require)
 			t.ok(event ~= nil, `{name} is in the catalogue`)
 			assert(event)
 			t.eq(event.side, "client", `{name} is the client's`)
-			t.ok(string.find(event.id, "^rbxasset://") ~= nil, `{name} plays a built-in stand-in`)
+			-- (The heater's and AC's hums are the fifth sheet's upload, the stand-in its fallback.)
+			local fallback = (event :: any).fallback
+			t.ok(
+				string.find(event.id, "^rbxasset://") ~= nil
+					or (fallback and string.find(fallback.id, "^rbxasset://") ~= nil),
+				`{name} plays a built-in stand-in`
+			)
 		end
 		t.eq((Sounds.get("ambient.season.winter") :: any).category, "ambient.season")
 	end)

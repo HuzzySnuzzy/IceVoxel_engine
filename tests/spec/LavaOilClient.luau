@@ -646,14 +646,14 @@ return function(t, shared, require, _server, client)
 		t.ok(index("entity.generic.extinguish_fire") <= #SoundList.EVENTS - #SoundList.MOODS, "before the cave moods")
 
 		-- A lava sea at y 10 under air, and a random that always rolls 0: every sample lands on the
-		-- listener's block, so the sea pops and bubbles at the odds' first roll.
+		-- listener's block, so the sea pops at the odds' first roll.
 		local function getBlock(_x: number, y: number, _z: number): number?
 			return if y <= 10 then LAVA elseif y == 11 then Blocks.AIR else Blocks.AIR
 		end
 		local sounds = SoundRules.lavaTick(getBlock, 0, 10, 0, function()
 			return 0
 		end)
-		t.eq(#sounds, 2 * SoundRules.LAVA_SAMPLES * 2, "every sample pops and bubbles at roll 0")
+		t.eq(#sounds, 2 * SoundRules.LAVA_SAMPLES, "every sample pops at roll 0")
 		t.eq(sounds[1].sound, "block.lava.pop")
 		t.eq(sounds[1].y, 11, "on top of the lava")
 		t.ok(sounds[1].volume >= 0.2 and sounds[1].volume <= 0.4, "Minecraft's volume")
@@ -676,7 +676,57 @@ return function(t, shared, require, _server, client)
 		t.eq(#unlucky, 0, "high rolls: silent")
 		-- On average the odds match Minecraft's 667 tries at 1 in 100 / 200.
 		t.ok(math.abs(SoundRules.LAVA_POP * SoundRules.LAVA_SAMPLES - 6.67) < 1e-9, "pop odds")
-		t.ok(math.abs(SoundRules.LAVA_AMBIENT * SoundRules.LAVA_SAMPLES - 3.335) < 1e-9, "ambient odds")
+		t.eq(Sounds.find("block.lava.ambient") ~= nil, true, "the bubbles are the loop's")
+
+		-- The loop: lavaTick keeps the nearest open lava it samples, lavaLoopAt plays on top of it.
+		local loop: SoundRules.LavaLoop = {}
+		SoundRules.lavaTick(
+			function(_x, y, _z)
+				return if y <= 10 then LAVA else B.Stone
+			end,
+			0,
+			10,
+			0,
+			function()
+				return 0
+			end,
+			loop
+		)
+		t.ok(loop.x == nil, "covered lava: none yet")
+		SoundRules.lavaTick(getBlock, 0, 10, 0, function()
+			return 0
+		end, loop)
+		t.ok(loop.x == 0 and loop.y == 10 and loop.z == 0, "the listener's own lava")
+		local x, y, z = SoundRules.lavaLoopAt(loop, getBlock, 0.5, 11, 0.5)
+		t.ok(x == 0.5 and y == 11 and z == 0.5, "on top of it, in the cell's centre")
+		-- A nearer block replaces a farther one, never the other way.
+		local near: SoundRules.LavaLoop = { x = 15, y = 10, z = 0 }
+		SoundRules.lavaTick(getBlock, 0, 10, 0, function()
+			return 0
+		end, near)
+		t.ok(near.x == 0 and near.y == 10 and near.z == 0, "the nearer replaces it")
+		-- (The first sample lands at x 15: farther.)
+		local far: SoundRules.LavaLoop = { x = 0, y = 10, z = 0 }
+		local rolls = { 0.99, 0, 0, 0, 0, 0 }
+		local roll = 0
+		SoundRules.lavaTick(getBlock, 0, 10, 0, function()
+			roll += 1
+			return rolls[(roll - 1) % #rolls + 1]
+		end, far)
+		t.ok(far.x == 0 and far.y == 10 and far.z == 0, "the nearest stays")
+		-- Out of range, or covered over: silent, and forgotten.
+		t.eq(SoundRules.lavaLoopAt(loop, getBlock, SoundRules.LAVA_LOOP_RANGE + 1, 11, 0.5), nil, "out of range")
+		t.ok(loop.x == nil and loop.y == nil and loop.z == nil, "forgotten")
+		loop.x, loop.y, loop.z = 0, 10, 0
+		t.eq(
+			SoundRules.lavaLoopAt(loop, function(_x, y, _z)
+				return if y <= 10 then LAVA else B.Stone
+			end, 0.5, 11, 0.5),
+			nil,
+			"covered: silent"
+		)
+		t.ok(loop.x == nil, "and forgotten")
+		t.eq(SoundRules.lavaLoopAt({}, getBlock, 0, 11, 0), nil, "no lava found: nothing")
 
 		-- Another character standing in lava makes no swim sound; in fuel it does.
 		local function standing(fluid: number): boolean

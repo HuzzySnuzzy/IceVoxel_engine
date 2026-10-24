@@ -117,19 +117,21 @@ return function(t, shared, require, server, client)
 		t.eq(Weapons.attachment(I.LaserSight), nil, "the Laser Sight fits no hand-held gun")
 	end)
 
-	t.test("turrets: the sounds after the seasons', the client's, on built-in stand-ins", function()
+	t.test("turrets: the sounds after the seasons', the client's; the machines' the fifth sheet's hums", function()
 		local first = Sounds.id["block.turret.servo"]
-		for i, name in { "block.turret.servo", "block.metal_miner.drill", "block.ammo_press.stamp" } do
+		for i, name in { "block.turret.servo", "block.metal_miner.hum", "block.ammo_press.hum" } do
 			local event = Sounds.get(name)
 			t.ok(event ~= nil, `{name} is in the catalogue`)
 			assert(event)
 			t.eq(Sounds.id[name], first + i - 1, `{name} in order`)
 			t.eq(event.side, "client", `{name} is the client's`)
 			t.eq(event.source, "blocks")
-			t.ok(string.find(event.id, "^rbxasset://") ~= nil, `{name} plays a built-in stand-in`)
 		end
-		t.eq(first + 2, Sounds.count, "the last events")
+		t.ok(string.find((Sounds.get("block.turret.servo") :: any).id, "^rbxasset://") ~= nil, "the servo's stand-in")
+		t.eq((Sounds.get("block.metal_miner.hum") :: any).category, "machine.heavy_hum", "the miner's heavy hum")
+		t.eq((Sounds.get("block.ammo_press.hum") :: any).category, "machine.hum", "the press's hum")
 		t.eq(Sounds.id["ambient.season.heat_wave"], first - 1, "right after the seasons'")
+		t.eq(Sounds.id["item.firearm.9mm.fire"], first + 3, "then the fifth sheet's")
 	end)
 
 	t.test(

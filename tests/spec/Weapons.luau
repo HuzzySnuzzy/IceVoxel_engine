@@ -401,8 +401,9 @@ return function(t, shared, require, server, client)
 			t.eq(NoiseRules.radius(name, Config.Apocalypse.Noise), 0, `{name} is no noise of NoiseRules'`)
 		end
 		t.eq(count, 22)
-		-- (Then the seasons' 11, then the turrets' 3.)
-		t.eq(Sounds.count, first + 21 + 11 + 3, "the weapons' are the last events before the seasons'")
+		-- (Then the seasons' 11, the turrets' 3, then the fifth sheet's 9: six calibre shots, two
+		-- machine hums and the Geiger click.)
+		t.eq(Sounds.count, first + 21 + 11 + 3 + 9, "the weapons' are the last events before the seasons'")
 		t.eq(Sounds.get("item.firearm.rifle.fire").category, "item.firearm.fire", "a Sound replaces every class")
 		t.eq(Sounds.get("item.firearm.heavy.fire").maxDistance, 224)
 		t.eq(Sounds.get("item.firearm.far").maxDistance, 256)

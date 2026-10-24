@@ -11,15 +11,17 @@
 	           listener (its Machines record says it works: Rendering/TransmitterRenderer
 	           .activeMachines; the client knows these without opening them) crackles the same
 	           way, at the generator.
-	  Seasons  the seasons' heaters, coolers and stoves that work (their records say so) within
-	           LOOP_RANGE blocks of the listener play their loop at the machine
-	           (Rendering/TransmitterModel.machineLoop: the heater's and the air conditioner's
-	           hum, the fan's whirr, the stove's crackle, the oil heater's roar; SoundPlayer
-	           .setLoop), the MAX_LOOPS nearest only, looked at LOOP_HZ times a second; a loop
-	           stops as soon as its machine stops, goes or is out of range.
-	  Lava     lava with air above it within 32 blocks of the listener pops and bubbles now and
-	           then (SoundRules.lavaTick: Minecraft's LavaFluid.animateTick on its random display
-	           ticks, sampled), at the lava.
+	  Loops    the machines with a loop that work (their records say so) within LOOP_RANGE blocks
+	           of the listener play it at the machine (Rendering/TransmitterModel.machineLoop: the
+	           electric machines' hums, the fan's whirr, the stove's crackle, the oil heater's
+	           roar; SoundPlayer.setLoop), the MAX_LOOPS nearest only, looked at LOOP_HZ times a
+	           second; a loop stops as soon as its machine stops, goes or is out of range.
+	  Lava     lava with air above it within 32 blocks of the listener pops now and then
+	           (SoundRules.lavaTick: Minecraft's LavaFluid.animateTick on its random display
+	           ticks, sampled), at the lava; the nearest such lava those samples have found bubbles
+	           in a loop (block.lava.ambient, the fifth data sheet's "Lava Ambient") while it is
+	           within SoundRules.LAVA_LOOP_RANGE blocks (SoundRules.lavaLoopAt, looked at with the
+	           machines' loops).
 	  Fire     every fire within 32 blocks of the listener (Rendering/FireRenderer.firesNear)
 	           crackles with the odds Minecraft's display ticks give it (SoundRules.fireCrackle:
 	           BaseFireBlock.animateTick), at the fire, cue volume 1..2 and pitch 0.3..1.
@@ -109,9 +111,11 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 		end
 	end
 
-	-- The loops playing (SoundPlayer.setLoop keys, one per machine position).
+	-- The loops playing (SoundPlayer.setLoop keys, one per machine position, and the lava's).
 	local looping: { [string]: boolean } = {}
 	local loopClock = 0
+	-- The lava the lava loop plays at (SoundRules.lavaTick keeps the nearest it samples).
+	local lava: SoundRules.LavaLoop = {}
 	local function hasLoop(block: number): boolean
 		return TransmitterModel.machineLoop(block) ~= nil
 	end
@@ -136,6 +140,11 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 					now[key] = true
 					SoundPlayer.setLoop(key, name, record.x + 0.5, record.y + 0.5, record.z + 0.5)
 				end
+			end
+			local x, y, z = SoundRules.lavaLoopAt(lava, getBlock, lx, ly, lz)
+			if x and y and z then
+				now.lava = true
+				SoundPlayer.setLoop("lava", "block.lava.ambient", x, y, z)
 			end
 		end
 		for key in looping do
@@ -209,7 +218,7 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 				end
 				if getBlock then
 					local x, y, z = math.floor(listener.X), math.floor(listener.Y), math.floor(listener.Z)
-					for _, sound in SoundRules.lavaTick(getBlock, x, y, z, math.random) do
+					for _, sound in SoundRules.lavaTick(getBlock, x, y, z, math.random, lava) do
 						SoundPlayer.play(sound.sound, sound.x, sound.y, sound.z, sound.volume, sound.pitch)
 					end
 				end

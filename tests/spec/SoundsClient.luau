@@ -463,27 +463,39 @@ return function(t, shared, require, _server, client)
 		-- names, played by Ui/SeasonHud through Ui/SurvivorHud's toast queue; the machines' loops:
 		-- Audio/Ambience by Rendering/TransmitterModel.machineLoop's names; the thermostat's click:
 		-- Ui/MenuLayout.BUTTON_SOUND).
-		-- So did the turrets' and the Metal Miner's (the servo: Rendering/TurretView; the drill and
-		-- the stamp: Rendering/TransmitterModel.machineLoop's names).
-		local pending: { [string]: boolean } = {}
+		-- So did the turrets' and the Metal Miner's (the servo: Rendering/TurretView; the machines'
+		-- hums: Rendering/TransmitterModel.machineLoop's names). The fifth sheet's Geiger counter
+		-- click waits for the radiation that plays it (the uranium to come).
+		local pending: { [string]: boolean } = { ["ambient.radiation.click"] = true }
 		-- A firearm's shot is played by its class through its FirearmSpec `sound` (Rendering/
 		-- ShotRules.fireSound, called by Interaction/Firearms for the player's own shot and by
 		-- Rendering/ShotView for others'), never as a literal; every other weapon sound is one
 		-- (ShotRules' names, Interaction/MeleeInput's swings, Ui/InventoryScreen's load, attach
 		-- and unload).
+		-- A calibre the fifth sheet recorded plays its own shots instead of its guns' class shot; a
+		-- class whose every gun has one stays each gun's FirearmSpec `sound`, for its fallback.
 		local fired: { [string]: Weapons.FirearmSpec } = {}
+		local suppressed: { [string]: Weapons.FirearmSpec } = {}
+		local classes: { [string]: boolean } = {}
 		for _, item in Weapons.FIREARMS do
 			local spec = Weapons.firearm(item) :: Weapons.FirearmSpec
-			fired[spec.sound] = spec
+			fired[ShotRules.fireSound(spec, false, 0) :: string] = spec
+			suppressed[ShotRules.fireSound(spec, true, 0) :: string] = spec
+			classes[spec.sound] = true
 		end
 		t.ok(next(fired) ~= nil, "the guns' shots")
 		for _, sound in Sounds.events do
 			local quoted = `"{sound.name}"`
-			local gun = fired[sound.name]
+			local gun = fired[sound.name] or suppressed[sound.name]
 			if gun and sound.side ~= "server" then
-				t.eq(ShotRules.fireSound(gun, false, 0), sound.name, `{sound.name}: its gun's shot`)
 				-- (Called, not only defined: Firearms' own shot, ShotRules.effects for ShotView's.)
 				t.ok(uses("[=(,]%s*ShotRules%.fireSound%("), `the client plays {sound.name} (ShotRules.fireSound)`)
+			elseif classes[sound.name] then
+				t.eq(
+					sound.category,
+					"item.firearm.fire",
+					`{sound.name}: a class shot, each of its guns' calibre's instead`
+				)
 			elseif pending[sound.name] then
 				t.ok(not string.find(source, quoted, 1, true), `{sound.name} is played now: take it off the list`)
 			elseif sound.side == "server" then

@@ -42,8 +42,9 @@
 	             ticks on one block, from its first (`hitTick`).
 	  ambience   a lit furnace crackles with Minecraft's odds for a furnace a block or two away
 	             (CRACKLE_CHANCE per tick), and so does a burning Heat Generator within
-	             CRACKLE_RANGE blocks (`crackles`); lava open to the air pops and bubbles
-	             (`lavaTick`: Minecraft's random display ticks, sampled); fire crackles with the
+	             CRACKLE_RANGE blocks (`crackles`); lava open to the air pops (`lavaTick`:
+	             Minecraft's random display ticks, sampled) and bubbles in a loop at the nearest
+	             found (`lavaLoopAt`); fire crackles with the
 	             odds Minecraft's display ticks give a block at its distance (`fireCrackle`). The
 	             cave mood is Audio/CaveMood's.
 	  fluids     only fluids one swims in (Fluids `swim`: water, fuel) splash and make swim
@@ -573,22 +574,46 @@ end
 	Lava's sounds (LavaFluid.animateTick): Minecraft's client picks 667 random blocks a tick within
 	16 blocks of the player (each axis nextInt(16) - nextInt(16)) and 667 within 32; lava with air
 	above pops (block.lava.pop) one time in 100 and bubbles (block.lava.ambient) one in 200. Here
-	LAVA_SAMPLES of each a tick stand for those 667, with the odds scaled to match: the same sounds
-	on average for a twenty-eighth of the block reads.
+	LAVA_SAMPLES of each a tick stand for those 667, with the odds scaled to match: the same pops
+	on average for a twenty-eighth of the block reads. The bubbling is the fifth data sheet's
+	"Lava Ambient" instead, a long loop with its bubbles in it: it plays at the nearest lava open
+	to the air the samples have found (`LavaLoop`: `lavaTick` keeps the nearest, `lavaLoopAt` says
+	where it plays) while that lava is within LAVA_LOOP_RANGE blocks of the listener.
 ]]
 SoundRules.LAVA_SAMPLES = 24
 SoundRules.LAVA_RANGES = table.freeze({ 16, 32 })
 SoundRules.LAVA_POP = 1 / 100 * 667 / SoundRules.LAVA_SAMPLES
-SoundRules.LAVA_AMBIENT = 1 / 200 * 667 / SoundRules.LAVA_SAMPLES
+SoundRules.LAVA_LOOP_RANGE = 16
 
 export type LavaSound = { sound: string, x: number, y: number, z: number, volume: number, pitch: number }
 
+-- The lava loop's lava: the nearest lava block open to the air found (nil: none).
+export type LavaLoop = { x: number?, y: number?, z: number? }
+
+-- Is block (x, y, z) lava (any level, CaveLava too) with air above it?
+local function openLava(getBlock: GetBlock, x: number, y: number, z: number): boolean
+	local block = getBlock(x, y, z)
+	if block == nil or Fluids.ofBlock(block) ~= Fluids.LAVA then
+		return false
+	end
+	local above = getBlock(x, y + 1, z)
+	return above == Blocks.AIR or above == Blocks.CAVE_AIR
+end
+
 --[[
 	One tick of lava sounds around block (x, y, z) (the listener's), with `random` rolls in [0, 1):
-	the sounds due (positions in blocks; volume and pitch multiply the event's: Minecraft's
-	0.2 + 0.2r and 0.9 + 0.15r). Lava (any level, CaveLava too) must have air above it.
+	the pops due (positions in blocks; volume and pitch multiply the event's: Minecraft's 0.2 +
+	0.2r and 0.9 + 0.15r). Lava (any level, CaveLava too) must have air above it. With `loop`, every
+	such lava sampled that is nearer the listener than the loop's (or the loop has none) becomes it.
 ]]
-function SoundRules.lavaTick(getBlock: GetBlock, x: number, y: number, z: number, random: () -> number): { LavaSound }
+function SoundRules.lavaTick(
+	getBlock: GetBlock,
+	x: number,
+	y: number,
+	z: number,
+	random: () -> number,
+	loop: LavaLoop?
+): { LavaSound }
 	local found: { LavaSound } = {}
 	local floor = math.floor
 	for _, range in SoundRules.LAVA_RANGES do
@@ -596,35 +621,57 @@ function SoundRules.lavaTick(getBlock: GetBlock, x: number, y: number, z: number
 			local bx = x + floor(random() * range) - floor(random() * range)
 			local by = y + floor(random() * range) - floor(random() * range)
 			local bz = z + floor(random() * range) - floor(random() * range)
-			local block = getBlock(bx, by, bz)
-			if block and Fluids.ofBlock(block) == Fluids.LAVA then
-				local above = getBlock(bx, by + 1, bz)
-				if above == Blocks.AIR or above == Blocks.CAVE_AIR then
-					if random() < SoundRules.LAVA_POP then
-						table.insert(found, {
-							sound = "block.lava.pop",
-							x = bx + random(),
-							y = by + 1,
-							z = bz + random(),
-							volume = 0.2 + random() * 0.2,
-							pitch = 0.9 + random() * 0.15,
-						})
-					end
-					if random() < SoundRules.LAVA_AMBIENT then
-						table.insert(found, {
-							sound = "block.lava.ambient",
-							x = bx + 0.5,
-							y = by + 0.5,
-							z = bz + 0.5,
-							volume = 0.2 + random() * 0.2,
-							pitch = 0.9 + random() * 0.15,
-						})
+			if openLava(getBlock, bx, by, bz) then
+				if random() < SoundRules.LAVA_POP then
+					table.insert(found, {
+						sound = "block.lava.pop",
+						x = bx + random(),
+						y = by + 1,
+						z = bz + random(),
+						volume = 0.2 + random() * 0.2,
+						pitch = 0.9 + random() * 0.15,
+					})
+				end
+				if loop then
+					local hx, hy, hz = loop.x, loop.y, loop.z
+					local nearer = hx == nil
+						or hy == nil
+						or hz == nil
+						or (bx - x) ^ 2 + (by - y) ^ 2 + (bz - z) ^ 2 < (hx - x) ^ 2 + (hy - y) ^ 2 + (hz - z) ^ 2
+					if nearer then
+						loop.x, loop.y, loop.z = bx, by, bz
 					end
 				end
 			end
 		end
 	end
 	return found
+end
+
+--[[
+	Where the lava loop (block.lava.ambient) plays for a listener at (lx, ly, lz): on top of the
+	loop's lava (its cell's top centre) while that block is still lava open to the air within
+	LAVA_LOOP_RANGE blocks of the listener; nil otherwise, and the loop forgets it (`lavaTick`
+	finds the next).
+]]
+function SoundRules.lavaLoopAt(
+	loop: LavaLoop,
+	getBlock: GetBlock,
+	lx: number,
+	ly: number,
+	lz: number
+): (number?, number?, number?)
+	local x, y, z = loop.x, loop.y, loop.z
+	if x == nil or y == nil or z == nil then
+		return nil, nil, nil
+	end
+	local px, py, pz = x + 0.5, y + 1, z + 0.5
+	local range = SoundRules.LAVA_LOOP_RANGE
+	if not openLava(getBlock, x, y, z) or (px - lx) ^ 2 + (py - ly) ^ 2 + (pz - lz) ^ 2 > range * range then
+		loop.x, loop.y, loop.z = nil, nil, nil
+		return nil, nil, nil
+	end
+	return px, py, pz
 end
 
 --[[

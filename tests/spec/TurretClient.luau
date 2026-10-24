@@ -1920,18 +1920,23 @@ return function(t, shared, require, server, client)
 		t.eq(ShotRules.TURRET, 0, "no player")
 		t.ok(ShotRules.isTurret(shot("smg")), "a turret's")
 		ShotRules.effects(shot("smg"), 12345, 10, true, out)
-		t.eq(out.sound, "item.firearm.smg.fire", "the SMG's class")
+		t.eq(out.sound, "item.firearm.9mm.fire", "the SMG's calibre")
 		t.ok(out.flash and out.tracer == (Config.Weapons.Tracers == true) and out.glow, "flash, tracers that glow")
 		t.ok(out.impacts and not out.own and not out.stop, "impacts; never the player's own")
 		ShotRules.effects(shot("rifle"), 12345, 10, true, out)
-		t.eq(out.sound, (Weapons.firearm(spec("rifle", 1).firearm) :: Weapons.FirearmSpec).sound, "the rifle's")
+		local rifle = Weapons.firearm(spec("rifle", 1).firearm) :: Weapons.FirearmSpec
+		t.eq(out.sound, ShotRules.fireSound(rifle, false, 10), "the rifle's")
+		t.eq(out.sound, `item.firearm.{rifle.calibre}.fire`, "its calibre's")
 		ShotRules.effects(shot("sniper"), 12345, 10, true, out)
-		t.eq(out.sound, "item.firearm.heavy.fire", "the sniper's heavy shot")
+		t.eq(out.sound, "item.firearm.308.fire", "the sniper's .308")
 		-- A Suppressor: suppressed and plain. An Improvised Suppressor: suppressed, glowing.
 		ShotRules.effects(shot("smg", { suppressed = true, plain = true }), 12345, 10, true, out)
-		t.ok(out.sound == ShotRules.SUPPRESSED and not out.flash and not out.glow, "suppressed, no flash, plain")
+		t.ok(
+			out.sound == "item.firearm.9mm.suppressed" and not out.flash and not out.glow,
+			"suppressed, no flash, plain"
+		)
 		ShotRules.effects(shot("smg", { suppressed = true, plain = false }), 12345, 10, true, out)
-		t.ok(out.sound == ShotRules.SUPPRESSED and not out.flash and out.glow, "improvised: its tracers glow")
+		t.ok(out.sound == "item.firearm.9mm.suppressed" and not out.flash and out.glow, "improvised: its tracers glow")
 		-- Far: the far roll; suppressed and far: unheard.
 		ShotRules.effects(shot("rifle"), 12345, Config.Weapons.FarSound + 1, true, out)
 		t.eq(out.sound, ShotRules.FAR, "far")
@@ -1950,7 +1955,7 @@ return function(t, shared, require, server, client)
 		local player = shot("smg", { shooter = 777, item = I.Pistol })
 		player.plain = nil
 		ShotRules.effects(player, 12345, 10, true, out)
-		t.ok(out.glow and out.sound == "item.firearm.pistol.fire", "a player's shot")
+		t.ok(out.glow and out.sound == "item.firearm.9mm.fire", "a player's shot")
 		ShotRules.effects(player, 12345, 10, false, out)
 		t.ok(not out.glow, "a suppressor's held look")
 		ShotRules.effects(player, 777, 10, true, out)
