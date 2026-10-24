@@ -7530,8 +7530,9 @@ top and the post. In the gun frame (yaw and pitch): the receiver; the type's bar
 and thick, a rifle's long, a sniper's longest) with a flash hider or a muzzle brake, or a
 suppressor's can of either kind in its place; the belt feeder and its brass belt on the left; the
 tier's bands in its colour (one at Basic, two from Advanced); a heat shroud from Elite; the
-targeting module's glowing eye at Ultimate; a Laser Sight's emitter under the receiver; and a Rifle
-Scope's tube on top (only on the types that take one). The bore runs through the pivot along the aim
+targeting module's glowing eye at Ultimate; a Laser Sight's emitter on the receiver's front top (where
+the scope sits: the one optic slot holds either); and a Rifle Scope's tube on top (only on the types
+that take one). The bore runs through the pivot along the aim
 and ends exactly `Spec.barrel` out, so the drawn muzzle is `TurretRules.muzzle`, the server's shot
 origin. The pivot is 0.82 over the block's top, on a post up from the turntable: held level the gun
 stays under the top of the cell above (the scope's top 0.005 under it), and at every yaw and pitch
@@ -7550,6 +7551,15 @@ reach of a turret standing on the wall (the wall's face is 0.5 out, a zombie pre
 | 2 high | 1.77 | 2.49 |
 | 3 high | 2.35 | 3.30 |
 | 4 high | 2.93 | 4.11 |
+
+The laser's beam starts at the emitter's front, 0.125–0.135 over the bore, and runs along the aim:
+it clears the turret's own block at every yaw down to −55° (every aim a sniper takes; under the
+receiver, where it was, it ran up to 0.34 through the block's corner at −51°). Steeper, near a
+diagonal, an SMG's or a rifle's beam crosses the block's corner, at most 0.18 at −60°, less than the
+shots' own line does there: the bore meets the block's top inside it below −49° at a diagonal and at
+every yaw below −58.6°. Out of the block at −60° the emitter would have to stand a third of a block
+to the side of the bore, or over the top of the cell above, which the level gun stays under; the
+TurretClient sweep holds the beam to both.
 
 Looks
 (`look(spec, flags)`) are made once and frozen. `place` writes each box's centre and its rotation
@@ -7583,8 +7593,11 @@ killed its target clicks when it takes the next zombie. Times follow the frames.
 
 **Shots, WAILA, F3.** A turret's shot (shooter `ShotRules.TURRET` = 0) sounds as its stand-in gun's
 class, is never the player's own, and `plain` removes the tracer glow; ShotView starts its flash and
-tracers at the drawn barrel's end nearest the shot's origin, within 0.25 blocks (`setTurretMuzzle` ←
-`TurretView.muzzleNear`: a neighbour's gun aiming elsewhere is never taken), else at the origin.
+tracers at its shooter's drawn barrel's end, whatever the drawn gun's aim (`setTurretMuzzle` ←
+`TurretView.muzzleNear`: the shooter is the turret whose pivot is its barrel's length from the
+shot's origin, within 0.02 blocks and the float32's rounding; of two, the one whose barrel ends
+nearer the origin, where it is drawn, else at its record's aim), else (its shooter not drawn) at
+the origin.
 WAILA shows "Ammo 3 / 4 · 9mm" (red at 0), "Feed: Elite" / "Feed: Basic → 90 rpm" / "Feed: by hand"
 (the panel's own words), and "Fitted: Laser Sight, Suppressor"; with F3 it adds the target, the aim
 and the flags. F3: "turrets N drawn / M records, K tracking, P parts".

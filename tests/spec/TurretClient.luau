@@ -462,6 +462,65 @@ return function(t, shared, require, server, client)
 		t.ok(spec("smg", 1).pitchMin < spec("sniper", 1).pitchMin, "the SMG's short barrel aims lower")
 	end)
 
+	t.test(
+		"turret client: a Laser Sight's beam clears its own block down to -55 degrees, after it its shots' line",
+		function()
+			-- How far (blocks) the ray from (sx, sy, sz) along (dx, dy, dz) runs inside the block (x, y, z).
+			local function inside(
+				sx: number,
+				sy: number,
+				sz: number,
+				dx: number,
+				dy: number,
+				dz: number,
+				x: number,
+				y: number,
+				z: number
+			): number
+				local lo, hi = 0, math.huge
+				for _, axis in { { sx - x, dx }, { sy - y, dy }, { sz - z, dz } } do
+					local from, along = axis[1], axis[2]
+					if math.abs(along) < 1e-12 then
+						if from < 0 or from > 1 then
+							return 0
+						end
+					else
+						local a, b = -from / along, (1 - from) / along
+						lo, hi = math.max(lo, math.min(a, b)), math.min(hi, math.max(a, b))
+					end
+				end
+				return math.max(0, hi - lo)
+			end
+			local x, y, z = 10, 64, -7
+			local settings = Config.Turrets
+			local deepest = {}
+			for _, s in Turrets.SPECS do
+				local look = TurretModel.look(s, Flag.Laser)
+				deepest[s.type] = 0
+				-- Every 5 degrees of yaw (the diagonals among them), every degree its type aims at.
+				for yawDeg = 0, 355, 5 do
+					for pitchDeg = s.pitchMin, settings.PitchMax do
+						local yaw, pitch = math.rad(yawDeg), math.rad(pitchDeg)
+						local dx, dy, dz = TurretRules.direction(yaw, pitch)
+						local sx, sy, sz = TurretModel.laserStart(look, x, y, z, yaw, pitch)
+						local beam = inside(sx :: number, sy :: number, sz :: number, dx, dy, dz, x, y, z)
+						local mx, my, mz = TurretRules.muzzle(x, y, z, yaw, pitch, s.barrel)
+						local shot = inside(mx, my, mz, dx, dy, dz, x, y, z)
+						deepest[s.type] = math.max(deepest[s.type], beam)
+						if (pitchDeg >= -55 and beam > 0) or beam > shot + 1e-9 then
+							t.ok(
+								false,
+								`{s.name}: the beam {beam} in its block at {yawDeg}, {pitchDeg} (its shots' {shot})`
+							)
+						end
+					end
+				end
+			end
+			t.eq(deepest.sniper, 0, "a sniper's beam never in its block")
+			t.ok(deepest.smg < 0.2 and deepest.rifle < 0.2, `an SMG's {deepest.smg}, a rifle's {deepest.rifle} at -60`)
+		end
+	)
+
 	--[[ The view's rules ]]
 
 	t.test("turret client: a drawn gun turns at its turn rate, the short way across 180 degrees", function()
@@ -1566,6 +1625,64 @@ return function(t, shared, require, server, client)
 			) ~= nil,
 			"TurretView gives it"
 		)
+	end)
+
+	t.test("turret view: a shot leaves its shooter's drawn barrel however far the drawn aim lags", function()
+		local h = boot()
+		-- (A float32's origin, as the Shots record carries it.)
+		local function finder(ox: number, oy: number, oz: number): (number?, number?, number?)
+			local f32 = buffer.create(12)
+			buffer.writef32(f32, 0, ox)
+			buffer.writef32(f32, 4, oy)
+			buffer.writef32(f32, 8, oz)
+			return h.finder(buffer.readf32(f32, 0), buffer.readf32(f32, 4), buffer.readf32(f32, 8))
+		end
+		local tracking = Flag.Powered + Flag.Tracking
+		for _, turretType in Turrets.TYPES do
+			local s = spec(turretType, 1)
+			local x, y, z = 6, 64, 6
+			h.set(x, y, z, s.block)
+			h.load(0, 0)
+			-- Drawn at yaw 0, level (its target drawn straight ahead); the server's aim further round.
+			h.mobs[3] = { x + 0.5, y + TurretRules.PIVOT, z + 6.5 }
+			h.send({ rec(x, y, z, { target = 3, flags = tracking }) })
+			h.frame()
+			local mx, my, mz = TurretRules.muzzle(x, y, z, 0, 0, s.barrel)
+			for _, lag in { 5, 15, 25, 45, 90, 180 } do
+				local fx, fy, fz = finder(TurretRules.muzzle(x, y, z, math.rad(lag), math.rad(20), s.barrel))
+				t.ok(
+					fx ~= nil
+						and math.abs(fx - mx) + math.abs((fy :: number) - my) + math.abs((fz :: number) - mz) < 1e-9,
+					`{s.name}, the server {lag} degrees round: its drawn barrel's end`
+				)
+			end
+			h.set(x, y, z, B.Air)
+		end
+		-- Two drawn snipers a block apart: the origin is a barrel from both pivots (one's muzzle at
+		-- 30 degrees, the other's at -30); the shooter is the one whose drawn barrel ends nearer.
+		local sniper = spec("sniper", 1)
+		h.set(10, 64, 9, sniper.block)
+		h.set(11, 64, 9, sniper.block)
+		local ox, oy, oz = TurretRules.muzzle(10, 64, 9, math.rad(30), 0, sniper.barrel)
+		local bx, by, bz = TurretRules.muzzle(11, 64, 9, math.rad(-30), 0, sniper.barrel)
+		t.near(math.abs(ox - bx) + math.abs(oy - by) + math.abs(oz - bz), 0, 1e-9, "both muzzles there")
+		for _, case in { { 25, 90, 10 }, { 90, -25, 11 } } do
+			h.send({
+				rec(10, 64, 9, { yaw = math.rad(case[1]), flags = tracking }),
+				rec(11, 64, 9, { yaw = math.rad(case[2]), flags = tracking }),
+			})
+			for _ = 1, 30 do
+				h.frame(0.1)
+			end
+			local at = case[3]
+			local drawn = h.View.state(at, 64, 9)
+			local ex, ey, ez = TurretRules.muzzle(at, 64, 9, drawn.yaw, drawn.pitch, sniper.barrel)
+			local fx, fy, fz = finder(ox, oy, oz)
+			t.ok(
+				fx ~= nil and math.abs(fx - ex) + math.abs((fy :: number) - ey) + math.abs((fz :: number) - ez) < 1e-6,
+				`drawn at {case[1]} and {case[2]} degrees: the one at {at}'s barrel`
+			)
+		end
 	end)
 
 	t.test("turret view: a frame with 48 turrets turning, and with 48 still", function()

@@ -23,8 +23,16 @@
 	    tier       bands round the receiver in the tier's colour (Transmitters/Tiers): one at
 	               Basic, two from Advanced; a heat shroud on the barrel from Elite; the targeting
 	               module's glowing eye at Ultimate
-	    laser      a Laser Sight's emitter under the receiver's front (TurretFlag.Laser): the beam
-	               (Rendering/TurretView) starts at its front and runs along the aim
+	    laser      a Laser Sight's emitter on the receiver's front top, where a scope's tube sits
+	               (TurretFlag.Laser; the one optic slot holds either): the beam
+	               (Rendering/TurretView) starts at its front and runs along the aim, 0.125-0.135
+	               over the bore, so it clears the turret's own block at every yaw down to -55
+	               degrees (every aim a sniper takes). Steeper, near a diagonal, an SMG's or a
+	               rifle's crosses the block's corner (at most 0.18 at -60), less than the shots'
+	               own line there (the bore meets the block's top inside it below -49 degrees at
+	               a diagonal, at every yaw below -58.6): out of it at -60 the emitter would have
+	               to stand a third of a block to the side of the bore, or over the top of the
+	               cell above
 	    scope      a Rifle Scope's tube on top (TurretFlag.Scope; the types that take one)
 	At most MAX_PARTS boxes (an Ultimate sniper with all three mounted has 13), plus the beam. Held
 	level the gun stays under the top of the cell above (the scope's top 0.005 under it); at every
@@ -166,10 +174,9 @@ local BELT_SIZE = { 0.03, 0.1, 0.1 }
 local BAND_OVER, BAND_ALONG, BAND_IN = 0.03, 0.04, 0.06
 -- The shroud: wider than the bore by, along.
 local SHROUD_OVER, SHROUD_ALONG = 0.05, 0.22
--- The emitter (across, up, along) under the receiver's front, its centre this far under the
--- receiver's bottom (its top a little inside).
+-- The emitter (across, up, along) on the receiver's front top (where a scope's tube sits: the one
+-- optic slot holds either), its bottom a little inside.
 local EMITTER_SIZE = { 0.06, 0.06, 0.16 }
-local EMITTER_DROP = 0.025
 -- The scope's tube (across, up, along), forward of the pivot.
 local SCOPE_SIZE = { 0.08, 0.08, 0.34 }
 local SCOPE_CENTRE = -0.02
@@ -286,7 +293,7 @@ local function build(spec: Spec, laser: boolean, scope: boolean, suppressor: boo
 	-- What is mounted.
 	local beam: { number }? = nil
 	if laser then
-		local up = -(h / 2 + EMITTER_DROP)
+		local up = h / 2 + EMITTER_SIZE[2] / 2 - INSIDE / 2
 		add(box("Laser", "gun", "plastic", EMITTER, table.clone(EMITTER_SIZE), { 0, up, front - EMITTER_SIZE[3] / 2 }))
 		beam = table.freeze({ 0, up, front })
 	end
