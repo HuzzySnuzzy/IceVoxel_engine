@@ -180,6 +180,7 @@ return function(t, shared, require, server, client)
 				t.eq(spec.spread, numbers.spread[tier])
 				t.eq(spec.settle, numbers.settle)
 				t.eq(spec.barrel, numbers.barrel)
+				t.eq(spec.pitchMin, numbers.pitchMin)
 				t.eq(spec.shot, numbers.shot)
 				t.eq(spec.damageScale, numbers.damageScale)
 				t.eq(spec.capacity, Config.Turrets.Capacity[tier])
@@ -245,8 +246,22 @@ return function(t, shared, require, server, client)
 		t.near(TurretRules.offAngle(1, 0.2, 1, 0.2), 0, 1e-6)
 		t.near(TurretRules.offAngle(0, 0, math.pi, 0), math.pi, 1e-9, "behind")
 		t.near(TurretRules.offAngle(0, 0, 0.1, 0), 0.1, 1e-9)
-		t.ok(TurretRules.inPitch(math.rad(-51)) and TurretRules.inPitch(math.rad(75)), "the limits are in")
-		t.ok(not TurretRules.inPitch(math.rad(-52)) and not TurretRules.inPitch(math.rad(76)), "beyond them not")
+		-- Each type's lowest pitch, its own (the SMG's and the rifle's PitchMin, -60; the sniper's
+		-- longer barrel -51); without a spec the lowest any type aims at.
+		local lows = { smg = -60, rifle = -60, sniper = -51 }
+		for _, s in Turrets.SPECS do
+			local low = lows[s.type]
+			t.eq(s.pitchMin, low, `{s.name}: its type's pitchMin`)
+			t.ok(TurretRules.inPitch(math.rad(low), s) and TurretRules.inPitch(math.rad(75), s), "the limits are in")
+			t.ok(
+				not TurretRules.inPitch(math.rad(low - 1), s) and not TurretRules.inPitch(math.rad(76), s),
+				"beyond not"
+			)
+			local a, b = TurretRules.pitchLimits(s)
+			t.ok(a == math.rad(low) and b == math.rad(75), "pitchLimits")
+		end
+		t.eq(Config.Turrets.PitchMin, -60)
+		t.ok(TurretRules.inPitch(math.rad(-60)) and not TurretRules.inPitch(math.rad(-61)), "no spec: PitchMin")
 		-- Nearest first, with 0.05 a degree of turning: a zombie 2 blocks nearer but behind loses.
 		t.ok(TurretRules.score(10, math.pi) > TurretRules.score(12, 0), "behind loses")
 		t.near(TurretRules.score(10, math.rad(20)), 11, 1e-9)

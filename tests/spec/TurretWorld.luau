@@ -541,7 +541,7 @@ return function(t, shared, require, server)
 			table.insert(below, e.add(ZOMBIE, 0.5 + math.sin(angle) * 12, FLOOR - 8, 0.5 + math.cos(angle) * 12))
 		end
 		local _, cavePitch = TurretRules.aim(PX, PY, PZ, TurretWorld.aimPoint(below[1], false))
-		t.ok(TurretRules.inPitch(cavePitch), "the cave's zombies are within the pitch limits")
+		t.ok(TurretRules.inPitch(cavePitch, Turrets.of("rifle", 4)), "the cave's zombies are within the pitch limits")
 		local walker = e.add(ZOMBIE, 0.5, FLOOR, 46.5)
 		local r = newSim(e)
 		local turret = r.add(Turrets.of("rifle", 4))
@@ -724,7 +724,7 @@ return function(t, shared, require, server)
 	end)
 
 	t.test(
-		"turret world: its own cell is air (it fires down past its edge); below -51 degrees is a dead zone",
+		"turret world: its own cell is air (it fires down past its edge); below its lowest pitch a dead zone",
 		function()
 			local spec = Turrets.of("smg", 1)
 			local e = newGame()
@@ -743,28 +743,59 @@ return function(t, shared, require, server)
 			e.set(TX, TY - 1, TZ, STONE)
 			-- Down beside the pillar, along the diagonal: the line to it passes through the turret's
 			-- own cell, by its corner (from the pivot 0.82 over the top only a line steeper than
-			-- about -49 degrees does, and PitchMin is -51).
+			-- about -49 degrees does, and the SMG's lowest pitch is -60).
 			local zombie = e.add(ZOMBIE, 2.5, base - 2.4, 2.5)
 			local _, wantPitch = TurretRules.aim(PX, PY, PZ, TurretWorld.aimPoint(zombie, false))
-			t.ok(TurretRules.inPitch(wantPitch), "within the pitch limits")
+			t.ok(TurretRules.inPitch(wantPitch, spec), "within the pitch limits")
 			-- (The line enters the turret's own cell: x and z 0..1, y 64..65.)
 			local r = newSim(e)
 			local turret = r.add(spec, nil, nil, nil, { ready = true })
 			r.step(30)
 			t.eq(r.state(turret).target, zombie.id, "seen through its own cell")
 			t.ok(#e.hurts > 0, "and shot")
-			-- Hugging the pillar's foot: steeper than -51 degrees, never.
+			-- Hugging the pillar's foot: steeper than -60 degrees, never.
 			local e2 = newGame()
 			e2.blocks = e.blocks
 			local hugging = e2.add(ZOMBIE, 1.4, base - 4, 0.5)
 			local _, steep = TurretRules.aim(PX, PY, PZ, TurretWorld.aimPoint(hugging, false))
-			t.ok(not TurretRules.inPitch(steep), `the pitch {math.deg(steep)} is beyond the limits`)
+			t.ok(not TurretRules.inPitch(steep, spec), `the pitch {math.deg(steep)} is beyond the limits`)
 			local r2 = newSim(e2)
 			local second = r2.add(spec)
 			r2.step(30)
 			t.eq(r2.state(second).target, 0, "the dead zone")
 		end
 	)
+
+	t.test("turret world: each type's own lowest pitch: at a wall's foot an SMG and a rifle reach lower", function()
+		-- A turret on a 2-high wall, a zombie on the ground outside, `out` blocks from the pivot
+		-- sideways: 1.5 out 64 degrees down (none), 2.0 out 57 (an SMG's and a rifle's -60, not a
+		-- sniper's -51), 2.5 out 51 (every type).
+		local function taken(spec: Turrets.Spec, out: number): (boolean, number)
+			local e = newGame()
+			for x = -3, 3 do
+				for y = FLOOR, FLOOR + 1 do
+					e.set(x, y, 0, STONE)
+				end
+			end
+			local ty = FLOOR + 2
+			e.set(0, ty, 0, spec.block)
+			local zombie = e.add(ZOMBIE, 0.5, FLOOR, 0.5 + out)
+			local r = newSim(e)
+			local turret = r.add(spec, 0, ty, 0, { ready = true })
+			r.step(40)
+			local px, py, pz = TurretRules.pivot(0, ty, 0)
+			local _, pitch = TurretRules.aim(px, py, pz, TurretWorld.aimPoint(zombie, false))
+			return r.state(turret).target == zombie.id and #e.hurts > 0, math.deg(pitch)
+		end
+		for _, case in { { 1.5, false, false }, { 2.0, true, false }, { 2.5, true, true } } do
+			for _, turretType in Turrets.TYPES do
+				local spec = Turrets.of(turretType, 4)
+				local got, pitch = taken(spec, case[1])
+				local want = if turretType == "sniper" then case[3] else case[2]
+				t.eq(got, want, `{spec.name}, the zombie {case[1]} out ({pitch} degrees): shot {want}`)
+			end
+		end
+	end)
 
 	t.test("turret world: every type and tier's range, MinRange, and a scope's on rifles and snipers", function()
 		for _, spec in Turrets.SPECS do

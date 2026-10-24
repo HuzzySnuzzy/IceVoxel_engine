@@ -64,7 +64,8 @@ export type Spec = {
 	damageScale: number,
 	-- Range (blocks), rate (rounds a minute), rounds its ammo slot holds, turn rate (degrees a
 	-- second), cone (degrees: the half angle), the most degrees off its aim it fires at, the
-	-- barrel (blocks from the pivot to the muzzle).
+	-- barrel (blocks from the pivot to the muzzle), the lowest pitch it aims at (degrees: its
+	-- type's, the lowest its drawn gun clears its own block at; TurretRules.inPitch).
 	range: number,
 	rpm: number,
 	buffer: number,
@@ -72,6 +73,7 @@ export type Spec = {
 	spread: number,
 	settle: number,
 	barrel: number,
+	pitchMin: number,
 	-- Energy: its store (J), J a tick idle and tracking, J a shot.
 	capacity: number,
 	idle: number,
@@ -160,6 +162,11 @@ for _, turretType in TYPES do
 	end
 	table.freeze(optics)
 	table.freeze(muzzles)
+	local pitchMin = numbers.pitchMin
+	assert(
+		pitchMin >= SETTINGS.PitchMin and pitchMin < 0,
+		`Turrets: {turretType}'s pitchMin is under 0, never under Config.Turrets.PitchMin`
+	)
 	local list: { Spec } = {}
 	byType[turretType] = list
 	for tier = 1, Turrets.TIERS do
@@ -193,6 +200,7 @@ for _, turretType in TYPES do
 			spread = numbers.spread[tier],
 			settle = numbers.settle,
 			barrel = numbers.barrel,
+			pitchMin = pitchMin,
 			capacity = capacity,
 			idle = SETTINGS.IdleJoules[tier],
 			tracking = SETTINGS.TrackingJoules[tier],

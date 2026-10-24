@@ -389,11 +389,11 @@ return function(t, shared, require, _server, client)
 							t.ok(corner[2] < y + 2 - 1e-3, `{s.name} {box.name}: level, in the cell above`)
 						end
 					end
-					-- Every 5 degrees of yaw round the turn, every degree from PitchMin to PitchMax:
-					-- never into its own block, and the server's shot origin out of it.
+					-- Every 5 degrees of yaw round the turn, every degree from its type's pitchMin to
+					-- PitchMax: never into its own block, and the server's shot origin out of it.
 					for yawDeg = 0, 355, 5 do
 						local yaw = math.rad(yawDeg)
-						for pitchDeg = settings.PitchMin, settings.PitchMax do
+						for pitchDeg = s.pitchMin, settings.PitchMax do
 							local pitch = math.rad(pitchDeg)
 							TurretModel.place(look, x, y, z, yaw, pitch, numbers)
 							placed += 1
@@ -421,21 +421,45 @@ return function(t, shared, require, _server, client)
 				end
 			end
 		end
-		t.eq(placed, (4 * 4 + 8 * 8) * 72 * (settings.PitchMax - settings.PitchMin + 1), "every look and aim")
-		-- The nearest, a sniper's can, at every half degree of a quarter turn (every yaw: the block's
-		-- footprint turns into itself): clear at PitchMin, into its block a degree under it, so
-		-- PitchMin is the lowest that clears them all.
-		local can = TurretModel.look(spec("sniper", 1), Flag.Suppressor)
-		for _, case in { { settings.PitchMin, false }, { settings.PitchMin - 1, true } } do
-			local deepest = 0
-			for tenths = 0, 900, 5 do
-				TurretModel.place(can, x, y, z, math.rad(tenths / 10), math.rad(case[1]), numbers)
-				for i, box in can.boxes do
-					deepest = math.max(deepest, depthIn(numbers, i, box, x, y, z))
+		local aims = 0
+		for _, s in Turrets.SPECS do
+			-- (Looks: an SMG's four, the others' eight with the scope.)
+			aims += (if s.type == "smg" then 4 else 8) * 72 * (settings.PitchMax - s.pitchMin + 1)
+		end
+		t.eq(placed, aims, "every look and aim")
+		-- Each type's lowest pitch is the lowest whole degree that clears every tier and mount at every
+		-- half degree of a quarter turn (every yaw: the block's footprint turns into itself): clear at
+		-- it, and a degree under it into its block, unless it is PitchMin, the lowest any type aims at.
+		local function deepest(turretType: string, pitchDeg: number): number
+			local most = 0
+			for tier = 1, 4 do
+				local s = spec(turretType, tier)
+				for bits = 0, 7 do
+					local look = TurretModel.look(
+						s,
+						(if bits % 2 == 1 then Flag.Laser else 0)
+							+ (if (bits // 2) % 2 == 1 then Flag.Scope else 0)
+							+ (if bits >= 4 then Flag.Suppressor else 0)
+					)
+					for tenths = 0, 900, 5 do
+						TurretModel.place(look, x, y, z, math.rad(tenths / 10), math.rad(pitchDeg), numbers)
+						for i, box in look.boxes do
+							most = math.max(most, depthIn(numbers, i, box, x, y, z))
+						end
+					end
 				end
 			end
-			t.eq(deepest > 1e-9, case[2], `the can at {case[1]}°: {deepest} into its block`)
+			return most
 		end
+		for _, turretType in Turrets.TYPES do
+			local low = spec(turretType, 1).pitchMin
+			t.eq(deepest(turretType, low), 0, `{turretType} at {low}°: clear`)
+			if low > settings.PitchMin then
+				local under = deepest(turretType, low - 1)
+				t.ok(under > 1e-9, `{turretType} at {low - 1}°: {under} into its block, so {low} is its lowest`)
+			end
+		end
+		t.ok(spec("smg", 1).pitchMin < spec("sniper", 1).pitchMin, "the SMG's short barrel aims lower")
 	end)
 
 	--[[ The view's rules ]]
@@ -505,9 +529,13 @@ return function(t, shared, require, _server, client)
 		local ay, ap = TurretRules.aim(px, py, pz, 10.5, 65.2, 3)
 		t.near(wy, ay, 1e-12, "at the target's yaw")
 		t.near(wp, ap, 1e-12, "and pitch")
-		-- Below the pitch limit: as low as it goes.
+		-- Below the pitch limit: as low as its type goes (no spec: the lowest any type goes).
 		wy, wp = TurretModel.want(record(tracking, 7), 4, 64, 9, 4.6, 40, 9.5)
 		t.near(wp, math.rad(Config.Turrets.PitchMin), 1e-12, "the pitch limit")
+		for _, s in Turrets.SPECS do
+			wy, wp = TurretModel.want(record(tracking, 7), 4, 64, 9, 4.6, 40, 9.5, s)
+			t.near(wp, math.rad(s.pitchMin), 1e-12, `{s.name}: its type's pitch limit`)
+		end
 		-- The target not drawn, or no power (it holds still): the record's aim.
 		wy, wp = TurretModel.want(record(tracking, 7), 4, 64, 9)
 		t.ok(wy == 1 and wp == 0.3, "not drawn: the record's aim")

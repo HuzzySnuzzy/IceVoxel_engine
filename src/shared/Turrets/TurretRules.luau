@@ -5,17 +5,19 @@
 
 	  Pivot      the gun turns about (x + 0.5, y + PIVOT, z + 0.5) of its block: 0.82 over the
 	             base's top, on the post the client draws up from its turntable, so the gun held
-	             level stays in the cell above (under its top) and at PitchMin no part of it, nor
-	             the muzzle, goes into its own block (Rendering/TurretModel; the specs sweep it)
+	             level stays in the cell above (under its top) and at its type's lowest pitch no
+	             part of it, nor the muzzle, goes into its own block (Rendering/TurretModel; the
+	             specs sweep it)
 	  Angles     radians. Yaw 0 faces +Z and grows towards +X: facing (sin yaw, cos yaw), as mobs'
 	             bodies (Entities/MobPhysics); pitch up from the horizontal. `direction` is the
 	             unit vector, `aim` the angles and distance from the pivot to a point, `muzzle`
 	             the barrel's end
 	  Turning    `turn` moves each axis at most `step` towards the angles wanted, the short way
 	             round (across +-pi) and never past them; `offAngle` is how far the aim is from
-	             them (the firing gate's settle). The pitch stays within Config.Turrets.PitchMin
-	             .. PitchMax (`inPitch`): below -51 degrees (the lowest the gun clears its own
-	             block at, every type and yaw) is a dead zone
+	             them (the firing gate's settle). The pitch stays within the Spec's `pitchMin`
+	             .. Config.Turrets.PitchMax (`pitchLimits`, `inPitch`): below its type's lowest
+	             (the lowest its gun clears its own block at, every tier, mount and yaw, never
+	             under PitchMin: SMG and rifle -60 degrees, sniper -51) is a dead zone
 	  Cadence    an exact whole credit: every powered tick `credit` + rpm; with CREDIT (1200: the
 	             ticks of a minute) or more and leave to fire it fires and loses CREDIT, else it is
 	             held at CREDIT at most. So a rate of r rounds a minute fires exactly r x 10 shots in
@@ -141,10 +143,17 @@ function TurretRules.muzzle(
 	return px + dx * barrel, py + dy * barrel, pz + dz * barrel
 end
 
--- Is `pitch` (radians) within Config.Turrets.PitchMin .. PitchMax?
-function TurretRules.inPitch(pitch: number): boolean
+-- The pitch limits (radians) of `spec`: its `pitchMin` .. Config.Turrets.PitchMax (without a
+-- spec PitchMin, the lowest any type aims at).
+function TurretRules.pitchLimits(spec: Spec?): (number, number)
 	local settings = Config.Turrets
-	return pitch >= math.rad(settings.PitchMin) - 1e-9 and pitch <= math.rad(settings.PitchMax) + 1e-9
+	return math.rad(if spec then spec.pitchMin else settings.PitchMin), math.rad(settings.PitchMax)
+end
+
+-- Is `pitch` (radians) within `spec`'s pitch limits (`pitchLimits`; without a spec, any type's)?
+function TurretRules.inPitch(pitch: number, spec: Spec?): boolean
+	local low, high = TurretRules.pitchLimits(spec)
+	return pitch >= low - 1e-9 and pitch <= high + 1e-9
 end
 
 --[[ Firing ]]

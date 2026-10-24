@@ -2430,8 +2430,11 @@ local Config = {
 		Enabled = true,
 		-- Per type: its round and stand-in gun (sound, noise; Weapons/WeaponList), damage times the
 		-- round's, J a shot, the most degrees off its aim it fires at, the barrel's length (blocks
-		-- from the pivot to the muzzle), and per tier its range, rate (rounds a minute), the rounds
-		-- its ammo slot holds, its turn rate (degrees a second) and its cone (degrees).
+		-- from the pivot to the muzzle), the lowest pitch it aims at (`pitchMin`, degrees: the
+		-- lowest whole degree at which every tier and mount of the type, drawn, clears its own
+		-- block at every yaw, never under PitchMin; tests/spec/TurretClient sweeps it), and per
+		-- tier its range, rate (rounds a minute), the rounds its ammo slot holds, its turn rate
+		-- (degrees a second) and its cone (degrees).
 		Types = {
 			smg = {
 				ammo = "Rounds9mm",
@@ -2440,6 +2443,7 @@ local Config = {
 				shot = 30,
 				settle = 4,
 				barrel = 0.7,
+				pitchMin = -60,
 				range = { 16, 20, 24, 32 },
 				rpm = { 90, 150, 240, 360 },
 				buffer = { 2, 3, 4, 6 },
@@ -2453,6 +2457,7 @@ local Config = {
 				shot = 80,
 				settle = 2,
 				barrel = 0.85,
+				pitchMin = -60,
 				range = { 24, 32, 40, 48 },
 				rpm = { 45, 75, 120, 180 },
 				buffer = { 1, 2, 3, 4 },
@@ -2466,6 +2471,7 @@ local Config = {
 				shot = 300,
 				settle = 1,
 				barrel = 1.0,
+				pitchMin = -51,
 				range = { 40, 48, 56, 64 },
 				rpm = { 15, 20, 30, 40 },
 				buffer = { 1, 1, 2, 2 },
@@ -2507,12 +2513,12 @@ local Config = {
 		MaxScansPerTick = 16,
 		MaxShotsPerTick = 32,
 		-- Nothing nearer than MinRange blocks; the gun's pitch limits (degrees: PitchMin the lowest
-		-- at which the drawn gun and its muzzle clear its own block at every yaw, with the pivot
-		-- Shared/Turrets/TurretRules.PIVOT; tests/spec/TurretClient sweeps it); a shot flies
-		-- ExtraFlight blocks past the turret's range (at most its round's); no range beyond MaxRange;
-		-- a turret shows "Firing" for FiringTicks after a shot.
+		-- any type aims at, each its own `pitchMin` at or over it, with the pivot
+		-- Shared/Turrets/TurretRules.PIVOT; PitchMax the highest); a shot flies ExtraFlight blocks
+		-- past the turret's range (at most its round's); no range beyond MaxRange; a turret shows
+		-- "Firing" for FiringTicks after a shot.
 		MinRange = 1.5,
-		PitchMin = -51,
+		PitchMin = -60,
 		PitchMax = 75,
 		ExtraFlight = 16,
 		MaxRange = 80,

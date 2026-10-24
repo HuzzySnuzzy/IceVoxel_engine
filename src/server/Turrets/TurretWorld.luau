@@ -50,8 +50,9 @@
 	             is the centre of its body box (Ballistics.mobBoxes), its head box's for a scoped
 	             sniper (Shared/Turrets.optic `head`); a target is in reach when that point is
 	             between MinRange and the range (TurretRules.range: a scope's factor, at most
-	             MaxRange) of the pivot and within the pitch limits (TurretRules.inPitch: below
-	             PitchMin is a dead zone).
+	             MaxRange) of the pivot and within its type's pitch limits (TurretRules.inPitch:
+	             below the Spec's pitchMin, SMG and rifle -60 degrees, sniper -51, is a dead
+	             zone).
 	  Scans      with no target, every ScanTicks (a Laser Sight's `scan`: 5) staggered by its
 	             cell, at most MaxScansPerTick for every turret together (one over waits for the
 	             next tick, the longest waiting first: of n due none waits more than
@@ -818,10 +819,10 @@ local function scan(world: World, turret: Turret, range: number, head: boolean):
 	local candidates, distances = world.candidates, world.distances
 	local aimX, aimY, aimZ = world.aimX, world.aimY, world.aimZ
 	local far, near = range * range, s.MinRange * s.MinRange
-	-- (TurretRules.inPitch's limits, as the sines of the pitch: no angle worked out.)
-	local limits = Config.Turrets
-	local low = math.sin(math.clamp(math.rad(limits.PitchMin) - 1e-9, -HALF_PI, HALF_PI))
-	local high = math.sin(math.clamp(math.rad(limits.PitchMax) + 1e-9, -HALF_PI, HALF_PI))
+	-- (TurretRules.inPitch's limits for its type, as the sines of the pitch: no angle worked out.)
+	local lowest, highest = TurretRules.pitchLimits(turret.spec)
+	local low = math.sin(math.clamp(lowest - 1e-9, -HALF_PI, HALF_PI))
+	local high = math.sin(math.clamp(highest + 1e-9, -HALF_PI, HALF_PI))
 	local killed = next(gone) ~= nil
 	local n = 0
 	for cx = (px - range) // GRID, (px + range) // GRID do
@@ -1198,7 +1199,7 @@ local function stepTurret(world: World, order: Order, out: Outcome, spec: Spec):
 			else
 				ax, ay, az = aimPoint(mob, head)
 				wantYaw, wantPitch, distance = TurretRules.aim(px, py, pz, ax, ay, az)
-				if distance > range or distance < s.MinRange or not TurretRules.inPitch(wantPitch) then
+				if distance > range or distance < s.MinRange or not TurretRules.inPitch(wantPitch, spec) then
 					setTarget(world, turret, 0)
 				elseif tick - turret.sightAt >= s.SightTicks then
 					turret.sightAt = tick

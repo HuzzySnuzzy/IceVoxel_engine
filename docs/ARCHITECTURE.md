@@ -7273,8 +7273,8 @@ require it):
   within a stack, optics and muzzle devices that exist). A Spec: block, kind, type, tier, name,
   calibre, ammo (the round), firearm (the stand-in gun: the SMG's Smg, the rifle's Assault Rifle,
   the sniper's Hunting Rifle, whose fire sound, noise and muzzle numbers the turret borrows),
-  damageScale, range, rpm, buffer, turn, spread, settle, barrel, capacity, idle, tracking, shot,
-  optics and muzzles (item sets). `rpm(spec, feed)` is the feeder rule (below). `SLOT` (1 ammo, 2
+  damageScale, range, rpm, buffer, turn, spread, settle, barrel, pitchMin (its type's lowest
+  pitch: The model), capacity, idle, tracking, shot, optics and muzzles (item sets). `rpm(spec, feed)` is the feeder rule (below). `SLOT` (1 ammo, 2
   optic, 3 muzzle), `STATUS` and `STATUS_NAMES` (No target, Targeting, Firing, No ammo, No power,
   Blocked, Disabled), `packState(status, feed, lure, tracking)` = status + 8 feed + 64 lure + 128
   tracking (a byte, at most 230) and `unpackState`, `headClear(block)` (nothing opaque and no
@@ -7284,8 +7284,10 @@ require it):
   `MaxRange`, a sniper aiming at heads) and the slots' `GHOSTS`.
 - `TurretRules` (both sides; signatures frozen): the pivot (x + 0.5, y + 1.82, z + 0.5), angles in
   radians (yaw 0 faces +Z, facing (sin yaw, cos yaw) as mobs'), `direction`, `aim`, `muzzle`,
-  `turn` (each axis at most a step, the short way across +-pi, never past), `offAngle`, `inPitch`
-  (-51 to 75 degrees: see The model), the cadence (`cadence`: an exact whole credit, + rpm a
+  `turn` (each axis at most a step, the short way across +-pi, never past), `offAngle`,
+  `pitchLimits(spec)` and `inPitch(pitch, spec)` (the Spec's `pitchMin` to 75 degrees: SMG and
+  rifle −60, sniper −51; without a spec `PitchMin` −60, the lowest any type aims at: see The
+  model), the cadence (`cadence`: an exact whole credit, + rpm a
   powered tick, CREDIT 1200 a shot, held at CREDIT while the shot may not go, so a rate of r fires
   exactly 10 r shots in 12 000 ticks; a float credit or capping before the shot's subtraction both
   fire too slowly, and the spec proves both), `spread` (with a Laser Sight and a working muzzle
@@ -7426,8 +7428,9 @@ machines read (never generating terrain), for the simulation's Env.
   - **Feed**: the feeder rule's tier at its first tick and every `FeedTicks`, staggered by its cell.
   - **Targets**: only the Env's hostiles (`Mobs.hostiles`: live, unfrozen `hostile` kinds; never
     players or animals). It aims at the body box's centre (Ballistics.mobBoxes), a scoped sniper at
-    the head's, within `MinRange` and `TurretRules.range` of the pivot and the pitch limits (below
-    −51° a dead zone).
+    the head's, within `MinRange` and `TurretRules.range` of the pivot and its type's pitch limits
+    (`TurretRules.inPitch`: below the Spec's `pitchMin`, an SMG's and a rifle's −60°, a sniper's
+    −51°, a dead zone).
   - **Scans** (no target): every `ScanTicks` (a Laser Sight's 5), staggered by cell, at most
     `MaxScansPerTick` a tick for every turret (one over waits a tick; those waiting go first, the
     longest waiting first, so of n due none waits more than ceil(n / MaxScansPerTick) ticks,
@@ -7528,9 +7531,23 @@ Scope's tube on top (only on the types that take one). The bore runs through the
 and ends exactly `Spec.barrel` out, so the drawn muzzle is `TurretRules.muzzle`, the server's shot
 origin. The pivot is 0.82 over the block's top, on a post up from the turntable: held level the gun
 stays under the top of the cell above (the scope's top 0.005 under it), and at every yaw and pitch
-the server allows no box and no muzzle goes into the turret's own block. `PitchMin` −51 is the
-lowest pitch at which that holds for every type, tier and mount (a degree lower a sniper's can
-reaches in at some yaw; `tests/spec/TurretClient` sweeps every look, yaw and pitch). Looks
+the server allows its type no box and no muzzle goes into the turret's own block. Each type's
+lowest pitch (`Config.Turrets.Types` `pitchMin`, in the Spec) is the lowest whole degree at which
+that holds for every tier and mount of the type at every yaw, never under `PitchMin` −60: the
+sniper −51 (a degree lower its can reaches in at some yaw), the rifle and the SMG −60 (the rifle's
+can would reach in at −69.4, the SMG's shorter barrel never does); `tests/spec/TurretClient` sweeps
+every look, yaw and pitch against its type's limit. Under that pitch is a dead zone at a wall's
+foot: a zombie on the ground whose body's centre is nearer the pivot sideways than this is out of
+reach of a turret standing on the wall (the wall's face is 0.5 out, a zombie pressed to it 0.8):
+
+| Wall under the turret | SMG, rifle (−60°) | Sniper (−51°) |
+| --- | --- | --- |
+| 1 high | 1.20 | 1.68 |
+| 2 high | 1.77 | 2.49 |
+| 3 high | 2.35 | 3.30 |
+| 4 high | 2.93 | 4.11 |
+
+Looks
 (`look(spec, flags)`) are made once and frozen. `place` writes each box's centre and its rotation
 as `CFrame.new`'s twelve numbers, with the columns right, up and back. A part's LookVector is
 therefore the aim and its Size is (across, up, along). No Model pivots are used
@@ -9430,9 +9447,9 @@ Saving worlds).
   `Machines.setTurretService`); the Turrets message and WeaponSync's `plain` ship with both ends.
   TurretView builds every CFrame from world blocks, with the epoch as part of each head's
   placement key. The bore runs through the pivot and the muzzle is `Spec.barrel` out; at every
-  aim within the pitch limits no part of the drawn gun and no muzzle is inside the turret's own
-  block (`TurretRules.PIVOT` and `PitchMin` change together). Turret parts are placed one by one,
-  never through Model pivots.
+  aim within its type's pitch limits no part of the drawn gun and no muzzle is inside the turret's
+  own block (`TurretRules.PIVOT` and each type's `pitchMin` change together). Turret parts are
+  placed one by one, never through Model pivots.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.
 - The structure library is part of world generation: the server, every client and every worker

@@ -28,8 +28,10 @@
 	    scope      a Rifle Scope's tube on top (TurretFlag.Scope; the types that take one)
 	At most MAX_PARTS boxes (an Ultimate sniper with all three mounted has 13), plus the beam. Held
 	level the gun stays under the top of the cell above (the scope's top 0.005 under it); at every
-	yaw and pitch within Config.Turrets' limits no box goes into the turret's own block (a
-	sniper's can is the nearest: a degree under PitchMin it would).
+	yaw and pitch within its type's limits (Spec `pitchMin`, Config.Turrets.Types: the lowest
+	whole degree that holds for every tier and mount, never under PitchMin) no box goes into the
+	turret's own block: a sniper's can is the nearest, a degree under its -51 it would; the SMG's
+	and the rifle's clear it at PitchMin, -60 (the rifle's can would go in at -69.4).
 
 	Frames. Every box is given in its frame's axes, in blocks from the pivot: `right`, `up` and
 	`forward` (along the aim). At yaw, pitch (TurretRules' angles: yaw 0 faces +Z, growing towards
@@ -47,7 +49,8 @@
 	The view's rules (pure, so the specs check them; Rendering/TurretView keeps the turrets):
 	  want     where a drawn gun turns to: at the target the client draws (Entities/MobRenderer
 	           .aimPoint: its body's centre, a scoped sniper's head: Shared/Turrets.optic), within
-	           the pitch limits, while the record says it tracks it with power; else the record's
+	           its type's pitch limits (TurretRules.pitchLimits), while the record says it tracks
+	           it with power; else the record's
 	           yaw and pitch while it tracks one the client does not draw, or has no power (it
 	           holds still); idle, the record's yaw held and the pitch back to level, as the server
 	           eases it (nothing is sent for that); without a record yaw 0, level (Protocol: a
@@ -60,7 +63,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Config = require(Shared.Config)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local Tiers = require(Shared.Transmitters.Tiers)
@@ -472,7 +474,8 @@ end
 --[[
 	Where the drawn gun of the turret in block (x, y, z) turns to (see the header): the yaw and pitch.
 	`record` is its last (nil: none); (ax, ay, az) where the client draws its target's aim point
-	(nil: not drawn).
+	(nil: not drawn); `spec` the turret's, whose pitch limits hold (TurretRules.pitchLimits; nil:
+	the lowest any type aims at).
 ]]
 function TurretModel.want(
 	record: Protocol.TurretRecord?,
@@ -481,7 +484,8 @@ function TurretModel.want(
 	z: number,
 	ax: number?,
 	ay: number?,
-	az: number?
+	az: number?,
+	spec: Spec?
 ): (number, number)
 	if record == nil then
 		return 0, 0
@@ -491,8 +495,8 @@ function TurretModel.want(
 		local px, py, pz = TurretRules.pivot(x, y, z)
 		local yaw, pitch, distance = TurretRules.aim(px, py, pz, ax, ay, az)
 		if distance > 0 then
-			local settings = Config.Turrets
-			return yaw, math.clamp(pitch, math.rad(settings.PitchMin), math.rad(settings.PitchMax))
+			local low, high = TurretRules.pitchLimits(spec)
+			return yaw, math.clamp(pitch, low, high)
 		end
 	end
 	if record.target ~= 0 or not powered or bit32.btest(record.flags, Flag.Tracking) then

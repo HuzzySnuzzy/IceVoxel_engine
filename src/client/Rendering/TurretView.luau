@@ -448,7 +448,7 @@ local function acquire(entry: Entry)
 	-- (It starts where the record says: no sweep from yaw 0 as it comes into view.)
 	local record = records[entry.key]
 	local ax, ay, az = targetPoint(entry, record)
-	local yaw, pitch = TurretModel.want(record, entry.x, entry.y, entry.z, ax, ay, az)
+	local yaw, pitch = TurretModel.want(record, entry.x, entry.y, entry.z, ax, ay, az, entry.spec)
 	-- (In (-pi, pi], as TurretRules.turn keeps it: a still gun's aim never changes its form.)
 	entry.yaw, entry.pitch = TurretRules.wrap(yaw), pitch
 	entry.turnedAt = -math.huge
@@ -689,7 +689,7 @@ local function drawEntry(entry: Entry, head: Head, dt: number, now: number, epoc
 	end
 	local x, y, z = entry.x, entry.y, entry.z
 	local ax, ay, az = targetPoint(entry, record)
-	local wantYaw, wantPitch = TurretModel.want(record, x, y, z, ax, ay, az)
+	local wantYaw, wantPitch = TurretModel.want(record, x, y, z, ax, ay, az, spec)
 	local yaw, pitch = TurretModel.step(spec, entry.yaw, entry.pitch, wantYaw, wantPitch, dt)
 	if yaw ~= entry.yaw or pitch ~= entry.pitch then
 		entry.turnedAt = now

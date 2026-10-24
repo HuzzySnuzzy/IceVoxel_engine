@@ -1512,22 +1512,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   keeps its energy and its Lure. Its tooltip says "Range 24 · 240 rpm · holds 4 · 9mm" (its own
   range, without an optic). A turret
   shoots only zombies (any monster: never a player or an animal, which its shots fly through). It
-  looks for the nearest it can see, with a little weight on how far it must turn: each scan the
-  two best (a zombie in sight next to it is taken at the next scan, however many hide behind a
-  wall) and a few more further down the line; it keeps its target until it dies, leaves its range or stays
-  hidden half a second. It turns at its tier's rate (SMG
-  180–360 degrees a second, rifle 120–240, sniper 60–120) and fires once on target. Glass and
-  leaves hide a zombie from it, torches and water don't, and a zombie more than 51 degrees below
-  the gun (hugging the wall it stands on) is safe. Shots are traced like a player's but never
-  shatter glass or break a block, and a kill credits nobody (no Knowledge, no kill count, no
-  player-only loot), as an iron golem's. A scoped sniper aims at heads. Gunfire draws zombies (SMG
-  36 blocks, rifle 60, sniper 72; a suppressor a quarter of that, an improvised one under half) at
-  most once a second. At night or in a blood moon an armed turret with no target lures them: a
-  24-block noise every 30 s, one in each 48 × 48 area (the Lure button turns it off; a suppressor
-  doesn't quiet it). The gun turns on its base (the barrel by type, bands in the tier's colour,
-  what is mounted: a laser's red beam to the first block or the target, a scope, a suppressor's
-  can), with a faint servo while it turns and a dry click when it runs out; WAILA shows its
-  rounds, feed and fittings.
+  looks for the nearest it can see, with a little weight on how far it must turn: each scan the two
+  best (a zombie in sight next to it is taken at the next scan, however many hide behind a wall)
+  and a few more further down the line; it keeps its target until it dies, leaves its range or
+  stays hidden half a second. It turns at its tier's rate (SMG 180–360 degrees a second, rifle
+  120–240, sniper 60–120) and fires once on target. Glass and leaves hide a zombie from it, torches
+  and water don't, and a zombie more than 60 degrees below an SMG or a rifle, 51 below a sniper
+  (whose longer barrel would meet its own block), is safe: hugging the foot of a 2-high wall it
+  stands on, within 1.8 blocks of the gun sideways (a sniper's 2.5). Shots are traced like a
+  player's but never shatter glass or break a block, and a kill credits nobody (no Knowledge, no
+  kill count, no player-only loot), as an iron golem's. A scoped sniper aims at heads. Gunfire
+  draws zombies (SMG 36 blocks, rifle 60, sniper 72; a suppressor a quarter of that, an improvised
+  one under half) at most once a second. At night or in a blood moon an armed turret with no target
+  lures them: a 24-block noise every 30 s, one in each 48 × 48 area (the Lure button turns it off;
+  a suppressor doesn't quiet it). The gun turns on its base (the barrel by type, bands in the
+  tier's colour, what is mounted: a laser's red beam to the first block or the target, a scope, a
+  suppressor's can), with a faint servo while it turns and a dry click when it runs out; WAILA
+  shows its rounds, feed and fittings.
 - **Metal Miner.** A machine that copies the ore block under it forever, for power, and pushes the
   drop out into the chests and transporters next to it: Coal Ore gives Coal every 30 s at 800 J a
   tick (never more energy than the coal burns for), Iron and Osmium Ore their raw ore every 20 s at
@@ -2838,14 +2839,14 @@ for performance:
 | `Weapons.Melee.HeavyHold` / `HeavyKnockback` / `HeavyExhaustion` | 0.45 / 0.8 / 3 | Seconds held for a heavy attack, its knockback, and its food (times a light hit's exhaustion). |
 | `Weapons.Melee.GuardCone` / `FinisherCone` / `FinisherMaxHealth` | 0.5 / 0.5 / 30 | The guard's front cone and the finisher's back cone (cosines: 120 degrees each), and the most health a zombie may have to die to a finisher. |
 | `Turrets.Enabled` | true | Turrets (Shared/Turrets): false makes the game as before: turrets tick inert ("Disabled", no energy taken), no recipes or Ages for turrets, their parts or the Laser Sight (the Servo Motor's stays while the Ammo Press is on), no simulation, no Turrets messages, no line waits for a turret (the blocks and items stay registered). |
-| `Turrets.Types` | smg, rifle, sniper | Per type: its round and stand-in gun (`ammo`, `firearm`: the fire sound, the noise, a muzzle device's effects), `damageScale`, J a `shot`, the most degrees off its aim it fires at (`settle`), the barrel's length, and per tier (Basic, Advanced, Elite, Ultimate) `range`, `rpm` (whole rounds a minute), `buffer` (rounds its ammo slot holds), `turn` (degrees a second) and `spread` (the cone's half angle). SMG 16-32 blocks, 90-360 rpm, 2-6 rounds; rifle 24-48, 45-180, 1-4; sniper 40-64, 15-40, 1-2. |
+| `Turrets.Types` | smg, rifle, sniper | Per type: its round and stand-in gun (`ammo`, `firearm`: the fire sound, the noise, a muzzle device's effects), `damageScale`, J a `shot`, the most degrees off its aim it fires at (`settle`), the barrel's length, the lowest pitch it aims at (`pitchMin`: the lowest whole degree at which its drawn gun clears its own block, every tier, mount and yaw, never under PitchMin: SMG and rifle -60, sniper -51), and per tier (Basic, Advanced, Elite, Ultimate) `range`, `rpm` (whole rounds a minute), `buffer` (rounds its ammo slot holds), `turn` (degrees a second) and `spread` (the cone's half angle). SMG 16-32 blocks, 90-360 rpm, 2-6 rounds; rifle 24-48, 45-180, 1-4; sniper 40-64, 15-40, 1-2. |
 | `Turrets.Capacity` / `IdleJoules` / `TrackingJoules` | {20, 40, 80, 160} kJ / {4, 8, 12, 16} / {8, 16, 24, 32} | Per tier: the energy store (also what the network may put in a tick), and J a tick idle and while tracking a target. |
 | `Turrets.Optics` / `Muzzles` | Laser Sight, Rifle Scope / both suppressors | The optic slot's items: the Laser Sight (every type: the cone × 0.5, a rescan every 5 ticks), the Rifle Scope (rifle and sniper: the range × 1.25, a sniper aims at heads). The muzzle slot's: their WeaponList numbers apply (on every type). |
 | `Turrets.NoiseScale` / `ShotNoiseTicks` | 0.75 / 20 | Gunfire's noise: the stand-in gun's (with its muzzle device) times this, at most once every ShotNoiseTicks a turret. |
 | `Turrets.Lure` | Enabled, Noise 24, Ticks 600, Cell 48 | The lure: a powered, armed turret with no target and its Lure on makes a Noise-block noise (more at night) every Ticks while it is night or a blood moon, at most one a Cell × Cell blocks. |
 | `Turrets.ScanTicks` / `SightTicks` / `LoseTicks` / `MaxSightChecks` | 10 / 4 / 10 / 6 | Targeting: a scan every ScanTicks (a Laser Sight's own 5), the target's sight checked every SightTicks and lost after LoseTicks unseen, at most MaxSightChecks candidates looked at a scan: the best two every scan (zombies hidden behind a wall never hide one in sight next to the gun) and the others further down the ranking each scan, so none in sight stays hidden for long. |
 | `Turrets.MaxScansPerTick` / `MaxShotsPerTick` | 16 / 32 | Every turret together a tick (a scan over it waits a tick; a shot over it waits a tick, losing none). Those waiting go first, the longest waiting first, so none starves and every turret gets its share. |
-| `Turrets.MinRange` / `PitchMin` / `PitchMax` / `ExtraFlight` / `MaxRange` / `FiringTicks` | 1.5 / -51 / 75 / 16 / 80 / 10 | Nothing nearer than MinRange; the gun's pitch limits (degrees: below -51 a dead zone, the lowest the drawn gun clears its own block at); a shot flies ExtraFlight past the turret's range; no range beyond MaxRange (a scope's included); "Firing" shows FiringTicks after a shot. |
+| `Turrets.MinRange` / `PitchMin` / `PitchMax` / `ExtraFlight` / `MaxRange` / `FiringTicks` | 1.5 / -60 / 75 / 16 / 80 / 10 | Nothing nearer than MinRange; the gun's pitch limits (degrees: PitchMin the lowest any type aims at, each type its own `pitchMin` at or over it, below which is a dead zone); a shot flies ExtraFlight past the turret's range; no range beyond MaxRange (a scope's included); "Firing" shows FiringTicks after a shot. |
 | `Turrets.FeedTicks` / `FeedRateTicks` | 20 / 100 | The feeder rule's look at the transporters around a turret every FeedTicks; the panel's "In: x/s" averages arrivals over FeedRateTicks. |
 | `Turrets.RecordRange` / `RecordTicks` / `RecordAngle` / `RecordRefresh` | 224 / 2 / 3 / 20 | Turrets messages: to players within RecordRange blocks sideways (as far as edit lists go: past every chunk a client keeps records for, 207 blocks at the highest Full Detail; where a player was last seen while respawning), at most every RecordTicks a turret, when its target, flags or rounds change or its aim moved RecordAngle degrees, and every RecordRefresh ticks while it tracks. |
 | `Turrets.Client` | DrawDistance 96, MaxDrawn 48, MaxParts 720, BeamLength 24, ServoLoops 4 | The client: turrets drawn within DrawDistance of the camera, at most MaxDrawn from MaxParts pooled parts; a Laser Sight's beam at most BeamLength; the servo loop at the ServoLoops nearest turning turrets. |
