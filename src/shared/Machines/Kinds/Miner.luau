@@ -49,7 +49,8 @@
 
 	Its panel: the output in its result frame, the progress arrow, the status line, two lines at
 	(8, 32) ("Makes Diamond", "4:00 an item": at most two, the panel would put a third over the
-	cards; short, as they end about 70 pixels on, before the arrow; the second from the window's
+	cards; short, as they end about 70 pixels on, before the arrow: a drop whose "Makes ..." is
+	over LINE_CHARACTERS shows alone, "Raw Uranium"; the second from the window's
 	`ticksRequired`, so none without a window), the upgrade slots and the energy bar. JEI's
 	"Duplicating" (an ore block into its drop, its time and energy, the Metal Miner the catalyst)
 	reads `info`: the store and each ore's numbers ("<Ore>Ticks", "<Ore>Joules", "<Ore>Floor").
@@ -65,6 +66,9 @@ local Types = require(script.Parent.Parent.Parent.Inventory.Types)
 type Container = Types.Container
 
 local STATE = MinerRules.STATE
+
+-- Characters a panel line holds before the progress arrow (about 64 pixels of its small text).
+local LINE_CHARACTERS = 16
 
 -- Slots.
 local OUTPUT, SPEED, ENERGY = 1, 2, 3
@@ -211,7 +215,9 @@ local kind = Core.define("miner", {
 		if ore == nil or code == STATE.NO_ORE then
 			return {}
 		end
-		local shown = { `Makes {Items.displayName(ore.drop)}` }
+		-- (A line holds 16 characters before the arrow: "Raw Uranium" alone, without "Makes".)
+		local drop = Items.displayName(ore.drop)
+		local shown = { if #drop + 6 <= LINE_CHARACTERS then `Makes {drop}` else drop }
 		local ticks = if data then data[TICKS_REQUIRED] else nil
 		if type(ticks) == "number" and ticks >= 1 and ticks == math.floor(ticks) and ticks < 2 ^ 31 then
 			table.insert(shown, `{timeText(ticks)} an item`)

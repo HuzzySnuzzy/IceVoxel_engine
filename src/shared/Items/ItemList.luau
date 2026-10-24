@@ -2595,6 +2595,104 @@ do
 	})
 end
 
+--[[
+	The new ores' items (BlockList has the ores and their blocks): each metal's raw lump, ingot and
+	nugget (copper, lead, zinc, uranium), brass's ingot and nugget (an alloy of three copper and a
+	zinc: Crafting/Recipes), and the two powders, Sulfur and Saltpetre, gunpowder's other halves.
+	Drawn like iron's and gold's in each metal's colour: copper orange, lead a dull blue-grey, zinc a
+	pale grey-green, brass yellow, uranium green-grey (its raw lump and ingot radioactive:
+	Shared/Radiation).
+
+	The Hazmat suit (Mekanism's): four pieces of lead sheet under yellow cloth, Leather's armor
+	points, that keep out a share of radiation each (Shared/Radiation.SHIELDING: Mekanism's 0.25,
+	0.4, 0.2 and 0.15; the whole suit all of it).
+]]
+local NEW_METALS: { { name: string, raw: { number }, ingot: { number }, light: { number }, dark: { number } } } = {
+	{
+		name = "Copper",
+		raw = { 176, 102, 70 },
+		ingot = { 214, 124, 84 },
+		light = { 236, 168, 120 },
+		dark = { 112, 62, 40 },
+	},
+	{
+		name = "Lead",
+		raw = { 100, 102, 124 },
+		ingot = { 122, 124, 148 },
+		light = { 160, 162, 186 },
+		dark = { 64, 66, 84 },
+	},
+	{
+		name = "Zinc",
+		raw = { 156, 168, 162 },
+		ingot = { 188, 198, 194 },
+		light = { 218, 226, 222 },
+		dark = { 104, 116, 110 },
+	},
+}
+local URANIUM = {
+	name = "Uranium",
+	raw = { 104, 138, 80 },
+	ingot = { 124, 176, 84 },
+	light = { 176, 220, 120 },
+	dark = { 64, 90, 48 },
+}
+local function metalItems(metal: typeof(URANIUM))
+	table.insert(list, {
+		name = `Raw{metal.name}`,
+		color = metal.raw,
+		material = "Rock",
+		model = lump(metal.raw, metal.light, metal.dark),
+	})
+	table.insert(
+		list,
+		{ name = `{metal.name}Ingot`, color = metal.ingot, material = "Metal", model = ingot(metal.ingot), tilt = 25 }
+	)
+	table.insert(
+		list,
+		{ name = `{metal.name}Nugget`, color = metal.ingot, material = "Metal", model = nugget(metal.ingot) }
+	)
+end
+for _, metal in NEW_METALS do
+	metalItems(metal)
+end
+local BRASS = { 214, 178, 88 }
+table.insert(list, { name = "BrassIngot", color = BRASS, material = "Metal", model = ingot(BRASS), tilt = 25 })
+table.insert(list, { name = "BrassNugget", color = BRASS, material = "Metal", model = nugget(BRASS) })
+-- A heap of powder, as Glow Dust's, with specks of `fleck`.
+local function powder(colour: { number }, fleck: { number }): { ModelBox }
+	return {
+		{ size = { 11, 3, 4 }, offset = { 0, -3.5, 0 } },
+		{ size = { 7, 3, 4 }, offset = { 0.5, -0.5, 0 }, color = shade(colour, 1.06) },
+		{ size = { 3.5, 2.5, 3.5 }, offset = { -0.25, 2.25, 0 }, color = shade(colour, 1.12) },
+		{ size = { 1.5, 1.5, 0.5 }, offset = { -3, -3, 2.1 }, color = fleck },
+		{ size = { 1, 1, 0.5 }, offset = { 2, -0.5, 2.1 }, color = fleck },
+		{ size = { 1, 1, 0.5 }, offset = { 3.5, -3.5, -2.1 }, color = fleck },
+	}
+end
+local SULFUR = { 222, 206, 70 }
+local SALTPETRE = { 232, 230, 220 }
+table.insert(list, { name = "Sulfur", color = SULFUR, material = "Sand", model = powder(SULFUR, { 170, 150, 40 }) })
+table.insert(
+	list,
+	{ name = "Saltpetre", color = SALTPETRE, material = "Sand", model = powder(SALTPETRE, { 190, 186, 172 }) }
+)
+metalItems(URANIUM)
+local HAZMAT = { 226, 196, 54 }
+-- (Mekanism's names for the pieces.)
+local HAZMAT_NAMES = { "Hazmat Mask", "Hazmat Gown", "Hazmat Pants", "Hazmat Boots" }
+for i, piece in PIECES do
+	table.insert(list, {
+		name = `Hazmat{piece.name}`,
+		displayName = HAZMAT_NAMES[i],
+		maxStack = 1,
+		armor = { slot = piece.slot, defense = ARMOR[1].points[i], toughness = 0 },
+		color = HAZMAT,
+		material = "Fabric",
+		model = piece.model,
+	})
+end
+
 -- Add new items above this line. Every potion of PotionList must have its items here: a potion
 -- added there after the first FIRST_POTIONS needs a loop of its own just above this line (it can't
 -- join the first one without moving every item after it).

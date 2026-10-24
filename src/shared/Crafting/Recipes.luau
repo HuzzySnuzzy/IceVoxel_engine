@@ -121,6 +121,16 @@ storage("GoldNugget", "GoldIngot")
 storage("OsmiumNugget", "OsmiumIngot")
 storage("OsmiumIngot", "OsmiumBlock")
 storage("RawOsmium", "RawOsmiumBlock")
+-- The new ores' metals the same way, and brass (an alloy of three copper ingots and a zinc ingot
+-- in any slots: four brass ingots).
+for _, metal in { "Copper", "Lead", "Zinc", "Uranium" } do
+	storage(`{metal}Nugget`, `{metal}Ingot`)
+	storage(`{metal}Ingot`, `{metal}Block`)
+	storage(`Raw{metal}`, `Raw{metal}Block`)
+end
+storage("BrassNugget", "BrassIngot")
+storage("BrassIngot", "BrassBlock")
+mix({ "CopperIngot", "CopperIngot", "CopperIngot", "ZincIngot" }, "BrassIngot", 4)
 
 --[[ Tools: wood, stone, iron, gold and diamond ]]
 
@@ -168,14 +178,17 @@ mix({ "IronIngot", "Flint" }, "FlintAndSteel")
 
 --[[
 	Explosives. Gunpowder has no creeper to drop it here, and ruins hide some (Generation/
-	ScavengeLoot): a coal or charcoal and a flint in any slots make two (black powder is charcoal
-	and saltpetre; flint stands in). TNT is Minecraft's: gunpowder in an X with sand between (5
-	gunpowder, 4 sand). The Nuke (this game's, a mod's toy): eight TNT around a block of diamond,
-	so a crater costs 40 gunpowder, 32 sand and nine diamonds.
+	ScavengeLoot). Black powder is saltpetre, charcoal and sulfur (75, 15 and 10 parts): two
+	Saltpetre, a Sulfur and a coal or charcoal in any slots make four (Thermal's niter recipe);
+	the old field mix, a coal or charcoal and a flint, still makes two. TNT is Minecraft's:
+	gunpowder in an X with sand between (5 gunpowder, 4 sand). The Nuke (this game's, a mod's toy):
+	eight TNT around a Block of Uranium, so a crater costs 40 gunpowder, 32 sand and nine uranium
+	ingots.
 ]]
+mix({ "Saltpetre", "Saltpetre", "Sulfur", "#coals" }, "Gunpowder", 4)
 mix({ "#coals", "Flint" }, "Gunpowder", 2)
 shape({ "X#X", "#X#", "X#X" }, { X = "Gunpowder", ["#"] = "Sand" }, "Tnt")
-shape({ "TTT", "TDT", "TTT" }, { T = "Tnt", D = "DiamondBlock" }, "Nuke")
+shape({ "TTT", "TUT", "TTT" }, { T = "Tnt", U = "UraniumBlock" }, "Nuke")
 
 --[[
 	Mekanism pipes and buckets. The bucket is Minecraft's. Mekanism's own recipes need steel,
@@ -325,6 +338,12 @@ smelt("DiamondOre", "Diamond")
 smelt("EmeraldOre", "Emerald")
 smelt("RawOsmium", "OsmiumIngot")
 smelt("OsmiumOre", "OsmiumIngot")
+for _, metal in { "Copper", "Lead", "Zinc", "Uranium" } do
+	smelt(`Raw{metal}`, `{metal}Ingot`)
+	smelt(`{metal}Ore`, `{metal}Ingot`)
+end
+smelt("SulfurOre", "Sulfur")
+smelt("SaltpetreOre", "Saltpetre")
 smelt("Sand", "Glass")
 smelt("Cobblestone", "Stone")
 smelt("Stone", "SmoothStone")
@@ -393,6 +412,18 @@ for _, material in { { "Straw", "Straw" }, { "Leaf", "#leaves" } } do
 	shape({ "X X", "X X" }, key, material[1] .. "Boots")
 end
 shape({ "N", "G", "D" }, { N = "IronNugget", G = "Glass", D = "GlowDust" }, "Thermometer")
+
+--[[
+	The Hazmat suit (Mekanism's, Shared/Radiation): lead sheet in White Wool padding, each piece in
+	its armor shape (the mask with a glass visor): 17 lead ingots and 12 wool for the suit.
+]]
+do
+	local key = { L = "LeadIngot", W = "WhiteWool", G = "Glass" }
+	shape({ "WLW", "LGL" }, key, "HazmatHelmet")
+	shape({ "L L", "WLW", "WLW" }, key, "HazmatChestplate")
+	shape({ "WLW", "L L", "W W" }, key, "HazmatLeggings")
+	shape({ "L L", "W W" }, key, "HazmatBoots")
+end
 
 --[[
 	What mobs drop (Shared/Entities/MobList). Minecraft's: raw meat cooks in a furnace (200 ticks,

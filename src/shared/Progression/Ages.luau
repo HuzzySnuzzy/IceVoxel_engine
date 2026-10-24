@@ -25,7 +25,9 @@
 	                  Rag, Bandage, Medkit, Herbal Poultice, Barricade, Baseball Bat, Supply
 	                  Crate and aged bricks are the Stone Age's; loot ignores Ages); the seasons'
 	                  Wood Stove, Insulated Glass and Insulated Door (the Snow Layer and
-	                  Insulated Planks are the Stone Age's).
+	                  Insulated Planks are the Stone Age's); lead, zinc and brass (ingots,
+	                  nuggets, blocks) and the Hazmat suit (copper, Sulfur and Saltpetre are the
+	                  Stone Age's).
 	  Industrial Age  (level 15, an Osmium Ingot smelted, a Bucket crafted) diamond tools and
 	                  armor, diamond, emerald and osmium blocks, osmium nuggets, Mekanism's basic
 	                  and advanced transporters, pipes and fluid tanks, the Configurator, the
@@ -40,7 +42,8 @@
 	                  Advanced and Elite turrets, the Metal Miner and the Ammo Press.
 	  Atomic Age      (level 40, an Oil Refinery and a Basic Battery crafted) the Solar Panel,
 	                  elite and ultimate cables and Batteries, ultimate transporters, pipes and
-	                  tanks, the Ultimate turrets, and the Nuke (with the Fission skill too).
+	                  tanks, the Ultimate turrets, uranium (ingots, nuggets, blocks) and the Nuke
+	                  (with the Fission skill too).
 
 	An Age's `recipes` are the results (item names) it opens: crafting and smelting results of a
 	later Age are locked for a player who hasn't reached it (Shared/Progression.allows; how:
@@ -138,6 +141,23 @@ for _, name in
 		"WoodStove",
 		"InsulatedGlass",
 		"InsulatedDoor",
+		-- (The new ores' lead, zinc and brass, and the Hazmat suit's lead; copper, sulfur and
+		-- saltpetre are the Stone Age's.)
+		"LeadIngot",
+		"LeadNugget",
+		"LeadBlock",
+		"RawLeadBlock",
+		"ZincIngot",
+		"ZincNugget",
+		"ZincBlock",
+		"RawZincBlock",
+		"BrassIngot",
+		"BrassNugget",
+		"BrassBlock",
+		"HazmatHelmet",
+		"HazmatChestplate",
+		"HazmatLeggings",
+		"HazmatBoots",
 	}
 do
 	table.insert(iron, name)
@@ -212,6 +232,11 @@ local atomic: { string } = {
 	"UltimateMechanicalPipe",
 	"UltimateFluidTank",
 	"Nuke",
+	-- (Uranium: its ingot, nugget and blocks; the ore and Raw Uranium are mined in any Age.)
+	"UraniumIngot",
+	"UraniumNugget",
+	"UraniumBlock",
+	"RawUraniumBlock",
 }
 
 --[[

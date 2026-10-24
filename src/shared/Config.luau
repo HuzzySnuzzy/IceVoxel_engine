@@ -2560,6 +2560,14 @@ local Config = {
 			GoldOre = { ticks = 800, joules = 300 },
 			EmeraldOre = { ticks = 3600, joules = 800 },
 			DiamondOre = { ticks = 4800, joules = 800 },
+			-- (The new ores: the metals as iron, the powders between iron and gold, uranium as
+			-- rare as emerald; Sulfur and Saltpetre make gunpowder, so ammo can be automated.)
+			CopperOre = { ticks = 400, joules = 200 },
+			LeadOre = { ticks = 400, joules = 200 },
+			ZincOre = { ticks = 400, joules = 200 },
+			SulfurOre = { ticks = 600, joules = 200 },
+			SaltpetreOre = { ticks = 600, joules = 200 },
+			UraniumOre = { ticks = 3600, joules = 800 },
 		},
 	},
 

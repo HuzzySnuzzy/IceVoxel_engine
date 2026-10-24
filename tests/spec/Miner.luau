@@ -53,6 +53,12 @@ return function(t, shared, require, server, client)
 		GoldOre = { drop = I.RawGold, ticks = 800, joules = 300, floor = 0, every = "0:40" },
 		EmeraldOre = { drop = I.Emerald, ticks = 3600, joules = 800, floor = 0, every = "3:00" },
 		DiamondOre = { drop = I.Diamond, ticks = 4800, joules = 800, floor = 0, every = "4:00" },
+		CopperOre = { drop = I.RawCopper, ticks = 400, joules = 200, floor = 0, every = "0:20" },
+		LeadOre = { drop = I.RawLead, ticks = 400, joules = 200, floor = 0, every = "0:20" },
+		ZincOre = { drop = I.RawZinc, ticks = 400, joules = 200, floor = 0, every = "0:20" },
+		SulfurOre = { drop = I.Sulfur, ticks = 600, joules = 200, floor = 0, every = "0:30" },
+		SaltpetreOre = { drop = I.Saltpetre, ticks = 600, joules = 200, floor = 0, every = "0:30" },
+		UraniumOre = { drop = I.RawUranium, ticks = 3600, joules = 800, floor = 0, every = "3:00" },
 	}
 
 	local function S(item: number, count: number)
@@ -204,7 +210,9 @@ return function(t, shared, require, server, client)
 			t.eq(container.data[ACTIVE], 1, "its grille glows")
 			local lines = MenuLayout.lineTexts(container)
 			t.eq(#lines, 2)
-			t.eq(lines[1], `Makes {Items.displayName(row.drop)}`)
+			local drop = Items.displayName(row.drop)
+			-- (Raw Uranium's "Makes ..." would run into the arrow: the drop alone.)
+			t.eq(lines[1], if #drop > 10 then drop else `Makes {drop}`)
 			t.eq(lines[2], `{row.every} an item`, `{ore.name}: the design's "an item every"`)
 			-- The next one takes as long.
 			local again, usedAgain = untilItem(container, cell, row.ticks + 10)
@@ -212,7 +220,7 @@ return function(t, shared, require, server, client)
 			t.eq(usedAgain, used)
 			t.eq(container.slots[OUTPUT].count, 2)
 		end
-		t.eq(#MinerRules.ORES, 6, "every ore block BlockList has")
+		t.eq(#MinerRules.ORES, 12, "every ore block BlockList has")
 	end)
 
 	t.test("miner: Mekanism's card maths at every count, never under an ore's floor", function()

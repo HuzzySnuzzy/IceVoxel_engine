@@ -183,8 +183,10 @@ return function(t, shared, require)
 		-- bats, blades, the hatch and concrete; 213 before the weapons' Improvised Suppressor and
 		-- Crossbow Bolts; 215 before the seasons' Snow Layer, insulation, stoves, heaters and
 		-- coolers; 224 before the turrets' seven parts, the Laser Sight, twelve turrets, the Metal
-		-- Miner and the Ammo Press.)
-		t.eq(#Crafting.recipes, 246, "recipes compiled")
+		-- Miner and the Ammo Press; 246 before the new ores' 34: six storage recipes for each of
+		-- copper, lead, zinc and uranium, four for brass, the brass alloy, the new gunpowder and
+		-- the four Hazmat pieces.)
+		t.eq(#Crafting.recipes, 280, "recipes compiled")
 	end)
 
 	t.test("crafting: the turrets' recipes each make only their own result; a tier keeps its data", function()

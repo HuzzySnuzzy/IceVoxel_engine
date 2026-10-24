@@ -415,7 +415,7 @@ return function(t, shared, require, server, client)
 		for i = 2, 10 do
 			free.container.slots[i] = S(I.Tnt, 1)
 		end
-		free.container.slots[6] = S(I.DiamondBlock, 1)
+		free.container.slots[6] = S(I.UraniumBlock, 1)
 		Menu.updateCraft(free)
 		t.eq(free.container.slots[1] and free.container.slots[1].item, I.Nuke, "ungated")
 		t.ok(Progression.allows(nil, I.Nuke), "a nil state allows everything")

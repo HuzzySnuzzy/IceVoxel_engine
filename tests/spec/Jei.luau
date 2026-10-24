@@ -1084,7 +1084,20 @@ return function(t, shared, require, _server, client)
 		local info = Machines.info(Blocks.id.MetalMiner)
 		local entries = entriesOf("duplicating")
 		t.eq(#entries, #MinerRules.ORES, "one per ore")
-		local drops = { "Coal", "RawIron", "RawOsmium", "RawGold", "Emerald", "Diamond" }
+		local drops = {
+			"Coal",
+			"RawIron",
+			"RawOsmium",
+			"RawGold",
+			"Emerald",
+			"Diamond",
+			"RawCopper",
+			"RawLead",
+			"RawZinc",
+			"Sulfur",
+			"Saltpetre",
+			"RawUranium",
+		}
 		for index, ore in MinerRules.ORES do
 			local entry = entries[index]
 			local numbers = Config.Miner.Ores[ore.name]
@@ -1130,7 +1143,7 @@ return function(t, shared, require, _server, client)
 		t.eq(#layout.inputs, 1, "the ore")
 		t.ok(layout.output ~= nil and layout.arrow ~= nil and #layout.texts == 2, "its drop, the arrow, two lines")
 		t.eq(JeiLayout.perPage("duplicating"), 3, "three a page")
-		t.eq(JeiData.pageCount(#entries, JeiLayout.perPage("duplicating")), 2, "six ores on two pages")
+		t.eq(JeiData.pageCount(#entries, JeiLayout.perPage("duplicating")), 4, "twelve ores on four pages")
 	end)
 
 	t.test("jei: Pressing: the Ammo Press makes each calibre's rounds of an ingot and a gunpowder", function()
@@ -1209,7 +1222,7 @@ return function(t, shared, require, _server, client)
 		t.eq(groupOf(NoMiner.recipes(NoMinerItems.id.Diamond), "duplicating"), nil)
 		local NoPress, NoPressItems = fresh(true, false)
 		t.eq(#entriesOf("pressing", NoPress.entries()), 0, "the press off: no Pressing")
-		t.eq(#entriesOf("duplicating", NoPress.entries()), 6, "the miner still copies")
+		t.eq(#entriesOf("duplicating", NoPress.entries()), 12, "the miner still copies")
 		t.eq(#NoPress.recipes(NoPressItems.id.Rounds9mm), 0, "rounds come from loot alone again")
 		t.eq(groupOf(NoPress.uses(NoPressItems.id.Gunpowder), "pressing"), nil)
 		t.eq(groupOf(NoPress.uses(NoPressItems.id.AmmoPress), "pressing"), nil)

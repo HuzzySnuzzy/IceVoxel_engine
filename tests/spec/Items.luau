@@ -37,9 +37,11 @@ return function(t, shared, require)
 		-- Creative order: blocks first, then armor, materials and tools.
 		t.eq(Items.list[1].name, "Stone")
 		-- (TuxedoPants, Terraria's vanity clothes, before the zombie apocalypse's 21 items, then the
-		-- weapons' 34, then the turrets' 8. Was "Sledgehammer", the weapons' last, and before it
-		-- "HerbalPoultice", the zombie apocalypse's.)
-		t.eq(Items.list[#Items.list].name, "LaserSight", "the last item added (the turrets')")
+		-- weapons' 34, then the turrets' 8, then the new ores' 20. Was "LaserSight", the turrets'
+		-- last, before it "Sledgehammer", the weapons', and "HerbalPoultice", the zombie
+		-- apocalypse's.)
+		t.eq(Items.list[#Items.list].name, "HazmatBoots", "the last item added (the new ores')")
+		t.eq(Items.id.RawCopper, Items.id.LaserSight + 1, "the new ores' items after the turrets'")
 		t.eq(Items.id.SmgBarrel, Items.id.Sledgehammer + 1, "the turrets' items after the weapons'")
 		t.eq(Items.id.StrongPotionOfResistance, Items.id.HermesBoots - 1, "the last potion, then Terraria's things")
 		t.eq(Items.get(Items.id.Planks).displayName, "Oak Planks", "a block's own display name")
@@ -88,8 +90,13 @@ return function(t, shared, require)
 		t.eq(#found, 1)
 		t.eq(found[1].name, "OakLog")
 		local ores = Items.search("ore")
-		-- (Was 6, the ores alone, before the weapons' Small-Bore Rifle and its .22 Magazine.)
-		t.eq(#ores, 8, "coal, iron, gold, diamond, emerald and osmium ore, and the small-bore rifle and magazine")
+		-- (Was 6, the ores alone, before the weapons' Small-Bore Rifle and its .22 Magazine; then 8,
+		-- before the new ores' six.)
+		t.eq(
+			#ores,
+			14,
+			"coal, iron, gold, diamond, emerald, osmium, copper, lead, zinc, sulfur, saltpetre and uranium ore, and the small-bore rifle and magazine"
+		)
 		t.eq(#Items.search(""), #Items.list)
 		t.eq(#Items.search("zzz"), 0)
 	end)

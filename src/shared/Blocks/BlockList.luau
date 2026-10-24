@@ -3949,4 +3949,91 @@ table.insert(list, {
 	energy = { capacity = Config.AmmoPress.Capacity, input = Config.AmmoPress.Capacity },
 })
 
+--[[
+	The new ores (after the Ammo Press, 499, so no other block's id changed: 500..514), each with its
+	storage blocks, in this order: copper (500 Copper Ore, the Block of Copper, the Block of Raw
+	Copper), lead (503..505), zinc (506..508; brass's other metal), 509 the Block of Brass, 510
+	Sulfur Ore, 511 Saltpetre Ore, uranium (512..514). Generation/Ores places the ores, Crafting/
+	Recipes smelts them and packs the blocks, ItemList has the raw metals, ingots, nuggets, Sulfur
+	and Saltpetre, and the Metal Miner copies every one of them (Machines/MinerRules).
+
+	  * The metal ores are stone with coloured specks (Granite's speckled material, as Osmium Ore):
+	    Minecraft's hardness 3 and a stone pickaxe to drop anything; uranium needs an iron one
+	    (Mekanism's uranium is as hard as its osmium, but this game keeps it for later). Each
+	    drops one of its raw metal.
+	  * Sulfur Ore (yellow crusts) and Saltpetre Ore (white ones, on Limestone's material) drop by
+	    any pickaxe, as Coal Ore does: one Sulfur, one Saltpetre.
+	  * The storage blocks: Minecraft's raw blocks' hardness 5 for every one (the Block of Copper
+	    Minecraft's 3), a stone pickaxe (iron for uranium); the metal blocks sound like metal, the
+	    raw ones like rock. Uranium's are radioactive (Shared/Radiation), as its ore is.
+]]
+-- (Each metal's ore, block and raw block: name, the speck colour, the block's, the raw block's,
+-- the least tool tier.)
+local NEW_METALS = {
+	{ name = "Copper", ore = { 170, 124, 98 }, block = { 196, 110, 76 }, raw = { 156, 92, 64 }, level = 1 },
+	{ name = "Lead", ore = { 122, 122, 142 }, block = { 106, 108, 132 }, raw = { 94, 96, 116 }, level = 1 },
+	{ name = "Zinc", ore = { 150, 162, 152 }, block = { 186, 196, 192 }, raw = { 150, 162, 158 }, level = 1 },
+}
+local URANIUM = { name = "Uranium", ore = { 122, 152, 98 }, block = { 112, 170, 72 }, raw = { 98, 130, 72 }, level = 2 }
+local function metalBlocks(ore: typeof(URANIUM))
+	table.insert(list, {
+		name = `{ore.name}Ore`,
+		color = ore.ore,
+		material = "Granite",
+		hardness = 3,
+		tool = "pickaxe",
+		toolLevel = ore.level,
+		drops = `Raw{ore.name}` :: string,
+	})
+	table.insert(list, {
+		name = `{ore.name}Block`,
+		displayName = `Block of {ore.name}`,
+		color = ore.block,
+		material = "Metal",
+		hardness = if ore.name == "Copper" then 3 else 5,
+		tool = "pickaxe",
+		toolLevel = ore.level,
+	})
+	table.insert(list, {
+		name = `Raw{ore.name}Block`,
+		displayName = `Block of Raw {ore.name}`,
+		color = ore.raw,
+		material = "Rock",
+		hardness = 5,
+		tool = "pickaxe",
+		toolLevel = ore.level,
+	})
+end
+for _, newMetal in NEW_METALS do
+	metalBlocks(newMetal)
+end
+table.insert(list, {
+	name = "BrassBlock",
+	displayName = "Block of Brass",
+	color = { 206, 170, 84 },
+	material = "Metal",
+	hardness = 5,
+	tool = "pickaxe",
+	toolLevel = 1,
+})
+table.insert(list, {
+	name = "SulfurOre",
+	color = { 178, 170, 104 },
+	material = "Granite",
+	hardness = 3,
+	tool = "pickaxe",
+	toolLevel = 0,
+	drops = "Sulfur" :: string,
+})
+table.insert(list, {
+	name = "SaltpetreOre",
+	color = { 198, 194, 182 },
+	material = "Limestone",
+	hardness = 3,
+	tool = "pickaxe",
+	toolLevel = 0,
+	drops = "Saltpetre" :: string,
+})
+metalBlocks(URANIUM)
+
 return list

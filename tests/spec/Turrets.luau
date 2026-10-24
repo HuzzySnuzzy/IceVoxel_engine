@@ -97,7 +97,8 @@ return function(t, shared, require, server, client)
 		end
 		t.eq(B.MetalMiner, 498)
 		t.eq(B.AmmoPress, 499)
-		t.eq(Blocks.count, 500, "the last blocks")
+		-- (The last blocks then; the new ores' 15 follow: tests/spec/Ores.)
+		t.eq(B.CopperOre, 500, "the last blocks before the new ores")
 		for _, name in { "MetalMiner", "AmmoPress" } do
 			local def = Blocks.get(B[name])
 			t.eq(def.decor, name)
@@ -113,7 +114,8 @@ return function(t, shared, require, server, client)
 			t.ok(type(LoreList[name]) == "string", `{name}'s lore`)
 			t.eq(Items.maxStack(I[name]), if name == "LaserSight" then 1 else 64, `{name}'s stack`)
 		end
-		t.eq(Items.list[#Items.list].name, "LaserSight", "the last item")
+		-- (The last item then; the new ores' follow it.)
+		t.eq(Items.id.RawCopper, Items.id.LaserSight + 1, "the last item before the new ores'")
 		t.eq(Weapons.attachment(I.LaserSight), nil, "the Laser Sight fits no hand-held gun")
 	end)
 
@@ -1186,8 +1188,9 @@ return function(t, shared, require, server, client)
 		local OffMachines = env.require(root.Machines)
 		local OffBlocks = env.require(root.Blocks)
 		local OffItems = env.require(root.Items)
-		t.eq(OffBlocks.count, 500, "the blocks stay")
-		t.eq(#OffCrafting.recipes, 224, "the recipes before them")
+		t.eq(OffBlocks.count, Blocks.count, "the blocks stay")
+		-- (The new ores' 34 come after them.)
+		t.eq(#OffCrafting.recipes, 224 + 34, "the recipes before them")
 		local results: { [number]: boolean } = {}
 		for _, recipe in OffCrafting.recipes do
 			results[recipe.result] = true

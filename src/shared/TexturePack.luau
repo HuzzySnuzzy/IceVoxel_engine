@@ -579,6 +579,23 @@ local Textures: { [string]: Texture } = {
 	["insulated glass"] = { Color = "", Material = "SmoothPlastic", Tint = false },
 	["insulated door bottom"] = { Color = "", Material = "WoodPlanks", Tint = false },
 	["insulated door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	-- The new ores and their blocks (BlockList after the Ammo Press): stone with each ore's
+	-- specks, the metal blocks and the raw blocks.
+	["copper ore"] = { Color = "", Material = "Granite", Tint = false },
+	["copper block"] = { Color = "", Material = "Metal", Tint = false },
+	["raw copper block"] = { Color = "", Material = "Rock", Tint = false },
+	["lead ore"] = { Color = "", Material = "Granite", Tint = false },
+	["lead block"] = { Color = "", Material = "Metal", Tint = false },
+	["raw lead block"] = { Color = "", Material = "Rock", Tint = false },
+	["zinc ore"] = { Color = "", Material = "Granite", Tint = false },
+	["zinc block"] = { Color = "", Material = "Metal", Tint = false },
+	["raw zinc block"] = { Color = "", Material = "Rock", Tint = false },
+	["brass block"] = { Color = "", Material = "Metal", Tint = false },
+	["sulfur ore"] = { Color = "", Material = "Granite", Tint = false },
+	["saltpetre ore"] = { Color = "", Material = "Limestone", Tint = false },
+	["uranium ore"] = { Color = "", Material = "Granite", Tint = false },
+	["uranium block"] = { Color = "", Material = "Metal", Tint = false },
+	["raw uranium block"] = { Color = "", Material = "Rock", Tint = false },
 }
 
 -- Block name (BlockList) -> the texture of each face.
@@ -759,6 +776,23 @@ local Blocks: { [string]: Faces } = {
 	InsulatedGlass = { All = "insulated glass" },
 	InsulatedDoor = { Front = "insulated door bottom" },
 	InsulatedDoorTop = { Front = "insulated door top" },
+
+	-- The new ores and their blocks
+	CopperOre = { All = "copper ore" },
+	CopperBlock = { All = "copper block" },
+	RawCopperBlock = { All = "raw copper block" },
+	LeadOre = { All = "lead ore" },
+	LeadBlock = { All = "lead block" },
+	RawLeadBlock = { All = "raw lead block" },
+	ZincOre = { All = "zinc ore" },
+	ZincBlock = { All = "zinc block" },
+	RawZincBlock = { All = "raw zinc block" },
+	BrassBlock = { All = "brass block" },
+	SulfurOre = { All = "sulfur ore" },
+	SaltpetreOre = { All = "saltpetre ore" },
+	UraniumOre = { All = "uranium ore" },
+	UraniumBlock = { All = "uranium block" },
+	RawUraniumBlock = { All = "raw uranium block" },
 }
 
 -- Item name (ItemList) -> its inventory icon ("" = not made yet; see the header).
@@ -856,6 +890,27 @@ local Icons: { [string]: string } = {
 	ServoMotor = "",
 	TargetingModule = "",
 	LaserSight = "",
+	-- The new ores' items and the Hazmat suit.
+	RawCopper = "",
+	CopperIngot = "",
+	CopperNugget = "",
+	RawLead = "",
+	LeadIngot = "",
+	LeadNugget = "",
+	RawZinc = "",
+	ZincIngot = "",
+	ZincNugget = "",
+	BrassIngot = "",
+	BrassNugget = "",
+	Sulfur = "",
+	Saltpetre = "",
+	RawUranium = "",
+	UraniumIngot = "",
+	UraniumNugget = "",
+	HazmatHelmet = "",
+	HazmatChestplate = "",
+	HazmatLeggings = "",
+	HazmatBoots = "",
 }
 
 export type Pack = {

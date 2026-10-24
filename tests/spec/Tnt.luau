@@ -183,10 +183,15 @@ return function(t, shared, require, server, client)
 		t.eq(tnt.item, I.Tnt)
 		t.eq(tnt.count, 1)
 		t.eq(Crafting.match(grid({ S, G, S, G, S, G, S, G, S }), 3), nil, "the other way round is nothing")
-		local T, D = I.Tnt, I.DiamondBlock
-		local nuke = Crafting.match(grid({ T, T, T, T, D, T, T, T, T }), 3) :: any
-		t.ok(nuke ~= nil, "eight TNT around a diamond block")
+		local T, U = I.Tnt, I.UraniumBlock
+		local nuke = Crafting.match(grid({ T, T, T, T, U, T, T, T, T }), 3) :: any
+		t.ok(nuke ~= nil, "eight TNT around a uranium block")
 		t.eq(nuke.item, I.Nuke)
+		local D = I.DiamondBlock
+		t.eq(Crafting.match(grid({ T, T, T, T, D, T, T, T, T }), 3), nil, "no longer a diamond block")
+		-- Black powder: two saltpetre, a sulfur and a coal or charcoal make four.
+		local black = Crafting.match(grid({ I.Saltpetre, I.Sulfur, I.Saltpetre, I.Charcoal }), 2) :: any
+		t.ok(black and black.item == I.Gunpowder and black.count == 4, "saltpetre, sulfur and charcoal")
 		-- (Appended after Flint and Steel; the newest item is pinned in tests/spec/Items.)
 		t.ok(I.Gunpowder > I.FlintAndSteel, "gunpowder came after flint and steel")
 	end)

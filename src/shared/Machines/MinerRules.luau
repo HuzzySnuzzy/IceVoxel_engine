@@ -4,9 +4,11 @@
 	each one gives, and its state code.
 
 	  ORES       every ore block BlockList has, in this order (frozen: the order is packed into the
-	             miner's state): Coal Ore, Iron Ore, Osmium Ore, Gold Ore, Emerald Ore, Diamond
+	             miner's state; new ores go at the end): Coal Ore, Iron Ore, Osmium Ore, Gold Ore,
+	             Emerald Ore, Diamond Ore, then Copper, Lead, Zinc, Sulfur, Saltpetre and Uranium
 	             Ore. Each gives its drop (Items.blockDrops: Coal, Raw Iron, Raw Osmium, Raw Gold,
-	             an Emerald, a Diamond; one a time), not the ore block (drops are what furnaces and
+	             an Emerald, a Diamond, Raw Copper, Raw Lead, Raw Zinc, a Sulfur, a Saltpetre, Raw
+	             Uranium; one a time), not the ore block (drops are what furnaces and
 	             the Electric Furnace take, and an ore block can't be moved: a miner is built on a
 	             vein where it lies), and Config.Miner.Ores' numbers: ticks an item, J a tick, the
 	             least J an item costs (`floor`: coal never makes more energy than it took)
@@ -53,7 +55,21 @@ local MinerRules = {}
 MinerRules.STATE = table.freeze({ MINING = 0, NO_POWER = 1, OUTPUT_FULL = 2, NO_ORE = 3 })
 local MAX_CODE = MinerRules.STATE.NO_ORE
 
-local NAMES = { "CoalOre", "IronOre", "OsmiumOre", "GoldOre", "EmeraldOre", "DiamondOre" }
+local NAMES = {
+	"CoalOre",
+	"IronOre",
+	"OsmiumOre",
+	"GoldOre",
+	"EmeraldOre",
+	"DiamondOre",
+	-- (The new ores, appended: the order is packed into saved state.)
+	"CopperOre",
+	"LeadOre",
+	"ZincOre",
+	"SulfurOre",
+	"SaltpetreOre",
+	"UraniumOre",
+}
 -- (Config.Miner.Ores by name.)
 local ORE_NUMBERS: { [string]: { ticks: number, joules: number, floor: number? } } = Config.Miner.Ores :: any
 

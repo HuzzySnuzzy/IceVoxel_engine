@@ -68,6 +68,13 @@ Knowledge.ORES = table.freeze({
 	IronOre = 2,
 	OsmiumOre = 2,
 	GoldOre = 3,
+	-- (The new ores: the metals as iron and osmium, the powders as coal, uranium as gold.)
+	CopperOre = 2,
+	LeadOre = 2,
+	ZincOre = 2,
+	SulfurOre = 1,
+	SaltpetreOre = 1,
+	UraniumOre = 3,
 	DiamondOre = 5,
 	EmeraldOre = 5,
 }) :: { [string]: number }
@@ -80,6 +87,13 @@ Knowledge.SMELTED = table.freeze({
 	IronIngot = 0.7,
 	GoldIngot = 1,
 	OsmiumIngot = 0.7,
+	-- (Minecraft's copper ingot gives 0.7; lead and zinc as it, uranium as gold.)
+	CopperIngot = 0.7,
+	LeadIngot = 0.7,
+	ZincIngot = 0.7,
+	UraniumIngot = 1,
+	Sulfur = 0.1,
+	Saltpetre = 0.1,
 	Diamond = 1,
 	Emerald = 1,
 	Coal = 0.1,
