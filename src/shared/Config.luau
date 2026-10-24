@@ -2497,8 +2497,9 @@ local Config = {
 		Lure = { Enabled = true, Noise = 24, Ticks = 600, Cell = 48 },
 		-- Targeting (ticks): a scan for a target every ScanTicks (a Laser Sight's own `scan`), sight
 		-- of the one held checked every SightTicks, lost after LoseTicks unseen; at most
-		-- MaxSightChecks candidates looked at a scan, MaxScansPerTick scans and MaxShotsPerTick shots
-		-- a tick for every turret together.
+		-- MaxSightChecks candidates looked at a scan (the next scan looks further down the ranking),
+		-- MaxScansPerTick scans and MaxShotsPerTick shots a tick for every turret together (those
+		-- refused go first next tick, the longest waiting first).
 		ScanTicks = 10,
 		SightTicks = 4,
 		LoseTicks = 10,
@@ -2520,10 +2521,12 @@ local Config = {
 		-- "In: x/s" averages arrivals over FeedRateTicks.
 		FeedTicks = 20,
 		FeedRateTicks = 100,
-		-- Turrets messages: to players within RecordRange blocks (sideways), at most every
-		-- RecordTicks a turret, when its target, flags or ammo change or its aim moved RecordAngle
-		-- degrees, and every RecordRefresh ticks while it tracks.
-		RecordRange = 96,
+		-- Turrets messages: to players within RecordRange blocks (sideways: as far as edit lists
+		-- go, Interest.EditChunkRadius chunks, past every chunk a client keeps records for: full
+		-- detail's and its neighbours', a turret up to 207 blocks off at the highest settings), at
+		-- most every RecordTicks a turret, when its target, flags or ammo change or its aim moved
+		-- RecordAngle degrees, and every RecordRefresh ticks while it tracks.
+		RecordRange = 224,
 		RecordTicks = 2,
 		RecordAngle = 3,
 		RecordRefresh = 20,

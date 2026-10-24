@@ -54,13 +54,19 @@
 	             PitchMin is a dead zone).
 	  Scans      with no target, every ScanTicks (a Laser Sight's `scan`: 5) staggered by its
 	             cell, at most MaxScansPerTick for every turret together (one over waits for the
-	             next tick): the hostiles in reach (from the tick's grid: hostiles hashed into
-	             16-block columns once a machine tick, only when a turret scans or shoots) ranked
+	             next tick, the longest waiting first: of n due none waits more than
+	             ceil(n / MaxScansPerTick) ticks; see Gate): the hostiles in reach (from the tick's
+	             grid: hostiles hashed into 16-block columns with their body's aim point once a
+	             machine tick, only when a turret scans or shoots; none killed this tick) ranked
 	             by TurretRules.score (distance + 0.05 a degree to turn: one two blocks nearer but
-	             behind the gun loses), the best MaxSightChecks looked at in that order
-	             (FireRules.wallBetween's rule, on VoxelRaycast.distance: Shapes.sight's collision
-	             boxes, so glass and leaves stop sight, torches and water don't), the first in
-	             sight taken.
+	             behind the gun loses; worked out only for those near enough to rank), the best
+	             MaxSightChecks looked at in that order (FireRules.wallBetween's rule, on
+	             VoxelRaycast.distance: Shapes.sight's collision boxes, so glass and leaves stop
+	             sight, torches and water don't; looked along from the candidate's end, where a
+	             wall a horde presses on stands), the first in sight taken. A scan that finds none
+	             in sight leaves the next to look further down the ranking (past the last it
+	             looked at, from the best again once past the end), so however many hidden ones
+	             rank first, one in sight k-th is looked at within ceil(k / MaxSightChecks) scans.
 	  Tracking   sticky (never a switch to a nearer one): turning at its turn rate
 	             (TurretRules.turn, `turn` degrees a second), its sight checked every SightTicks,
 	             lost after LoseTicks unseen, at once when it is gone (env.mob nil: dead, removed,
@@ -71,18 +77,20 @@
 	  Firing     tracking, the target seen at the last check, the order ready, armed, powered and
 	             not blocked, the gun within `settle` degrees of the aim point, and the tick's
 	             MaxShotsPerTick not used up (a shot over it waits a tick: the kind holds the credit
-	             at CREDIT, so none is lost). The shot: from the pivot along the exact aim, spread
-	             by TurretRules.spread (Ballistics.spreadDir: a Laser Sight halves the cone, a
-	             working Suppressor narrows it); the round's flight (its velocity, range and
-	             falloff, zeroed at the aim's distance, ending at the round's range x 2.5 or the
-	             turret's range + ExtraFlight, the nearer), its damage x the type's damageScale; the
-	             hostiles near the flight its only targets (FireRules.mobTarget's, filled into
-	             pooled tables; no lag compensation), so a player or an animal in the line is flown
-	             through; FireRules.blockRules(weapons, false): glass is never shattered, leaves
-	             are flown through (PassLeaves); Ballistics.trace. A hit hurts through
-	             `env.hurt` (Ballistics.damage: a head hit times ZombieHead, HelmetShare of that
-	             under a helmet, through no armour; the bullet's knockback away from the turret).
-	             One bullet a shot (the turrets' rounds are single bullets).
+	             at CREDIT, so none is lost; those waiting go first, so every turret gets its share).
+	             The shot: from the pivot along the exact aim, spread by TurretRules.spread
+	             (Ballistics.spreadDir: a Laser Sight halves the cone, a working Suppressor narrows
+	             it); the round's flight (its velocity, range and falloff, zeroed at the aim's
+	             distance, ending at the round's range x 2.5 or the turret's range + ExtraFlight,
+	             the nearer), its damage x the type's damageScale; the hostiles near the flight its
+	             only targets (FireRules.mobTarget's, filled into pooled tables; no lag
+	             compensation), so a player or an animal in the line is flown through;
+	             FireRules.blockRules(weapons, false): glass is never shattered, leaves are flown
+	             through (PassLeaves); Ballistics.trace. A hit hurts through `env.hurt`
+	             (Ballistics.damage: a head hit times ZombieHead, HelmetShare of that under a
+	             helmet, through no armour; the bullet's knockback away from the turret); one it
+	             kills (env.mob nil after) is gone for the tick's later scans and shots. One bullet
+	             a shot (the turrets' rounds are single bullets).
 	  Noise      a shot's noise at the muzzle (TurretRules.shotNoise: the stand-in gun's with its
 	             muzzle device x NoiseScale) and its impact's (FireRules.impactNoise, ImpactNoise
 	             blocks) at most once every ShotNoiseTicks a turret.
@@ -172,12 +180,17 @@ type Turret = {
 	yaw: number,
 	pitch: number,
 	-- The mob it tracks (0: none), the tick it was last seen and last looked at, and whether
-	-- it was in sight then; a scan waiting for the next tick's budget.
+	-- it was in sight then; the tick its due scan and its shot have waited since for the
+	-- tick's budget (math.huge: none waits); the last candidate its scans looked at in vain
+	-- (score and id; -math.huge: none), the next scan looking past it.
 	target: number,
 	seenAt: number,
 	sightAt: number,
 	visible: boolean,
-	scanDue: boolean,
+	scanSince: number,
+	shotSince: number,
+	floorScore: number,
+	floorId: number,
 	-- Its last shot and its last noise (ticks), its feeder tier and whether it was asked yet,
 	-- its shot counter (u16).
 	shotAt: number,
@@ -200,6 +213,23 @@ type Turret = {
 	record: Protocol.TurretRecord,
 }
 
+--[[
+	A budget every turret shares (MaxScansPerTick, MaxShotsPerTick), fairly: those refused one
+	tick go first the next, oldest first, so of n waiting none waits more than ceil(n / budget)
+	ticks. A request's age is the tick it has waited since and its turret's turn that tick
+	(`ageOf`), so of those waiting since the same tick the last the machines tick are not always
+	the last served. `waiting` holds this tick's refusals (their ages, the first `count`); from the
+	last tick's, those older than `cutoff` go, then `quota` more of age `cutoff`, `reserved` of
+	them still to come; the others only while the budget less those reserved allows.
+]]
+type Gate = {
+	waiting: { number },
+	count: number,
+	cutoff: number,
+	quota: number,
+	reserved: number,
+}
+
 -- The whole state (see the header).
 export type World = {
 	env: Env,
@@ -210,24 +240,36 @@ export type World = {
 	byChunk: { [number]: { Turret } },
 	count: number,
 	tracking: number,
-	-- This tick's counts and time (ms).
+	-- This tick's counts and time (ms), the scans' and the shots' budgets.
 	scans: number,
 	sights: number,
 	shots: number,
 	ms: number,
+	scanGate: Gate,
+	shotGate: Gate,
 	-- The tick's grid of hostiles (`gridTick`: the tick it was built for): the list env.hostiles
-	-- fills, how many, each 16-block column's first index and each entry's next (0: the last).
+	-- fills, how many, each 16-block column's first index and each entry's next (0: the last),
+	-- each one's body aim point; the ids of those killed since it was built.
 	gridTick: number,
 	hostiles: { Target },
 	hostileCount: number,
 	heads: { [number]: number },
 	nexts: { number },
-	-- A scan's candidates (index into `hostiles`, score, aim point).
+	bodyX: { number },
+	bodyY: { number },
+	bodyZ: { number },
+	gone: { [number]: boolean },
+	-- A scan's candidates (index into `hostiles`, distance, aim point), the nearest (`rank`:
+	-- distance, candidate), those it scored (candidate, score).
 	candidates: { number },
-	scores: { number },
+	distances: { number },
 	aimX: { number },
 	aimY: { number },
 	aimZ: { number },
+	nearest: { number },
+	nearestAt: { number },
+	picks: { number },
+	scores: { number },
 	-- A shot's targets (from the pool), its last impact (for FireRules.impactNoise), its origin,
 	-- direction and flight, the block rules (no glass shattered).
 	targets: { Ballistics.Target },
@@ -271,6 +313,9 @@ local FLIGHT_REACH = 0.75
 -- The coordinates a Shots message may carry (Net/WeaponSync): sideways, and up or down.
 local LIMIT = Protocol.MAX_COORDINATE + 64
 local Y_LIMIT = 4096
+-- The most a turn adds to a candidate's score (TurretRules.score: half a turn, blocks).
+local TURN_MOST = TurretRules.score(0, math.pi)
+local HALF_PI = math.pi / 2
 -- Items whose flags the records carry.
 local LASER = rawget(Items.id :: any, "LaserSight") :: number?
 local SCOPE = rawget(Items.id :: any, "RifleScope") :: number?
@@ -299,16 +344,26 @@ function TurretWorld.new(env: Env): World
 		sights = 0,
 		shots = 0,
 		ms = 0,
+		scanGate = { waiting = {}, count = 0, cutoff = -math.huge, quota = 0, reserved = 0 },
+		shotGate = { waiting = {}, count = 0, cutoff = -math.huge, quota = 0, reserved = 0 },
 		gridTick = -math.huge,
 		hostiles = {},
 		hostileCount = 0,
 		heads = {},
 		nexts = {},
+		bodyX = {},
+		bodyY = {},
+		bodyZ = {},
+		gone = {},
 		candidates = {},
-		scores = {},
+		distances = {},
 		aimX = {},
 		aimY = {},
 		aimZ = {},
+		nearest = {},
+		nearestAt = {},
+		picks = {},
+		scores = {},
 		targets = {},
 		targetPool = {},
 		finals = {},
@@ -347,11 +402,65 @@ function TurretWorld.settings(): { turrets: typeof(Config.Turrets), weapons: typ
 	return { turrets = Config.Turrets, weapons = Config.Weapons }
 end
 
--- A new machine tick: its counts start over, its grid is stale, old lure cells go.
+--[[ The budgets (see Gate) ]]
+
+-- A request's age: the tick it has waited since, and its turret's turn that tick (0..1: the
+-- turrets' spread evenly, each one's moving on every tick).
+local function ageOf(turret: Turret, since: number): number
+	return since + (turret.phase * 0.6180339887 + since * 0.7548776662) % 1
+end
+
+-- A new tick's turns, from the last tick's refusals, `most` going a tick.
+local function openGate(gate: Gate, tick: number, most: number)
+	local waiting, count = gate.waiting, gate.count
+	if most < 1 then
+		gate.cutoff, gate.quota, gate.reserved = -math.huge, 0, 0
+	elseif count <= most then
+		-- (All of them go, before any new one.)
+		gate.cutoff, gate.quota, gate.reserved = tick, 0, count
+	else
+		-- (The `most` oldest go: those older than the most-th, and of its age what is left.)
+		table.sort(waiting)
+		local cutoff = waiting[most]
+		local older = 0
+		while waiting[older + 1] < cutoff do
+			older += 1
+		end
+		gate.cutoff, gate.quota, gate.reserved = cutoff, most - older, most
+	end
+	table.clear(waiting)
+	gate.count = 0
+end
+
+-- May a request of age `age` go, `used` of the tick's `most` gone? (Counted when it may.)
+local function admit(gate: Gate, age: number, used: number, most: number): boolean
+	if used >= most then
+		return false
+	elseif age < gate.cutoff or (age == gate.cutoff and gate.quota > 0) then
+		if age == gate.cutoff then
+			gate.quota -= 1
+		end
+		gate.reserved = math.max(gate.reserved - 1, 0)
+		return true
+	end
+	return used + gate.reserved < most
+end
+
+-- A request of age `age` was refused: it goes first next tick.
+local function refuse(gate: Gate, age: number)
+	gate.count += 1
+	gate.waiting[gate.count] = age
+end
+
+-- A new machine tick: its counts start over, the budgets go to those that waited, its grid is
+-- stale, old lure cells go.
 local function beginTick(world: World, tick: number)
 	world.tick = tick
 	world.scans, world.sights, world.shots, world.ms = 0, 0, 0, 0
-	local lure = world.env.settings.turrets.Lure
+	local s = world.env.settings.turrets
+	openGate(world.scanGate, tick, s.MaxScansPerTick)
+	openGate(world.shotGate, tick, s.MaxShotsPerTick)
+	local lure = s.Lure
 	local ticks = math.max(1, lure.Ticks)
 	if tick % ticks == 0 then
 		local lures = world.lures
@@ -386,7 +495,10 @@ local function newTurret(order: Order, spec: Spec): Turret
 		seenAt = -math.huge,
 		sightAt = -math.huge,
 		visible = false,
-		scanDue = false,
+		scanSince = math.huge,
+		shotSince = math.huge,
+		floorScore = -math.huge,
+		floorId = 0,
 		shotAt = -math.huge,
 		noiseAt = -math.huge,
 		feed = 0,
@@ -490,12 +602,15 @@ local function ensureGrid(world: World)
 	local n = world.env.hostiles(list)
 	world.hostileCount = n
 	local heads, nexts = world.heads, world.nexts
+	local bodyX, bodyY, bodyZ = world.bodyX, world.bodyY, world.bodyZ
 	table.clear(heads)
+	table.clear(world.gone)
 	for i = 1, n do
 		local mob = list[i]
 		local key = Coords.chunkKey(mob.x // GRID, mob.z // GRID)
 		nexts[i] = heads[key] or 0
 		heads[key] = i
+		bodyX[i], bodyY[i], bodyZ[i] = aimPoint(mob, false)
 	end
 end
 
@@ -528,7 +643,11 @@ local function sightBlocked(
 end
 TurretWorld.sightBlocked = sightBlocked
 
--- Is a block between the turret's pivot and a point (its own cell air)? A sight check counted.
+--[[
+	Is a block between the turret's pivot and a point (its own cell air)? A sight check counted.
+	(Looked along from the point: the wall a horde presses on stands near it, so a hidden one's
+	ray ends after a block or two.)
+]]
 local function wall(
 	world: World,
 	turret: Turret,
@@ -540,7 +659,74 @@ local function wall(
 	z: number
 ): boolean
 	world.sights += 1
-	return sightBlocked(world, turret.x, turret.y, turret.z, px, py, pz, x, y, z)
+	return sightBlocked(world, turret.x, turret.y, turret.z, x, y, z, px, py, pz)
+end
+
+-- Candidate k's score from the pivot (px, py, pz), the gun along (gx, gy, gz).
+local function scoreOf(
+	world: World,
+	k: number,
+	px: number,
+	py: number,
+	pz: number,
+	gx: number,
+	gy: number,
+	gz: number
+): number
+	local d = world.distances[k]
+	local along = ((world.aimX[k] - px) * gx + (world.aimY[k] - py) * gy + (world.aimZ[k] - pz) * gz) / d
+	return TurretRules.score(d, math.acos(math.clamp(along, -1, 1)))
+end
+
+--[[
+	Scores the `n` candidates of the turret's scan that may be among its best `most` ranked after
+	its floor (TurretRules.score, then the id: the last candidate its scans looked at in vain),
+	into `picks` and `scores`; returns how many. A score is at least the distance, so none further
+	than the worst score of the `most` nearest surely past the floor needs its angle worked out
+	(one acos, from the gun's direction: TurretRules.offAngle's angle).
+]]
+local function rank(world: World, turret: Turret, n: number, most: number): number
+	if most < 1 then
+		return 0
+	end
+	local list, candidates, distances = world.hostiles, world.candidates, world.distances
+	local floorScore, floorId = turret.floorScore, turret.floorId
+	local px, py, pz = TurretRules.pivot(turret.x, turret.y, turret.z)
+	local gx, gy, gz = TurretRules.direction(turret.yaw, turret.pitch)
+	-- The `most` nearest of those surely past the floor (distance, candidate).
+	local nearest, nearestAt, found = world.nearest, world.nearestAt, 0
+	for k = 1, n do
+		local d = distances[k]
+		if d > floorScore and (found < most or d < nearest[most]) then
+			local j = if found < most then found + 1 else most
+			found = math.max(found, j)
+			while j > 1 and nearest[j - 1] > d do
+				nearest[j], nearestAt[j] = nearest[j - 1], nearestAt[j - 1]
+				j -= 1
+			end
+			nearest[j], nearestAt[j] = d, k
+		end
+	end
+	local cut = math.huge
+	if found >= most then
+		cut = 0
+		for j = 1, most do
+			cut = math.max(cut, scoreOf(world, nearestAt[j], px, py, pz, gx, gy, gz))
+		end
+	end
+	local picks, scores = world.picks, world.scores
+	local count = 0
+	for k = 1, n do
+		local d = distances[k]
+		if d <= cut and d + TURN_MOST >= floorScore then
+			local score = scoreOf(world, k, px, py, pz, gx, gy, gz)
+			if score > floorScore or (score == floorScore and list[candidates[k]].id > floorId) then
+				count += 1
+				picks[count], scores[count] = k, score
+			end
+		end
+	end
+	return count
 end
 
 --[[
@@ -552,49 +738,74 @@ local function scan(world: World, turret: Turret, range: number, head: boolean):
 	ensureGrid(world)
 	world.scans += 1
 	local px, py, pz = TurretRules.pivot(turret.x, turret.y, turret.z)
-	local list, heads, nexts = world.hostiles, world.heads, world.nexts
-	local candidates, scores = world.candidates, world.scores
+	local list, heads, nexts, gone = world.hostiles, world.heads, world.nexts, world.gone
+	local bodyX, bodyY, bodyZ = world.bodyX, world.bodyY, world.bodyZ
+	local candidates, distances = world.candidates, world.distances
 	local aimX, aimY, aimZ = world.aimX, world.aimY, world.aimZ
 	local far, near = range * range, s.MinRange * s.MinRange
-	local yaw, pitch = turret.yaw, turret.pitch
+	-- (TurretRules.inPitch's limits, as the sines of the pitch: no angle worked out.)
+	local limits = Config.Turrets
+	local low = math.sin(math.clamp(math.rad(limits.PitchMin) - 1e-9, -HALF_PI, HALF_PI))
+	local high = math.sin(math.clamp(math.rad(limits.PitchMax) + 1e-9, -HALF_PI, HALF_PI))
+	local killed = next(gone) ~= nil
 	local n = 0
 	for cx = (px - range) // GRID, (px + range) // GRID do
 		for cz = (pz - range) // GRID, (pz + range) // GRID do
 			local i = heads[Coords.chunkKey(cx, cz)] or 0
 			while i ~= 0 do
-				local x, y, z = aimPoint(list[i], head)
-				local dx, dy, dz = x - px, y - py, z - pz
-				local d2 = dx * dx + dy * dy + dz * dz
-				if d2 <= far and d2 >= near then
-					local wantYaw, wantPitch, distance = TurretRules.aim(px, py, pz, x, y, z)
-					if TurretRules.inPitch(wantPitch) then
-						n += 1
-						candidates[n] = i
-						scores[n] = TurretRules.score(distance, TurretRules.offAngle(yaw, pitch, wantYaw, wantPitch))
-						aimX[n], aimY[n], aimZ[n] = x, y, z
+				if not (killed and gone[list[i].id]) then
+					local x, y, z = bodyX[i], bodyY[i], bodyZ[i]
+					if head then
+						x, y, z = aimPoint(list[i], true)
+					end
+					local dx, dy, dz = x - px, y - py, z - pz
+					local d2 = dx * dx + dy * dy + dz * dz
+					if d2 <= far and d2 >= near then
+						local distance = math.sqrt(d2)
+						if dy >= distance * low and dy <= distance * high then
+							n += 1
+							candidates[n], distances[n] = i, distance
+							aimX[n], aimY[n], aimZ[n] = x, y, z
+						end
 					end
 				end
 				i = nexts[i]
 			end
 		end
 	end
-	-- The best few in order (each found by a pass: nothing sorted, nothing made).
-	for _ = 1, math.min(n, s.MaxSightChecks) do
-		local best, bestScore = 0, math.huge
-		for k = 1, n do
-			if scores[k] < bestScore then
-				best, bestScore = k, scores[k]
+	local most = s.MaxSightChecks
+	local count = rank(world, turret, n, most)
+	if count == 0 and turret.floorScore > -math.huge then
+		-- (Past the last of the ranking: from the best again.)
+		turret.floorScore, turret.floorId = -math.huge, 0
+		count = rank(world, turret, n, most)
+	end
+	-- The best few in order (each found by a pass: nothing sorted, nothing made); the next scan
+	-- looks past the last of them that is hidden.
+	local picks, scores = world.picks, world.scores
+	for _ = 1, math.min(count, most) do
+		local best, bestScore, bestId = 0, math.huge, 0
+		for m = 1, count do
+			local score = scores[m]
+			if score <= bestScore and score < math.huge then
+				local id = list[candidates[picks[m]]].id
+				if score < bestScore or id < bestId then
+					best, bestScore, bestId = m, score, id
+				end
 			end
 		end
 		if best == 0 then
 			break
 		end
 		scores[best] = math.huge
-		if not wall(world, turret, px, py, pz, aimX[best], aimY[best], aimZ[best]) then
-			setTarget(world, turret, list[candidates[best]].id)
+		local k = picks[best]
+		if not wall(world, turret, px, py, pz, aimX[k], aimY[k], aimZ[k]) then
+			setTarget(world, turret, bestId)
 			turret.seenAt, turret.sightAt, turret.visible = world.tick, world.tick, true
+			turret.floorScore, turret.floorId = -math.huge, 0
 			return true
 		end
+		turret.floorScore, turret.floorId = bestScore, bestId
 	end
 	return false
 end
@@ -663,7 +874,7 @@ local function flightTargets(world: World, length: number)
 	x0, y0, z0, x1, y1, z1 = x0 - m, y0 - m, z0 - m, x1 + m, y1 + m, z1 + m
 	local ox, oy, oz = origin.x, origin.y, origin.z
 	local ux, uy, uz = dir.x, dir.y, dir.z
-	local list, heads, nexts = world.hostiles, world.heads, world.nexts
+	local list, heads, nexts, gone = world.hostiles, world.heads, world.nexts, world.gone
 	for cx = x0 // GRID, x1 // GRID do
 		for cz = z0 // GRID, z1 // GRID do
 			local i = heads[Coords.chunkKey(cx, cz)] or 0
@@ -671,7 +882,15 @@ local function flightTargets(world: World, length: number)
 				local mob = list[i]
 				local kind = mob.kind
 				local x, y, z = mob.x, mob.y, mob.z
-				if x >= x0 and x <= x1 and z >= z0 and z <= z1 and y <= y1 and y + kind.height >= y0 then
+				if
+					x >= x0
+					and x <= x1
+					and z >= z0
+					and z <= z1
+					and y <= y1
+					and y + kind.height >= y0
+					and not gone[mob.id]
+				then
 					-- (Near the chord from the origin to the flight's end: its box's centre.)
 					local cy = y + kind.height / 2
 					local along = math.clamp((x - ox) * ux + (cy - oy) * uy + (z - oz) * uz, 0, length)
@@ -743,11 +962,15 @@ local function shoot(
 	world.ownX, world.ownY, world.ownZ = turret.x, turret.y, turret.z
 	local impacts = Ballistics.trace(world.sight, origin, dir, flight, world.targets, world.rules)
 	local final = impacts[#impacts]
-	-- The hit.
+	-- The hit (one it kills is gone for the tick's later scans and shots).
 	if final and final.kind == "mob" and final.target then
 		local amount = Ballistics.damage(flight, final, weapons)
+		local id = final.target.key
 		if amount > 0 then
-			env.hurt(final.target.key, amount, px, pz, FireRules.knockback(1, 1, weapons), final.head)
+			env.hurt(id, amount, px, pz, FireRules.knockback(1, 1, weapons), final.head)
+			if env.mob(id) == nil then
+				world.gone[id] = true
+			end
 		end
 	end
 	-- Its noise and its impact's, under the turret's cooldown.
@@ -888,6 +1111,9 @@ local function stepTurret(world: World, order: Order, out: Outcome, spec: Spec):
 	local step = math.rad(spec.turn) / TurretRules.TICK_RATE
 	local fired = false
 	local status: number
+	-- (A shot waits on only while it is refused tick after tick.)
+	local shotSince = turret.shotSince
+	turret.shotSince = math.huge
 	if not powered then
 		-- It holds still and keeps its target while it lasts.
 		if turret.target ~= 0 and env.mob(turret.target) == nil then
@@ -921,38 +1147,51 @@ local function stepTurret(world: World, order: Order, out: Outcome, spec: Spec):
 				end
 			end
 		end
-		-- No target: a scan when one is due and the tick's budget allows.
+		-- No target: a scan when one is due and the tick's budget allows (oldest due first).
 		if turret.target == 0 then
 			local every = math.max(1, opticSpec.scan)
 			if (tick + turret.phase) % every == 0 then
-				turret.scanDue = true
+				turret.scanSince = math.min(turret.scanSince, tick)
 			end
-			if turret.scanDue and world.scans < s.MaxScansPerTick then
-				turret.scanDue = false
-				if scan(world, turret, range, head) then
-					local mob = env.mob(turret.target)
-					if mob == nil then
-						setTarget(world, turret, 0)
-					else
-						ax, ay, az = aimPoint(mob, head)
-						wantYaw, wantPitch, distance = TurretRules.aim(px, py, pz, ax, ay, az)
+			local since = turret.scanSince
+			if since <= tick then
+				local age = ageOf(turret, since)
+				if admit(world.scanGate, age, world.scans, s.MaxScansPerTick) then
+					turret.scanSince = math.huge
+					if scan(world, turret, range, head) then
+						local mob = env.mob(turret.target)
+						if mob == nil then
+							setTarget(world, turret, 0)
+						else
+							ax, ay, az = aimPoint(mob, head)
+							wantYaw, wantPitch, distance = TurretRules.aim(px, py, pz, ax, ay, az)
+						end
 					end
+				else
+					refuse(world.scanGate, age)
 				end
 			end
 		end
 		if turret.target ~= 0 then
-			turret.scanDue = false
+			turret.scanSince = math.huge
 			turret.yaw, turret.pitch = TurretRules.turn(turret.yaw, turret.pitch, wantYaw, wantPitch, step)
+			-- A shot when the tick's budget allows (the longest waiting first).
 			if
 				turret.visible
 				and order.ready
 				and order.armed
-				and world.shots < s.MaxShotsPerTick
 				and TurretRules.offAngle(turret.yaw, turret.pitch, wantYaw, wantPitch)
 					<= math.rad(spec.settle) + 1e-9
 			then
-				shoot(world, turret, order, range, ax, ay, az, distance)
-				fired = true
+				local since = math.min(shotSince, tick)
+				local age = ageOf(turret, since)
+				if admit(world.shotGate, age, world.shots, s.MaxShotsPerTick) then
+					shoot(world, turret, order, range, ax, ay, az, distance)
+					fired = true
+				else
+					turret.shotSince = since
+					refuse(world.shotGate, age)
+				end
 			end
 			if tick - turret.shotAt < s.FiringTicks then
 				status = STATUS.FIRING

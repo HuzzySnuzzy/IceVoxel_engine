@@ -7,32 +7,36 @@
 
 	   targets     hostiles only (an animal or a frozen zombie never, an animal in the line never
 	               hit); the aim points (Ballistics.mobBoxes' centres); nearest first with the
-	               turning score; at most MaxSightChecks looked at; sight through blocks, glass
-	               and leaves stopped, torches and water not, the turret's own cell air; the pitch
-	               limits' dead zone; MinRange; every type and tier's range and the scope's
+	               turning score; at most MaxSightChecks looked at, the next scan further down
+	               (a breach, a cave: hidden ones never hide one in sight for long); sight through
+	               blocks, glass and leaves stopped, torches and water not, the turret's own cell
+	               air; the pitch limits' dead zone; MinRange; every type and tier's range and the
+	               scope's; a mob killed in a tick gone for its later shots and scans
 	   tracking    sticky; the turn rate (the short way across +-pi); lost after LoseTicks
 	               unseen, at once dead, gone or out of range; no power holds still and keeps
 	               it; blocked drops it; idle eases level, the yaw held; the status precedence
 	   firing      the settle gate; the cadence under the feeder rule through the real kind
 	               (Machines/Kinds/Turret); hand-filled its buffer then No ammo; MaxShotsPerTick
-	               (a shot over it waits a tick, none lost); the spread with and without the Laser
-	               Sight and a Suppressor (the cone's edge, the design's hit rates); damage per
-	               type, the scoped sniper's head shots and a helmet's share; knockback; glass
-	               never shattered
+	               (a shot over it waits a tick, none lost, every turret its share); the spread
+	               with and without the Laser Sight and a Suppressor (the cone's edge, the
+	               design's hit rates); damage per type, the scoped sniper's head shots and a
+	               helmet's share; knockback; glass never shattered
 	   noise       each type's radius, suppressors' shares, the cooldown, the impact's noise; the
 	               lure (night only, its cell's cap, its interval, its button, armed and idle
 	               only, Lure.Enabled)
-	   scans       ScanTicks, a Laser Sight's 5, staggered by cell, MaxScansPerTick
+	   scans       ScanTicks, a Laser Sight's 5, staggered by cell, MaxScansPerTick (the longest
+	               waiting first: none starves)
 	   records     when they go (a change, RecordAngle, RecordRefresh, RecordTicks; idling sends
 	               nothing), chunk records, a turret broken forgotten, the codec's round trip;
 	               Shots records (shooter 0, the stand-in gun, the counter, the muzzle, plain)
 	               through WeaponSync's codec
-	   cost        50 turrets and 100 zombies in a fight against the design's budget; nothing
-	               allocated while tracking
+	   cost        50 turrets and 100 zombies in a fight and a siege, 150 and 260 in a siege (the
+	               blood moon's), against the design's budget; nothing allocated while tracking
 	   the glue    Mobs.hostiles and Mobs.target (reused tables, monsters only, never frozen),
 	               Mobs.weaponDamage with no player (no kill credit), records to players within
-	               RecordRange, shots within ShotBroadcast, chunk records, the lure's night, the
-	               NoiseBus, switched off nothing at all
+	               RecordRange (every chunk a client keeps; where a player was last seen while its
+	               feet are unknown), shots within ShotBroadcast, chunk records, the lure's night,
+	               the NoiseBus, switched off nothing at all
 ]]
 
 local fs = require("@lune/fs")
@@ -451,7 +455,7 @@ return function(t, shared, require, server)
 
 	t.test("turret world: at most MaxSightChecks candidates are looked at a scan, best first", function()
 		local spec = Turrets.of("rifle", 4)
-		local function run(walled: number): (number, number)
+		local function run(walled: number): (number, number, number)
 			local e = newGame()
 			-- A wall along z = 3 from x -10 to 10, two high: the walled ones stand behind it.
 			for x = -10, 10 do
@@ -475,14 +479,81 @@ return function(t, shared, require, server)
 					break
 				end
 			end
-			return (if r.state(turret).target == open.id then 1 else 0), sights
+			local first = if r.state(turret).target == open.id then 1 else 0
+			-- (And by its next scan.)
+			r.step(S.ScanTicks)
+			return first, sights, if r.state(turret).target == open.id then 1 else 0
 		end
 		local got, sights = run(5)
 		t.eq(got, 1, "5 walled, the 6th in sight: taken")
 		t.eq(sights, 6, "six looks")
-		got, sights = run(6)
-		t.eq(got, 0, "6 walled: the one in sight is never looked at")
+		local next
+		got, sights, next = run(6)
+		t.eq(got, 0, "6 walled: the one in sight is not looked at by the first scan")
 		t.eq(sights, S.MaxSightChecks, "MaxSightChecks looks")
+		t.eq(next, 1, "the next scan looks past the six: taken")
+	end)
+
+	t.test("turret world: hidden ones ranked first never hide one in sight for long: a breach, a cave", function()
+		-- A base's wall in front of the gun (z 4, three high) with `waiting` zombies pressing on it,
+		-- and one come in through a gap 14 blocks behind the gun, in plain sight.
+		local function breach(waiting: number): (number, boolean)
+			local e = newGame()
+			for x = -16, 16 do
+				for y = FLOOR, FLOOR + 2 do
+					e.set(x, y, 4, STONE)
+				end
+			end
+			for i = 1, waiting do
+				e.add(ZOMBIE, -9.5 + (i - 1) % 20, FLOOR, 5.5 + (i - 1) // 20)
+			end
+			local inside = e.add(ZOMBIE, 0.5, FLOOR, -13.5)
+			local r = newSim(e)
+			local turret = r.add(Turrets.of("rifle", 2))
+			local scans = 0
+			repeat
+				r.step(1)
+				scans += TurretWorld.stats(r.world).scans
+			until r.state(turret).target == inside.id or r.tick >= 400
+			return scans, r.state(turret).target == inside.id
+		end
+		for _, waiting in { 6, 10, 30 } do
+			local scans, got = breach(waiting)
+			local most = math.ceil((waiting + 1) / S.MaxSightChecks)
+			t.ok(got and scans <= most, `{waiting} at the wall: the one inside taken by scan {scans} (at most {most})`)
+		end
+		-- A cave under the base (8 down, 12 out: within the pitch limits) with 8 zombies in it, and
+		-- one walking in on the ground from 46 blocks, 2 blocks a second: taken as it comes in reach
+		-- (two scans: the eight hidden ones first), not once it is nearer than they are.
+		local e = newGame()
+		for x = -16, 16 do
+			for z = -16, 16 do
+				for y = FLOOR - 8, FLOOR - 6 do
+					e.set(x, y, z, AIR)
+				end
+			end
+		end
+		local below = {}
+		for i = 1, 8 do
+			local angle = i * math.pi / 4
+			table.insert(below, e.add(ZOMBIE, 0.5 + math.sin(angle) * 12, FLOOR - 8, 0.5 + math.cos(angle) * 12))
+		end
+		local _, cavePitch = TurretRules.aim(PX, PY, PZ, TurretWorld.aimPoint(below[1], false))
+		t.ok(TurretRules.inPitch(cavePitch), "the cave's zombies are within the pitch limits")
+		local walker = e.add(ZOMBIE, 0.5, FLOOR, 46.5)
+		local r = newSim(e)
+		local turret = r.add(Turrets.of("rifle", 4))
+		r.each = function()
+			walker.z -= 0.1
+		end
+		repeat
+			r.step(1)
+		until r.state(turret).target == walker.id or walker.z <= 3
+		local least = 46 - 0.1 * (2 * S.ScanTicks)
+		t.ok(walker.z - 0.5 >= least, `the walker taken at {walker.z - 0.5} blocks (at least {least})`)
+		for _, mob in below do
+			t.ok(r.state(turret).target ~= mob.id, "none in the cave")
+		end
 	end)
 
 	t.test("turret world: sight stopped by blocks, glass and leaves; torches and water let it by", function()
@@ -930,6 +1001,65 @@ return function(t, shared, require, server)
 		end
 	end)
 
+	t.test("turret world: a mob killed in a tick is gone for that tick's later shots and scans", function()
+		-- The fake's hurt as the mobs': a dead mob takes nothing.
+		local function game(): any
+			local e = newGame()
+			local hurt = e.env.hurt
+			e.env.hurt = function(id: number, ...): number
+				local mob = e.byId[id]
+				if mob and mob.dead then
+					table.insert(e.hurts, { id = id, amount = 0 })
+					return 0
+				end
+				return hurt(id, ...)
+			end
+			return e
+		end
+		-- A shot: the second turret's bullet at B flies through A, killed this tick by the first.
+		local e = game()
+		local b = e.add(ZOMBIE, 0.5, FLOOR, 12.5)
+		local r = newSim(e)
+		local second = r.add(Turrets.of("rifle", 1), 0, TY, -6)
+		r.step(12)
+		t.eq(r.state(second).target, b.id, "the second tracks B")
+		local a = e.add(ZOMBIE, 0.5, FLOOR, 4.5, { health = 1 })
+		local first = r.add(Turrets.of("smg", 1), 5, TY, 4)
+		-- (The first ticks first.)
+		table.remove(r.turrets)
+		table.insert(r.turrets, 1, first)
+		r.step(20)
+		t.eq(r.state(first).target, a.id, "the first tracks A, in the second's line")
+		t.eq(r.state(second).target, b.id)
+		e.hurts = {}
+		first.order.ready, second.order.ready = true, true
+		r.step(1)
+		t.eq(#e.hurts, 2, "two hits")
+		t.ok(e.hurts[1].id == a.id and a.dead, "A killed")
+		t.eq(e.hurts[2].id, b.id, "the second's bullet through A's body into B")
+		-- A scan: one due in the tick of a kill takes the live one, not the one just killed.
+		local e2 = game()
+		local dying = e2.add(ZOMBIE, 0.5, FLOOR, 5.5, { health = 1 })
+		local live = e2.add(ZOMBIE, 0.5, FLOOR, 9.5)
+		local r2 = newSim(e2)
+		local killer = r2.add(Turrets.of("smg", 4))
+		r2.step(12)
+		t.eq(r2.state(killer).target, dying.id)
+		-- (Beside it, its first scan due on the tick of the kill, ticked after the killer.)
+		local x = 2
+		local due = r2.tick + 1
+		while (due + (x + 7 * TY) % 997) % S.ScanTicks ~= 0 do
+			due += 1
+		end
+		r2.step(due - 1 - r2.tick)
+		local scanner = r2.add(Turrets.of("smg", 4), x, TY, TZ)
+		killer.order.ready = true
+		r2.step(1)
+		t.ok(dying.dead, "killed")
+		t.eq(TurretWorld.stats(r2.world).scans, 1, "the other's scan in the same tick")
+		t.eq(r2.state(scanner).target, live.id, "it took the live one")
+	end)
+
 	-- The angle (degrees) between where a shot ended and the aim point, from the pivot.
 	local function angleOff(shot: any, ax: number, ay: number, az: number): number
 		local p = shot.pellets[1]
@@ -1196,6 +1326,73 @@ return function(t, shared, require, server)
 		t.eq(table.concat(counts, " "), `{S.MaxScansPerTick} {S.MaxScansPerTick} 8`, "the budget, the rest next tick")
 	end)
 
+	t.test("turret world: MaxScansPerTick: the longest waiting first, so none starves however late it ticks", function()
+		-- 200 idle turrets 60 apart (no two reach the same zombie): 20 scans come due a tick, more
+		-- than the budget. A zombie in front of each of the 20 the machines tick last: each is taken
+		-- within ScanTicks and ceil(200 / MaxScansPerTick) ticks.
+		local spec = Turrets.of("rifle", 1)
+		local e = newGame()
+		local r = newSim(e)
+		local n, late = 200, 20
+		local entries = {}
+		for i = 0, n - 1 do
+			entries[i + 1] = r.add(spec, i * 60, TY, 0)
+		end
+		r.step(40)
+		for i = n - late, n - 1 do
+			e.add(ZOMBIE, i * 60 + 0.5, FLOOR, 10.5)
+		end
+		local within = S.ScanTicks + math.ceil(n / S.MaxScansPerTick)
+		local most = 0
+		for _ = 1, within do
+			r.step(1)
+			most = math.max(most, TurretWorld.stats(r.world).scans)
+		end
+		local got = 0
+		for i = n - late + 1, n do
+			if r.state(entries[i]).target ~= 0 then
+				got += 1
+			end
+		end
+		t.eq(got, late, `all {late} taken within {within} ticks`)
+		t.eq(most, S.MaxScansPerTick, "never more than the budget a tick")
+	end)
+
+	t.test("turret world: MaxShotsPerTick: every turret its share, whenever the machines tick it", function()
+		-- 130 Ultimate SMGs, each with a zombie of its own, rounds without end: 39 shots wanted a
+		-- tick, 32 allowed. Each fires as often as the others, the budget used every tick.
+		local spec = Turrets.of("smg", 4)
+		local e = newGame()
+		local r = newSim(e)
+		local n, ticks = 130, 600
+		local entries = {}
+		for i = 0, n - 1 do
+			entries[i + 1] = r.add(spec, i * 60, TY, 0, { auto = true })
+			e.add(ZOMBIE, i * 60 + 0.5, FLOOR, 8.5)
+		end
+		r.step(60)
+		for _, entry in entries do
+			entry.shots = 0
+		end
+		local total, over = 0, 0
+		for _ = 1, ticks do
+			r.step(1)
+			local shots = TurretWorld.stats(r.world).shots
+			total += shots
+			if shots > S.MaxShotsPerTick then
+				over += 1
+			end
+		end
+		local least, most = math.huge, 0
+		for _, entry in entries do
+			least, most = math.min(least, entry.shots), math.max(most, entry.shots)
+		end
+		local share = S.MaxShotsPerTick * ticks / n
+		t.eq(over, 0, "never more than the budget a tick")
+		t.eq(total, S.MaxShotsPerTick * ticks, "the budget used every tick")
+		t.ok(least >= share * 0.97 and most <= share * 1.03, `each its share of {share}: {least} to {most}`)
+	end)
+
 	--[[ Records and shots ]]
 
 	-- A record as the client gets it (through the codec).
@@ -1358,10 +1555,12 @@ return function(t, shared, require, server)
 		block of a base, 3 apart, and 100 zombies (every kind) walking in from 14 to 40 blocks
 		out, a zombie killed coming back at the edge; the kind's cadence kept for each turret.
 		`walled`: a siege instead, a ring of stone three high 17 blocks round the base with the
-		zombies held outside it, so every turret scans and every sight check fails. Returns the
-		step (one machine tick of every turret and the zombies' walk) and the simulation.
+		zombies held outside it, so every turret scans and every sight check fails. `columns` x
+		`lines` turrets and `count` zombies another size (the ring 2 blocks past the base's
+		corners). Returns the step (one machine tick of every turret and the zombies' walk) and the
+		simulation.
 	]]
-	local function fight(walled: boolean?): (() -> (), any)
+	local function fight(walled: boolean?, columns: number?, lines: number?, count: number?): (() -> (), any)
 		local e = newGame()
 		local roll = rng(99)
 		local zombies = {}
@@ -1371,13 +1570,15 @@ return function(t, shared, require, server)
 				table.insert(kinds, kind)
 			end
 		end
-		local cx, cz = 13.5, 6.5
-		local stop = if walled then 18.5 else 12
+		local wide, deep = columns or 10, lines or 5
+		local cx, cz = (wide - 1) * 1.5, (deep - 1) * 1.5 + 0.5
+		local ring = math.ceil(math.sqrt(cx * cx + cz * cz) + 2)
+		local stop = if walled then ring + 1.5 else ring - 5
 		if walled then
-			for x = -20, 50 do
-				for z = -20, 30 do
+			for x = math.floor(cx) - ring - 2, math.ceil(cx) + ring + 2 do
+				for z = math.floor(cz) - ring - 2, math.ceil(cz) + ring + 2 do
 					local d = math.sqrt((x + 0.5 - cx) ^ 2 + (z + 0.5 - cz) ^ 2)
-					if d >= 17 and d < 18 then
+					if d >= ring and d < ring + 1 then
 						for y = FLOOR, FLOOR + 3 do
 							e.set(x, y, z, STONE)
 						end
@@ -1387,13 +1588,13 @@ return function(t, shared, require, server)
 		end
 		local function place(mob: any, i: number)
 			local angle = i * 2.399 + roll()
-			local distance = (if walled then 19 else 14) + (i % 27)
+			local distance = (if walled then ring + 2 else ring - 3) + (i % 27)
 			mob.x, mob.z = cx + math.cos(angle) * distance, cz + math.sin(angle) * distance
 			mob.y = FLOOR
 			mob.health = 40
 			mob.dead = false
 		end
-		for i = 1, 100 do
+		for i = 1, count or 100 do
 			local mob = e.add(kinds[(i - 1) % #kinds + 1], 0, FLOOR, 0)
 			place(mob, i)
 			zombies[i] = mob
@@ -1402,8 +1603,8 @@ return function(t, shared, require, server)
 		local optics = { 0, 0, I.LaserSight, 0, I.RifleScope }
 		local muzzles = { 0, I.Suppressor, 0, I.ImprovisedSuppressor }
 		local n = 0
-		for gx = 0, 9 do
-			for gz = 0, 4 do
+		for gx = 0, wide - 1 do
+			for gz = 0, deep - 1 do
 				n += 1
 				local spec = Turrets.SPECS[(n - 1) % #Turrets.SPECS + 1]
 				local optic = optics[n % #optics + 1]
@@ -1437,22 +1638,23 @@ return function(t, shared, require, server)
 
 	--[[
 		Costs (the design's budget for 50 turrets and 100 zombies in a fight: 1.5 ms native, 4
-		interpreted, a machine tick; Lune, the median of 3 runs of 200 ticks, the budget and 15%,
-		a miss measured again with the median of 5). Measured on this shared 4 core machine (load
-		2.5, other builders' runs alongside), native / NOCODEGEN=1:
+		interpreted, a machine tick, held to the siege and to the blood moon's siege too: 150
+		turrets, 260 zombies; Lune, the median of 3 runs of 200 ticks, the budget and 15%, a miss
+		measured again with the median of 5). Measured on this shared 4 core machine (load 2,
+		other builders' runs alongside), native / NOCODEGEN=1:
 		  the fight   0.38-0.57 / 0.85 ms (0.8 scans, 12 sight checks, 4.3 shots, 46 tracking a tick)
 		  the siege   see the spec's print (every turret scanning, every sight check failing)
 		Allocated: nothing a tick while tracking, nothing in the siege (scans, sight checks
 		blocked); 4.8 KB a tick in the fight (the trace's impacts: about 1.1 KB a shot).
 	]]
 	t.test(
-		"turret world: cost: 50 turrets and 100 zombies in a fight and a siege; nothing allocated tracking",
+		"turret world: cost: 50 turrets and 100 zombies in a fight and a siege, the blood moon's siege; nothing allocated",
 		function()
 			-- ms a machine tick (every turret's step and the fakes' walk), the median of `runs`.
-			local function cost(walled: boolean, ticks: number, runs: number): (number, any)
+			local function cost(case: any, ticks: number, runs: number): (number, any)
 				local times, last = {}, nil
 				for _ = 1, runs do
-					local step, r = fight(walled)
+					local step, r = fight(case.walled, case.columns, case.lines, case.count)
 					local start = os.clock()
 					for _ = 1, ticks do
 						step()
@@ -1465,12 +1667,24 @@ return function(t, shared, require, server)
 			local budget = if NATIVE then 1.5 else 4
 			local limit = budget * 1.15
 			local r: any, siege: any = nil, nil
-			for _, walled in { false, true } do
-				local label = if walled then "a siege" else "a fight"
-				local ms, last = cost(walled, 200, 3)
+			for _, case in
+				{
+					{ label = "50 turrets, 100 zombies, a fight", walled = false },
+					{ label = "50 turrets, 100 zombies, a siege", walled = true },
+					{
+						label = "150 turrets, 260 zombies, a siege",
+						walled = true,
+						columns = 15,
+						lines = 10,
+						count = 260,
+					},
+				}
+			do
+				local walled, label = case.walled, case.label
+				local ms, last = cost(case, 200, 3)
 				local again = ""
 				if ms > limit then
-					ms = math.min(ms, (cost(walled, 200, 5)))
+					ms = math.min(ms, (cost(case, 200, 5)))
 					again = ", measured again"
 				end
 				-- What a tick does (the last run's next 100 ticks).
@@ -1485,7 +1699,7 @@ return function(t, shared, require, server)
 				end
 				print(
 					string.format(
-						"         50 turrets, 100 zombies, %s: %.3f ms a tick (budget %.1f, %s%s); a tick %.1f scans, %.1f sight checks, %.1f shots, %.1f tracking",
+						"         %s: %.3f ms a tick (budget %.1f, %s%s); a tick %.1f scans, %.1f sight checks, %.1f shots, %.1f tracking",
 						label,
 						ms,
 						budget,
@@ -1501,7 +1715,7 @@ return function(t, shared, require, server)
 				if walled then
 					t.eq(shots, 0, "the siege: nothing seen, nothing fired")
 					t.ok(sights >= scans * 5, "every scan looks at its best few")
-					siege = last
+					siege = siege or last
 				else
 					t.ok(shots > 100, "a fight: shots every tick")
 					r = last
@@ -1884,7 +2098,7 @@ return function(t, shared, require, server)
 			local Mobs = h.Mobs
 			local near = h.join(4.5, FLOOR, 4.5)
 			local inRecords = h.join(TX + 0.5 + S.RecordRange - 1, FLOOR, 0.5)
-			local far = h.join(TX + 0.5 + W.ShotBroadcast + 10, FLOOR, 0.5)
+			local far = h.join(TX + 0.5 + math.max(W.ShotBroadcast, S.RecordRange) + 10, FLOOR, 0.5)
 			-- A player standing in the line of fire: never a target, never hit.
 			local inLine = h.join(0.5, FLOOR, 5.5)
 			local id = Mobs.spawn("Zombie", 0.5, FLOOR, 10.5)
@@ -1983,6 +2197,75 @@ return function(t, shared, require, server)
 			-- Broken: forgotten.
 			h.Glue.blockChanged(TX, TY, TZ, spec.block, AIR)
 			t.eq(TurretWorld.stats(h.Glue.world()).turrets, 0, "forgotten")
+		end
+	)
+
+	t.test(
+		"turret glue: records reach every chunk a client keeps them for, and a player whose feet are unknown",
+		function()
+			local h = glue()
+			local spec = Turrets.of("smg", 1)
+			local order = newOrder(spec)
+			order.optic = I.LaserSight
+			local function serve(ticks: number)
+				for _ = 1, ticks do
+					h.serve(order)
+					h.Glue.update(1 / 20)
+				end
+			end
+			local function flags(player: any): { number }
+				local found = {}
+				for _, payload in h.take(player, Protocol.ServerMessage.Turrets) do
+					for _, record in Protocol.decodeTurrets(payload) :: { any } do
+						table.insert(found, record.flags)
+					end
+				end
+				return found
+			end
+			-- A client keeps a chunk's records while it holds its data or its edit list: its full
+			-- detail chunks' and their neighbours' (Streaming/ChunkStreamer, around its feet). The
+			-- farthest such turret (sideways) at the highest Full Detail, Detail Falloff and Cave
+			-- View: within RecordRange, and one sent its records from there gets the changes.
+			local LodTree = require(shared.World.LodTree)
+			local PlayerSettings = require(shared.PlayerSettings)
+			local highest: any = {}
+			for _, entry in PlayerSettings.ENTRIES do
+				highest[entry.key] = entry.max
+			end
+			LodTree.configure(PlayerSettings.lod(highest))
+			local reach = 0
+			for _, underground in { false, true } do
+				for key, level in LodTree.select(0.5, 0.5, nil, underground) do
+					if level == 0 then
+						local _, nx, nz = Coords.decodeNodeKey(key)
+						for _, cell in { (nx - 1) * 16, (nx + 2) * 16 - 1, (nz - 1) * 16, (nz + 2) * 16 - 1 } do
+							reach = math.max(reach, math.abs(cell))
+						end
+					end
+				end
+			end
+			local lod = Config.Lod
+			LodTree.configure(lod.ViewDistance, lod.SplitDistance, lod.SplitDistanceL1, lod.UndergroundSplitDistanceL1)
+			t.ok(reach > 96 and S.RecordRange >= reach, `a kept record {reach} blocks off, within {S.RecordRange}`)
+			local away = h.join(TX + 0.5 + reach, FLOOR, 0.5)
+			-- Another near, then dying: its feet unknown while it respawns.
+			local near = h.join(4.5, FLOOR, 4.5)
+			serve(4)
+			h.Glue.sendChunks(away, { { 0, 0 } })
+			local sent = flags(away)
+			t.ok(#sent >= 1 and bit32.btest(sent[#sent], Flag.Powered), "the chunk's record: powered")
+			t.ok(#flags(near) >= 1, "the near one's")
+			near.x = nil
+			order.powered = false
+			order.ammo, order.held, order.armed = 0, 0, false
+			serve(10)
+			local after = flags(away)
+			t.ok(#after >= 1 and not bit32.btest(after[#after], Flag.Powered), `{reach} blocks off: the change came`)
+			local respawning = flags(near)
+			t.ok(
+				#respawning >= 1 and not bit32.btest(respawning[#respawning], Flag.Powered),
+				"feet unknown: sent by where it was last seen"
+			)
 		end
 	)
 

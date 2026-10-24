@@ -7393,25 +7393,36 @@ machines read (never generating terrain), for the simulation's Env.
     the head's, within `MinRange` and `TurretRules.range` of the pivot and the pitch limits (below
     −51° a dead zone).
   - **Scans** (no target): every `ScanTicks` (a Laser Sight's 5), staggered by cell, at most
-    `MaxScansPerTick` a tick for every turret (one over waits a tick). Hostiles are hashed into
-    16-block columns once a machine tick, only when a turret scans or shoots, ranked by
-    `TurretRules.score`. The best `MaxSightChecks` are looked at with FireRules.wallBetween's rule
-    on `VoxelRaycast.distance` (nothing allocated; glass and leaves stop sight, torches and water
-    don't; its own cell is air).
+    `MaxScansPerTick` a tick for every turret (one over waits a tick; those waiting go first, the
+    longest waiting first, so of n due none waits more than ceil(n / MaxScansPerTick) ticks,
+    however late the machines tick it). Hostiles are hashed into 16-block columns with their
+    body's aim point once a machine tick, only when a turret scans or shoots, ranked by
+    `TurretRules.score` (the angle worked out only for those near enough to rank: a score is at
+    least the distance; a mob killed earlier in the tick skipped). The best `MaxSightChecks` are
+    looked at with FireRules.wallBetween's rule on `VoxelRaycast.distance` (nothing allocated;
+    glass and leaves stop sight, torches and water don't; its own cell is air; looked along from
+    the candidate's end, where the wall a horde presses on stands). A scan that finds none in
+    sight leaves the next to look further down the ranking (from the best again past its end),
+    so a crowd hidden behind a wall or in a cave below never hides one in sight: k-th in the
+    ranking, it is looked at within ceil(k / MaxSightChecks) scans.
   - **Tracking**: sticky, at the tier's turn rate (`TurretRules.turn`), its sight every
     `SightTicks`, lost after `LoseTicks` unseen, at once when gone (dead, removed, frozen) or out of
     reach. Idle, powered and not blocked, the pitch eases level at the turn rate and the yaw holds
     (the client does the same; nothing is sent).
   - **Firing**: the target seen at the last check, the order ready, armed, powered and not blocked,
     within `settle`, and `MaxShotsPerTick` (32) not used up (a shot over it waits a tick; the kind
-    holds the credit, none lost). From the pivot along the exact aim spread by `TurretRules.spread`
-    (`Ballistics.spreadDir`); the round's flight zeroed at the aim's distance, ending at the round's
-    range × 2.5 or the turret's range + `ExtraFlight`; its damage × damageScale. The hostiles near
-    the flight are its only targets (FireRules.mobTarget's, pooled; no lag compensation), so a
-    player or an animal in the line is flown through. `FireRules.blockRules(weapons, false)` (glass
-    never shattered, leaves passed); `Ballistics.trace`. A hit is `env.hurt` (`Ballistics.damage`: a
-    head ×ZombieHead, ×HelmetShare under a helmet, through no armour; the bullet's knockback from
-    the turret). One bullet a shot.
+    holds the credit, none lost; those waiting go first, the ties among them broken by a turn that
+    moves every tick, so over the budget every turret fires its share whenever the machines tick
+    it: 130 Ultimate SMGs 147-149 shots each in 30 s). From the pivot along the exact aim spread by
+    `TurretRules.spread` (`Ballistics.spreadDir`); the round's flight zeroed at the aim's distance,
+    ending at the round's range × 2.5 or the turret's range + `ExtraFlight`; its damage ×
+    damageScale. The hostiles near the flight are its only targets (FireRules.mobTarget's, pooled;
+    no lag compensation), so a player or an animal in the line is flown through.
+    `FireRules.blockRules(weapons, false)` (glass never shattered, leaves passed);
+    `Ballistics.trace`. A hit is `env.hurt` (`Ballistics.damage`: a head ×ZombieHead, ×HelmetShare
+    under a helmet, through no armour; the bullet's knockback from the turret); one it kills
+    (`env.mob` nil after) is gone for the tick's later scans and shots, so no bullet stops in a
+    corpse. One bullet a shot.
   - **Noise**: the shot's (`TurretRules.shotNoise` at the muzzle) and its impact's
     (`FireRules.impactNoise`) at most once every `ShotNoiseTicks` a turret.
   - **The lure**: powered, not blocked, armed, idle, its Lure on: `Lure.Noise` at the pivot every
@@ -7426,7 +7437,9 @@ machines read (never generating terrain), for the simulation's Env.
   - Nothing allocates in scans, sight checks, tracking, the lure or records; a shot allocates only
     its trace's impacts (about 1 KB). Lune, 50 turrets and 100 zombies in a fight: 0.3–0.8 ms a tick
     native (0.85 interpreted), 0.8 scans, 12 sight checks, 4.3 shots a tick; a siege with every
-    sight check failing 0.5–0.7 ms (the design's budget: 1.5 ms native, 4 interpreted).
+    sight check failing 0.25–0.6 ms; the blood moon's siege, 150 turrets and 260 zombies, 0.9 ms
+    (2.9 interpreted; 16 scans and 87 sight checks a tick). The design's budget: 1.5 ms native, 4
+    interpreted.
 - `Turrets` (the glue): `start(net, world)` builds the Env (`Machines.knownBlock`, `Mobs.hostiles`
   and `Mobs.target`, `Mobs.weaponDamage` with no player: nobody credited, no Knowledge, no kill
   count, no `byPlayer` loot, as an iron golem's kills; `NoiseBus.emit`, so the director's night,
@@ -7434,9 +7447,14 @@ machines read (never generating terrain), for the simulation's Env.
   Apocalypse/BloodMoon; the feeder rule from `TransmitterWorld.feedTier`) and registers the service.
   `update(dt)` after Machines.update: the frame's shots as Shots messages to the players within
   `ShotBroadcast` of each shot's origin, the records as one Turrets message to those within
-  `RecordRange` sideways (every change to a player not in the world yet unless positions are the
-  server's, as Machines records). `sendChunks` sends the chunks' records after their edit lists;
-  `blockChanged` forgets a broken turret.
+  `RecordRange` (224: as far as edit lists go, `Interest.EditChunkRadius`) sideways of their feet,
+  else where they were last seen (a respawn loses no change; every change to a player never in the
+  world yet unless positions are the server's, as Machines records). A client keeps a chunk's
+  records while it holds its data or its edit list: its full detail chunks' and their neighbours'
+  around its feet, a turret up to 143 blocks off sideways by default (175 underground), 207 at the
+  highest Full Detail and Detail Falloff; all within RecordRange, so none it keeps goes stale.
+  `sendChunks` sends the chunks' records after their edit lists; `blockChanged` forgets a broken
+  turret.
 - `Mobs/Mobs` adds `Mobs.hostiles(into)` and `Mobs.target(id, into?)` (Hostile: id, kind, variant,
   feet, yaw), read only, reusing the tables they are given.
 

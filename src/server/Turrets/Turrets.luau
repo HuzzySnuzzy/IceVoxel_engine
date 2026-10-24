@@ -26,8 +26,10 @@
 	  Records   Turrets records (Net/Protocol, message Turrets): a chunk's non-default ones right
 	            after its edit list (`sendChunks`, from ServerNet's `chunksSent` rule after the
 	            machines'), changes to players within Config.Turrets.RecordRange sideways of their
-	            feet (`update`, every frame right after Machines.update; every change to a player
-	            not in the world yet unless positions are the server's own, as Machines records).
+	            feet, else where they were last seen (`update`, every frame right after
+	            Machines.update; every change to a player never in the world yet unless positions
+	            are the server's own, as Machines records). RecordRange reaches past every chunk a
+	            client keeps records for (its chunks' data and edit lists), so none goes stale.
 	  Shots     each frame's turret shots (Net/WeaponSync records: shooter 0, the stand-in gun,
 	            the turret's counter, from its muzzle, `suppressed` and `plain`) as Shots messages,
 	            at most WeaponSync.MAX_SHOTS each, to every player within
@@ -68,12 +70,17 @@ type Net = {
 
 local Turrets = {}
 
+-- Positions players may report (blocks); anything else is ignored.
+local LIMIT = Protocol.MAX_COORDINATE + 64
+
 local state: TurretWorld.World? = nil
 local net: Net? = nil
 local started = false
 -- (Each frame's lists for one player, reused.)
 local nearShots: { WeaponSync.Shot } = {}
 local nearRecords: { Protocol.TurretRecord } = {}
+-- Each player's last known feet (blocks: x, y, z).
+local lastFeet: { [Player]: { number } } = {}
 
 -- The simulation (nil before `start`, and with the turrets off).
 function Turrets.world(): TurretWorld.World?
@@ -86,6 +93,24 @@ function Turrets.blockChanged(x: number, y: number, z: number, old: number, new:
 	if world then
 		TurretWorld.blockChanged(world, x, y, z, old, new)
 	end
+end
+
+-- The player's feet (Players/PlayerPositions, blocks), else where they were last seen, as the
+-- machines' records go (a respawn loses no change); nil, 0, 0 when never.
+local function feetOf(player: Player): (number?, number, number)
+	local x, y, z = PlayerPositions.feet(player)
+	local last = lastFeet[player]
+	if x and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT then
+		if last == nil then
+			lastFeet[player] = { x, y, z }
+		else
+			last[1], last[2], last[3] = x, y, z
+		end
+		return x, y, z
+	elseif last then
+		return last[1], last[2], last[3]
+	end
+	return nil, 0, 0
 end
 
 local function sendRecords(sender: Net, player: Player, records: { Protocol.TurretRecord })
@@ -182,6 +207,9 @@ function Turrets.start(serverNet: Net, _world: WorldServer.World)
 	Machines.setTurretService(function(order: TurretTypes.Order, out: TurretTypes.Outcome): TurretTypes.Outcome
 		return TurretWorld.step(simulation, order, out)
 	end)
+	Players.PlayerRemoving:Connect(function(player)
+		lastFeet[player] = nil
+	end)
 end
 
 --[[
@@ -204,9 +232,9 @@ function Turrets.update(_dt: number)
 	local hear = broadcast * broadcast
 	local range = Config.Turrets.RecordRange
 	for _, player in Players:GetPlayers() do
-		local fx, _, fz = PlayerPositions.feet(player)
+		local fx, _, fz = feetOf(player)
 		if fx == nil then
-			-- (Not in the world yet: every change, as the machines' records.)
+			-- (Never in the world yet: every change, as the machines' records.)
 			if everything then
 				sendRecords(sender, player, records)
 			end
