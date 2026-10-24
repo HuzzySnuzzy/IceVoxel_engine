@@ -49,9 +49,9 @@
 	  6. The feed rate from the rounds that arrived since the last tick, the rounds held, the
 	     packed state from the answer (its status, feed and tracking, the Lure), RATE, ACTIVE.
 	The service decides the status (precedence: Disabled, No power, Blocked, then with a target
-	Firing within Config.Turrets.FiringTicks of a shot, else No ammo when unarmed while `ready`,
-	else Targeting; without one No ammo with no round, else No target); the kind writes what it
-	says.
+	Firing within Config.Turrets.FiringTicks of a shot, else No ammo when unarmed while `ready`
+	and no round is coming (none held and its feed 0: by hand, or its line stopped), else
+	Targeting; without one No ammo with no round, else No target); the kind writes what it says.
 
 	Its panel: the title (the block's name), the ammo, optic and muzzle slots in a row with their
 	outlines (Shared/Turrets.GHOSTS), the status line, four lines ("Range 24 · 240 rpm": the range

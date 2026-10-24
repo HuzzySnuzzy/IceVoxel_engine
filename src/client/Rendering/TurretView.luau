@@ -28,10 +28,11 @@
 	neither is (they come again with the edit list). A change of a position's block forgets its
 	record (the server starts a new turret idle); when this player's own predicted break took it,
 	it is kept UNDO_WINDOW seconds and comes back if the server refuses the break (then dropped).
-	A record that says Dry (Protocol.TurretFlag: it tracks and would fire now with no round, the
-	server's No ammo) after one that did not clicks item.firearm.dry (Rendering/ShotRules.DRY) at
-	the gun, once: a fed turret's next round comes before its cadence is ready, so it never clicks;
-	one that runs dry does, also when its last round killed its target and it takes the next.
+	A record that says Dry (Protocol.TurretFlag: it tracks and would fire now with no round held
+	or coming, the server's No ammo) after one that did not clicks item.firearm.dry
+	(Rendering/ShotRules.DRY) at the gun, once: a fed turret waiting on its belt never clicks,
+	however slow its line; one that runs dry does (filled by hand, or its line's chest empty),
+	also when its last round killed its target and it takes the next.
 	Drawn: every REFRESH_INTERVAL (and when something changed) the turrets within Config.Turrets
 	.Client.DrawDistance of the camera whose chunk is shown, nothing over the gun
 	(Shared/Turrets.headClear of the cell above, as the client sees it) and the record not
@@ -322,8 +323,8 @@ local function dropChunkRecords(chunk: number)
 	end
 end
 
--- Does `record` say it would fire now and has no round (TurretFlag.Dry: the server's No ammo while
--- it tracks)?
+-- Does `record` say it would fire now and has no round, none coming (TurretFlag.Dry: the server's
+-- No ammo while it tracks)?
 local function dry(record: Record): boolean
 	return bit32.btest(record.flags, Flag.Dry)
 end

@@ -43,9 +43,11 @@
 	  Status     in the design's precedence: No power (it holds still and keeps its target), then
 	             Blocked (the cell over the gun: it drops its target), then with a target Firing
 	             within FiringTicks of its last shot, No ammo unarmed while its cadence is ready
-	             (it would fire now; with no round its record says Dry), else Targeting (a fed
-	             turret's next round comes before its cadence is ready: never No ammo); without
-	             one No ammo with no round, else No target. Disabled is the kind's.
+	             and no round is coming (it would fire now: with none held and its feed 0, by hand
+	             or its line stopped bringing them, its record says Dry; a round held without a
+	             shot's energy is No ammo too, not dry), else Targeting (waiting on its cadence, or
+	             fed on its belt: a line slower than its cadence never shows No ammo); without one
+	             No ammo with no round, else No target. Disabled is the kind's.
 	  Feed       the feeder rule (`env.feed`) at its first tick and every FeedTicks after,
 	             staggered by its cell; the Outcome's `feed` every tick.
 	  Targets    only `env.hostiles`' and `env.mob`'s: never a player or an animal. The aim point
@@ -1262,9 +1264,9 @@ local function stepTurret(world: World, order: Order, out: Outcome, spec: Spec):
 			end
 			if tick - turret.shotAt < s.FiringTicks then
 				status = STATUS.FIRING
-			elseif not order.armed and order.ready then
-				-- (It would fire now: dry with no round. Waiting on its cadence it is Targeting,
-				-- so a fed one's next round comes before it would.)
+			elseif not order.armed and order.ready and (order.ammo >= 1 or turret.feed == 0) then
+				-- (It would fire now: dry with no round and none coming, by hand or its line
+				-- stopped. A fed one waiting on its belt, or on its cadence, is Targeting.)
 				status = STATUS.NO_AMMO
 				dry = order.ammo < 1
 			else

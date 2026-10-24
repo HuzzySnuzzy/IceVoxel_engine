@@ -1527,8 +1527,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   lures them: a 24-block noise every 30 s, one in each 48 × 48 area (the Lure button turns it off;
   a suppressor doesn't quiet it). The gun turns on its base (the barrel by type, bands in the
   tier's colour, what is mounted: a laser's red beam to the first block or the target, a scope, a
-  suppressor's can), with a faint servo while it turns and a dry click when it runs out; WAILA
-  shows its rounds, feed and fittings.
+  suppressor's can), with a faint servo while it turns and a dry click when it runs out (never
+  while it waits on a slow line); WAILA shows its rounds, feed and fittings.
 - **Metal Miner.** A machine that copies the ore block under it forever, for power, and pushes the
   drop out into the chests and transporters next to it: Coal Ore gives Coal every 30 s at 800 J a
   tick (never more energy than the coal burns for), Iron and Osmium Ore their raw ore every 20 s at

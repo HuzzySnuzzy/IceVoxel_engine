@@ -7426,10 +7426,13 @@ machines read (never generating terrain), for the simulation's Env.
   come back idle. Each tick of a turret:
   - **Status**: No power (it holds still and keeps its target), Blocked (it drops it), then with a
     target Firing within `FiringTicks` of its last shot, No ammo unarmed while its cadence is ready
-    (it would fire now; with no round its record says Dry), else Targeting; without one No ammo
-    with no round, else No target. A fed turret's next round comes before its cadence is ready, so
-    the panel and WAILA never show No ammo between its shots (a Basic rifle on one Basic
-    transporter: the round 22 ticks after the shot, the cadence 27).
+    and no round is coming (it would fire now: with none held and its feed 0, by hand or its line
+    stopped, its record says Dry), else Targeting; without one No ammo with no round, else No
+    target. A fed turret waits on its belt as Targeting, so the panel and WAILA never show No ammo
+    between its shots, however much slower than its cadence its line's trips are (each transporter
+    more adds one: a Basic rifle on two Basic transporters fires every 44 ticks, its cadence 27).
+    Once its line has brought no round for `FEED_MEMORY` (100 ticks), its next look at the feed
+    finds 0: No ammo, Dry, at most 6 s after its last round's shot.
   - **Feed**: the feeder rule's tier at its first tick and every `FeedTicks`, staggered by its cell.
   - **Targets**: only the Env's hostiles (`Mobs.hostiles`: live, unfrozen `hostile` kinds; never
     players or animals). It aims at the body box's centre (Ballistics.mobBoxes), a scoped sniper at
@@ -7508,9 +7511,9 @@ machines read (never generating terrain), for the simulation's Env.
 
 **The protocol.** ServerMessage `Turrets` (34): u16 count, 19 bytes a turret: i32 x, u16 y, i32 z,
 u16 yaw (65536ths of a turn), i8 pitch (whole degrees), u32 target, u8 flags (`TurretFlag`:
-powered, firing, blocked, laser, scope, suppressor, tracking, and bit 7 dry: no round while it
-tracks and its cadence would fire), u8 ammo (`Protocol.encodeTurrets`, `decodeTurrets`;
-`TurretRecord`). A turret's shots are Shots records (33) with shooter 0, the
+powered, firing, blocked, laser, scope, suppressor, tracking, and bit 7 dry: no round held or
+coming while it tracks and its cadence would fire), u8 ammo (`Protocol.encodeTurrets`,
+`decodeTurrets`; `TurretRecord`). A turret's shots are Shots records (33) with shooter 0, the
 stand-in gun as the item and the turret's own counter, from its muzzle, and WeaponSync's flag bit 3
 `plain` (tracers without glow, for a suppressed turret's shot). Both ends ship together: an older
 client refuses bit 3.
@@ -7589,10 +7592,12 @@ render position survives a rebase. A powered Laser Sight's beam runs to the firs
 cell left out, rechecked every 0.1 s and as soon as the drawn aim turned a degree) or to the drawn
 target it passes, at most `BeamLength` 24. The servo `block.turret.servo` loops at the `ServoLoops`
 4 nearest turning guns. A turret that runs dry clicks `item.firearm.dry` once: a record whose Dry
-flag rises (it tracks and would fire now with no round: the server's No ammo); a fed turret's next
-round comes before its cadence would fire, so it never clicks (every type and tier, through a Basic
-or an Advanced transporter, `tests/spec/TurretClient` on the real pipes), and one whose last round
-killed its target clicks when it takes the next zombie. Times follow the frames.
+flag rises (it tracks and would fire now with no round held or coming: the server's No ammo); a
+fed turret waiting on its belt never clicks, however slow its line (every type and tier on lines
+of 1, 2 and 4 Basic or Advanced transporters, at the end or one beside each transporter,
+`tests/spec/TurretClient` on the real pipes); one filled by hand clicks when its cadence would
+fire after its last round, one whose line's chest ran out within 6 s of its last shot, and one
+whose last round killed its target when it takes the next zombie. Times follow the frames.
 
 **Shots, WAILA, F3.** A turret's shot (shooter `ShotRules.TURRET` = 0) sounds as its stand-in gun's
 class, is never the player's own, and `plain` removes the tracer glow; ShotView starts its flash and
