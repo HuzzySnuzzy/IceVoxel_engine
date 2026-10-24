@@ -102,8 +102,8 @@ return function(t, shared, require, server, client)
 			t.eq(I[name], 4277 + index, `{name}'s id`)
 		end
 		t.eq(I.HerbalPoultice, 4277, "the apocalypse's last item before them")
-		-- (Then the turrets' 8: Sledgehammer was the last item.)
-		t.eq(Items.list[#Items.list - 8].name, "Sledgehammer", "the last item before the turrets'")
+		-- (Then the turrets' 8 and the new ores' 20: Sledgehammer was the last item.)
+		t.eq(Items.list[#Items.list - 8 - 20].name, "Sledgehammer", "the last item before the turrets'")
 		local names = {
 			Pistol = "9mm Pistol",
 			Smg = "SMG",
@@ -1120,7 +1120,11 @@ return function(t, shared, require, server, client)
 	--[[ Recipes and Ages ]]
 
 	t.test("weapons: an improvised suppressor and crossbow bolts are made; bolts in the Iron Age", function()
-		t.eq(#Crafting.recipes, 246, "213 and the weapons' two (then the seasons' 9, the turrets' 22)")
+		t.eq(
+			#Crafting.recipes,
+			280,
+			"213 and the weapons' two (then the seasons' 9, the turrets' 22, the new ores' 34)"
+		)
 		local suppressor = Crafting.match({
 			[1] = { item = I.GlassBottle, count = 1 },
 			[2] = { item = I.DuctTape, count = 1 },

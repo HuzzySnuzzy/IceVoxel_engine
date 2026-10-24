@@ -91,10 +91,11 @@ return function(t, shared, require, server)
 		-- (Then the five doors' 32 halves each: Doors; then the Oak Fence's 15 variants with arms;
 		-- then the zombie apocalypse's 19 blocks and the Ceiling Lamp's cave twin, ids 419..438;
 		-- then the seasons' 47: 8 snow layers, 5 heaters, 2 insulation blocks, a door's 32 halves;
-		-- then the turrets' 14: twelve turrets, the Metal Miner and the Ammo Press.)
+		-- then the turrets' 14: twelve turrets, the Metal Miner and the Ammo Press; then the new ores'
+		-- 15.)
 		t.eq(
 			Blocks.count,
-			244 + 5 * 32 + 15 + 20 + 47 + 14,
+			244 + 5 * 32 + 15 + 20 + 47 + 14 + 15,
 			"17 blocks and 14 twins, then the doors, fence arms and the apocalypse's"
 		)
 		for twin, of in TWINS do

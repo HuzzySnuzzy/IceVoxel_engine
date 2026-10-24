@@ -124,17 +124,18 @@ return function(t, shared, require, server)
 			t.eq(B[name], 418 + index, `{name}'s id`)
 		end
 		-- (The seasons' 47 came after: snow layers, heaters, insulation; then the turrets' 14:
-		-- twelve turrets, the Metal Miner and the Ammo Press. Was 439, then 486.)
+		-- twelve turrets, the Metal Miner and the Ammo Press; then the new ores' 15. Was 439, then
+		-- 486, then 500.)
 		t.eq(B.CaveCeilingLamp, 438, "the Ceiling Lamp's twin was the last block before the seasons")
-		t.eq(Blocks.count, 500)
+		t.eq(Blocks.count, 515)
 		t.eq(Blocks.caveTwinFor(B.CeilingLamp), B.CaveCeilingLamp)
 		t.ok(Blocks.isCaveTwin(B.CaveCeilingLamp), "a cave twin")
 		for index, name in ITEMS do
 			t.eq(I[name], 4256 + index, `{name}'s id`)
 		end
-		-- (The weapons' 34 came after, then the turrets' 8: was "HerbalPoultice", then
-		-- "Sledgehammer"; HerbalPoultice is still 4277.)
-		t.eq(Items.list[#Items.list].name, "LaserSight", "the last item")
+		-- (The weapons' 34 came after, then the turrets' 8, then the new ores' 20: was
+		-- "HerbalPoultice", then "Sledgehammer", then "LaserSight"; HerbalPoultice is still 4277.)
+		t.eq(Items.list[#Items.list].name, "HazmatBoots", "the last item")
 		t.eq(I.HerbalPoultice, 4277, "the apocalypse's last item")
 		t.eq(Items.maxStack(I.Bandage), 16)
 		t.eq(Items.maxStack(I.Medkit), 4)
