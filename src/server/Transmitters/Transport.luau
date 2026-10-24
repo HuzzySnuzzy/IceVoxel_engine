@@ -23,10 +23,10 @@
 	were they empty (Transmitters.room over no slots), the pull "waits" instead of backing off,
 	its failures left as they were: every 3 ticks (IDLE_DELAY) it looks at those machines alone
 	(their room, with the items on their way counted) and at the item types its inventories give,
-	and pulls as soon as one has room, other items are there, or a machine that demands its
-	items was placed or broken anywhere (`world.demanders`). So a line sends the next round as
-	soon as the turret has room, and a turret fed through one transporter of its tier or better
-	holds its full rate (tests/spec/TurretFeed). A waiting pull's routes are searched again
+	and pulls as soon as one has room, an item they did not give when it began is there, or a
+	machine that demands its items was placed or broken anywhere (`world.demanders`). So a line
+	sends the next round as soon as the turret has room, and a turret fed through one
+	transporter of its tier or better holds its full rate (tests/spec/TurretFeed). A waiting pull's routes are searched again
 	otherwise only when the backoff would have ended (its waits in a row counted as failures),
 	and that search, off the 3 tick looks, sends nothing to such machines: a full turret's line
 	searches and chooses among destinations as often as a full chest's, and feeds the turret as
@@ -742,7 +742,8 @@ end
 --[[
 	Is a waiting pull's wait over: was a machine that demands its items placed or broken since it
 	began (`world.demanders`), has one of the machines it waits for room now (the items on their
-	way there counted) or is it gone, or do the inventories it pulls from give other items now?
+	way there counted) or is it gone, or do the inventories it pulls from give an item they didn't
+	when it began (one gone can make nothing sendable)?
 ]]
 local function waitOver(world: World, node: Node, waits: { Wait }): boolean
 	if node.demanders ~= world.demanders then
@@ -759,11 +760,18 @@ local function waitOver(world: World, node: Node, waits: { Wait }): boolean
 		end
 	end
 	local kinds, now = node.kinds, given(world, node)
-	if kinds == nil or #kinds ~= #now then
+	if kinds == nil then
 		return true
 	end
-	for i, kind in now do
-		if not Items.stacksMatch(kind, kinds[i]) then
+	for _, kind in now do
+		local known = false
+		for _, before in kinds do
+			if Items.stacksMatch(kind, before) then
+				known = true
+				break
+			end
+		end
+		if not known then
 			return true
 		end
 	end

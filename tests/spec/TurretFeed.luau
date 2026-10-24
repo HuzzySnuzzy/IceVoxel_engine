@@ -580,6 +580,69 @@ return function(t, shared, require, server)
 		t.eq(tier(h), 0, "after the restart: by hand")
 	end)
 
+	t.test("turret feed: a full turret's feeder rebuilt keeps its cap", function()
+		--[[
+			ProbeR3A (the review's): an Ultimate SMG on a Basic line of 3, full and idle, the
+			transporter beside it broken and a Basic one placed again 5 ticks later (no look between).
+			Its record starts again from its kept feed, as after a restart: still Basic, and once
+			targets come it fires at Basic's rate (before: by hand, 6 rounds in its first second).
+		]]
+		local spec = Turrets.of("smg", 4)
+		local targets = false
+		local counter, get, bindWorld = shooter(function(): boolean
+			return targets
+		end, Config.Turrets.FeedTicks)
+		local s = line(1, 3, spec.block, spec.ammo, get())
+		bindWorld(s)
+		s.step(600)
+		t.eq(TransmitterWorld.feedTier(s.pipes, s.x, Y, 0, spec.block), 1, "before: Basic")
+		s.set(s.x - 1, Y, 0, AIR)
+		s.step(5)
+		s.set(s.x - 1, Y, 0, T[1])
+		s.step(600)
+		t.eq(TransmitterWorld.feedTier(s.pipes, s.x, Y, 0, spec.block), 1, "rebuilt, full for 600 ticks: Basic")
+		targets = true
+		counter.shots = 0
+		s.step(20)
+		local cap = Turrets.rpm(spec, 1) / 60
+		t.ok(counter.shots <= math.ceil(cap), `{counter.shots} rounds in its first second (Basic's {cap} a second)`)
+	end)
+
+	t.test("turret feed: a waiting line whose chest only loses or regains an item keeps its wait", function()
+		--[[
+			ProbeR3B (the review's): a chest of 9mm, a Basic line of 30 into a full SMG that never
+			fires; a cobblestone, which can go nowhere on this line, put in the chest and taken out
+			again every 6 ticks (a miner filling the chest, another line emptying it). Only an item the
+			chest did not give when the wait began ends it, so the line searches about as often as
+			when the chest stays the same (before: every look, six times as often).
+		]]
+		local spec = Turrets.of("smg", 1)
+		local function searches(toggle: boolean): number
+			local _, get, bindWorld = shooter(function(): boolean
+				return false
+			end, Config.Turrets.FeedTicks)
+			local s = line(1, 30, spec.block, spec.ammo, get())
+			bindWorld(s)
+			local chest = s.containers:peek(0, Y, 0)
+			local n = 0
+			for tick = 1, 2000 do
+				if toggle and tick % 6 == 0 then
+					local stack = chest.slots[27]
+					chest.slots[27] = if stack and stack.item == B.Cobblestone
+						then nil
+						else Items.newStack(B.Cobblestone, 1)
+				end
+				s.step(1)
+				if s.pipes.searchBudget < Transport.SEARCH_BUDGET then
+					n += 1
+				end
+			end
+			return n
+		end
+		local still, changing = searches(false), searches(true)
+		t.ok(changing <= 2 * still, `{changing} searches with the cobblestone coming and going, {still} without`)
+	end)
+
 	--[[ Every other destination exactly as before ]]
 
 	--[[

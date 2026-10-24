@@ -717,14 +717,15 @@ function TransmitterWorld.blockChanged(world: World, x: number, y: number, z: nu
 	if key == nil then
 		return
 	end
-	-- (A turret gone or replaced: what fed it is forgotten, and so is a transporter gone or
-	-- replaced next to one. A pull waiting for turrets looks at its routes again.)
+	-- (A turret gone or replaced: what fed it is forgotten. A transporter that fed one gone or
+	-- replaced: that turret's record goes, so its next look starts again from its kept feed, as
+	-- after a restart. A pull waiting for turrets looks at its routes again.)
 	world.feeds[key] = nil
 	for side = 0, 5 do
 		local neighbour = Grid.neighbour(key, side)
 		local feed = if neighbour then world.feeds[neighbour] else nil
-		if feed then
-			feed.at[key] = nil
+		if feed and feed.at[key] ~= nil then
+			world.feeds[neighbour :: number] = nil
 		end
 	end
 	if Machines.demands(old) or Machines.demands(new) then

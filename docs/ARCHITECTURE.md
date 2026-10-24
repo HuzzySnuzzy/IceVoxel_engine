@@ -5700,8 +5700,9 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
     `demand`: the turrets) whose slots through that face would take one were they empty
     (`Transmitters.room` over no slots), the pull "waits" instead of the backoff, its failures as
     they were: every 3 ticks it looks at those machines alone (their room, rounds on their way
-    counted) and at the item types its inventories give, and pulls as soon as one has room, other
-    items are there or a machine that demands its items was placed or broken anywhere
+    counted) and at the item types its inventories give, and pulls as soon as one has room, an
+    item they did not give when it began is there (one gone can make nothing sendable) or a
+    machine that demands its items was placed or broken anywhere
     (`world.demanders`). A pull's result ranks sent, waiting, failed, nothing. So a line sends the
     next round as soon as the turret has room, and a turret fed through one transporter of its
     tier or better holds its full rate (Turrets and the Metal Miner: the feed). A waiting pull
@@ -7388,9 +7389,10 @@ require it):
   any joined transporter did: an Ultimate stub let a turret on a Basic line fire at its full
   rate), nor does one that brought rounds once and stopped, once the turret has had room, or
   one that replaced a transporter that brought them. The records are not saved: after a
-  restart, until rounds come, the transporters that can feed a turret count up to the feed its
-  saved state kept, so a full idle turret keeps its cap (before, it read "by hand" and fired its
-  buffer at its own rate). The simulation works it out every `FeedTicks` and returns it as the
+  restart, or once a transporter that fed it is broken or replaced (its record starts again),
+  until rounds come, the transporters that can feed a turret count up to the feed its saved state
+  kept, so a full idle turret keeps its cap (before, it read "by hand" and fired its buffer at
+  its own rate). The simulation works it out every `FeedTicks` and returns it as the
   Outcome's `feed`; the kind caps the next tick's rate with it.
 - The demand rule (Mekanism pipes: Items): a line into a full turret waits 3 ticks instead of
   backing off (looking at the turret and at what it pulls from alone, and at once when a turret
