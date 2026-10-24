@@ -307,10 +307,10 @@
 	  Turrets        u16 count, count x (i32 x, u16 y, i32 z, u16 yaw (a turn in 65536 steps), i8
 	                 pitch (whole degrees), u32 target (the mob it tracks, 0 none), u8 flags
 	                 (TurretFlag: bit 0 powered, 1 firing, 2 blocked, 3 a Laser Sight, 4 a Rifle
-	                 Scope, 5 a suppressor of either kind, 6 tracking, 7 dry: no round while it
-	                 tracks and its cadence would fire, the server's No ammo), u8 ammo (rounds
-	                 held)): 19 bytes a turret (Shared/Turrets: server Turrets/TurretWorld's aim
-	                 and target for client Rendering/TurretView). A record replaces what the
+	                 Scope, 5 a suppressor of either kind, 6 tracking, 7 dry: no round held or
+	                 coming while it tracks and its cadence would fire, the server's No ammo), u8
+	                 ammo (rounds held)): 19 bytes a turret (Shared/Turrets: server
+	                 Turrets/TurretWorld's aim and target for client Rendering/TurretView). A record replaces what the
 	                 client knew about that position; a turret without one is idle (aimed level,
 	                 yaw 0, no target, nothing mounted). Sent with a chunk's edit list (the turrets
 	                 not in that state) and to the players near a change. A length that is not
