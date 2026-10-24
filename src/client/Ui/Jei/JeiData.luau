@@ -4,7 +4,7 @@
 	what it uses, for the recipe view (Ui/Jei/RecipeView). Pure: no Roblox APIs, so the tests check
 	it.
 
-	Entries come in seven categories, in this order (JEI's tabs):
+	Entries come in nine categories, in this order (JEI's tabs):
 
 	  crafting  Crafting.recipes (the same compiled recipes the grids match): `inputs` is the 3 x 3
 	            display, cells 1..9 row by row, laid out like JEI's CraftingGridHelper (a recipe one
@@ -22,7 +22,16 @@
 	            at 2.5 kJ/t, 10 MJ);
 	  boiling   Tough As Nails' dirty water boiled clean on a Campfire (ToughAsNails/Boiling, a
 	            right click: Drinks.PURIFIED_OF, `inputs[1]` the dirty water, `output` its purified
-	            twin, BOIL_TEXT under them).
+	            twin, BOIL_TEXT under them);
+	  duplicating  the Metal Miner (Machines.info of its block, Machines/MinerRules.ORES in their
+	            order): `inputs[1]` the ore block under it, `output` its drop (one), `ticks` an
+	            item takes, the `energy` (J) an item costs (at least the ore's floor) at `power`
+	            J/t, before upgrade cards; none with Config.Miner.Enabled false;
+	  pressing  the Ammo Press (Machines.info of its block): `inputs[1]` an Iron Ingot,
+	            `inputs[2]` a Gunpowder, `output` a calibre's rounds (one entry a round its `info`
+	            counts, in item order: 16 9mm, 10 5.56, 5 .308), `ticks`, `energy` and `power` as
+	            duplicating's; none with Config.AmmoPress.Enabled false.
+	The two machines' entries say "10 s, 10 kJ" and "50 J/t" (`machineTexts`).
 	Refining and the generators show fluids as fluid stacks (JEI's fluid ingredients). Lookups go by item, so a
 	fluid stands for its bucket and its block (`fluidItems`): "Show uses" of an Oil Bucket or of Oil
 	lists refining, "Show recipes" of a Fuel Bucket too.
@@ -52,6 +61,7 @@ local Crafting = require(Shared.Crafting)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
+local MinerRules = require(Shared.Machines.MinerRules)
 local Progression = require(Shared.Progression)
 local Recipes = require(Shared.Crafting.Recipes)
 local Smelting = require(Shared.Crafting.Smelting)
@@ -60,7 +70,16 @@ local Config = require(Shared.Config)
 
 type Stack = Items.Stack
 
-export type Category = "crafting" | "smelting" | "fuel" | "refining" | "heating" | "combustion" | "boiling"
+export type Category =
+	"crafting"
+	| "smelting"
+	| "fuel"
+	| "refining"
+	| "heating"
+	| "combustion"
+	| "boiling"
+	| "duplicating"
+	| "pressing"
 export type Mode = "recipes" | "uses"
 
 -- A fluid stack (JEI's fluid ingredient): a Shared/Fluids id and mB.
@@ -77,12 +96,13 @@ export type Entry = {
 	output: Stack?,
 	shapeless: boolean,
 	-- Smelting: ticks to cook one; fuel: burn ticks; refining: ticks a bucket takes; the
-	-- generators: ticks a bucket burns; crafting: 0.
+	-- generators: ticks a bucket burns; duplicating and pressing: ticks an item or an operation
+	-- takes; crafting: 0.
 	ticks: number,
 	-- The fluids it takes and makes (refining and the generators).
 	fluidInputs: { FluidStack }?,
 	fluidOutput: FluidStack?,
-	-- Refining: J it uses; the generators: J they make. And J a tick.
+	-- Refining, duplicating and pressing: J it uses; the generators: J they make. And J a tick.
 	energy: number?,
 	power: number?,
 }
@@ -91,7 +111,17 @@ export type Group = { category: Category, entries: { Entry } }
 
 local JeiData = {}
 
-JeiData.CATEGORIES = { "crafting", "smelting", "fuel", "refining", "heating", "combustion", "boiling" } :: { Category }
+JeiData.CATEGORIES = {
+	"crafting",
+	"smelting",
+	"fuel",
+	"refining",
+	"heating",
+	"combustion",
+	"boiling",
+	"duplicating",
+	"pressing",
+} :: { Category }
 JeiData.TITLES = {
 	crafting = "Crafting",
 	smelting = "Smelting",
@@ -100,6 +130,8 @@ JeiData.TITLES = {
 	heating = "Heat Generator",
 	combustion = "Combustion Generator",
 	boiling = "Campfire",
+	duplicating = "Duplicating",
+	pressing = "Pressing",
 } :: { [Category]: string }
 -- The item each category's tab shows (Minecraft's catalysts).
 JeiData.TAB_ITEMS = {
@@ -110,6 +142,8 @@ JeiData.TAB_ITEMS = {
 	heating = "HeatGenerator",
 	combustion = "CombustionGenerator",
 	boiling = "Campfire",
+	duplicating = "MetalMiner",
+	pressing = "AmmoPress",
 } :: { [Category]: string }
 -- The items each category's recipes are made in (JEI's recipe catalysts), whose uses list them all.
 JeiData.CATALYSTS = {
@@ -123,6 +157,8 @@ JeiData.CATALYSTS = {
 	heating = { "HeatGenerator" },
 	combustion = { "CombustionGenerator" },
 	boiling = { "Campfire" },
+	duplicating = { "MetalMiner" },
+	pressing = { "AmmoPress" },
 } :: { [Category]: { string } }
 --[[
 	Does catalyst `name` (CATALYSTS) take `entry` of its category? The Wood Stove only the fuels its
@@ -343,6 +379,62 @@ local function fluidEntries(): { Entry }
 	return entries
 end
 
+--[[
+	The machines' entries (see the header): the Metal Miner's ores (Duplicating) and the Ammo
+	Press's rounds (Pressing), from their `info`, each while its Config switch is on.
+]]
+local function machineEntries(): { Entry }
+	local entries: { Entry } = {}
+	local miner = infoOf("MetalMiner")
+	if Config.Miner.Enabled then
+		for _, ore in MinerRules.ORES do
+			local ticks, joules = miner[`{ore.name}Ticks`], miner[`{ore.name}Joules`]
+			local item = Items.ofBlock(ore.block)
+			if ticks and joules and ticks > 0 and item then
+				table.insert(entries, {
+					category = "duplicating",
+					recipe = nil,
+					inputs = { { item } },
+					output = { item = ore.drop, count = 1 },
+					shapeless = false,
+					ticks = ticks,
+					-- (Coal's floor: never less than what a coal is worth in a Heat Generator.)
+					energy = math.max(ticks * joules, miner[`{ore.name}Floor`] or 0),
+					power = joules,
+				})
+			end
+		end
+	end
+	local press = infoOf("AmmoPress")
+	local iron, powder = rawget(Items.id :: any, "IronIngot"), rawget(Items.id :: any, "Gunpowder")
+	if Config.AmmoPress.Enabled and press.ticks and press.joules and press.ticks > 0 and iron and powder then
+		-- (Every other number in its info is a round's count by its item name.)
+		local rounds: { number } = {}
+		local counts: { [number]: number } = {}
+		for name, count in press do
+			local item = rawget(Items.id :: any, name)
+			if type(item) == "number" and count >= 1 then
+				table.insert(rounds, item)
+				counts[item] = count
+			end
+		end
+		table.sort(rounds)
+		for _, item in rounds do
+			table.insert(entries, {
+				category = "pressing",
+				recipe = nil,
+				inputs = { { iron }, { powder } },
+				output = { item = item, count = counts[item] },
+				shapeless = false,
+				ticks = press.ticks,
+				energy = press.ticks * press.joules,
+				power = press.joules,
+			})
+		end
+	end
+	return entries
+end
+
 --[[ The index ]]
 
 local built = false
@@ -466,6 +558,9 @@ local function build()
 			ticks = 0,
 		})
 	end
+	for _, entry in machineEntries() do
+		add(entry)
+	end
 	for name, members in Recipes.tags :: { [string]: { string } } do
 		local ids: { number } = {}
 		for _, member in members do
@@ -498,7 +593,8 @@ local function build()
 	end
 end
 
--- Every entry: crafting recipes, then smelting, fuels, the machines' fluids and boiling.
+-- Every entry: crafting recipes, then smelting, fuels, the machines' fluids, boiling, the Metal
+-- Miner's ores and the Ammo Press's rounds.
 function JeiData.entries(): { Entry }
 	build()
 	return all
@@ -525,7 +621,8 @@ local function grouped(entries: { Entry }?): { Group }
 	return groups
 end
 
--- What makes `item`: crafting, smelting, refining and boiling (JEI's "Show recipes", R).
+-- What makes `item`: crafting, smelting, refining, boiling, duplicating and pressing (JEI's
+-- "Show recipes", R).
 function JeiData.recipes(item: number): { Group }
 	build()
 	return grouped(byOutput[item])
@@ -607,6 +704,16 @@ function JeiData.fluidTexts(entry: Entry): { string }
 		return { `{JeiData.smeltText(entry.ticks)}, {Items.formatEnergy(energy)}`, `{Items.formatEnergy(power)}/t` }
 	end
 	return { `Makes {Items.formatEnergy(energy)}`, `{Items.formatEnergy(power)}/t for {JeiData.smeltText(entry.ticks)}` }
+end
+
+--[[
+	The text lines of a machine's entry (duplicating, pressing): the time and the J an item or an
+	operation costs, and J a tick: "10 s, 10 kJ" and "50 J/t" (a diamond "240 s, 3.84 MJ" and
+	"800 J/t").
+]]
+function JeiData.machineTexts(entry: Entry): { string }
+	local energy, power = entry.energy or 0, entry.power or 0
+	return { `{JeiData.smeltText(entry.ticks)}, {Items.formatEnergy(energy)}`, `{Items.formatEnergy(power)}/t` }
 end
 
 -- A fuel's worth: "Burns 8 items", "Burns 1.5 items", "Burns 1 item" (burn ticks / 200).

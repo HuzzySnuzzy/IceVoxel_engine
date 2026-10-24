@@ -4,8 +4,12 @@
 	(Ui/Jei/JeiLayout: the list beside a panel, and docked in every ITEMS body the survival
 	inventory makes, Ui/InventoryColumns; cells told from placement) and the recipe transfer
 	(Ui/Jei/JeiTransfer), whose plans are applied with Inventory/Menu and must leave exactly the
-	recipe in the grid without losing anything.
+	recipe in the grid without losing anything. The machines' categories: the Metal Miner's
+	Duplicating and the Ammo Press's Pressing (their entries from Machines.info, catalysts, texts,
+	layouts and pages, and their Config switches), and every lookup's tabs fitting over the view.
 ]]
+
+local Loader = require("../lib/Loader")
 
 return function(t, shared, require, _server, client)
 	local Blocks = require(shared.Blocks)
@@ -1050,5 +1054,164 @@ return function(t, shared, require, _server, client)
 		)
 		t.eq(JeiData.TITLES.boiling, "Campfire")
 		t.eq(JeiLayout.entry("boiling"), JeiLayout.entry("smelting"), "drawn as smelting")
+	end)
+
+	--[[ The machines' categories: the Metal Miner and the Ammo Press ]]
+
+	local function entriesOf(category: string, from: { any }?): { any }
+		local list = {}
+		for _, entry in from or JeiData.entries() do
+			if entry.category == category then
+				table.insert(list, entry)
+			end
+		end
+		return list
+	end
+
+	local function groupOf(groups, category: string)
+		for _, group in groups do
+			if group.category == category then
+				return group
+			end
+		end
+		return nil
+	end
+
+	t.test("jei: Duplicating: the Metal Miner copies each ore into its drop, with its time and energy", function()
+		local Config = require(shared.Config)
+		local Machines = require(shared.Machines)
+		local MinerRules = require(shared.Machines.MinerRules)
+		local info = Machines.info(Blocks.id.MetalMiner)
+		local entries = entriesOf("duplicating")
+		t.eq(#entries, #MinerRules.ORES, "one per ore")
+		local drops = { "Coal", "RawIron", "RawOsmium", "RawGold", "Emerald", "Diamond" }
+		for index, ore in MinerRules.ORES do
+			local entry = entries[index]
+			local numbers = Config.Miner.Ores[ore.name]
+			t.eq(#entry.inputs[1], 1, `{ore.name}: one input`)
+			t.eq(entry.inputs[1][1], id[ore.name], `{ore.name}: the ore block, in MinerRules' order`)
+			t.eq(entry.inputs[2], nil)
+			t.eq(entry.output and entry.output.item, id[drops[index]], `{ore.name} gives its drop`)
+			t.eq(entry.output and entry.output.count, 1, "one at a time")
+			t.eq(entry.ticks, numbers.ticks, `{ore.name}: Config's ticks`)
+			t.eq(entry.ticks, info[`{ore.name}Ticks`], "as its info says")
+			t.eq(entry.power, numbers.joules, `{ore.name}: J a tick`)
+			t.eq(entry.energy, math.max(numbers.ticks * numbers.joules, numbers.floor or 0), `{ore.name}: J an item`)
+			t.eq(entry.recipe, nil)
+			t.eq(JeiData.lockText(entry, nil), nil, "no lock: the miner's Age opens it")
+			t.ok(
+				find(JeiData.recipes(ore.drop), "duplicating", function(e)
+					return e == entry
+				end),
+				`{drops[index]}'s recipes`
+			)
+			t.ok(
+				find(JeiData.uses(ore.block), "duplicating", function(e)
+					return e == entry
+				end),
+				`{ore.name}'s uses`
+			)
+		end
+		-- The texts: the time and J an item, J a tick.
+		same(JeiData.machineTexts(entries[6]) :: any, { "240 s, 3.84 MJ", "800 J/t" } :: any, "a diamond")
+		same(JeiData.machineTexts(entries[1]) :: any, { "30 s, 480 kJ", "800 J/t" } :: any, "a coal")
+		same(JeiData.machineTexts(entries[2]) :: any, { "20 s, 80 kJ", "200 J/t" } :: any, "a raw iron")
+		t.ok(entries[1].energy >= 400000, "coal never under its 400 kJ floor")
+		-- Its catalyst, title, tab and layout.
+		same(JeiData.CATALYSTS.duplicating :: any, { "MetalMiner" } :: any, "the miner is its catalyst")
+		t.eq(JeiData.TITLES.duplicating, "Duplicating")
+		t.eq(JeiData.TAB_ITEMS.duplicating, "MetalMiner")
+		local miner = JeiData.uses(id.MetalMiner)
+		same(categories(miner) :: any, { "duplicating" } :: any, "the miner's uses: every ore")
+		t.eq(#miner[1].entries, #MinerRules.ORES)
+		same(categories(JeiData.recipes(id.Diamond)) :: any, { "crafting", "smelting", "duplicating" } :: any)
+		same(categories(JeiData.uses(id.DiamondOre)) :: any, { "smelting", "duplicating" } :: any)
+		local layout = JeiLayout.entry("duplicating")
+		t.eq(#layout.inputs, 1, "the ore")
+		t.ok(layout.output ~= nil and layout.arrow ~= nil and #layout.texts == 2, "its drop, the arrow, two lines")
+		t.eq(JeiLayout.perPage("duplicating"), 3, "three a page")
+		t.eq(JeiData.pageCount(#entries, JeiLayout.perPage("duplicating")), 2, "six ores on two pages")
+	end)
+
+	t.test("jei: Pressing: the Ammo Press makes each calibre's rounds of an ingot and a gunpowder", function()
+		local Machines = require(shared.Machines)
+		local info = Machines.info(Blocks.id.AmmoPress)
+		local entries = entriesOf("pressing")
+		local rounds = { { id.Rounds9mm, 16 }, { id.Rounds556, 10 }, { id.Rounds308, 5 } }
+		t.eq(#entries, #rounds, "one per calibre")
+		for index, round in rounds do
+			local entry = entries[index]
+			same(entry.inputs[1], { id.IronIngot }, "an Iron Ingot")
+			same(entry.inputs[2], { id.Gunpowder }, "and a Gunpowder")
+			t.eq(entry.inputs[3], nil)
+			t.eq(entry.output and entry.output.item, round[1], `calibre {index}, in item order`)
+			t.eq(entry.output and entry.output.count, round[2], `{round[2]} rounds`)
+			t.eq(entry.output and entry.output.count, info[Items.get(round[1]).name], "its info's count")
+			t.eq(entry.ticks, info.ticks)
+			t.eq(entry.ticks, 200)
+			t.eq(entry.energy, 10000, "10 kJ an operation")
+			t.eq(entry.power, 50)
+			t.eq(JeiData.lockText(entry, nil), nil)
+			same(JeiData.machineTexts(entry) :: any, { "10 s, 10 kJ", "50 J/t" } :: any, "its texts")
+			same(categories(JeiData.recipes(round[1])) :: any, { "pressing" } :: any, "rounds: only pressed")
+		end
+		-- Every calibre is among the uses of both inputs and of the press (its catalyst).
+		for _, item in { id.IronIngot, id.Gunpowder, id.AmmoPress } do
+			local group = groupOf(JeiData.uses(item), "pressing")
+			t.eq(group and #group.entries, #rounds, `{Items.displayName(item)}: every pressing`)
+		end
+		same(categories(JeiData.uses(id.AmmoPress)) :: any, { "pressing" } :: any)
+		same(categories(JeiData.recipes(id.IronIngot)) :: any, { "crafting", "smelting" } :: any, "made as before")
+		same(JeiData.CATALYSTS.pressing :: any, { "AmmoPress" } :: any)
+		t.eq(JeiData.TITLES.pressing, "Pressing")
+		t.eq(JeiData.TAB_ITEMS.pressing, "AmmoPress")
+		local layout = JeiLayout.entry("pressing")
+		t.eq(#layout.inputs, 2, "the ingot over the gunpowder")
+		t.ok(layout.inputs[1].x == layout.inputs[2].x and layout.inputs[1].y < layout.inputs[2].y, "stacked")
+		t.ok(layout.output ~= nil and layout.arrow ~= nil and #layout.texts == 2)
+		t.eq(JeiData.pageCount(#entries, JeiLayout.perPage("pressing")), 1, "the three calibres on one page")
+	end)
+
+	t.test("jei: every category's tab item exists, and every lookup's tabs fit over the view", function()
+		-- (RecipeView: a tab per category present, ItemIcon.TAB_WIDTH 28 and a pixel apart.)
+		local TAB_SPAN = 29
+		local fit = math.floor((JeiLayout.VIEW_WIDTH + 1) / TAB_SPAN)
+		t.eq(#JeiData.CATEGORIES, 9)
+		for _, category in JeiData.CATEGORIES do
+			t.ok(rawget(id :: any, JeiData.TAB_ITEMS[category]) ~= nil, `{category}'s tab item`)
+			t.ok(type(JeiData.TITLES[category]) == "string", `{category}'s title`)
+			for _, name in JeiData.CATALYSTS[category] do
+				t.ok(rawget(id :: any, name) ~= nil, `{category}'s catalyst {name}`)
+			end
+		end
+		local most = 0
+		for _, def in Items.list do
+			most = math.max(most, #JeiData.recipes(def.id), #JeiData.uses(def.id))
+		end
+		t.ok(most <= fit, `at most {fit} tabs fit: the most an item has is {most}`)
+	end)
+
+	t.test("jei: the machines' categories follow their Config switches", function()
+		-- Fresh modules with a switch off (JeiData builds its index once).
+		local function fresh(miner: boolean, press: boolean)
+			local env = Loader.new()
+			local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
+			local clientRoot = env.mount("src/client", "StarterPlayerScripts", "IceVoxel")
+			local OffConfig = env.require(root.Config)
+			OffConfig.Miner.Enabled = miner
+			OffConfig.AmmoPress.Enabled = press
+			return env.require(clientRoot.Ui.Jei.JeiData), env.require(root.Items)
+		end
+		local NoMiner, NoMinerItems = fresh(false, true)
+		t.eq(#entriesOf("duplicating", NoMiner.entries()), 0, "the miner off: no Duplicating")
+		t.eq(#entriesOf("pressing", NoMiner.entries()), 3, "the press still presses")
+		t.eq(groupOf(NoMiner.uses(NoMinerItems.id.MetalMiner), "duplicating"), nil, "no tab on the miner")
+		t.eq(groupOf(NoMiner.recipes(NoMinerItems.id.Diamond), "duplicating"), nil)
+		local NoPress, NoPressItems = fresh(true, false)
+		t.eq(#entriesOf("pressing", NoPress.entries()), 0, "the press off: no Pressing")
+		t.eq(#entriesOf("duplicating", NoPress.entries()), 6, "the miner still copies")
+		t.eq(#NoPress.recipes(NoPressItems.id.Rounds9mm), 0, "rounds come from loot alone again")
+		t.eq(groupOf(NoPress.uses(NoPressItems.id.Gunpowder), "pressing"), nil)
+		t.eq(groupOf(NoPress.uses(NoPressItems.id.AmmoPress), "pressing"), nil)
 	end)
 end

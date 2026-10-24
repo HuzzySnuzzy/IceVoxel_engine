@@ -1,7 +1,8 @@
 --[[
 	Item tooltips (Shared/Items/Tooltip, its lore in Items/LoreList): what a sword, a pickaxe, armor
 	with Tough As Nails insulation, food, a drink, fuel, a block, an accessory and a potion say, in
-	Minecraft's order and colours; a stack's wear and data; the recipe gate's lock line; every item
+	Minecraft's order and colours; a stack's wear and data; the recipe gate's lock line; the twelve
+	turrets' stat line (range, rate, rounds held, calibre: Shared/Turrets' Specs); every item
 	giving lines without error; and every item having lore (no gaps, no stale keys). The weapons
 	(Shared/Weapons/Describe): a firearm's state under its name (magazine, rounds, chamber, fire
 	mode, what is mounted and its condition, a jam, ruin) and its block when fired (damage of each
@@ -169,6 +170,47 @@ return function(t, shared, require, _server, client)
 		})
 		t.eq(tank[2], "Lava: 5,000 mB")
 		t.eq(tank[3], LoreList.BasicFluidTank)
+	end)
+
+	t.test("tooltips: the twelve turrets say their range, rate, rounds held and calibre", function()
+		local Turrets = require(shared.Turrets)
+		-- Config.Turrets' numbers by type, Basic to Ultimate, and how players read each calibre.
+		local expected = {
+			smg = { range = { 16, 20, 24, 32 }, rpm = { 90, 150, 240, 360 }, buffer = { 2, 3, 4, 6 }, calibre = "9mm" },
+			rifle = {
+				range = { 24, 32, 40, 48 },
+				rpm = { 45, 75, 120, 180 },
+				buffer = { 1, 2, 3, 4 },
+				calibre = "5.56",
+			},
+			sniper = { range = { 40, 48, 56, 64 }, rpm = { 15, 20, 30, 40 }, buffer = { 1, 1, 2, 2 }, calibre = ".308" },
+		}
+		t.eq(#Turrets.SPECS, 12)
+		for _, spec in Turrets.SPECS do
+			local numbers = expected[spec.type]
+			local want =
+				`Range {numbers.range[spec.tier]} · {numbers.rpm[spec.tier]} rpm · holds {numbers.buffer[spec.tier]} · {numbers.calibre}`
+			t.eq(Tooltip.turretLine(spec), want, spec.name)
+			local lines = Tooltip.lines(spec.block)
+			local index = find(lines, want)
+			t.ok(index ~= nil, `{spec.name}'s tooltip has "{want}"`)
+			if index then
+				t.eq(lines[index].colour, "gray")
+				t.eq(lines[index - 1].text, `Stores {Items.formatEnergy(spec.capacity)}`, "after its store")
+			end
+			t.eq(lines[2].text, LoreList[spec.name], "the lore first")
+		end
+		-- The design's line, last after its tool and store.
+		t.eq(
+			table.concat(Tooltip.texts(Turrets.of("smg", 3).block), " | "),
+			`Elite SMG Turret | {LoreList.EliteSmgTurret} | Needs a Pickaxe | Stores 80 kJ | Range 24 · 240 rpm · holds 4 · 9mm`
+		)
+		-- Nothing else says it.
+		for _, item in { id.MetalMiner, id.AmmoPress, id.Rounds556, id.Smg, id.ElectricFurnace } do
+			for _, text in Tooltip.texts(item) do
+				t.ok(string.find(text, " rpm · holds ", 1, true) == nil, `{Items.displayName(item)}: no turret line`)
+			end
+		end
 	end)
 
 	t.test("tooltips: accessories, potions and mana items", function()

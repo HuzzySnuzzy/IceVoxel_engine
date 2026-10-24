@@ -7,11 +7,31 @@
 	faster with Speed Upgrades (Mekanism's maths, Machines/Upgrades). Gunpowder needs the
 	Demolition skill, so the press opens nothing new on its own.
 
+	It works as the Electric Furnace does (Kinds/Smelter): every tick it works uses
+	`energyPerTick` J and moves the progress on by one; after `ticksRequired` ticks one Iron Ingot
+	and one Gunpowder become the calibre's rounds in the output. It works only with a whole tick's
+	energy stored and room in the output for all of an operation's rounds (the same round, within
+	its stack); without either the progress waits where it is and goes on when they come
+	(Mekanism pauses on both). Taking either input away starts the progress over (Mekanism resets
+	it when the input runs out). Every calibre costs the same, so the Calibre button keeps the
+	progress: what comes out is the calibre chosen when the operation finishes.
+
+	Every tick `settings` works out Mekanism's upgrade maths from the cards installed, as the
+	Electric Furnace's: the ticks an operation takes (Config.AmmoPress.Ticks x 10^(-speed/8),
+	truncated: 149 with one card, 20 with 8), the energy a tick of work uses (Joules x
+	10^((2 speed - energy)/8)) and the capacity (the block's store x 10^(energy/8)). Taking cards
+	out applies at once (energy over a smaller capacity is lost: Mekanism's setMaxEnergy).
+
+	With Config.AmmoPress.Enabled false (read every tick) it is inert: it uses nothing, makes
+	nothing, keeps its progress and says "Idle" (its recipe is left out then: Crafting/Recipes,
+	Progression/Ages).
+
 	Slots (frozen):
 	  1 ingot      Iron Ingots only: by hand, shift-click and transporters through any face
 	  2 gunpowder  Gunpowder only, the same way
 	  3 output     the rounds (Minecraft's result frame at (116, 35)): taken by hand, shift-click
-	               and transporters, and pushed out on its own (Mekanism's ejector)
+	               and transporters, and pushed out on its own every 10 ticks into the chests
+	               next to it (Mekanism's ejector: server Transmitters/Eject and Transport)
 	  4 speed      up to 8 Speed Upgrades, at (8, 53)
 	  5 energy     up to 8 Energy Upgrades, at (26, 53)
 	Data after the header (Shared/Machines), frozen:
@@ -21,7 +41,10 @@
 	  10 calibre        the calibre pressed: an index into Config.AmmoPress.Calibres (1 9mm, 2
 	                    5.56, 3 .308; a fresh press's 1), which the Calibre button cycles; kept
 	                    in the item
-	  11 state          IDLE, NO_POWER, OUTPUT_FULL, NO_INPUT (the status line)
+	  11 state          why it is not working (the status line, WAILA): IDLE (nothing in it, or
+	                    switched off), NO_POWER (less than a tick's energy), OUTPUT_FULL (no room
+	                    for the rounds), NO_INPUT (an ingot without gunpowder, or the other way
+	                    round)
 	  12 activeDelay    Mekanism's deactivation delay (Machines.showActive: ACTIVE while it works,
 	                    its window glows and it stamps)
 	RATE is minus the J it used this tick. It takes as much energy as its store holds in a tick
@@ -32,11 +55,6 @@
 	upgrade slots and the energy bar. JEI's "Pressing" (an Iron Ingot and a Gunpowder into rounds,
 	the Ammo Press the catalyst) reads `info`: ticks, joules, capacity and each round's count by
 	its item name.
-
-	STUB (ammo press builder D implements): the tick only sets state 0 (it presses nothing yet);
-	the slots, fields, panel, button, status, line and `info` above are the foundation's and
-	frozen. (D's tick stays inert, using nothing, with Config.AmmoPress.Enabled false, as its
-	recipe is left out then: Crafting/Recipes, Progression/Ages.)
 ]]
 
 local Core = require(script.Parent.Parent.Core)
@@ -51,7 +69,7 @@ type Container = Types.Container
 local PRESS = Config.AmmoPress
 
 -- Slots.
-local INGOT, GUNPOWDER, OUTPUT, ENERGY = 1, 2, 3, 5
+local INGOT, GUNPOWDER, OUTPUT, SPEED, ENERGY = 1, 2, 3, 4, 5
 
 -- State codes (the `state` field; Shared/Machines KindSpec `state`).
 local IDLE, NO_POWER, OUTPUT_FULL, NO_INPUT = 0, 1, 2, 3
@@ -62,14 +80,20 @@ local CALIBRE = Core.HEADER + 4
 
 local IRON, POWDER = Items.id.IronIngot, Items.id.Gunpowder
 
--- What each calibre choice makes: the round's item, how many, its calibre's name.
-type Calibre = { ammo: number, count: number, calibre: string }
+-- What each calibre choice makes: the round's item, how many, its calibre's name, and an
+-- operation's result as a stack (read only: the output gets a new one).
+type Calibre = { ammo: number, count: number, calibre: string, result: Items.Stack }
 local CALIBRES: { Calibre } = {}
 for index, entry in PRESS.Calibres do
 	local item = rawget(Items.id :: any, entry.ammo)
 	local round = Weapons.ammo(item)
 	assert(round and entry.count >= 1, `AmmoPress: calibre {index} needs a round and a count`)
-	CALIBRES[index] = table.freeze({ ammo = item :: number, count = entry.count, calibre = round.calibre })
+	CALIBRES[index] = table.freeze({
+		ammo = item :: number,
+		count = entry.count,
+		calibre = round.calibre,
+		result = table.freeze({ item = item :: number, count = entry.count }) :: Items.Stack,
+	})
 end
 
 -- The calibre choice of a press's data (whole, 1..#CALIBRES; anything else the first).
@@ -100,14 +124,88 @@ local SLOTS: { Core.SlotSpec } = {
 for _, slot in Upgrades.slots(8, 53) do
 	table.insert(SLOTS, slot)
 end
-assert(#SLOTS == ENERGY and INGOT == 1 and GUNPOWDER == 2 and OUTPUT == 3, "the Ammo Press's slots")
+assert(#SLOTS == ENERGY and INGOT == 1 and GUNPOWDER == 2 and OUTPUT == 3 and SPEED == 4, "the Ammo Press's slots")
 
--- STUB (builder D): the tick only says state 0 (IDLE) and uses nothing.
-local function tick(container: Container, _ctx: Core.TickContext)
+--[[
+	Ticks an operation takes, J a tick of work uses and the capacity, now: Config.AmmoPress's
+	numbers and the block's store changed by the cards in slots 4 and 5 (Mekanism's maths,
+	Machines/Upgrades).
+]]
+local function settings(container: Container, ctx: Core.TickContext): (number, number, number)
+	local speed, energy = Upgrades.counts(container, SPEED, ENERGY)
+	return Upgrades.ticks(PRESS.Ticks, speed),
+		Upgrades.energyPerTick(PRESS.Joules, speed, energy),
+		Upgrades.capacity(ctx.energy.capacity, energy)
+end
+
+-- Does `slot` hold at least one `item` (data from elsewhere may put anything anywhere)?
+local function holds(container: Container, slot: number, item: number): boolean
+	local stack = container.slots[slot]
+	return stack ~= nil and stack.item == item and type(stack.count) == "number" and stack.count >= 1
+end
+
+-- Is there room in the output for all of `calibre`'s rounds (the same round, within its limit)?
+local function fits(container: Container, calibre: Calibre): boolean
+	local limit = Core.slotLimit(container.block, OUTPUT, calibre.ammo)
+	local output = container.slots[OUTPUT]
+	if output == nil then
+		return calibre.count <= limit
+	end
+	return Items.stacksMatch(output, calibre.result) and output.count + calibre.count <= limit
+end
+
+local function tick(container: Container, ctx: Core.TickContext)
+	-- (RATE still holds last tick's: below 0 when it worked.)
 	local wasWorking = Core.get(container, "rate") < 0
-	Core.set(container, "state", IDLE)
-	Core.set(container, "rate", 0)
-	Core.showActive(container, wasWorking, false)
+	if not PRESS.Enabled then
+		-- Switched off: inert, nothing used or made, the progress left as it is.
+		Core.set(container, "state", IDLE)
+		Core.set(container, "rate", 0)
+		Core.showActive(container, wasWorking, false)
+		return
+	end
+	local ticks, energyPerTick, capacity = settings(container, ctx)
+	Core.set(container, "ticksRequired", ticks)
+	Core.set(container, "energyPerTick", energyPerTick)
+	Upgrades.setCapacity(container, capacity)
+	-- (A calibre from elsewhere reads as the first, and is kept so.)
+	local choice = calibreOf(Core.get(container, "calibre"))
+	Core.set(container, "calibre", choice)
+	local calibre = CALIBRES[choice]
+
+	local slots = container.slots
+	local hasIngot, hasPowder = holds(container, INGOT, IRON), holds(container, GUNPOWDER, POWDER)
+	-- (Never past the end, whatever the data says: a full arrow finishes on the next tick.)
+	local progress = math.clamp(math.floor(Core.get(container, "progress")), 0, ticks)
+	local state, working = IDLE, false
+	if not (hasIngot and hasPowder) then
+		-- Nothing to press: idle when empty, waiting for the other input with one of them.
+		progress = 0
+		state = if hasIngot or hasPowder then NO_INPUT else IDLE
+	elseif not fits(container, calibre) then
+		state = OUTPUT_FULL
+	elseif not Core.use(container, energyPerTick) then
+		state = NO_POWER
+	else
+		working = true
+		progress += 1
+		if progress >= ticks then
+			progress = 0
+			local output = slots[OUTPUT]
+			slots[OUTPUT] = if output
+				then Items.withCount(output, output.count + calibre.count)
+				else Items.newStack(calibre.ammo, calibre.count)
+			-- (What is left of each input keeps its wear and data.)
+			local ingot, powder = slots[INGOT] :: Items.Stack, slots[GUNPOWDER] :: Items.Stack
+			slots[INGOT] = Items.withCount(ingot, ingot.count - 1)
+			slots[GUNPOWDER] = Items.withCount(powder, powder.count - 1)
+		end
+	end
+	Core.set(container, "progress", progress)
+	Core.set(container, "state", state)
+	Core.set(container, "rate", if working then -Core.quantiseUp(energyPerTick) else 0)
+	-- (Held on through short stops: Mekanism's blockDeactivationDelay, Shared/Machines.)
+	Core.showActive(container, wasWorking, working)
 end
 
 local info: { [string]: number } = { ticks = PRESS.Ticks, joules = PRESS.Joules, capacity = PRESS.Capacity }

@@ -42,7 +42,9 @@
 	            "Light: 14", "Falls" (Gravity), "Climbable", "Slippery", a chest's slots,
 	            "Flammable", heat and cold for Tough As Nails (Config.ToughAsNails Heating /
 	            CoolingBlocks), "Creative only", an energy block's store, a tank's capacity and a
-	            transmitter's tier numbers (Transmitters/Tiers, Mekanism's own tooltips).
+	            transmitter's tier numbers (Transmitters/Tiers, Mekanism's own tooltips), a
+	            turret's stat line ("Range 24 · 240 rpm · holds 4 · 9mm": its Shared/Turrets
+	            Spec's range, rate, the rounds its ammo slot holds and its calibre; `turretLine`).
 
 	Every LoreList key must be an item (checked as this loads); every item having lore is
 	tests/spec/Tooltips' to check, so a missing line never breaks a running game.
@@ -65,6 +67,7 @@ local Drinks = require(script.Parent.Parent.ToughAsNails.Drinks)
 local Tiers = require(script.Parent.Parent.Transmitters.Tiers)
 local Fluids = require(script.Parent.Parent.Fluids)
 local Describe = require(script.Parent.Parent.Weapons.Describe)
+local Turrets = require(script.Parent.Parent.Turrets)
 
 type Stack = Items.Stack
 
@@ -214,6 +217,15 @@ local function toolNeeded(def: Blocks.BlockDef): string?
 	return `Needs {article} {tool}{if def.shearDrops ~= nil then " or Shears" else ""}`
 end
 
+--[[
+	A turret's stat line: its range (blocks), its own rate (rounds a minute, which a slower feeder
+	lowers: Turrets.rpm), the rounds its ammo slot holds and its calibre as players read it
+	("Range 24 · 240 rpm · holds 4 · 9mm"; "5.56", ".308": Weapons/Describe.calibre).
+]]
+function Tooltip.turretLine(spec: Turrets.Spec): string
+	return `Range {spec.range} · {spec.rpm} rpm · holds {spec.buffer} · {Describe.calibre(spec.calibre)}`
+end
+
 -- What a block item says about its block (see the header).
 local function blockLines(lines: { Line }, block: number)
 	local def = Blocks.get(block)
@@ -274,6 +286,10 @@ local function blockLines(lines: { Line }, block: number)
 		elseif transmitter.kind == "energy" then
 			add(`Capacity: {Items.formatEnergy(tier.cableCapacity)}/t`)
 		end
+	end
+	local turret = Turrets.spec(block)
+	if turret then
+		add(Tooltip.turretLine(turret))
 	end
 end
 

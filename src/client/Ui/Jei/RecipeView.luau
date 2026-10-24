@@ -32,6 +32,11 @@
 	              heating, combustion  a fuel bar burning down over a bucket's burn time, the lava
 	                        or fuel as a fluid stack, "Makes 4 MJ" and "200 J/t for 1000 s"
 	                        (fuel: "Makes 10 MJ" and "2.5 kJ/t for 200 s")
+	              duplicating  the ore block, a progress bar filling over the time the Metal
+	                        Miner takes an item, its drop, "240 s, 3.84 MJ" and "800 J/t"
+	              pressing  the Iron Ingot over the Gunpowder, a progress bar filling over the
+	                        10 s an operation takes, the rounds and their count, "10 s, 10 kJ"
+	                        and "50 J/t"
 	            A fluid stack stands for its bucket in navigation (clicks, R / U, gamepad).
 
 	The gauges are the inventory's (Ui/ContainerPanel): the progress a white bar 2 tall across the
@@ -89,6 +94,14 @@ local TAB_HEIGHT, TAB_WIDTH = ItemIcon.TAB_HEIGHT, ItemIcon.TAB_WIDTH
 local PAGE_ROW = { y = JeiLayout.PREV.y, h = JeiLayout.PREV.h }
 -- (The gauges' bars, the chevron and the padlock: Theme.Size's GAUGE, CHEVRON and PADLOCK.)
 local Size = Theme.Size
+-- The categories whose arrow is a progress bar filling over the entry's time (the others' a
+-- static chevron).
+local PROGRESS: { [string]: boolean } = {
+	smelting = true,
+	refining = true,
+	duplicating = true,
+	pressing = true,
+}
 -- JEI's shapeless mark: two arrows crossing over (9 x 10).
 local SHAPELESS_ART = {
 	".....#...",
@@ -457,7 +470,7 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 	end
 	local arrow = layout.arrow
 	if arrow then
-		if entry.category == "smelting" or entry.category == "refining" then
+		if PROGRESS[entry.category] then
 			widget.arrow = gaugeBar(frame, arrow, Dayz.Colour.Quantity)
 		else
 			Dayz.silhouette(
@@ -518,6 +531,8 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		lines = { JeiData.fuelText(entry.ticks), JeiData.smeltText(entry.ticks) }
 	elseif entry.fluidInputs then
 		lines = JeiData.fluidTexts(entry)
+	elseif entry.category == "duplicating" or entry.category == "pressing" then
+		lines = JeiData.machineTexts(entry)
 	end
 	for i, text in lines do
 		local r = layout.texts[i]

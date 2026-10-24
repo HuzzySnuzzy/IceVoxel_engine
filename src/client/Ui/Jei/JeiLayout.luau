@@ -37,6 +37,11 @@
 	                 heating, combustion  150 x 36: as fuel, with the fluid stack under the flame
 	                 boiling   as smelting (the dirty water over the campfire's flame, the arrow,
 	                           the purified water), "Right click" under them
+	                 duplicating  150 x 36: as refining with items: the ore, an arrow filling
+	                           over the time an item takes, its drop, two lines of text right
+	                           of them
+	                 pressing  150 x 36: the Iron Ingot over the Gunpowder, then as
+	                           duplicating (the arrow, the rounds, two lines of text)
 
 	A slot's (x, y) is its item's top left corner, as in MenuLayout (the frame is one pixel up and
 	left, a large frame five).
@@ -195,6 +200,37 @@ local GENERATOR: EntryLayout = {
 	texts = { rect(24, 9, 126, 8), rect(24, 21, 126, 8) },
 }
 
+-- The Metal Miner: refining's layout with items where its fluids go (the ore, its drop).
+local DUPLICATING: EntryLayout = {
+	w = 150,
+	h = 36,
+	inputs = { { x = 1, y = 10, big = false } },
+	output = { x = 55, y = 10, big = false },
+	fluidInputs = {},
+	fluidOutput = nil,
+	arrow = rect(24, 10, 24, 16),
+	flame = nil,
+	plus = nil,
+	shapeless = nil,
+	texts = { rect(78, 9, 72, 8), rect(78, 21, 72, 8) },
+}
+
+-- The Ammo Press: the ingot over the gunpowder (Mekanism's main input over its extra one), then
+-- as the miner's.
+local PRESSING: EntryLayout = {
+	w = 150,
+	h = 36,
+	inputs = { { x = 1, y = 1, big = false }, { x = 1, y = 19, big = false } },
+	output = { x = 55, y = 10, big = false },
+	fluidInputs = {},
+	fluidOutput = nil,
+	arrow = rect(24, 10, 24, 16),
+	flame = nil,
+	plus = nil,
+	shapeless = nil,
+	texts = { rect(78, 9, 72, 8), rect(78, 21, 72, 8) },
+}
+
 JeiLayout.ENTRIES = {
 	crafting = CRAFTING,
 	smelting = SMELTING,
@@ -203,6 +239,8 @@ JeiLayout.ENTRIES = {
 	heating = GENERATOR,
 	combustion = GENERATOR,
 	boiling = SMELTING,
+	duplicating = DUPLICATING,
+	pressing = PRESSING,
 } :: { [string]: EntryLayout }
 
 function JeiLayout.entry(category: string): EntryLayout
