@@ -5528,7 +5528,7 @@ on the input `Ui/Screens` hands it before anything else.
   refining, and "Show recipes" of a Fuel Bucket too.
 - duplicating and pressing, from the machines' numbers (`Machines.info`, each while its switch
   `Config.Miner.Enabled` / `Config.AmmoPress.Enabled` is on when the index is built): the Metal
-  Miner's six ores in `MinerRules.ORES` order, each ore block into its drop (one), the time an
+  Miner's twelve ores in `MinerRules.ORES` order, each ore block into its drop (one), the time an
   item takes and its J (ticks × J/t, never under the ore's floor) at J/t ("240 s, 3.84 MJ",
   "800 J/t" for a diamond; coal "30 s, 480 kJ"); and the Ammo Press's calibres in item order, a
   Brass Ingot, a Lead Ingot and a Gunpowder (`inputs` 1-3, the panel's order) into 16 9mm, 10
