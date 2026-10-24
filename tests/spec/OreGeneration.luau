@@ -339,6 +339,49 @@ return function(t, shared, require)
 		return cells, others
 	end
 
+	t.test("ore generation: saltpetre never runs under wet land or the sea at dry land's edge", function()
+		-- (Each step of a vein, not only its start, must lie under dry land above the sea: a vein
+		-- starting at a desert's edge once ran under the tundra beside it.)
+		local rng = Hash.rng(5)
+		local dry, other, chunks, tries = 0, 0, 0, 0
+		while chunks < 12 and tries < 20000 do
+			tries += 1
+			local cx, cz = rng:int(-40000, 40000) // SIZE, rng:int(-40000, 40000) // SIZE
+			local hasDry, hasOther = false, false
+			for dz = 0, SIZE - 1, 3 do
+				for dx = 0, SIZE - 1, 3 do
+					local h, b = gen.column(cx * SIZE + dx, cz * SIZE + dz)
+					if Ores.isDry(b) and h > Config.SeaLevel then
+						hasDry = true
+					else
+						hasOther = true
+					end
+				end
+			end
+			if hasDry and hasOther then
+				chunks += 1
+				local r = gen.generate(0, cx, cz)
+				for y = 0, r.height - 1 do
+					for lz = 0, SIZE - 1 do
+						for lx = 0, SIZE - 1 do
+							if ChunkLayout.get(r.data, lx, y, lz) == B.SaltpetreOre then
+								local h, b = gen.column(cx * SIZE + lx, cz * SIZE + lz)
+								if h > Config.SeaLevel and Ores.isDry(b) then
+									dry += 1
+								else
+									other += 1
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		t.eq(chunks, 12, "chunks on dry land's edge found")
+		t.ok(dry > 0, `saltpetre under their dry land ({dry})`)
+		t.eq(other, 0, "none under the wet land or sea beside it")
+	end)
+
 	t.test("ore generation: saltpetre 4 to 36 blocks under dry land, as common as coal there", function()
 		local top = 120
 		local cells, others = underLand(top, function()

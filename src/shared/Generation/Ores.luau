@@ -68,7 +68,8 @@
 	  * sulfur is volcanic: 3 veins of 8 a chunk in the cave lava's band (y 1 .. 33: caves are lava
 	    below Config.Caves.LavaLevel, y 11; 1.9 times iron there), and `Ores.vents` on the stone
 	    barrier of every lava lake (on the surface and sunk into cave floors; some 20 blocks a
-	    lake) and in the rock around oil deposits (35 to 75 blocks a small or medium well);
+	    surface lake, 35 an underground one) and in the rock around oil deposits (20 to 30 blocks
+	    a small well, 35 to 70 a medium one, 85 to 210 a large one);
 	  * saltpetre lies under dry land: 4 veins of 8 a chunk start 4 to 36 blocks under the top
 	    block of columns whose biome never rains (BiomeList's precipitation = false: Desert,
 	    Savanna, Windswept Savanna) above the sea, some 24 blocks a dry chunk: as many as coal in
@@ -336,8 +337,13 @@ function Ores.place(
 			for _ = 1, ore.size do
 				if live and x >= 0 and x < SIZE and z >= 0 and z < SIZE and y > 0 and y < heightCells then
 					local offset = ((y * P + z + 1) * P + x + 1) * 2
+					-- (A dry ore's every step stays under dry land above the sea: a vein starting
+					-- at a desert's edge ends there instead of running under the tundra beside it.)
+					local column = (z + 1) * P + x + 2
+					local h = if ore.dry and surface then surface[column] else nil
 					if
 						readu16(data, offset) == stone
+						and (not ore.dry or (h ~= nil and h > SEA and biomes ~= nil and DRY[biomes[column]]))
 						and (
 							buried == nil
 							or not exposed(data, offset, y, heightCells)
@@ -416,7 +422,8 @@ local barrier: { number } = {}
 	of its barrier cells, and around every oil deposit of `wells`, one per WELL_AREA square blocks
 	of its surface, started one block outside the sphere. Each lake's and well's veins come from
 	its own stream, so every chunk walks the same ones and writes its core's part (a vein crosses
-	chunk borders unbroken). Only stone becomes sulfur.
+	chunk borders unbroken, but for the sunk lake's: only its own chunk knows of it, so its veins
+	stop at that chunk's border, as every Ores.place vein does). Only stone becomes sulfur.
 ]]
 function Ores.vents(
 	data: buffer,

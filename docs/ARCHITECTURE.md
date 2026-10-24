@@ -123,11 +123,13 @@ node key) and `posKey(x, y, z)` for block positions.
      replace stone, in the core" is what CaveDecor's rock rule and the border checks lean on.
    `Ores.vents` runs after the underground lava lake (so no lake barrier covers it again): sulfur
    veins of 6 started on the stone barrier cells (`Lava.BARRIER`) of every lava lake near the
-   chunk and the one just sunk into it (one per 16 barrier cells, some 20 blocks a lake), and
-   veins of 8 started one block outside every nearby oil deposit's sphere (one per 64 square
-   blocks of its surface, 35-75 blocks a small or medium well). Each lake's and well's veins come
-   from its own stream (seeded by its position), so every chunk walks the same ones and writes its
-   own core's part: a vent crosses chunk borders unbroken. The newer ores add about a fifth of the
+   chunk and the one just sunk into it (one per 16 barrier cells, some 20 blocks a surface lake,
+   35 an underground one), and veins of 8 started one block outside every nearby oil deposit's
+   sphere (one per 64 square blocks of its surface: 20-30 blocks a small well, 35-70 a medium
+   one, 85-210 a large one). Each lake's and well's veins come from its own stream (seeded by its
+   position), so every chunk walks the same ones and writes its own core's part: a vent crosses
+   chunk borders unbroken, but for the sunk lake's (only its own chunk knows of it, so its veins
+   stop at that chunk's border, as every ore vein does). The newer ores add about a fifth of the
    ore walk's steps (334 of 1,780 in a 700 tall chunk): `Ores.place` costs ~0.2 ms there instead
    of ~0.15 ms, and ores with vents ~0.12 ms of a real chunk's ~3 ms.
 7. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`; never

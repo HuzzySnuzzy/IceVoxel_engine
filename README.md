@@ -1617,12 +1617,14 @@ A fast, Minecraft-style voxel engine for Roblox.
   - **Uranium Ore** (Mekanism's small and buried veins, a quarter as many) deep: near bedrock and
     in the deep caves up to y 133, never in the mountains; rare (about half as common as iron
     below y 50, four times the diamonds), and mostly buried in the rock: three in four of its
-    cells that would face a cave stay stone.
+    buried veins' cells that would face a cave stay stone (about three in five of all its own).
   - **Sulfur Ore** where it is volcanic: in the rock of the cave lava's band (bedrock to y 33), in
-    crusts on the stone rim of every lava lake (on the surface and sunk into cave floors, about 20
-    a lake), and in the rock around oil deposits (35-75 around a small or medium well).
+    crusts on the stone rim of every lava lake (about 20 a surface lake, 35 one sunk into a cave
+    floor), and in the rock around oil deposits (20-30 around a small well, 35-70 a medium one,
+    85-210 a large one).
   - **Saltpetre Ore** under dry land: 4 to 36 blocks below the surface of deserts, savannas and
-    windswept savannas (the biomes where it never rains), about 24 a chunk, as much as coal there.
+    windswept savannas (the biomes where it never rains; never under wetter land beside them or
+    the sea), about 24 a chunk, as much as coal there.
 - **Item data.** Items carry a little data of their own, Minecraft's item NBT kept flat: up to 16
   named numbers, strings or flags. A Fluid Tank broken in survival keeps its fluid in its item
   ("Lava: 12,000 mB" under its name in the inventory) and gets it back when placed again, as in
