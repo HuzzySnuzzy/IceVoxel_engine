@@ -3968,7 +3968,8 @@ fluid of Shared/Fluids, checked at load). A stack is `{ item, count, damage }`, 
 (64; armor and tools 1, snowballs 16); `damage` is a tool's wear (`durability`: wood 59, stone
 131, iron 250, diamond 1561, gold 32, shears 238). Blocks say how long they take to mine
 (`hardness`), which tool harvests them (`tool`, and `toolLevel` when only that tool of that tier
-or better drops anything: iron and osmium ore need stone, diamond, gold and emerald ore iron),
+or better drops anything: iron, osmium, copper, lead and zinc ore need stone, diamond, gold,
+emerald and uranium ore iron),
 what they drop (`drops`, `dropCount`: snow gives 4 snowballs; `shearDrops`, `shearCount`: what
 Shears get instead), what right click opens (`menu`) and how many slots they hold (`container`).
 An item of ItemList may place a block that is no item of its own (`places`, Minecraft's
@@ -4767,6 +4768,38 @@ burns away.
   (1 − distance / (`ShakeDistance` × power)) × min(1, power / 4), fading over 0.45 s, turning the
   camera by up to 1.6° after Roblox's camera updates.
 
+## The new ores (`Blocks/BlockList`, `Items/ItemList`, `Crafting/Recipes`, `Machines/MinerRules`)
+
+Copper, lead, zinc, brass, sulfur, saltpetre and uranium, after the Ammo Press (499) so no other
+id moved; `tests/spec/Ores` checks the registries.
+
+- Blocks 500..514, in this order: Copper Ore, Block of Copper, Block of Raw Copper; Lead Ore and
+  its two; Zinc Ore and its two (zinc is brass's other metal: brass is an alloy, so it needs one);
+  Block of Brass; Sulfur Ore; Saltpetre Ore; Uranium Ore and its two. The metal ores are Granite's
+  speckled material in the ore's colour (as Osmium Ore), hardness 3, `toolLevel` 1 (uranium 2),
+  each dropping one of its raw metal; Sulfur and Saltpetre Ore (Limestone's material for
+  saltpetre's white crusts) drop by any pickaxe (`toolLevel` 0, as coal). The storage blocks have
+  Minecraft's raw blocks' hardness 5 (the Block of Copper Minecraft's 3) and the ore's tier;
+  metal blocks sound "metal", raw ones "stone". Blank texture pack entries ("copper ore" ...).
+- Items after the Laser Sight: each metal's raw lump, ingot and nugget (the iron shapes, `lump`,
+  `ingot`, `nugget`, in the metal's colour), Brass Ingot and Nugget, Sulfur and Saltpetre (a heap
+  of powder, as Glow Dust's), the uranium three, then the Hazmat suit (`HazmatHelmet` ...
+  `HazmatBoots`, shown as Mekanism's Hazmat Mask, Gown, Pants and Boots: armor with Leather's
+  points). Blank icons.
+- Recipes: `storage` (nine to one and back) for each metal's nuggets, ingots and raw lumps and
+  for brass; smelting raw and ore into ingots, Sulfur Ore into Sulfur, Saltpetre Ore into
+  Saltpetre; brass `mix` (three Copper Ingots and a Zinc Ingot make four); black powder `mix`
+  (two Saltpetre, a Sulfur, a `#coals`: four Gunpowder, Thermal's niter recipe; the coal and flint
+  recipe stays); the Nuke's core a Block of Uranium; the Hazmat pieces in the armor shapes of Lead
+  Ingots and White Wool, the mask's visor Glass ("WLW", "LGL").
+- The Metal Miner copies all six new ores: `MinerRules.ORES` appends Copper, Lead, Zinc, Sulfur,
+  Saltpetre and Uranium Ore after Diamond (the order is packed into a miner's state, 8 x index +
+  code, so the old six keep theirs); Config.Miner.Ores: the metals as iron (400 ticks at 200 J),
+  the powders 600 at 200, uranium 3600 at 800. A panel line holds 16 characters before the arrow
+  (`LINE_CHARACTERS`): a drop whose "Makes ..." is longer shows alone ("Raw Uranium").
+- Knowledge (`Knowledge.ORES`, `SMELTED`): the metals as iron, the powders as coal, uranium as
+  gold.
+
 ## TNT and the Nuke (server `Behaviours/Tnt`, `World/Nuke`, client `Rendering/FuseView`)
 
 Minecraft 1.20.1's TntBlock and PrimedTnt, and a mod-style Nuke lit the same way. Tested in
@@ -4779,8 +4812,9 @@ radiation sign; "nuke side / top", blank), and their lit blocks `LitTnt` and `Li
 placeable, unbreakable (Minecraft's primed TNT is an entity no player breaks), blast resistance 0
 (rays pass, as they pass entities), no drops, `item` the unlit block (WAILA's icon, pick block),
 glowing (`light` 9 white, 12 red: drawn one part per block with its PointLight), behaviour "Tnt".
-Gunpowder (ItemList, last) is two per coal or charcoal and flint; TNT is Minecraft's recipe (5
-gunpowder in an X, 4 sand); the Nuke is eight TNT around a diamond block.
+Gunpowder (ItemList, last) is four of two Saltpetre, a Sulfur and a coal or charcoal (black
+powder), or two of a coal or charcoal and a flint; TNT is Minecraft's recipe (5 gunpowder in an X,
+4 sand); the Nuke is eight TNT around a Block of Uranium.
 
 **Lit blocks, not entities.** PrimedTnt falls, flashes and explodes where it is. The engine's
 entities are items only (EntityWorld, its own protocol and renderer), so a lit explosive is a
@@ -5309,9 +5343,9 @@ budget's bucket and the fraction of a point not yet given.
 
 | Source | First time (once ever) | Again |
 | ------ | ---------------------- | ----- |
-| a block broken | 5 (`mine`) | ores: coal 1, iron and osmium 2, gold 3, diamond and emerald 5 (`ORES`, source "ore"); logs 0.25 (`LOG`) |
+| a block broken | 5 (`mine`) | ores: coal, sulfur and saltpetre 1, iron, osmium, copper, lead and zinc 2, gold and uranium 3, diamond and emerald 5 (`ORES`, source "ore"); logs 0.25 (`LOG`) |
 | a crafting result taken | 8 (`craft`) | 0.1 a craft (`CRAFT`) |
-| a smelted result taken out (or pushed out, or pulled by a pipe: for the furnace's last user) | 10 (`smelt`) | Minecraft's furnace experience per item: iron and osmium ingots 0.7, gold, diamond, emerald 1, charcoal 0.15, others 0.1 (`SMELTED`) |
+| a smelted result taken out (or pushed out, or pulled by a pipe: for the furnace's last user) | 10 (`smelt`) | Minecraft's furnace experience per item: iron, osmium, copper, lead and zinc ingots 0.7, gold, uranium, diamond, emerald 1, charcoal 0.15, others 0.1 (`SMELTED`) |
 | a biome stood in | 20 (`biome`) | - |
 | a mob killed (Mobs/Mobs' `died`, wired to `killed` by the boot script) | 10 (`mob`) | animals 2 (Minecraft's 1-3), zombies by kind: a crawler 4, a zombie or runner 5, the screamer, police, firefighter, construction and doctor zombies 6, a soldier 8, a brute 10; others 3 (`MOBS`, `MOB_DEFAULT`) |
 | an Age reached | its reward: 50, 100, 150, 200 (`age`) | - |
@@ -5343,7 +5377,10 @@ announced again nor rewarded). With the
 milestones: Iron (5, a Furnace crafted, an Iron Ingot smelted), Industrial (15, an Osmium Ingot
 smelted, a Bucket crafted), Electric (25, a Heat Generator crafted, 6 biomes), Atomic (40, an
 Oil Refinery and a Basic Battery crafted). Iron smelting is the Stone Age's on purpose: smelting
-the first ingot is the way in; what is made of iron is the Iron Age's. What the mobs brought
+the first ingot is the way in; what is made of iron is the Iron Age's. Of the new ores, copper
+(ingots, nuggets, blocks), Sulfur and Saltpetre are the Stone Age's, lead, zinc, brass and the
+Hazmat suit the Iron Age's, and uranium's ingot, nugget and blocks the Atomic Age's (the ore and
+Raw Uranium are mined in any Age). What the mobs brought
 (cooked meat, leather armor, White Wool) is the Stone Age's; the potions (Effects/PotionList)
 are brewed from the Iron Age (each potion's base variant), their level II and long variants from
 the Industrial Age (`tests/spec/Crossover` checks every one).
@@ -7328,10 +7365,12 @@ require it):
   output (pushed out every 10 ticks), 2-3 the cards (`Upgrades.slots(8, 53)`); data 7 progress, 8
   ticksRequired, 9 energyPerTick, 10 mining (the ore block seen), 11 state (`MinerRules.packState`:
   code + 8 x the ore's index in `MinerRules.ORES`, the frozen order Coal, Iron, Osmium, Gold,
-  Emerald, Diamond Ore), 12 activeDelay; MINING ("Mining Diamond Ore"), NO_POWER, OUTPUT_FULL,
+  Emerald, Diamond Ore, then the new ores appended: Copper, Lead, Zinc, Sulfur, Saltpetre, Uranium
+  Ore), 12 activeDelay; MINING ("Mining Diamond Ore"), NO_POWER, OUTPUT_FULL,
   NO_ORE ("No ore below"); a 200 kJ store taking its capacity a tick (`rates`); `info` the store and
   each ore's ticks, J a tick and floor. Config.Miner.Ores: coal 600 ticks at 800 J/t with a 400 kJ
-  floor, iron and osmium 400 at 200, gold 800 at 300, emerald 3600 at 800, diamond 4800 at 800. Each
+  floor, iron, osmium, copper, lead and zinc 400 at 200, sulfur and saltpetre 600 at 200, gold 800
+  at 300, emerald and uranium 3600 at 800, diamond 4800 at 800. Each
   tick it reads the cell under it with `ctx.getBlock`: an ore of `ORES` is mined; another block is
   "No ore below" (progress 0, `mining` 0); another ore than `mining` starts over; nil (an unloaded,
   unedited cell: still what was generated) keeps it mining what it mined, so it works with nobody
@@ -7350,7 +7389,8 @@ require it):
   item, within its stack) is "Output full" and less than a tick's J "No power", both with the
   progress waiting and nothing used; else it works (RATE minus the J, ACTIVE through `showActive`'s
   delay) and at `ticksRequired` puts one drop (Coal, Raw Iron, Raw Osmium, Raw Gold, an Emerald, a
-  Diamond: `Items.blockDrops`, never the ore) into the output in a new stack, which the ejector
+  Diamond, Raw Copper, Raw Lead, Raw Zinc, a Sulfur, a Saltpetre, Raw Uranium: `Items.blockDrops`,
+  never the ore) into the output in a new stack, which the ejector
   pushes into chests next to it and NORMAL and PULL transporter sides take; nothing reaches the
   cards. Only its energy goes into its item. With `Config.Miner.Enabled` false it is inert (nothing
   used or made, "Idle"). Its panel's two lines at (8, 32): "Makes Diamond" and, from the window's

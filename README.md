@@ -166,8 +166,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   in a ripple. Lit, it glows, flashes white, hisses (`entity.tnt.primed`), falls as Minecraft's
   primed TNT does (speeding up, through air, fire, plants and fluids, which it gives back), can't
   be broken, and 4 s later explodes with power 4 and no fire (in water it breaks nothing).
-  **Gunpowder** (soldier zombies drop it too, and police stations and bunkers keep some): a coal
-  or charcoal and a flint make two; TNT is Minecraft's recipe (5 gunpowder in an X, 4 sand).
+  **Gunpowder** (soldier zombies drop it too, and police stations and bunkers keep some): black
+  powder, two Saltpetre, a Sulfur and a coal or charcoal, makes four, and a coal or charcoal and a
+  flint still make two; TNT is Minecraft's recipe (5 gunpowder in an X, 4 sand).
 - **The Nuke** (for fun, a mod's nuke). A dark casing with hazard stripes and the radiation sign,
   lit like TNT: it glows red, flashes and beeps every second for 10 s, then digs a crater no ray
   explosion could: a ragged sphere of radius 24 (± 20%, smooth noise and a block of crumble; the
@@ -179,7 +180,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   (about 33,000 edits over 3-4 s on open ground), never into unloaded chunks. Players: Minecraft's
   explosion damage at power 28, deadly in the open within about 50 blocks, walls and hills
   shielding; everyone within 256 blocks sees a white flash, a fireball, a shock ring and a rising
-  mushroom cloud, hears the boom and feels a long shake. Eight TNT around a block of diamond.
+  mushroom cloud, hears the boom and feels a long shake. Eight TNT around a Block of Uranium.
 - **Fire.** Minecraft 1.20.1's fire. It burns on top of a block, or clings to the sides of
   flammable blocks when there is no floor, and spreads: every 1.5-2 s (30 + rand(10) ticks) it may
   burn a neighbour away (Minecraft's burn odds: leaves and plants fast, logs and coal blocks
@@ -675,7 +676,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   back) or the `F3` + `F4` game mode switcher.
   - **Survival:** blocks take Minecraft's time to mine, by hand or with tools, cracking as they
     go, and drop as items that bob on the ground until someone walks over them. Stone and ores need
-    a pickaxe of the right tier to drop anything (iron and osmium ore a stone pickaxe, diamonds an iron one),
+    a pickaxe of the right tier to drop anything (iron, osmium, copper, lead and zinc ore a stone
+    pickaxe, diamonds and uranium an iron one),
     and tools wear out. Placing uses items up. Players have a Minecraft inventory: 36 slots, armor,
     a 2 × 2 crafting grid and Terraria's equipment (below), laid out in a survival game's columns
     (see The inventory and the HUD); chests, crafting tables and furnaces open in its VICINITY
@@ -768,15 +770,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   chest beside it, or a pipe pulls out, counts as smelted by whoever last used the furnace.
   Knowledge opens five **Ages**, each at a level and one or two milestones: the **Stone Age** (where
   everyone starts: wood, stone tools, the crafting table, furnace, chests, torches, glass, iron
-  smelting, Tough As Nails' basics, cooked meat, leather armor and wool), the **Iron Age** (level 5,
-  a Furnace crafted and an Iron Ingot smelted: iron and gold tools and armor, the Bucket, Shears,
-  Flint and Steel, the Lantern, the Canteen, the Thermometer, gold and osmium smelting, potions),
+  smelting, copper, Sulfur and Saltpetre, Tough As Nails' basics, cooked meat, leather armor and
+  wool), the **Iron Age** (level 5, a Furnace crafted and an Iron Ingot smelted: iron and gold tools
+  and armor, the Bucket, Shears, Flint and Steel, the Lantern, the Canteen, the Thermometer, gold,
+  osmium, lead and zinc smelting, brass, the Hazmat suit, potions),
   the **Industrial Age** (level 15, an Osmium Ingot and a Bucket: diamond gear, Mekanism's basic and
   advanced pipes, transporters and tanks, the Configurator, the Heat Generator, gunpowder and TNT,
   potions II and long potions), the **Electric Age** (level 25, a Heat Generator: cables, the
   Electric Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion Generator, elite
   pipes) and the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar Panel, the
-  ultimate tiers, the Nuke). A later Age's crafting results stay out of the grid (shown greyed with
+  ultimate tiers, uranium smelting, the Nuke). A later Age's crafting results stay out of the grid (shown greyed with
   "Requires the Iron Age"; JEI puts a padlock on them) and furnaces take nothing that would smelt
   into one; reaching an Age is automatic, with a banner, a fanfare and a line in everyone's chat.
   Each level is a **skill point** for the skill tree (`K`): 18 small perks in three branches across
@@ -1534,7 +1537,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   drop out into the chests and transporters next to it: Coal Ore gives Coal every 30 s at 800 J a
   tick (never more energy than the coal burns for), Iron and Osmium Ore their raw ore every 20 s at
   200 J a tick, Gold Ore every 40 s at 300, Emerald Ore an Emerald every 3 minutes and Diamond Ore
-  a Diamond every 4 minutes at 800 (`Config.Miner`), faster with Speed Upgrades and cheaper with
+  a Diamond every 4 minutes at 800; the new ores too: Copper, Lead and Zinc Ore their raw metal
+  every 20 s at 200, Sulfur and Saltpetre Ore a Sulfur or a Saltpetre every 30 s at 200 (so
+  gunpowder, and with it ammo, can be automated), Uranium Ore Raw Uranium every 3 minutes at 800
+  (`Config.Miner`), faster with Speed Upgrades and cheaper with
   Energy Upgrades (Mekanism's maths; coal never under its floor, and cards put in or taken out
   mid-item keep the share made, so no swap makes a coal cheaper). It needs a real ore block where it
   lies (ores can't be moved) and keeps mining with nobody near. Its panel: the output, the arrow,
@@ -1558,6 +1564,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   Osmium (both hardness 7.5, as in Mekanism), and each unpacks again. The ore generates in small
   veins in all rock, plus Mekanism's "middle" veins concentrated around y 100: about as much as
   iron below y 197 and about half as much in the mountains above.
+- **Copper, lead, zinc and brass.** Copper Ore (orange-specked stone), Lead Ore (dull blue-grey)
+  and Zinc Ore (pale grey-green), hardness 3, need a stone pickaxe and drop Raw Copper, Raw Lead
+  and Raw Zinc, which smelt into ingots (the ores smelt too). Each metal has its nuggets (nine to
+  an ingot), its Block (nine ingots; copper's hardness 3, the others 5) and its Block of Raw metal
+  (nine raw, hardness 5), all unpacking again. Brass is an alloy: three Copper Ingots and a Zinc
+  Ingot in any slots make four Brass Ingots, with Brass Nuggets and a Block of Brass. Copper is
+  the Stone Age's; lead, zinc and brass the Iron Age's. Brass makes the Ammo Press's cases and lead
+  its bullets.
+- **Sulfur and saltpetre.** Sulfur Ore (yellow crusts) and Saltpetre Ore (white crusts) drop one
+  Sulfur or one Saltpetre with any pickaxe, as Coal Ore does (and smelt into it). Two Saltpetre, a
+  Sulfur and a coal or charcoal make four Gunpowder (behind the Industrial Age and Demolition, as
+  gunpowder is). The Metal Miner copies both.
+- **Uranium.** Uranium Ore (green-specked stone) needs an iron pickaxe and drops Raw Uranium, which
+  smelts into a Uranium Ingot in the Atomic Age, with Uranium Nuggets, a Block of Uranium (the
+  Nuke's core) and a Block of Raw Uranium. The **Hazmat suit** (Mekanism's Hazmat Mask, Gown,
+  Pants and Boots: lead ingots in White Wool padding, the mask with a glass visor; Leather's
+  armor points) is the Iron Age's.
 - **Item data.** Items carry a little data of their own, Minecraft's item NBT kept flat: up to 16
   named numbers, strings or flags. A Fluid Tank broken in survival keeps its fluid in its item
   ("Lava: 12,000 mB" under its name in the inventory) and gets it back when placed again, as in
