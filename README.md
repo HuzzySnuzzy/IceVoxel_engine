@@ -1481,13 +1481,14 @@ A fast, Minecraft-style voxel engine for Roblox.
   24 / 32 / 40 / 48 at 45 / 75 / 120 / 180 holding 1 / 2 / 3 / 4; Sniper 40 / 48 / 56 / 64 at 15 /
   20 / 30 / 40 holding 1 / 1 / 2 / 2 (`Config.Turrets`). The belt feeder runs at the speed of the
   transporter that feeds it: a turret fires at most the rate of its type at the best transporter
-  tier next to it that feeds it (a Basic transporter caps an Ultimate SMG at 90 a minute), so its
-  full rate needs a transporter of its tier or better; fed through one it holds that rate, and each
-  further transporter costs its trip. A line into a full turret waits for room instead of backing
-  off, looking at the turret alone, so it costs no more than a backoff (Mekanism's backoff is
-  unchanged for chests, furnaces and every other machine), and a line branching to several
-  turrets feeds them all, taking turns when it cannot keep up. Filled by hand (no transporter) a
-  turret fires its buffer at its own rate, then shows "No ammo". Energy:
+  tier next to it that brings it rounds (a Basic transporter caps an Ultimate SMG at 90 a minute;
+  a dead stub, a transporter of another colour or a line passing by with other items doesn't
+  count), so its full rate needs a transporter of its tier or better; fed through one it holds
+  that rate, and each further transporter costs its trip. A line into a full turret waits for
+  room instead of backing off, looking at the turret alone, so it costs no more than a backoff
+  (Mekanism's backoff is unchanged for chests, furnaces and every other machine), and a line
+  branching to several turrets feeds them all, taking turns when it cannot keep up. Filled by
+  hand (no transporter) a turret fires its buffer at its own rate, then shows "No ammo". Energy:
   20 / 40 / 80 / 160 kJ stores, 4 / 8 / 12 / 16 J a tick idle, twice that while tracking, and 30
   (SMG), 80 (rifle) or 300 (sniper) J a shot: power is a requirement, ammo the real cost. Its panel
   has the ammo, optic and muzzle slots (outlined while empty), the status ("No target",

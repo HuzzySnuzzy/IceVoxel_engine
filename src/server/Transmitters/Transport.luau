@@ -73,7 +73,8 @@
 	route if not; at 100 it enters the next transporter (progress - 100) or, at the end, the
 	inventory: what fits goes in (Transmitters.insert through that face; viewers see it at once
 	and a furnace starts cooking) and the rest finds a new route from the middle of the
-	transporter.
+	transporter. A machine that demands its items (a turret) keeps the tick items last came
+	through each transporter (`world.feeds`: the feeder rule, TransmitterWorld.feedTier).
 
 	Breaking. The items in a transporter that goes drop there as item entities (Env.drop).
 
@@ -590,6 +591,17 @@ local function arrive(world: World, item: Item, node: Node, inventory: number)
 		local newSlots, leftover = Transmitters.insert(block, opposite(side), slots, item.stack)
 		if leftover == nil or leftover.count < item.stack.count then
 			store(world, x, y, z, block, newSlots)
+			-- (The feeder rule: a machine that demands its items keeps which transporter
+			-- brought them, TransmitterWorld.feedTier.)
+			if Machines.demands(block) then
+				local feed = world.feeds[inventory]
+				if feed == nil then
+					feed = { at = {}, stack = item.stack }
+					world.feeds[inventory] = feed
+				end
+				feed.at[node.key] = world.tick
+				feed.stack = Items.withCount(item.stack, 1) :: Stack
+			end
 		end
 		left = leftover
 	end

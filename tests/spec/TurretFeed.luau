@@ -308,44 +308,126 @@ return function(t, shared, require, server)
 		end
 	end)
 
-	t.test("turret feed: the feeder rule reads the transporters next to it", function()
+	t.test("turret feed: the feeder rule reads the transporters that bring it rounds", function()
 		local spec = Turrets.of("smg", 4)
+		local UP, NORTH, SOUTH, EAST = 1, 2, 3, 5
+		local function tier(s: any): number
+			return TransmitterWorld.feedTier(s.pipes, s.x, Y, 0, spec.block)
+		end
+		-- (Not firing: Disabled, so full once its rounds came.)
 		local s = line(3, 1, spec.block, spec.ammo, nil)
 		local x = s.x
-		t.eq(TransmitterWorld.feedTier(s.pipes, x, Y, 0, spec.block), 3, "an Elite one beside it")
+		t.eq(tier(s), 0, "nothing came yet: by hand")
+		s.step(100)
+		t.eq(tier(s), 3, "an Elite one beside it brought them")
 		-- A side set to NONE or PULL gives nothing; PUSH does.
-		local EAST = 5
 		TransmitterWorld.setMode(s.pipes, x - 1, Y, 0, EAST, M.NONE)
-		t.eq(TransmitterWorld.feedTier(s.pipes, x, Y, 0, spec.block), 0, "cut: by hand")
+		t.eq(tier(s), 0, "cut: by hand")
 		TransmitterWorld.setMode(s.pipes, x - 1, Y, 0, EAST, M.PULL)
-		t.eq(TransmitterWorld.feedTier(s.pipes, x, Y, 0, spec.block), 0, "pulling: by hand")
+		t.eq(tier(s), 0, "pulling: by hand")
 		TransmitterWorld.setMode(s.pipes, x - 1, Y, 0, EAST, M.PUSH)
-		t.eq(TransmitterWorld.feedTier(s.pipes, x, Y, 0, spec.block), 3, "pushing feeds it")
-		-- The best of several; the Restrictive Transporter counts as Basic; none over the gun.
-		local blocks: { [number]: number } = {}
-		local containers = Containers.new()
-		local pipes = TransmitterWorld.new({
-			getBlock = function(bx: number, by: number, bz: number): number?
-				return blocks[Coords.posKey(bx, by, bz)] or AIR
-			end,
-			containers = containers,
-		})
-		local function set(bx: number, by: number, bz: number, block: number)
-			local key = Coords.posKey(bx, by, bz)
-			local old = blocks[key] or AIR
-			blocks[key] = block
-			TransmitterWorld.blockChanged(pipes, bx, by, bz, old, block)
+		t.eq(tier(s), 3, "pushing feeds it")
+		-- Full, nothing can come: it keeps its feeder however long it waits, looked at as the
+		-- simulation does (every FeedTicks).
+		for _ = 1, 100 do
+			s.step(20)
+			tier(s)
 		end
-		set(0, Y, 0, spec.block)
-		set(0, Y + 1, 0, T[4])
-		t.eq(TransmitterWorld.feedTier(pipes, 0, Y, 0, spec.block), 0, "an Ultimate one over the gun feeds nothing")
-		set(0, Y, 1, B.RestrictiveTransporter)
-		t.eq(TransmitterWorld.feedTier(pipes, 0, Y, 0, spec.block), 1, "the Restrictive Transporter: Basic")
-		set(1, Y, 0, T[2])
-		set(0, Y - 1, 0, T[3])
-		t.eq(TransmitterWorld.feedTier(pipes, 0, Y, 0, spec.block), 3, "the best: Elite, from below")
-		t.eq(TransmitterWorld.feedTier(pipes, 0, Y, 0, B.Chest), 4, "a chest takes them through its top too")
-		t.eq(TransmitterWorld.feedTier(pipes, 5, Y, 5, spec.block), 0, "none near")
+		t.eq(tier(s), 3, "full for 2000 ticks: still Elite")
+		-- Its source gone and its rounds taken out by hand: forgotten once nothing came for
+		-- FEED_MEMORY ticks.
+		s.set(0, Y, 0, AIR)
+		s.container().slots[1] = nil
+		s.step(TransmitterWorld.FEED_MEMORY - 20)
+		t.eq(tier(s), 3, "a while: still Elite")
+		s.step(40)
+		t.eq(tier(s), 0, "nothing came: by hand")
+		-- The best of several that brought it rounds; the Restrictive Transporter counts as Basic.
+		local counter, get, bindWorld = shooter()
+		local f = line(1, 1, spec.block, spec.ammo, get())
+		bindWorld(f)
+		local function feeder(z: number, side: number, block: number)
+			local cz = if side == NORTH then z - 1 else z + 1
+			f.set(f.x, Y, cz, B.Chest)
+			local chest = f.containers:get(f.x, Y, cz, B.Chest)
+			for slot = 1, 27 do
+				chest.slots[slot] = Items.newStack(spec.ammo, Items.maxStack(spec.ammo))
+			end
+			f.set(f.x, Y, z, block)
+			assert(TransmitterWorld.setMode(f.pipes, f.x, Y, z, side, M.PULL))
+		end
+		f.step(200)
+		t.ok(counter.shots > 0, "it fires")
+		t.eq(tier(f), 1, "a Basic one")
+		feeder(1, SOUTH, B.RestrictiveTransporter)
+		TransmitterWorld.setMode(f.pipes, f.x - 1, Y, 0, EAST, M.NONE)
+		f.step(200)
+		t.eq(tier(f), 1, "the Restrictive Transporter: Basic")
+		feeder(-1, NORTH, T[3])
+		f.step(200)
+		t.eq(tier(f), 3, "the best: Elite")
+		t.eq(TransmitterWorld.feedTier(f.pipes, 5, Y, 5, spec.block), 0, "none near")
+		-- None over the gun: an Ultimate one there brings nothing through its top.
+		local top = line(4, 1, spec.block, spec.ammo, nil)
+		top.set(top.x - 1, Y, 0, AIR)
+		top.set(top.x, Y + 2, 0, B.Chest)
+		top.containers:get(top.x, Y + 2, 0, B.Chest).slots[1] = Items.newStack(spec.ammo, 64)
+		top.set(top.x, Y + 1, 0, T[4])
+		assert(TransmitterWorld.setMode(top.pipes, top.x, Y + 1, 0, UP, M.PULL))
+		top.step(200)
+		t.eq(tier(top), 0, "an Ultimate one over the gun feeds nothing")
+	end)
+
+	t.test("turret feed: transporters that bring it no rounds never lift its feeder", function()
+		-- ProbeFeedA (the review's): an Ultimate SMG on one Basic transporter (90 a minute) with
+		-- an Ultimate transporter beside it that brings it nothing, then with one that brings it
+		-- its rounds.
+		local spec = Turrets.of("smg", 4)
+		local NORTH, SOUTH = 2, 3
+		local function fedWith(extra: (any) -> ()): (number, number)
+			local counter, get, bindWorld = shooter()
+			local s = line(1, 1, spec.block, spec.ammo, get())
+			bindWorld(s)
+			extra(s)
+			s.step(WARM)
+			counter.shots = 0
+			s.step(TICKS)
+			return counter.shots / (TICKS / 20), TransmitterWorld.feedTier(s.pipes, s.x, Y, 0, spec.block)
+		end
+		local basic = Turrets.rpm(spec, 1) / 60
+		local cases: { [string]: (any) -> () } = {
+			["a dead stub"] = function(s: any)
+				s.set(s.x, Y, 1, T[4])
+			end,
+			["a red stub its rounds cannot enter"] = function(s: any)
+				s.set(s.x, Y, 1, T[4])
+				assert(TransmitterWorld.setColour(s.pipes, s.x, Y, 1, 15))
+			end,
+			["a line of cobblestone passing by"] = function(s: any)
+				local at = s.x
+				s.set(at - 1, Y, 2, B.Chest)
+				s.containers:get(at - 1, Y, 2, B.Chest).slots[1] = Items.newStack(B.Cobblestone, 64)
+				s.set(at - 1, Y, 1, T[4])
+				assert(TransmitterWorld.setMode(s.pipes, at - 1, Y, 1, SOUTH, M.PULL))
+				-- (Kept off the Basic line north of it.)
+				assert(TransmitterWorld.setMode(s.pipes, at - 1, Y, 1, NORTH, M.NONE))
+				s.set(at, Y, 1, T[4])
+				s.set(at + 1, Y, 1, T[4])
+				s.set(at + 1, Y, 2, B.Chest)
+			end,
+		}
+		for name, extra in cases do
+			local rate, tier = fedWith(extra)
+			t.eq(tier, 1, `{name}: still fed by Basic`)
+			t.near(rate, basic, 0.01 * basic, `{name}: Basic's rate ({rate} a second)`)
+		end
+		-- The Basic one replaced by an Ultimate one: Ultimate's rate.
+		local rate, tier = fedWith(function(s: any)
+			s.set(1, Y, 0, T[4])
+			assert(TransmitterWorld.setMode(s.pipes, 1, Y, 0, WEST, M.PULL))
+		end)
+		t.eq(tier, 4, "an Ultimate one that brings them")
+		t.ok(rate >= 0.99 * spec.rpm / 60, `its rate ({rate} a second)`)
 	end)
 
 	--[[ Every other destination exactly as before ]]

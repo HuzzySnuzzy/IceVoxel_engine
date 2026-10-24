@@ -92,6 +92,10 @@ export type Node = {
 -- key and block, the face the items would enter it by and the stack the pull would send.
 export type Wait = { inventory: number, block: number, face: number, stack: Stack }
 
+-- What brought a machine that demands its items (a turret) its items: the tick each transporter
+-- next to it (pos key) last did, and one of the last stack that came (Transport's arrive).
+export type Feed = { at: { [number]: number }, stack: Stack }
+
 export type Tank = {
 	key: number,
 	x: number,
@@ -187,6 +191,9 @@ export type World = {
 	-- (pos key: the next tick's pulls start there; nil: anywhere).
 	searchBudget: number,
 	pullFrom: number?,
+	-- Machines that demand their items (turrets, pos key): the transporters that brought them
+	-- items (the feeder rule, TransmitterWorld.feedTier).
+	feeds: { [number]: Feed },
 	-- Transport ops since the last takeTransport (adds carry startTime 0: the caller sets it).
 	ops: { TransportOp },
 	-- Transmitters and tanks whose record may have changed.

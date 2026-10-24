@@ -5716,7 +5716,9 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
     deliveries measured before the rule for a machine that demands nothing and shows chests and
     furnaces still backing off, and the Transport and MachinePipes specs are untouched. With
     `Config.Turrets.Enabled` false no kind demands anything. `TransmitterWorld.feedTier` is the
-    feeder rule's look at the transporters next to a block.
+    feeder rule's look at the transporters next to a turret that bring it rounds: the arrivals
+    into a machine that demands its items record the transporter they came through and the tick
+    (`world.feeds`, forgotten when the block changes).
   - Routes: Dijkstra from the item's transporter, adding `pathCost` for each transporter entered
     and only entering ones that `carries` its colour. The cheapest inventory (then fewest steps)
     on a NORMAL or PUSH side that takes at least one item wins. Room counts the items already on
@@ -7370,10 +7372,15 @@ require it):
 **The feed** (the turrets design's measurements on this code; `tests/spec/TurretFeed` holds them):
 - The feeder rule: a turret fires at most `Turrets.rpm(spec, feed)`, its type's rate at the lower
   of its tier and `feed`, the best tier among the Logistical Transporters next to it that feed it
-  (`TransmitterWorld.feedTier`: the transporter's side towards it joined and NORMAL or PUSH, the
-  turret taking items through that face, never its top; the Restrictive Transporter counts as
-  Basic; 0 by hand: its own rate until its buffer is empty). The simulation works it out every
-  `FeedTicks` and returns it as the Outcome's `feed`; the kind caps the next tick's rate with it.
+  (`TransmitterWorld.feedTier`: one that brings it rounds, which are on their way through it or
+  came through it in the last 100 ticks, `FEED_MEMORY`, or before the turret was last seen full,
+  as Transport's arrivals record; the transporter's side towards it joined and NORMAL or PUSH,
+  the turret taking items through that face, never its top; the Restrictive Transporter counts
+  as Basic; 0 by hand: its own rate until its buffer is empty). A dead stub, a transporter of
+  another colour than the rounds or a line passing by with other items never counts (before,
+  any joined transporter did: an Ultimate stub let a turret on a Basic line fire at its full
+  rate). The simulation works it out every `FeedTicks` and returns it as the Outcome's `feed`; the
+  kind caps the next tick's rate with it.
 - The demand rule (Mekanism pipes: Items): a line into a full turret waits 3 ticks instead of
   backing off (looking at the turret alone; its routes are searched no more often than the
   backoff's, so it costs what a line into a full chest does). With it a line delivers the
