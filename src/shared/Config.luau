@@ -2503,9 +2503,10 @@ local Config = {
 		Lure = { Enabled = true, Noise = 24, Ticks = 600, Cell = 48 },
 		-- Targeting (ticks): a scan for a target every ScanTicks (a Laser Sight's own `scan`), sight
 		-- of the one held checked every SightTicks, lost after LoseTicks unseen; at most
-		-- MaxSightChecks candidates looked at a scan (the best two every scan, the others further
-		-- down the ranking each scan), MaxScansPerTick scans and MaxShotsPerTick shots a tick for
-		-- every turret together (those refused go first next tick, the longest waiting first).
+		-- MaxSightChecks candidates looked at a scan (best first, those the scans' pass has not
+		-- looked at yet, the best three again every second scan), MaxScansPerTick scans and
+		-- MaxShotsPerTick shots a tick for every turret together (those refused go first next
+		-- tick, the longest waiting first).
 		ScanTicks = 10,
 		SightTicks = 4,
 		LoseTicks = 10,

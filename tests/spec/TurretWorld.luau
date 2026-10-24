@@ -7,11 +7,14 @@
 
 	   targets     hostiles only (an animal or a frozen zombie never, an animal in the line never
 	               hit); the aim points (Ballistics.mobBoxes' centres); nearest first with the
-	               turning score; at most MaxSightChecks looked at, the next scan further down
-	               (a breach, a cave: hidden ones never hide one in sight for long); sight through
-	               blocks, glass and leaves stopped, torches and water not, the turret's own cell
-	               air; the pitch limits' dead zone; MinRange; every type and tier's range and the
-	               scope's; a mob killed in a tick gone for its later shots and scans
+	               turning score; at most MaxSightChecks looked at, the scans' passes against a
+	               model of the header (a breach, a cave, a horde at a wall, one walking in:
+	               hidden ones never hide one in sight for long, nor let a far one be taken
+	               first); sight through blocks, glass and leaves stopped, torches and water not,
+	               the turret's own cell air, the answer the cast from the pivot's on random lines
+	               and through cells' corners; the pitch limits' dead zone; MinRange; every type
+	               and tier's range and the scope's; a mob killed in a tick gone for its later
+	               shots and scans
 	   tracking    sticky; the turn rate (the short way across +-pi); lost after LoseTicks
 	               unseen, at once dead, gone or out of range; no power holds still and keeps
 	               it; blocked drops it; idle eases level, the yaw held; the status precedence (fed,
@@ -32,7 +35,8 @@
 	               Shots records (shooter 0, the stand-in gun, the counter, the muzzle, plain)
 	               through WeaponSync's codec
 	   cost        50 turrets and 100 zombies in a fight and a siege, 150 and 260 in a siege (the
-	               blood moon's), against the design's budget; nothing allocated while tracking
+	               blood moon's; 150 scoped Ultimate snipers with the ring 45 and 60 out), against
+	               the design's budget; nothing allocated while tracking
 	   the glue    Mobs.hostiles and Mobs.target (reused tables, monsters only, never frozen),
 	               Mobs.weaponDamage with no player (no kill credit), records to players within
 	               RecordRange (every chunk a client keeps; where a player was last seen while its
@@ -518,11 +522,12 @@ return function(t, shared, require, server)
 			until r.state(turret).target == inside.id or r.tick >= 400
 			return scans, r.state(turret).target == inside.id
 		end
-		-- (The best two every scan, the walk the rest: the k-th of a fresh walk by scan
-		-- ceil((k - 2) / (MaxSightChecks - 2)).)
-		for _, waiting in { 6, 10, 30 } do
+		-- (A pass looks at MaxSightChecks a scan, less its best few looked at again every RELOOK
+		-- scans: the k-th of a fresh pass by scan ceil(k / (MaxSightChecks - top / RELOOK)).)
+		local top = math.min(TurretWorld.TOP_CHECKS, S.MaxSightChecks // 2)
+		for _, waiting in { 6, 10, 30, 60 } do
 			local scans, got = breach(waiting)
-			local most = math.ceil((waiting + 1 - 2) / (S.MaxSightChecks - 2))
+			local most = math.ceil((waiting + 1) / (S.MaxSightChecks - top / TurretWorld.RELOOK))
 			t.ok(got and scans <= most, `{waiting} at the wall: the one inside taken by scan {scans} (at most {most})`)
 		end
 		-- A cave under the base (8 down, 12 out: within the pitch limits) with 8 zombies in it, and
@@ -559,40 +564,402 @@ return function(t, shared, require, server)
 		end
 	end)
 
-	t.test("turret world: every scan looks at the best two: one in sight by the gun is taken next, mid-walk", function()
-		-- A base's wall in front of the gun (z 4, three high) with 30 zombies pressing on it, one in
-		-- sight far behind the gun (the ranking's last), and, while the scans walk down the hidden
-		-- crowd, one come in 2 blocks in front of the gun (the best): taken at the next scan, before
-		-- the far one.
-		local spec = Turrets.of("rifle", 2)
-		local tried = 0
-		for delay = 1, 80, 3 do
-			local e = newGame()
-			for x = -20, 20 do
-				for y = FLOOR, FLOOR + 2 do
-					e.set(x, y, 4, STONE)
+	-- A scans' pass as the header tells it (see modelScan): nothing looked at.
+	local function newModelPass(p: any)
+		p.looked, p.count = {}, 0
+		p.floorScore, p.floorId, p.coverScore, p.coverId = -math.huge, 0, math.huge, 0
+	end
+
+	--[[
+		The header's scan written out plainly, on `list` (the candidates in reach sorted by
+		TurretRules.score and id, `seen` whether in sight from the pivot): its best few due again
+		(looked at in vain RELOOK scans ago or more), then, best first, MaxSightChecks of those the
+		pass may look at (not looked at in it, before the cover or after the floor, or due); none
+		left, a new pass from the best. `p` is the pass (looked: id -> scan, count, floor, cover,
+		scans), the turret's `state` mirrors it. Returns the target (0: none).
+	]]
+	local function modelScan(p: any, list: { any }): number
+		local most = S.MaxSightChecks
+		p.scans += 1
+		local now = p.scans
+		local function after(a: any, score: number, id: number): boolean
+			return a.score > score or (a.score == score and a.id > id)
+		end
+		local function before(a: any, score: number, id: number): boolean
+			return a.score < score or (a.score == score and a.id < id)
+		end
+		local due = {}
+		if p.count > 0 then
+			for j = 1, math.min(math.min(TurretWorld.TOP_CHECKS, most // 2), #list) do
+				local last = p.looked[list[j].id]
+				if last and now - last >= TurretWorld.RELOOK then
+					due[list[j].id] = true
 				end
 			end
-			for i = 1, 30 do
-				e.add(ZOMBIE, -9.5 + (i - 1) % 20, FLOOR, 5.5 + (i - 1) // 20)
-			end
-			e.add(ZOMBIE, 0.5, FLOOR, -18.5)
-			local r = newSim(e)
-			local turret = r.add(spec)
-			r.step(delay)
-			if r.state(turret).target == 0 then
-				tried += 1
-				local near = e.add(ZOMBIE, 0.5, FLOOR, 2.5)
-				local scans = 0
-				repeat
-					r.step(1)
-					scans += TurretWorld.stats(r.world).scans
-				until scans >= 1
-				t.eq(r.state(turret).target, near.id, `come at tick {delay}: taken at the next scan`)
+		end
+		local order, fresh = {}, 0
+		for _, a in list do
+			local open = p.looked[a.id] == nil
+				and (before(a, p.coverScore, p.coverId) or after(a, p.floorScore, p.floorId))
+			if due[a.id] or open then
+				table.insert(order, a)
+				if not due[a.id] then
+					fresh += 1
+				end
 			end
 		end
-		t.ok(tried >= 20, `mid-walk arrivals ({tried})`)
-	end)
+		if fresh == 0 and (p.count > 0 or p.coverScore < math.huge) then
+			newModelPass(p)
+			order = list
+		end
+		for j = 1, math.min(most, #order) do
+			local a = order[j]
+			if a.seen then
+				newModelPass(p)
+				return a.id
+			end
+			if p.looked[a.id] ~= nil or p.count < TurretWorld.RECORD then
+				if p.looked[a.id] == nil then
+					p.count += 1
+				end
+				p.looked[a.id] = now
+			elseif p.coverScore == math.huge then
+				p.coverScore, p.coverId, p.floorScore, p.floorId = a.score, a.id, a.score, a.id
+			elseif after(a, p.floorScore, p.floorId) then
+				p.floorScore, p.floorId = a.score, a.id
+			else
+				p.coverScore, p.coverId = a.score, a.id
+			end
+		end
+		return 0
+	end
+
+	-- The candidates in reach of the turret at T (its `state`'s aim), sorted, for modelScan.
+	local function rankedList(world: any, e: any, spec: Turrets.Spec, state: any): { any }
+		local range = TurretRules.range(spec, 0)
+		local list = {}
+		for _, mob in e.mobs do
+			local ax, ay, az = TurretWorld.aimPoint(mob, false)
+			local wantYaw, wantPitch, d = TurretRules.aim(PX, PY, PZ, ax, ay, az)
+			if d <= range and d >= S.MinRange and TurretRules.inPitch(wantPitch, spec) then
+				table.insert(list, {
+					id = mob.id,
+					score = TurretRules.score(d, TurretRules.offAngle(state.yaw, state.pitch, wantYaw, wantPitch)),
+					seen = not TurretWorld.sightBlocked(world, TX, TY, TZ, PX, PY, PZ, ax, ay, az),
+				})
+			end
+		end
+		table.sort(list, function(a, b)
+			return if a.score ~= b.score then a.score < b.score else a.id < b.id
+		end)
+		return list
+	end
+
+	t.test(
+		"turret world: each scan looks at the best its pass has not looked at, the best few again: the header's model",
+		function()
+			-- Random crowds about the turret, most of them hidden (a stone at their aim point), more
+			-- coming in between scans, crowds past the RECORD a pass keeps: scan by scan, its target
+			-- and its pass (what it looked at, when, the floor and the cover) are the model's.
+			local roll = rng(31)
+			local differ, scans, takenCount, overflowed, longest = 0, 0, 0, 0, 0
+			for trial = 1, 160 do
+				local spec = Turrets.SPECS[1 + math.floor(roll() * #Turrets.SPECS)]
+				local range = TurretRules.range(spec, 0)
+				local e = newGame()
+				local stoneAt = {}
+				e.env.getBlock = function(x: number, y: number, z: number): number?
+					if x == TX and y == TY and z == TZ then
+						return spec.block
+					end
+					return if stoneAt[Coords.posKey(x, y, z)] then STONE else AIR
+				end
+				local hidden = 0.85 + roll() * 0.15
+				local function add()
+					local a = roll() * 2 * math.pi
+					local d = 1 + roll() * (range + 4)
+					local mob = e.add(
+						ZOMBIE,
+						TX + 0.5 + math.sin(a) * d,
+						FLOOR + (roll() - 0.5) * 20,
+						TZ + 0.5 + math.cos(a) * d
+					)
+					if roll() < hidden then
+						local ax, ay, az = TurretWorld.aimPoint(mob, false)
+						stoneAt[Coords.posKey(math.floor(ax), math.floor(ay), math.floor(az))] = true
+					end
+				end
+				for _ = 1, 1 + math.floor(roll() * 90) do
+					add()
+				end
+				local r = newSim(e)
+				local turret = r.add(spec)
+				r.step(1)
+				local state = r.state(turret)
+				assert(state.scans == 0, "no scan yet")
+				state.yaw = (roll() - 0.5) * 2 * math.pi
+				local p = { scans = 0 }
+				newModelPass(p)
+				local full = false
+				for _ = 1, 500 do
+					if roll() < 0.03 then
+						add()
+					end
+					local list = rankedList(r.world, e, spec, state)
+					r.step(1)
+					if TurretWorld.stats(r.world).scans > 0 then
+						scans += 1
+						local want = modelScan(p, list)
+						local same = state.target == want and state.lookedCount == p.count
+						for id, at in state.looked do
+							same = same and p.looked[id] == at
+						end
+						local near = function(a: number, b: number): boolean
+							return a == b or math.abs(a - b) < 1e-9
+						end
+						same = same
+							and near(state.floorScore, p.floorScore)
+							and state.floorId == p.floorId
+							and near(state.coverScore, p.coverScore)
+							and state.coverId == p.coverId
+						if not same then
+							differ += 1
+							if differ <= 6 then
+								print(
+									string.format(
+										"         trial %d scan %d: took %d (%d kept, floor %.3f %d, cover %.3f %d); the model %d (%d, floor %.3f %d, cover %.3f %d)",
+										trial,
+										p.scans,
+										state.target,
+										state.lookedCount,
+										state.floorScore,
+										state.floorId,
+										state.coverScore,
+										state.coverId,
+										want,
+										p.count,
+										p.floorScore,
+										p.floorId,
+										p.coverScore,
+										p.coverId
+									)
+								)
+							end
+							break
+						end
+						full = full or p.coverScore < math.huge
+						longest = math.max(longest, p.scans)
+						if want ~= 0 then
+							takenCount += 1
+							break
+						end
+					end
+				end
+				if full then
+					overflowed += 1
+				end
+			end
+			print(
+				string.format(
+					"         %d scans, %d differ from the model; %d trials took a target, %d overflowed the record, %d scans the longest",
+					scans,
+					differ,
+					takenCount,
+					overflowed,
+					longest
+				)
+			)
+			t.eq(differ, 0, "the model's looks")
+			t.ok(takenCount > 40 and overflowed > 10, "targets taken, records overflowed")
+		end
+	)
+
+	--[[
+		A base's wall `wall` blocks out in front of the gun (x -20..20, three high) with `crowd`
+		zombies pressing on it outside (rows of 20); `post`: a stone post in front of the gun
+		(z 1, x -1..0) with two zombies behind it; `far`: one in sight far behind the gun (the
+		ranking's last). Returns the game and the far one.
+	]]
+	local function horde(wall: number, crowd: number, post: boolean, far: boolean, health: number?): (any, any)
+		local e = newGame()
+		for x = -20, 20 do
+			for y = FLOOR, FLOOR + 2 do
+				e.set(x, y, wall, STONE)
+			end
+		end
+		local fields = if health then { health = health } else nil
+		for i = 1, crowd do
+			e.add(ZOMBIE, -9.5 + (i - 1) % 20, FLOOR, wall + 1.5 + (i - 1) // 20, fields)
+		end
+		if post then
+			for x = -1, 0 do
+				for y = FLOOR, FLOOR + 2 do
+					e.set(x, y, 1, STONE)
+				end
+			end
+			e.add(ZOMBIE, 0.5, FLOOR, 2.4, fields)
+			e.add(ZOMBIE, -0.5, FLOOR, 2.4, fields)
+		end
+		return e, if far then e.add(ZOMBIE, 0.5, FLOOR, -18.5, fields) else nil
+	end
+
+	t.test(
+		"turret world: one in sight with hidden ones ranked above it is taken at the next scan or the one after, before a far one",
+		function()
+			-- One coming in at any point of the scans' passes, in sight by the gun: in front with a
+			-- crowd hidden at a wall (the best), beside the gun behind a post hiding two (the third),
+			-- beside it with a horde pressed on a wall 2 blocks out (the 6th or the 11th); one in
+			-- sight far behind the gun all along: never taken first.
+			local spec = Turrets.of("rifle", 2)
+			for _, case in
+				{
+					{ "best, 12 at the wall", 4, 12, false, 0.5, 2.5 },
+					{ "best, 30 at the wall", 4, 30, false, 0.5, 2.5 },
+					{ "best, 60 at the wall", 4, 60, false, 0.5, 2.5 },
+					{ "two behind a post, 30 at the wall", 4, 30, true, 2.5, 2.0 },
+					{ "two behind a post, 60 at the wall", 4, 60, true, 2.5, 2.0 },
+					{ "20 at a wall 2 out", 2, 20, false, 2.5, 1.0 },
+					{ "40 at a wall 2 out", 2, 40, false, 2.5, 1.0 },
+				}
+			do
+				local label, wallAt, crowd, post, nx, nz = case[1], case[2], case[3], case[4], case[5], case[6]
+				local worst, total, trials, rankSum = 0, 0, 0, 0
+				-- (Arrivals over two of its longest passes.)
+				local span = 2 * math.ceil((crowd + 3) / 4.5) * S.ScanTicks
+				for delay = 1, span, 3 do
+					local e, far = horde(wallAt, crowd, post, true)
+					local r = newSim(e)
+					local turret = r.add(spec)
+					r.step(delay)
+					if r.state(turret).target ~= 0 then
+						continue
+					end
+					local near = e.add(ZOMBIE, nx, FLOOR, nz)
+					local list = rankedList(r.world, e, spec, r.state(turret))
+					for k, a in list do
+						if a.id == near.id then
+							t.ok(a.seen, `{label}: the newcomer in sight`)
+							rankSum += k
+						elseif a.id == far.id then
+							t.ok(a.seen and k == #list, `{label}: the far one in sight, the last`)
+						end
+					end
+					local scans = 0
+					repeat
+						r.step(1)
+						scans += TurretWorld.stats(r.world).scans
+					until r.state(turret).target ~= 0 or scans > 20
+					trials += 1
+					total += scans
+					worst = math.max(worst, scans)
+					t.eq(r.state(turret).target, near.id, `{label}, come at tick {delay}: the near one taken`)
+				end
+				print(
+					string.format(
+						"         %s: the newcomer ranked %.1f, taken after %.2f scans on average, %d at worst (%d arrivals)",
+						label,
+						rankSum / trials,
+						total / trials,
+						worst,
+						trials
+					)
+				)
+				-- (Arrivals before the scans reach the far one and take it.)
+				t.ok(trials >= 5, `{label}: arrivals ({trials})`)
+				t.ok(worst <= 2, `{label}: at the next scan or the one after ({worst})`)
+			end
+			-- Firing (a zombie's health, its own cadence): how long the near one waits.
+			local health = ZOMBIE.health or 20
+			local worst = 0
+			for delay = 2, 51, 7 do
+				local e = horde(4, 30, false, true, health)
+				local r = newSim(e)
+				local turret = r.add(spec, nil, nil, nil, { auto = true })
+				r.step(delay)
+				local near = e.add(ZOMBIE, 0.5, FLOOR, 2.5, { health = health })
+				local waited = 0
+				repeat
+					r.step(1)
+					waited += 1
+				until r.state(turret).target == near.id or waited > 400
+				worst = math.max(worst, waited)
+			end
+			t.ok(worst <= 2 * S.ScanTicks, `firing: the near one taken within two scans ({worst} ticks)`)
+		end
+	)
+
+	t.test(
+		"turret world: one walking in across a cave of hidden ones is taken within ceil(r / MaxSightChecks) scans, one more at most",
+		function()
+			-- 30 to 70 zombies in a cave under the base, one walking in on the ground from beyond the
+			-- range: from the scan it comes in reach at, ranked r, it is taken within ceil(r / 6)
+			-- scans, a scan more when the best few come due again on the way.
+			local spec = Turrets.of("rifle", 2)
+			local range = TurretRules.range(spec, 0)
+			local roll = rng(11)
+			local over, runs, worstOver = 0, 0, -math.huge
+			for _ = 1, 40 do
+				local e = newGame()
+				for x = -24, 24 do
+					for z = -24, 24 do
+						for y = FLOOR - 8, FLOOR - 5 do
+							e.set(x, y, z, AIR)
+						end
+					end
+				end
+				for _ = 1, 30 + math.floor(roll() * 40) do
+					local a = roll() * 2 * math.pi
+					local d = 7 + roll() * 20
+					e.add(ZOMBIE, 0.5 + math.sin(a) * d, FLOOR - 8, 0.5 + math.cos(a) * d)
+				end
+				local a = roll() * 2 * math.pi
+				local speed = 0.15 + roll() * 0.15
+				local walker = e.add(ZOMBIE, 0.5 + math.sin(a) * (range + 3), FLOOR, 0.5 + math.cos(a) * (range + 3))
+				local r = newSim(e)
+				local turret = r.add(spec)
+				r.each = function()
+					local dx, dz = 0.5 - walker.x, 0.5 - walker.z
+					local len = math.sqrt(dx * dx + dz * dz)
+					if len > 2.5 then
+						walker.x += dx / len * speed
+						walker.z += dz / len * speed
+					end
+				end
+				local scans, entered = 0, nil
+				repeat
+					r.step(1)
+					if entered == nil then
+						for k, entry in rankedList(r.world, e, spec, r.state(turret)) do
+							if entry.id == walker.id then
+								entered = k
+							end
+						end
+					end
+					if entered then
+						scans += TurretWorld.stats(r.world).scans
+					end
+				until r.state(turret).target == walker.id or r.tick > 2000
+				if entered then
+					runs += 1
+					local bound = math.ceil(entered / S.MaxSightChecks) + 1
+					worstOver = math.max(worstOver, scans - bound)
+					if scans > bound then
+						over += 1
+					end
+				end
+			end
+			print(
+				string.format(
+					"         %d walkers: %d taken later than ceil(r / 6) + 1 scans (at worst %d to spare)",
+					runs,
+					over,
+					-worstOver
+				)
+			)
+			t.ok(runs >= 30, "walkers")
+			t.eq(over, 0, "within the bound")
+		end
+	)
 
 	t.test("turret world: sight is the shot's line from the pivot, through a cell's corner too", function()
 		-- A zombie at a block's centre on the turret's diagonal (the line from the pivot runs exactly
@@ -620,6 +987,161 @@ return function(t, shared, require, server)
 		end
 		t.ok(seen[true] and seen[false], "one side blocks the line, the other doesn't")
 	end)
+
+	t.test(
+		"turret world: its sight check is the cast from the pivot's, looked at from the point first: random lines, cells' corners",
+		function()
+			-- A clutter of whole and partial blocks (fences, doors, the Bunker Hatch, snow layers,
+			-- cables, transporters), glass, water, leaves, torches and stone; a turret in it, its own
+			-- cell air; points at random, at block centres on its diagonals (the line through cells'
+			-- edges and corners exactly), on the grid's halves and wholes, straight along an axis, in
+			-- blocks. The answer is always the cast from the pivot's; the look from the point decides
+			-- (reading fewer cells) most lines a block stops.
+			local names = {
+				"Stone",
+				"Stone",
+				"Glass",
+				"OakLeaves",
+				"Torch",
+				"Water",
+				"OakFence",
+				"OakFenceNorthSouth",
+				"OakFenceWestEast",
+				"OakDoor",
+				"OakDoorOpen",
+				"BunkerHatch",
+				"BunkerHatchOpen",
+				"SnowLayer2",
+				"SnowLayer7",
+				"BasicUniversalCable",
+				"BasicLogisticalTransporter",
+			}
+			local roll = rng(17)
+			local kinds = { "random", "diagonal", "halves", "axis", "inside" }
+			local tally = {}
+			for _, kind in kinds do
+				tally[kind] = { differ = 0, total = 0, blocked = 0, cheaper = 0 }
+			end
+			for _ = 1, 24 do
+				local e = newGame()
+				local placed = {}
+				for _ = 1, 600 do
+					local block = B[names[math.floor(roll() * #names) + 1]]
+					if block then
+						local x, y, z =
+							math.floor(roll() * 24) - 12,
+							FLOOR + math.floor(roll() * 5) - 1,
+							math.floor(roll() * 24) - 12
+						e.set(x, y, z, block)
+						placed[Coords.posKey(x, y, z)] = block
+					end
+				end
+				local spec = Turrets.of("rifle", 2)
+				local world = TurretWorld.new(e.env)
+				local getBlock, cells = e.env.getBlock, 0
+				e.env.getBlock = function(x: number, y: number, z: number): number?
+					cells += 1
+					return getBlock(x, y, z)
+				end
+				for _ = 1, 100 do
+					local tx, ty, tz =
+						math.floor(roll() * 20) - 10, FLOOR + math.floor(roll() * 3), math.floor(roll() * 20) - 10
+					local was = placed[Coords.posKey(tx, ty, tz)]
+					e.set(tx, ty, tz, spec.block)
+					local px, py, pz = TurretRules.pivot(tx, ty, tz)
+					for _, kind in kinds do
+						for _ = 1, 5 do
+							local bx, by, bz
+							if kind == "random" then
+								bx, by, bz = roll() * 24 - 12, FLOOR - 1 + roll() * 5, roll() * 24 - 12
+							elseif kind == "diagonal" then
+								-- (A zombie at a block's centre on a diagonal from the turret: its body's centre.)
+								local k = math.floor(roll() * 8) + 1
+								local sx, sz = if roll() < 0.5 then 1 else -1, if roll() < 0.5 then 1 else -1
+								local mob = {
+									kind = ZOMBIE,
+									x = px + sx * k,
+									y = FLOOR + math.floor(roll() * 3),
+									z = pz + sz * k,
+									yaw = 0,
+								}
+								bx, by, bz = TurretWorld.aimPoint(mob :: any, false)
+							elseif kind == "halves" then
+								bx = math.floor(roll() * 48) / 2 - 12
+								by = FLOOR - 1 + math.floor(roll() * 10) / 2
+								bz = math.floor(roll() * 48) / 2 - 12
+							elseif kind == "axis" then
+								local along = math.floor(roll() * 3)
+								bx, by, bz = px, py, pz
+								if along == 0 then
+									bx += math.floor(roll() * 24) - 12 + 0.5
+								elseif along == 1 then
+									by += math.floor(roll() * 6) - 4
+								else
+									bz += math.floor(roll() * 24) - 12 + 0.5
+								end
+							else
+								-- (In a block of the clutter.)
+								bx, by, bz =
+									math.floor(roll() * 24) - 12 + roll(),
+									FLOOR + math.floor(roll() * 4),
+									math.floor(roll() * 24) - 12 + roll()
+							end
+							cells = 0
+							local want = TurretWorld.sightBlocked(world, tx, ty, tz, px, py, pz, bx, by, bz)
+							local fromPivot = cells
+							cells = 0
+							local got = TurretWorld.sightCheck(world, tx, ty, tz, px, py, pz, bx, by, bz)
+							local row = tally[kind]
+							row.total += 1
+							if want then
+								row.blocked += 1
+								if cells < fromPivot then
+									row.cheaper += 1
+								end
+							end
+							if got ~= want then
+								row.differ += 1
+								if row.differ <= 3 then
+									print(
+										string.format(
+											"         %s: turret (%d,%d,%d) to (%.4f,%.4f,%.4f): from the pivot %s, the check %s",
+											kind,
+											tx,
+											ty,
+											tz,
+											bx,
+											by,
+											bz,
+											tostring(want),
+											tostring(got)
+										)
+									)
+								end
+							end
+						end
+					end
+					e.set(tx, ty, tz, was or (if ty < FLOOR then STONE else AIR))
+				end
+			end
+			for _, kind in kinds do
+				local row = tally[kind]
+				print(
+					string.format(
+						"         %s points: %d of %d differ; %d blocked, %d of them decided from the point",
+						kind,
+						row.differ,
+						row.total,
+						row.blocked,
+						row.cheaper
+					)
+				)
+				t.eq(row.differ, 0, `{kind}: the cast from the pivot's answers`)
+				t.ok(row.blocked > row.total // 10 and row.blocked < row.total, `{kind}: both answers met`)
+			end
+			t.ok(tally.random.cheaper > tally.random.blocked // 4, "the look from the point decides many")
+		end
+	)
 
 	t.test("turret world: a cell the server does not hold stops its sight, so no round goes into it", function()
 		for _, unloaded in { false, true } do
@@ -1720,10 +2242,18 @@ return function(t, shared, require, server)
 		`walled`: a siege instead, a ring of stone three high 17 blocks round the base with the
 		zombies held outside it, so every turret scans and every sight check fails. `columns` x
 		`lines` turrets and `count` zombies another size (the ring 2 blocks past the base's
-		corners). Returns the step (one machine tick of every turret and the zombies' walk) and the
-		simulation.
+		corners, or `out` blocks from its centre), every turret `only` (a Spec, scoped where it
+		fits) when given. Returns the step (one machine tick of every turret and the zombies' walk)
+		and the simulation.
 	]]
-	local function fight(walled: boolean?, columns: number?, lines: number?, count: number?): (() -> (), any)
+	local function fight(
+		walled: boolean?,
+		columns: number?,
+		lines: number?,
+		count: number?,
+		out: number?,
+		only: Turrets.Spec?
+	): (() -> (), any)
 		local e = newGame()
 		local roll = rng(99)
 		local zombies = {}
@@ -1735,7 +2265,7 @@ return function(t, shared, require, server)
 		end
 		local wide, deep = columns or 10, lines or 5
 		local cx, cz = (wide - 1) * 1.5, (deep - 1) * 1.5 + 0.5
-		local ring = math.ceil(math.sqrt(cx * cx + cz * cz) + 2)
+		local ring = out or math.ceil(math.sqrt(cx * cx + cz * cz) + 2)
 		local stop = if walled then ring + 1.5 else ring - 5
 		if walled then
 			for x = math.floor(cx) - ring - 2, math.ceil(cx) + ring + 2 do
@@ -1769,8 +2299,8 @@ return function(t, shared, require, server)
 		for gx = 0, wide - 1 do
 			for gz = 0, deep - 1 do
 				n += 1
-				local spec = Turrets.SPECS[(n - 1) % #Turrets.SPECS + 1]
-				local optic = optics[n % #optics + 1]
+				local spec = only or Turrets.SPECS[(n - 1) % #Turrets.SPECS + 1]
+				local optic = if only then I.RifleScope else optics[n % #optics + 1]
 				if not spec.optics[optic] then
 					optic = 0
 				end
@@ -1817,7 +2347,7 @@ return function(t, shared, require, server)
 			local function cost(case: any, ticks: number, runs: number): (number, any)
 				local times, last = {}, nil
 				for _ = 1, runs do
-					local step, r = fight(case.walled, case.columns, case.lines, case.count)
+					local step, r = fight(case.walled, case.columns, case.lines, case.count, case.out, case.only)
 					local start = os.clock()
 					for _ = 1, ticks do
 						step()
@@ -1840,6 +2370,25 @@ return function(t, shared, require, server)
 						columns = 15,
 						lines = 10,
 						count = 260,
+					},
+					-- (Every zombie in reach of every one, the ring farther out: long lines of sight.)
+					{
+						label = "150 scoped Ultimate snipers, 260 zombies, a siege 45 out",
+						walled = true,
+						columns = 15,
+						lines = 10,
+						count = 260,
+						out = 45,
+						only = Turrets.of("sniper", 4),
+					},
+					{
+						label = "150 scoped Ultimate snipers, 260 zombies, a siege 60 out",
+						walled = true,
+						columns = 15,
+						lines = 10,
+						count = 260,
+						out = 60,
+						only = Turrets.of("sniper", 4),
 					},
 				}
 			do

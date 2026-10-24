@@ -7443,19 +7443,34 @@ machines read (never generating terrain), for the simulation's Env.
     `MaxScansPerTick` a tick for every turret (one over waits a tick; those waiting go first, the
     longest waiting first, so of n due none waits more than ceil(n / MaxScansPerTick) ticks,
     however late the machines tick it). Hostiles are hashed into 16-block columns with their
-    body's aim point once a machine tick, only when a turret scans or shoots, ranked by
-    `TurretRules.score` (the angle worked out only for those near enough to rank: a score is at
-    least the distance; a mob killed earlier in the tick skipped). `MaxSightChecks` of them are
+    body's aim point once a machine tick, only when a turret scans or shoots (their head's once a
+    tick a scoped sniper scans), ranked by `TurretRules.score` (the angle worked out only for those
+    near enough to rank: a score is at least the distance, and the angle lies between its chord
+    and π/2 times it; a mob killed earlier in the tick skipped). `MaxSightChecks` of them are
     looked at with FireRules.wallBetween's rule on `VoxelRaycast.distance` (nothing allocated;
     glass and leaves stop sight, torches and water don't; its own cell is air; a cell the server
     does not hold stops it, as it stops the shot's trace, so no round goes into terrain it doesn't
-    know; looked along from the pivot, as the trace runs, so a line exactly through a cell's edge
-    or corner meets what the shot would): every scan the best two, so one in sight among them
-    (next to the gun, with a crowd hidden behind a wall or in a cave below) is taken at the next
-    scan, before any further down; then the other `MaxSightChecks` − 2 walk down the ranking,
-    past the last the walk looked at in vain (from the third again past its end). With n in
-    reach, while the ranking holds, every one is looked at within ceil((n − 2) / 4) + 1 scans,
-    the k-th of a fresh walk within ceil((k − 2) / 4).
+    know). The answer is the cast from the pivot's, as the trace runs, so a line exactly through a
+    cell's edge or corner meets what the shot would; it is looked along from the candidate first
+    (`sightCheck`): a whole cell that stops sight there, which the line goes through more than a
+    millionth of a block inside and before its end, is met from the pivot too, so one hidden
+    behind the wall a horde presses on costs the cells from it to the wall, not from the gun (a
+    line met by an edge or a corner, or by part of a cell, is cast from the pivot; random lines
+    and block centres on its diagonals, 60 000 in `tests/spec/TurretWorld`, all the pivot's
+    answers). Which: the scans make passes down the ranking. Each looks, best first, at those its
+    pass has not looked at yet (by id, up to `RECORD` 48 a turret; past them the walk's floor, the
+    last looked at in vain, so one come in between the 48th and the floor waits for the next pass)
+    and at its best three again once their last look is two scans old; with none left a new pass
+    starts from the best, and one taken ends it. So one in sight is taken within ceil(r / 6)
+    scans, r its rank among those its pass has not looked at (a scan more when the best three come
+    due on the way): one come in by the gun, with a horde hidden at a wall or in a cave ranked
+    above it, at the next scan or the one after, and before one in sight further down (before,
+    beyond the best two, it waited for the walk to wrap while one far off was taken and held: the
+    horde's 11th, 5 s; the third behind a post, a far one taken first 59 times in 60). While the
+    ranking holds, the k-th of a fresh pass is looked at within ceil(k / 4.5) scans (6 a scan,
+    less the best three every second scan); one looked at in vain is looked at again in the next
+    pass, or within two scans among the best three. `tests/spec/TurretWorld` holds the scans to a
+    model of this, scan by scan, past the record too.
   - **Tracking**: sticky, at the tier's turn rate (`TurretRules.turn`), its sight every
     `SightTicks`, lost after `LoseTicks` unseen, at once when gone (dead, removed, frozen) or out of
     reach. Idle, powered and not blocked, the pitch eases level at the turn rate and the yaw holds
@@ -7485,12 +7500,15 @@ machines read (never generating terrain), for the simulation's Env.
   - **Shots** are pooled WeaponSync records: shooter 0, the stand-in gun, the turret's u16 counter,
     from its muzzle, `suppressed` (a working device that fits) and `plain` (suppressed, its glow
     false).
-  - Nothing allocates in scans, sight checks, tracking, the lure or records; a shot allocates only
-    its trace's impacts (about 1 KB). Lune, 50 turrets and 100 zombies in a fight: 0.3–0.8 ms a tick
-    native (0.85 interpreted), 0.8 scans, 12 sight checks, 4.3 shots a tick; a siege with every
-    sight check failing 0.25–0.6 ms; the blood moon's siege, 150 turrets and 260 zombies, 1.0–1.2
-    ms (2.7–2.9 interpreted; 16 scans and 89 sight checks a tick, each from the pivot). The
-    design's budget: 1.5 ms native, 4 interpreted.
+  - Nothing allocates in scans, sight checks, tracking, the lure or records (a turret's pass
+    record is made with it); a shot allocates only its trace's impacts (about 1 KB). Lune, 50
+    turrets and 100 zombies in a fight: 0.2–0.3 ms a tick native (0.6 interpreted), 0.9 scans, 12
+    sight checks, 4.2 shots a tick; a siege with every sight check failing 0.2–0.5 ms; the blood
+    moon's siege, 150 turrets and 260 zombies, 0.75–0.8 ms (2.1 interpreted; 16 scans and 87 sight
+    checks a tick); 150 scoped Ultimate snipers, every zombie in reach of every one, the ring 27,
+    45 or 60 blocks out: 0.75–1.0 ms (2.7–3.0 interpreted; a sight check reads 7 cells, 20 to 62
+    from the pivot, which took 1.8–2.0 ms 60 out). The design's budget: 1.5 ms native, 4
+    interpreted.
 - `Turrets` (the glue): `start(net, world)` builds the Env (`Machines.knownBlock`, `Mobs.hostiles`
   and `Mobs.target`, `Mobs.weaponDamage` with no player: nobody credited, no Knowledge, no kill
   count, no `byPlayer` loot, as an iron golem's kills; `NoiseBus.emit`, so the director's night,

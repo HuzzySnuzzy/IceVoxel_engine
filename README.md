@@ -1512,11 +1512,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   keeps its energy and its Lure. Its tooltip says "Range 24 · 240 rpm · holds 4 · 9mm" (its own
   range, without an optic). A turret
   shoots only zombies (any monster: never a player or an animal, which its shots fly through). It
-  looks for the nearest it can see, with a little weight on how far it must turn: each scan the two
-  best (a zombie in sight next to it is taken at the next scan, however many hide behind a wall)
-  and a few more further down the line; it keeps its target until it dies, leaves its range or
-  stays hidden half a second. It turns at its tier's rate (SMG 180–360 degrees a second, rifle
-  120–240, sniper 60–120) and fires once on target. Glass and leaves hide a zombie from it, torches
+  looks for the nearest it can see, with a little weight on how far it must turn: each scan six,
+  best first, of those it has not yet looked at in vain (and the three best again every second
+  scan), so a zombie in sight next to it is taken at the next scan or the one after however many
+  hide behind a wall, and before one in sight further off; it keeps its target until it dies,
+  leaves its range or stays hidden half a second. It turns at its tier's rate (SMG 180–360 degrees
+  a second, rifle 120–240, sniper 60–120) and fires once on target. Glass and leaves hide a zombie from it, torches
   and water don't, and a zombie more than 60 degrees below an SMG or a rifle, 51 below a sniper
   (whose longer barrel would meet its own block), is safe: hugging the foot of a 2-high wall it
   stands on, within 1.8 blocks of the gun sideways (a sniper's 2.5). Shots are traced like a
@@ -2844,7 +2845,7 @@ for performance:
 | `Turrets.Optics` / `Muzzles` | Laser Sight, Rifle Scope / both suppressors | The optic slot's items: the Laser Sight (every type: the cone × 0.5, a rescan every 5 ticks), the Rifle Scope (rifle and sniper: the range × 1.25, a sniper aims at heads). The muzzle slot's: their WeaponList numbers apply (on every type). |
 | `Turrets.NoiseScale` / `ShotNoiseTicks` | 0.75 / 20 | Gunfire's noise: the stand-in gun's (with its muzzle device) times this, at most once every ShotNoiseTicks a turret. |
 | `Turrets.Lure` | Enabled, Noise 24, Ticks 600, Cell 48 | The lure: a powered, armed turret with no target and its Lure on makes a Noise-block noise (more at night) every Ticks while it is night or a blood moon, at most one a Cell × Cell blocks. |
-| `Turrets.ScanTicks` / `SightTicks` / `LoseTicks` / `MaxSightChecks` | 10 / 4 / 10 / 6 | Targeting: a scan every ScanTicks (a Laser Sight's own 5), the target's sight checked every SightTicks and lost after LoseTicks unseen, at most MaxSightChecks candidates looked at a scan: the best two every scan (zombies hidden behind a wall never hide one in sight next to the gun) and the others further down the ranking each scan, so none in sight stays hidden for long. |
+| `Turrets.ScanTicks` / `SightTicks` / `LoseTicks` / `MaxSightChecks` | 10 / 4 / 10 / 6 | Targeting: a scan every ScanTicks (a Laser Sight's own 5), the target's sight checked every SightTicks and lost after LoseTicks unseen, at most MaxSightChecks candidates looked at a scan: best first, those not yet looked at in vain in the scans' pass down the ranking (the best three again every second scan), so zombies hidden behind a wall never hide one in sight next to the gun for more than a scan or two, nor one further down for long. |
 | `Turrets.MaxScansPerTick` / `MaxShotsPerTick` | 16 / 32 | Every turret together a tick (a scan over it waits a tick; a shot over it waits a tick, losing none). Those waiting go first, the longest waiting first, so none starves and every turret gets its share. |
 | `Turrets.MinRange` / `PitchMin` / `PitchMax` / `ExtraFlight` / `MaxRange` / `FiringTicks` | 1.5 / -60 / 75 / 16 / 80 / 10 | Nothing nearer than MinRange; the gun's pitch limits (degrees: PitchMin the lowest any type aims at, each type its own `pitchMin` at or over it, below which is a dead zone); a shot flies ExtraFlight past the turret's range; no range beyond MaxRange (a scope's included); "Firing" shows FiringTicks after a shot. |
 | `Turrets.FeedTicks` / `FeedRateTicks` | 20 / 100 | The feeder rule's look at the transporters around a turret every FeedTicks; the panel's "In: x/s" averages arrivals over FeedRateTicks. |
