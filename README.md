@@ -667,7 +667,7 @@ A fast, Minecraft-style voxel engine for Roblox.
     and now and then a pistol magazine, soldiers 5.56 rounds and a rifle magazine, construction
     workers rarely a pipe wrench. Crossbow Bolts are crafted (an Iron Nugget over a Stick over a
     Feather make four, in the Iron Age), the Improvised Suppressor from a Glass Bottle and Duct
-    Tape.
+    Tape; the Ammo Press (below) presses 9mm, 5.56 and .308 rounds from iron and gunpowder.
   - **Off:** `Config.Weapons.Enabled = false` keeps guns as clubs that never fire;
     `Config.Weapons.Melee.Enabled = false` puts melee back as it was.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
@@ -1472,6 +1472,61 @@ A fast, Minecraft-style voxel engine for Roblox.
   middle, Glow Blocks above and below it, osmium ingots, gold ingots or diamonds beside it and gold
   ingots, diamonds or emeralds in the corners, and keeps its charge (Mekanism's upgrade recipes
   do). Mekanism's charge and discharge slots and side configuration are not in.
+- **Turrets.** SMG, Rifle and Sniper turrets in the transmitters' four tiers (Basic, Advanced, Elite,
+  Ultimate) shoot zombies with the 9mm, 5.56 or .308 rounds a Logistical Transporter feeds them,
+  on Mekanism energy. Each tier reaches further, turns and fires faster and holds a few more rounds:
+  SMG 16 / 20 / 24 / 32 blocks at 90 / 150 / 240 / 360 rounds a minute holding 2 / 3 / 4 / 6; Rifle
+  24 / 32 / 40 / 48 at 45 / 75 / 120 / 180 holding 1 / 2 / 3 / 4; Sniper 40 / 48 / 56 / 64 at 15 /
+  20 / 30 / 40 holding 1 / 1 / 2 / 2 (`Config.Turrets`). The belt feeder runs at the speed of the
+  transporter that feeds it: a turret fires at most the rate of its type at the best transporter
+  tier next to it that feeds it (a Basic transporter caps an Ultimate SMG at 90 a minute), so its
+  full rate needs a transporter of its tier or better; fed through one it holds that rate, and each
+  further transporter costs its trip. A line into a full turret waits for room instead of backing
+  off (Mekanism's backoff is unchanged for chests, furnaces and every other machine). Filled by
+  hand (no transporter) a turret fires its buffer at its own rate, then shows "No ammo". Energy:
+  20 / 40 / 80 / 160 kJ stores, 4 / 8 / 12 / 16 J a tick idle, twice that while tracking, and 30
+  (SMG), 80 (rifle) or 300 (sniper) J a shot: power is a requirement, ammo the real cost. Its panel
+  has the ammo, optic and muzzle slots (outlined while empty), the status ("No target",
+  "Targeting", "Firing", "No ammo", "No power", "Blocked", "Disabled"), "Range 24 · 240 rpm", the
+  feed ("Feed: Elite", "Feed: Basic → 90 rpm", "Feed: by hand"), the rounds arriving ("In: 2.4/s"),
+  the Lure and its button, and the energy bar; WAILA shows the status. Transporters reach only the
+  ammo slot (through every side but the top, where the gun sits) and never take anything out; a
+  block, a transporter or deep snow over a turret blocks it (one layer of snow, a torch or water
+  don't), and nothing rests on its top. Attachments: a Laser Sight (turrets only: a hand-held gun
+  takes none) halves the cone and finds targets sooner, a Rifle Scope on a rifle or sniper reaches
+  a quarter further (up to 80 blocks) and lets a sniper aim at heads, a suppressor or an improvised
+  one quiets it; none of them wear on a turret, and a Ruined one does nothing. Recipes: the parts
+  (a Servo Motor, a Belt Feeder, a Receiver, a Targeting Module and a barrel for each type) from
+  iron, osmium, leather, nails, scrap, glass, glow dust, cables and diamonds; a Basic turret from
+  its barrel, a servo, a receiver, a belt feeder, osmium and a targeting module; each next tier
+  around the one below, with gold, diamonds or emeralds in the corners (as the transmitters'
+  upgrades), keeping its energy and its Lure. The parts, the Laser Sight and the Basic to Elite
+  turrets are the Electric Age's, the Ultimates the Atomic Age's. Broken with a pickaxe a turret
+  keeps its energy and its Lure. *Still to come in this feature's later parts:* targeting and
+  firing (zombies only, never players or animals; shots traced like a player's that never break a
+  block; no kill credit, as an iron golem's), the gunfire's noise and the night lure that draw
+  zombies to an armed, idle turret (the Lure button turns it off), the gun drawn turning on the
+  base with its laser beam and servo sound, and the tooltips' stat line; until then a turret shows
+  "No target" and fires nothing.
+- **Metal Miner.** A machine that copies the ore block under it forever, for power, and pushes the
+  drop out into the chests and transporters next to it: Coal Ore gives Coal every 30 s at 800 J a
+  tick (never more energy than the coal burns for), Iron and Osmium Ore their raw ore every 20 s at
+  200 J a tick, Gold Ore every 40 s at 300, Emerald Ore an Emerald every 3 minutes and Diamond Ore
+  a Diamond every 4 minutes at 800 (`Config.Miner`), faster with Speed Upgrades and cheaper with
+  Energy Upgrades (Mekanism's maths; coal never under its floor). It needs a real ore block where it
+  lies (ores can't be moved) and keeps mining with nobody near. Its panel: the output, the arrow,
+  the status ("Mining Diamond Ore", "No power", "Output full", "No ore below"), the upgrade slots
+  and the energy bar (200 kJ). Recipe: osmium around a Universal Cable, over Blocks of Iron around
+  an Electric Furnace, over diamonds around a Diamond Pickaxe (the Electric Age's). *Still to come:*
+  the mining itself, its glowing grille and drill sound, and JEI's "Duplicating"; until then it
+  shows "Idle".
+- **Ammo Press.** Presses an Iron Ingot and a Gunpowder into 16 9mm, 10 5.56 or 5 .308 rounds in
+  10 seconds at 50 J a tick (`Config.AmmoPress`), the calibre picked by its Calibre button (kept in
+  its item), with upgrade cards; the rounds are pushed out on their own. Gunpowder needs the
+  Demolition skill, so ammo stays the real cost of defence. Recipe: iron around a Servo Motor, over
+  osmium around an Electric Furnace, over iron around a Block of Iron (the Electric Age's). *Still
+  to come:* the pressing itself, its window's glow and stamp, and JEI's "Pressing"; until then it
+  shows "Idle".
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
   pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
   Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
@@ -2042,7 +2097,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             Panel; Battery, the Batteries; Refinery, the Oil Refinery;
                             Combustion, the Combustion Generator; the seasons' Stove, the Wood
                             Stove; OilHeater; Heater, the Electric Heater; Cooler, the Air
-                            Conditioner and the Electric Fan)
+                            Conditioner and the Electric Fan; Turret, the twelve turrets; Miner,
+                            the Metal Miner; AmmoPress, the Ammo Press), MinerRules (the Metal
+                            Miner's ores, their drops and numbers, its state code)
   Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel; a
                             recipe may keep an ingredient's data), Crafting (grid matching),
                             Smelting (the furnace tick; the Lava Bucket's burn time)
@@ -2106,6 +2163,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             action locks the gun), Ballistics (a shot's flight), Loading
                             (combining in the inventory, the weapon actions), Melee (heavy
                             attacks, the guard, finishers), Describe (their tooltip lines)
+  Turrets/                  turrets, pure: init (the registry: twelve Specs by block, the feeder
+                            rule's rate, the slots, the packed state, the cell over the gun,
+                            optics, slot outlines), TurretRules (aim, turning, the exact cadence,
+                            spread, range, noise, score, feed rate; both sides), Types (the
+                            Order, Outcome and Service the machine kind and the simulation share)
   Progression/              knowledge, Ages and skills, pure: Knowledge (Minecraft's experience
                             curve, the sources and their numbers, fatigue and the budget), Ages
                             (what each opens and needs), Skills (the tree and its perks), init
@@ -2282,6 +2344,10 @@ src/server   -> ServerScriptService.IceVoxel
                             damage, noise and record; pure), Firing (a Fire message played out),
                             WeaponActions (raising and guarding; the weapon actions' locks and
                             sounds), init (the glue)
+  Turrets/                  turrets on the server: TurretWorld (the simulation every turret's
+                            machine tick asks: targets, shots, noise, the lure, records; pure),
+                            Turrets (the glue: the service handed to the machines, records,
+                            shots); both stubs until the simulation lands
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
                             pure), Transport (items in transporters), Fluids (every fluid in
                             pipes, machines' fluid tanks, the fluid ejector),
@@ -2493,8 +2559,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             gauges, machines' records (WAILA, Ambience, buckets); TransmitterModel
                             (their geometry, aiming, item paths, fluid colours)
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
-                            chests, crafting tables, furnaces, Mekanism's machines, structure
-                            blocks and jigsaws)
+                            chests, crafting tables, furnaces, Mekanism's machines, the turrets'
+                            bases, the Metal Miner and the Ammo Press, structure blocks and
+                            jigsaws)
   Rendering/StructureBoxes  structure blocks' outlines, names and air markers
   Interaction/Firearms      a firearm in hand: raising, the sights, the trigger, reloading, the
                             fire mode, the light; MeleeInput (the melee rework's light and heavy
@@ -2506,6 +2573,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             wind-up)
   Rendering/ShotView        shots seen and heard: flashes, tracers, impacts, fire sounds (by the
                             pure ShotRules)
+  Rendering/TurretView      the turrets' guns turning on their bases as the server's records say,
+                            their lasers and servos (a stub until the view lands)
   Ui/WeaponHud              the shoulder dot, the red dot, the scope, the held gun's word and bar;
                             WeaponButtons (the touch AIM, FIRE and RELOAD)
   Debug/DebugOverlay        F3 stats, time of day and weather, the mobs and their rigs (also
@@ -2744,6 +2813,22 @@ for performance:
 | `Weapons.Melee.Enabled` | true | The melee rework (light attacks on release, heavy attacks, the guard, finishers); false: every attack as before. |
 | `Weapons.Melee.HeavyHold` / `HeavyKnockback` / `HeavyExhaustion` | 0.45 / 0.8 / 3 | Seconds held for a heavy attack, its knockback, and its food (times a light hit's exhaustion). |
 | `Weapons.Melee.GuardCone` / `FinisherCone` / `FinisherMaxHealth` | 0.5 / 0.5 / 30 | The guard's front cone and the finisher's back cone (cosines: 120 degrees each), and the most health a zombie may have to die to a finisher. |
+| `Turrets.Enabled` | true | Turrets (Shared/Turrets): false makes the game as before: turrets tick inert ("Disabled", no energy taken), no recipes or Ages for turrets, their parts or the Laser Sight (the Servo Motor's stays while the Ammo Press is on), no simulation, no Turrets messages, no line waits for a turret (the blocks and items stay registered). |
+| `Turrets.Types` | smg, rifle, sniper | Per type: its round and stand-in gun (`ammo`, `firearm`: the fire sound, the noise, a muzzle device's effects), `damageScale`, J a `shot`, the most degrees off its aim it fires at (`settle`), the barrel's length, and per tier (Basic, Advanced, Elite, Ultimate) `range`, `rpm` (whole rounds a minute), `buffer` (rounds its ammo slot holds), `turn` (degrees a second) and `spread` (the cone's half angle). SMG 16-32 blocks, 90-360 rpm, 2-6 rounds; rifle 24-48, 45-180, 1-4; sniper 40-64, 15-40, 1-2. |
+| `Turrets.Capacity` / `IdleJoules` / `TrackingJoules` | {20, 40, 80, 160} kJ / {4, 8, 12, 16} / {8, 16, 24, 32} | Per tier: the energy store (also what the network may put in a tick), and J a tick idle and while tracking a target. |
+| `Turrets.Optics` / `Muzzles` | Laser Sight, Rifle Scope / both suppressors | The optic slot's items: the Laser Sight (every type: the cone × 0.5, a rescan every 5 ticks), the Rifle Scope (rifle and sniper: the range × 1.25, a sniper aims at heads). The muzzle slot's: their WeaponList numbers apply (on every type). |
+| `Turrets.NoiseScale` / `ShotNoiseTicks` | 0.75 / 20 | Gunfire's noise: the stand-in gun's (with its muzzle device) times this, at most once every ShotNoiseTicks a turret. |
+| `Turrets.Lure` | Enabled, Noise 24, Ticks 600, Cell 48 | The lure: a powered, armed turret with no target and its Lure on makes a Noise-block noise (more at night) every Ticks while it is night or a blood moon, at most one a Cell × Cell blocks. |
+| `Turrets.ScanTicks` / `SightTicks` / `LoseTicks` / `MaxSightChecks` | 10 / 4 / 10 / 6 | Targeting: a scan every ScanTicks (a Laser Sight's own 5), the target's sight checked every SightTicks and lost after LoseTicks unseen, at most MaxSightChecks candidates looked at a scan. |
+| `Turrets.MaxScansPerTick` / `MaxShotsPerTick` | 16 / 32 | Every turret together a tick (a scan over it waits a tick; a shot over it waits a tick, losing none). |
+| `Turrets.MinRange` / `PitchMin` / `PitchMax` / `ExtraFlight` / `MaxRange` / `FiringTicks` | 1.5 / -60 / 75 / 16 / 80 / 10 | Nothing nearer than MinRange; the gun's pitch limits (degrees: below -60 a dead zone); a shot flies ExtraFlight past the turret's range; no range beyond MaxRange (a scope's included); "Firing" shows FiringTicks after a shot. |
+| `Turrets.FeedTicks` / `FeedRateTicks` | 20 / 100 | The feeder rule's look at the transporters around a turret every FeedTicks; the panel's "In: x/s" averages arrivals over FeedRateTicks. |
+| `Turrets.RecordRange` / `RecordTicks` / `RecordAngle` / `RecordRefresh` | 96 / 2 / 3 / 20 | Turrets messages: to players within RecordRange blocks sideways, at most every RecordTicks a turret, when its target, flags or rounds change or its aim moved RecordAngle degrees, and every RecordRefresh ticks while it tracks. |
+| `Turrets.Client` | DrawDistance 96, MaxDrawn 48, MaxParts 720, BeamLength 24, ServoLoops 4 | The client: turrets drawn within DrawDistance of the camera, at most MaxDrawn from MaxParts pooled parts; a Laser Sight's beam at most BeamLength; the servo loop at the ServoLoops nearest turning turrets. |
+| `Miner.Enabled` / `Capacity` | true / 200000 | The Metal Miner: false makes it inert with no recipe; its energy store (J, before Energy Upgrades). |
+| `Miner.Ores` | Coal 600 ticks at 800 J/t (floor 400 kJ), Iron and Osmium 400 at 200, Gold 800 at 300, Emerald 3600 at 800, Diamond 4800 at 800 | Per ore block: ticks an item takes and J a tick (Speed and Energy Upgrades change both, Mekanism's maths), and the least J an item costs whatever the cards (`floor`: coal never makes more energy than it took). |
+| `AmmoPress.Enabled` / `Capacity` / `Ticks` / `Joules` | true / 20000 / 200 / 50 | The Ammo Press: false makes it inert with no recipe; its store; an operation's ticks and J a tick (before upgrade cards). |
+| `AmmoPress.Calibres` | 16 9mm, 10 5.56, 5 .308 | What an Iron Ingot and a Gunpowder make, by the Calibre button's choice (in order). |
 | `Camera.Enabled` | true | The DayZ camera (client `Player/CameraRig`): over the shoulder or from the eyes, freelook, focus, the body facing the aim and drawn in first person. false: Roblox's camera exactly as before (its zoom; shift lock, which the server gives back through `Player.DevEnableMouseLock`; `Weapons.ShoulderOffset` while raised; the body turning where it walks at `Movement.TurnSpeed`; Minecraft's hand; the crosshair for a gamepad only). |
 | `Camera.DefaultView` / `FirstPersonBody` / `FreelookToggle` | "third" / true / false | The Camera, First-Person Body and Freelook settings' defaults. |
 | `Camera.Profiles` | standing { 4.8, 0.9, 0.25, 0 } | The third-person camera by what the body does: { distance behind the pivot, shoulder, height above the eyes, forward } in studs (DayZ's third-person cameras, × 3): `standing`, `sprinting`, `crouching`, `lying` (crawling, swimming), `climbing`, `flying`, `raised` (a firearm: 2.4 behind, 1.5 to the side), `raisedHands` (a melee guard), `crouchRaised`; a change eases over DayZ's blend times. |
@@ -3087,6 +3172,32 @@ local server):
   with the mouse, touch and a gamepad, "Set +1", no energy bar on the stove; the stove's and oil
   heater's glow and light, the loops (at most 6) and the click; the room fills' cost on a big
   build and in a cave (the 2 ms budget).
+
+**Studio checklist for the turrets and the Metal Miner** (the Lune specs play the rules out: the
+feed on the real pipes, the cadence, the kinds' energy and slots, the codecs; only Studio shows the
+look, the sound, the feel and the cost on a device; the items marked later need the feature's later
+parts):
+
+- **Turret views (later):** TurretView's per-frame BulkMoveTo with 30-48 turrets on a low-end phone;
+  the heads at each tier; the laser beam by day and night; no z-fighting with the base's decor
+  top.
+- **Shots (later):** the flash and tracer starting at the drawn barrel while the client is still
+  turning; a suppressed turret's tracers plain; turret fire heard at the right class and far sound.
+- **Cost (later):** the server's tick on a Roblox server (not Lune) in a blood moon with 10 turrets
+  and the real director; Shots + Turrets + Machines bandwidth to a player beside a turret wall (a
+  firing turret's Machines record changes every tick: 4 a second each).
+- **Panels:** the turret's three outlined slots, four lines and the Lure button at every GUI scale
+  and on touch (the lines' width beside the energy bar); the miner's and the press's panels (the
+  press's Calibre button).
+- **The Metal Miner (later):** on a diamond ore in an unloaded chunk it keeps mining and its chest
+  fills; its grille's glow and the drill loop; transporters taking its output.
+- **Sounds (later):** the three new loops' stand-ins, and their overrides from
+  `SoundService.IceVoxelSounds`.
+- **The lure (later):** zombies drawn by the lure and gunfire at night feel like "the turrets protect
+  the base", not like a swarm: tune `Turrets.NoiseScale`, `Lure` and the rates from play.
+- **Now:** a Basic Rifle Turret fed from a chest through one Basic transporter fills to its one
+  round and the line keeps it full; a block over it shows "Blocked", a torch or one snow layer
+  doesn't; the Lure button and a broken turret keeping its Lure off; the bases' decor at each tier.
 
 `Seed = nil` gives every server a random world; set a number for a fixed one. With the title
 screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"void"`,

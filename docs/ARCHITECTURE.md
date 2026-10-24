@@ -5681,6 +5681,20 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
     (`Transmitters.results`). The first with a destination sends up to the tier's pull amount (a
     whole stack from a furnace or machine: the ejector's), never more than fits there or a stack.
     Destinations are found before anything is taken, and the item takes the puller's colour.
+  - The demand rule (Shared/Turrets: a turret holds a few rounds, so it is full most of the time).
+    When items were there but nothing took them and a destination the pull reaches (a NORMAL or
+    PUSH side, not the source) is a machine that demands them (`Machines.demands`, KindSpec
+    `demand`: the turrets) whose slots through that face would take one were they empty
+    (`Transmitters.room` over no slots), the pull "waits": 3 ticks, its failures as they were,
+    instead of the backoff. A pull's result ranks sent, waiting, failed, nothing. So a line sends
+    the next round as soon as the turret has room (rounds on their way counted), and a turret fed
+    through one transporter of its tier or better holds its full rate (Turrets and the Metal Miner:
+    the feed). Every other destination is exactly as before: `tests/spec/TurretFeed` reproduces the
+    deliveries measured before the rule for a machine that demands nothing and shows chests and
+    furnaces still backing off, and the Transport and MachinePipes specs are untouched. With
+    `Config.Turrets.Enabled` false no kind demands anything. An idle full turret's line searches its
+    route every 3 ticks, inside the tick's search budget. `TransmitterWorld.feedTier` is the
+    feeder rule's look at the transporters next to a block.
   - Routes: Dijkstra from the item's transporter, adding `pathCost` for each transporter entered
     and only entering ones that `carries` its colour. The cheapest inventory (then fewest steps)
     on a NORMAL or PUSH side that takes at least one item wins. Room counts the items already on
@@ -5862,9 +5876,11 @@ on its own (Mekanism's ejector, every 10 ticks, into the transporters and chests
 results out, above). Energy is kept in multiples of 1/1024 J (`QUANTUM`), so sums and differences
 are exact; `produce` and `use` keep it so, and `share` is Mekanism's even split in whole quanta:
 every recipient gets the same share, those that take less get all they take and the rest is shared
-again, smallest limits first. A kind's `lines(view)` gives up to `MAX_LINES` (4) more panel lines
-under its status line, where its panel's `lines = { x, y }` puts the first (`Machines.lines`; one
-every 12 pixels, `MenuLayout.LINE_HEIGHT`, as many as fit the panel).
+again, smallest limits first. A kind's `lines(view, data?)` gives up to `MAX_LINES` (4) more panel
+lines under its status line, where its panel's `lines = { x, y }` puts the first (`Machines.lines`;
+one every 12 pixels, `MenuLayout.LINE_HEIGHT`, as many as fit the panel); the panel passes its
+window's data (MenuLayout.lineTexts: a turret's feed rate, a press's calibre, which no record
+carries), WAILA none.
 
 **Fluid tanks** (`Machines/Core`; Mekanism's BasicFluidTank.input / output). A kind's `tanks` each
 have a `name` (a data key), a whole `capacity` (mB), the `fluids` they take (Shared/Fluids ids,
@@ -6139,6 +6155,17 @@ panel has no energy bar and WAILA no energy line), have panel `buttons` (Invento
 (`Machines.start`'s env from `Seasons/RoomWorld.climateAt`; nil and 0 outdoors or in tests). The
 Wood Stove, Oil Heater, Electric Heater, Air Conditioner and Electric Fan are kinds "stove",
 "oilheater", "heater" and "cooler" (Machines/Kinds), their layouts frozen.
+
+**Turrets' machines** (see Turrets and the Metal Miner): a kind may `demand` its items (server
+Transmitters/Transport's demand rule: `Machines.demands`), and `TickContext.turret` gives a kind
+the server's turret simulation (Shared/Turrets/Types' Service), from MachineWorld's Env getter
+`turret`, asked once a step, which server Machines answers with what `Machines.setTurretService`
+registered (nil before it, in tests and with the turrets off). `Machines.save` keeps a kind's `keep`
+fields that differ from a fresh machine's (its `defaults`, else 0), so a turret's Lure switched
+off (0, the default 1) stays off in its item; for every kind kept before, whose defaults are 0, it
+is the same rule. The kinds: "turret_<type>_<tier>" (twelve, Machines/Kinds/Turret), "miner"
+(Machines/Kinds/Miner with Machines/MinerRules) and "press" (Machines/Kinds/AmmoPress), their
+layouts frozen.
 
 **A new machine:** a BlockList block with `machine` and `energy`, a module in
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
@@ -6828,6 +6855,19 @@ power, 56), `emit` (a sprint: Apocalypse/Survival once a second, `Sprint` 8; a s
 them to Mobs once a tick. A noise carries no "who": a zombie that hears one looks for a target at
 once. With `Apocalypse.Enabled` or `Noise.Enabled` false nothing is heard.
 
+**Turret noise and the lure** (Turrets and the Metal Miner; builder A's server Turrets/TurretWorld
+emits them, none at this commit). A turret's gunfire is a `NoiseBus.emit` of
+`TurretRules.shotNoise` (the stand-in gun's noise with its muzzle device, at least
+`SuppressedMinNoise` suppressed, times `Config.Turrets.NoiseScale` 0.75: SMG 36, rifle 60, sniper 72
+blocks; suppressed 9 / 15 / 18), and the impact's 8 blocks (`FireRules.impactNoise`), at most once
+every `ShotNoiseTicks` (20) a turret, then the director's night and rain factors as for any noise.
+The lure: a turret that is powered, armed and has no target, its Lure on (the panel's button),
+makes `Lure.Noise` (24; 30 at night) every `Lure.Ticks` (600) while it is night or a blood moon, at
+most one a `Lure.Cell` (48 x 48) cell an interval for every turret together; a suppressor doesn't
+quiet it (servos, not shots). Zombies within reach investigate (MobAI's noise rule), walk into
+range and the gunfire keeps them coming. Turrets never hurt players or animals or break blocks, a
+lure needs a powered turret with ammo, and hunters in a blood moon have targets already.
+
 ## Infection and bleeding (`Apocalypse/Infection`, server `Apocalypse/`, `Items/Foods`)
 
 The zombie apocalypse's survival rules are pure and tested in Lune (`tests/spec/Infection`,
@@ -7048,11 +7088,19 @@ inventory prediction, and draws its own shot at once. Everything that decides is
 | client → server | `Weapon` (28) | u8 op: 1 raise, 2 lower, 3 guard, 4 unguard |
 | client → server | `Attack` (18) | u32 mob id, then u8 flags (bit 0: a heavy attack) when heavy: 4 or 5 bytes |
 | client → server | `Inventory`, action kind 8 `weapon` | u32 seq, u8 8, u8 op (1..6), i16 slot (-1: the held gun), u8 part (0..6): 9 bytes |
-| server → client | `Shots` (33) | u8 count, then each shot: f64 shooter (UserId), u16 item, u16 shot counter, u8 flags (suppressed, jammed after it, refused), f32 origin, u8 pellets, each f32 end and u8 hit (`WeaponSync.Hit`: none, block, glass, mob, mob head, player, player head): 26 + 13 a pellet bytes |
+| server → client | `Shots` (33) | u8 count, then each shot: f64 shooter (UserId), u16 item, u16 shot counter, u8 flags (suppressed, jammed after it, refused, plain: tracers without glow), f32 origin, u8 pellets, each f32 end and u8 hit (`WeaponSync.Hit`: none, block, glass, mob, mob head, player, player head): 26 + 13 a pellet bytes |
 
 The inventory's `fire` action (`Types`) is never sent on its own: the Fire message carries its
 seq, and the server acknowledges every Fire once, whatever becomes of it, so the predicted round
-never sticks. A refused shot (but one over the rate, dropped silently) comes back to its shooter
+never sticks. A turret's shot (Turrets and the Metal Miner) is a Shots record too: shooter 0 (no
+player, so ShotView draws the flash and tracer from the record's origin, the turret's muzzle, and
+ShotRules' `own` is false), the turret's stand-in gun as the item (its class's fire sound), the
+turret's own counter, and `plain` when its muzzle device takes the glow away (WeaponSync bit 3,
+which came with the turrets: both ends ship together). The server traces it as it traces a player's
+(builder A: server Turrets/TurretWorld), sends it to the players within `ShotBroadcast` of the
+turret (its own audience: `FireRules.audience` expects a shooter), and it never hurts a player or
+an animal nor breaks a block; ShotRules and ShotView honour `plain` for shooterless records
+(builder B). A refused shot (but one over the rate, dropped silently) comes back to its shooter
 alone as a refused record with no pellets, its jam flag set when the reason is "jammed".
 
 ### On the server (`server/Weapons/`)
@@ -7172,6 +7220,177 @@ alone as a refused record with no pellets, its jam flag set when the reason is "
   `WeaponFiring` (the server's rules and glue on fakes, the exploits), `WeaponLoading`, `Melee`,
   `Tooltips`, `WeaponClient`, `SoundsClient`.
 
+## Turrets and the Metal Miner (`Turrets/`, `Machines/Kinds/Turret`, `Miner`, `AmmoPress`, `Machines/MinerRules`, server `Turrets/`, client `Rendering/TurretView`)
+
+SMG, Rifle and Sniper turrets in the transmitters' four tiers (Basic, Advanced, Elite, Ultimate)
+that shoot zombies with the rounds a Logistical Transporter feeds them and Mekanism energy; the
+Metal Miner, which copies the ore block under it forever for energy; and the Ammo Press, which
+presses iron and gunpowder into rounds. All three are ordinary machine kinds (Electricity and
+machines): nothing new in world saves, their state is their container's slots and data.
+
+The feature landed in parts. **At this commit** (the foundation): the registries, the shared
+rules, the turret kind complete, the miner's and the press's frozen layouts, the pipes' demand rule
+and feeder rule, the service seam, the Turrets message and WeaponSync's `plain`, the decor, and
+stubs for the rest that boot and do nothing harmful. **Still to come**, each in files of its own
+(marked STUB in them): the server's turret simulation and glue (targeting, firing, noise, the lure,
+records: builder A), the client's turret view and model, `plain` in ShotRules / ShotView, WAILA's
+and F3's turret lines (builder B), the Metal Miner's tick, its window glow and loops (builder C),
+the Ammo Press's tick, JEI's Duplicating and Pressing categories and the turrets' tooltip line
+(builder D). Each builder's report carries the paragraph to add here.
+
+**Shared** (`Shared/Turrets`, pure; requires Config, Blocks, Items, Weapons and
+Transmitters/Tiers, never Shared/Transmitters or Shared/Machines, which load the kinds that
+require it):
+- `init`: the twelve `Spec`s from Config.Turrets (`SPECS`, type by type and tier by tier: the
+  BlockList order of blocks 486..497; `spec(block)`, `isTurret`, `of(type, tier)`), checked as it
+  loads (blocks and kinds, energy, a stand-in gun of the round's calibre, whole rates, buffers
+  within a stack, optics and muzzle devices that exist). A Spec: block, kind, type, tier, name,
+  calibre, ammo (the round), firearm (the stand-in gun: the SMG's Smg, the rifle's Assault Rifle,
+  the sniper's Hunting Rifle, whose fire sound, noise and muzzle numbers the turret borrows),
+  damageScale, range, rpm, buffer, turn, spread, settle, barrel, capacity, idle, tracking, shot,
+  optics and muzzles (item sets). `rpm(spec, feed)` is the feeder rule (below). `SLOT` (1 ammo, 2
+  optic, 3 muzzle), `STATUS` and `STATUS_NAMES` (No target, Targeting, Firing, No ammo, No power,
+  Blocked, Disabled), `packState(status, feed, lure, tracking)` = status + 8 feed + 64 lure + 128
+  tracking (a byte, at most 230) and `unpackState`, `headClear(block)` (nothing opaque and no
+  obstruction box over the gun: air, torches, plants, water and a one-layer snow pass; a block, a
+  transporter or deeper snow make it "Blocked"; nil is clear), `optic(spec, item)` (a Laser Sight:
+  the cone x 0.5, a rescan every 5 ticks; a Rifle Scope on a rifle or sniper: the range x 1.25 to
+  `MaxRange`, a sniper aiming at heads) and the slots' `GHOSTS`.
+- `TurretRules` (both sides; signatures frozen): the pivot (x + 0.5, y + 1.3, z + 0.5), angles in
+  radians (yaw 0 faces +Z, facing (sin yaw, cos yaw) as mobs'), `direction`, `aim`, `muzzle`,
+  `turn` (each axis at most a step, the short way across +-pi, never past), `offAngle`, `inPitch`
+  (-60 to 75 degrees), the cadence (`cadence`: an exact whole credit, + rpm a powered tick, CREDIT
+  1200 a shot, held at CREDIT while the shot may not go, so a rate of r fires exactly 10 r shots in
+  12 000 ticks; a float credit or capping before the shot's subtraction both fire too slowly, and
+  the spec proves both), `spread` (with a Laser Sight and a working muzzle device), `range`,
+  `shotNoise` (the stand-in gun's `Handling.noise` with its device x `NoiseScale` 0.75: SMG 36,
+  rifle 60, sniper 72 blocks, suppressed 9 / 15 / 18), `score` (distance + 0.05 a degree to turn)
+  and `feedRate` (the panel's "In: x/s", an average over `FeedRateTicks`).
+- `Types` (types only, requiring nothing, so Machines/Core can name them): `Order` (a turret's
+  question each tick: tick, key, cell, block, powered, blocked, armed, ready, optic, muzzle and
+  its durability left, ammo, held, lure), `Outcome` (status, fired, tracking, feed) and `Service`.
+
+**The machines.**
+- The turrets (`Machines/Kinds/Turret`, twelve kinds "turret_<type>_<tier>", complete). Slots: 1
+  the ammo (its round only, at most its buffer, through every face but Up), 2 the optic, 3 the
+  muzzle device (by hand and shift-click only); transporters never take anything out, attachments
+  never wear on a turret. Data (frozen): 7 credit, 8 state (packed; the kind's `state`, so Machines
+  records and WAILA carry status, feed and Lure), 9 lure (1 on, the default, kept in the item), 10
+  held, 11 feedRate, 12 activeDelay; RATE minus the J used. Each tick: inert with
+  `Config.Turrets.Enabled` false or no service ("Disabled", nothing taken); its tracking energy if
+  it tracked last tick, else its idle energy, all or nothing; blocked from the cell above
+  (`ctx.getBlock`); the feeder rule's rate from last tick's feed; armed (a round and a shot's
+  energy); the cadence's credit grows only while powered; the service answers the order, and a
+  shot it fires is taken only when the order was ready, armed, powered and not blocked (a round off
+  the slot in a new stack table, the shot's energy, CREDIT off the credit); then the feed rate, the
+  rounds held, the packed state, RATE, ACTIVE (while targeting or firing). The service decides the
+  status in the design's precedence (Disabled, No power, Blocked; with a target Firing within
+  `FiringTicks` of a shot, No ammo unarmed, else Targeting; without one No ammo with no round, else
+  No target). `demand = true` (the demand rule). Its panel: the three slots with their outlines,
+  the status line, four lines ("Range 24 · 240 rpm", "Feed: Elite" / "Feed: Basic → 90 rpm" /
+  "Feed: by hand", "In: 2.4/s" from the window's data, "Lure: on"), the Lure button (id 0) and the
+  energy bar; `info` range, rpm, buffer, idle, tracking, shot.
+- The Metal Miner (`Machines/Kinds/Miner`, kind "miner"; `Machines/MinerRules`). Frozen: slot 1
+  the output (pushed out every 10 ticks), 2-3 the cards (`Upgrades.slots(8, 53)`); data 7
+  progress, 8 ticksRequired, 9 energyPerTick, 10 mining (the ore block seen), 11 state
+  (`MinerRules.packState`: code + 8 x the ore's index in `MinerRules.ORES`, the frozen order Coal,
+  Iron, Osmium, Gold, Emerald, Diamond Ore), 12 activeDelay; MINING ("Mining Diamond Ore"),
+  NO_POWER, OUTPUT_FULL, NO_ORE ("No ore below"); a 200 kJ store taking its capacity a tick
+  (`rates`); `info` the store and each ore's ticks, J a tick and floor. Config.Miner.Ores: coal 600
+  ticks at 800 J/t with a 400 kJ floor (never energy-positive: a coal is 320 kJ in a Heat
+  Generator), iron and osmium 400 at 200, gold 800 at 300, emerald 3600 at 800, diamond 4800 at
+  800. Builder C's tick reads the cell under it with `ctx.getBlock` (nil, an unloaded unedited
+  cell, keeps mining what it mined), Mekanism's card maths with the floor (`MinerRules.settings`),
+  makes the ore's drop, never the ore. STUB at this commit: the tick sets state 0 and uses nothing.
+- The Ammo Press (`Machines/Kinds/AmmoPress`, kind "press"). Frozen: slots 1 Iron Ingots, 2
+  Gunpowder, 3 the output, 4-5 the cards; data 7 progress, 8 ticksRequired, 9 energyPerTick, 10
+  calibre (1 9mm, 2 5.56, 3 .308: Config.AmmoPress.Calibres, the Calibre button cycling it, kept in
+  the item), 11 state (IDLE, NO_POWER, OUTPUT_FULL, NO_INPUT), 12 activeDelay; a 20 kJ store; its
+  line names what an operation makes ("16 9mm Rounds"); `info` ticks, joules, capacity and each
+  round's count. An operation is an ingot and a gunpowder into 16 9mm, 10 5.56 or 5 .308 rounds,
+  200 ticks at 50 J/t. STUB at this commit (builder D): the tick sets state 0.
+
+**The feed** (the turrets design's measurements on this code; `tests/spec/TurretFeed` holds them):
+- The feeder rule: a turret fires at most `Turrets.rpm(spec, feed)`, its type's rate at the lower
+  of its tier and `feed`, the best tier among the Logistical Transporters next to it that feed it
+  (`TransmitterWorld.feedTier`: the transporter's side towards it joined and NORMAL or PUSH, the
+  turret taking items through that face, never its top; the Restrictive Transporter counts as
+  Basic; 0 by hand: its own rate until its buffer is empty). The simulation works it out every
+  `FeedTicks` and returns it as the Outcome's `feed`; the kind caps the next tick's rate with it.
+- The demand rule (Mekanism pipes: Items): a line into a full turret waits 3 ticks instead of
+  backing off. With it a line delivers the turret's buffer once a trip (its transit, 20 / 10 / 5 /
+  2 ticks a block from Basic to Ultimate, plus at most 3), and the buffers (SMG 2 / 3 / 4 / 6,
+  rifle 1 / 2 / 3 / 4, sniper 1 / 1 / 2 / 2) are chosen so that the matching tier fed through one
+  transporter holds the full rate: every turret, through one transporter of its tier or better,
+  holds 100 % of its rate, a lower feeder exactly that tier's rate, longer lines within 2 % of the
+  design's table. Without the rule a Basic rifle on one Basic transporter got 69 %.
+
+**The service seam and the require cycle.** Players/ToughAsNails requires server Machines and
+Mobs requires ToughAsNails, so server Machines never requires the turrets (which need Mobs). A
+kind's `TickContext.turret` is the service; MachineWorld's Env has a getter, `turret: () ->
+Service?`, asked once a step; server Machines' getter returns what `Machines.setTurretService`
+was given, which server `Turrets/Turrets.start` (after Weapons.start) hands over. Before that, or
+with the turrets off, kinds see none and show "Disabled". `Machines.knownBlock` is the blocks the
+machines read (never generating terrain), for the simulation's Env.
+
+**On the server** (`server/Turrets/`; frozen APIs, STUB bodies until builder A):
+- `TurretWorld` (pure): `new(env)`, `step(world, order, out)` (the Service), `blockChanged`,
+  `takeShots` (this frame's Shots records), `takeRecords`, `chunkRecords`, `stats`, `settings`;
+  Env `getBlock`, `hostiles(into)`, `mob(id)`, `hurt(id, amount, ox, oz, knockback, head)`
+  (Mobs.weaponDamage with no player: nobody credited, no Knowledge, no `byPlayer` loot),
+  `noise` (NoiseBus.emit), `lureTime` (night or a blood moon), `feed(x, y, z)` (the feeder rule),
+  `random`, `settings`. At this commit `step` answers from the order alone (No power, Blocked,
+  No ammo, No target), never fires, never tracks, feed 0.
+- `Turrets` (the glue): `start(net, world)` builds the simulation and registers the service (none
+  with the turrets off), `update(dt)` after Machines.update, `blockChanged` after
+  Machines.blockChanged on WorldServer.onChanged, `sendChunks` in ServerNet's `chunksSent` after the
+  machines', `world()`. At this commit it sends nothing.
+- To come (builder A, Shared/Turrets' design): targets are live, unfrozen `hostile` mobs (never
+  players or animals), scanned every `ScanTicks` (5 with a laser) nearest-first by `score`, with
+  `FireRules.wallBetween` sight checks; sticky tracking at the turn rate; shots traced from the
+  pivot with `Ballistics.trace` as a player's are (spread with `Ballistics.spreadDir`, the round's
+  flight, `FireRules.blockRules(weapons, false)`: no glass shattered), never hurting a player or
+  an animal or breaking a block; budgets `MaxScansPerTick`, `MaxShotsPerTick` (a deferred shot
+  waits a tick, the credit held); records to players within `RecordRange`.
+
+**The protocol.** ServerMessage `Turrets` (34): u16 count, 19 bytes a turret: i32 x, u16 y, i32 z,
+u16 yaw (65536ths of a turn), i8 pitch (whole degrees), u32 target, u8 flags (`TurretFlag`:
+powered, firing, blocked, laser, scope, suppressor, tracking), u8 ammo (`Protocol.encodeTurrets`,
+`decodeTurrets`; `TurretRecord`). A turret's shots are Shots records (33) with shooter 0, the
+stand-in gun as the item and the turret's own counter, from its muzzle, and WeaponSync's flag bit 3
+`plain` (tracers without glow, for a suppressed turret's shot). Both ends ship together: an older
+client refuses bit 3.
+
+**On the client.** BlockDecor draws the bases ("<Tier><Type>Turret": a dark steel housing, the
+tier's colour along each side's top and in the top's corners, the belt feed's intake with the
+type's brass marks, the turntable ring on top), the miner ("MetalMiner", the drill housing's
+grille `MINER_WINDOW`, the osmium hopper, the drill head) and the press ("AmmoPress", the stamping
+window `PRESS_WINDOW`, the chute, the ram's cap); TransmitterModel lights the two windows (builder
+C). `Rendering/TurretView` (frozen API: `start(world)`, `state(x, y, z)`, `stats()`; STUB until
+builder B) will draw the guns from pooled parts (Rendering/TurretModel), turning with
+`TurretRules.turn`, the laser's beam and the servo's loop. MenuLayout passes a panel's window data
+to `Machines.lines`.
+
+**Recipes, Ages and the rest.** Crafting/Recipes: a Servo Motor (two), a Belt Feeder, a Receiver,
+a Targeting Module, the three barrels and the Laser Sight from iron, osmium, leather, nails, scrap,
+glass, glow dust, cables and diamonds; each type's Basic turret from its barrel, a servo, a
+receiver, a belt feeder, osmium and a targeting module; each next tier round the one below with the
+alloys of the transmitters' upgrades in the corners, a barrel, servos and a module (keeping its data:
+energy and Lure); the Metal Miner round an Electric Furnace over a Diamond Pickaxe, the Ammo Press
+round one over a Block of Iron. Ages: the parts, the Laser Sight, Basic to Elite turrets, the
+miner and the press in the Electric Age, the Ultimates in the Atomic Age. Lore for every new item,
+blank icons for the eight items (the fourteen blocks are machines: never textured), three sounds
+(below). `Config.Turrets.Enabled`, `Miner.Enabled` and `AmmoPress.Enabled` false make each the
+identity: no recipes or Ages for it (the Servo Motor stays while the press needs it), its kinds
+inert, no demand rule, no service, no messages; blocks and items stay registered (ids are
+append-only).
+
+**Specs**: `Turrets` (registries, Specs, the maths, the kind on a fake service, the stub, the
+panels, the frozen layouts, the codec, the decor, the features off), `TurretFeed` (the feeder and
+demand rules on the real pipes, and every other destination exactly as before), `Crafting` (each
+new grid makes only its result), `Weapons` (`plain`). To come: `TurretWorld` (A), `TurretClient`
+(B), `Miner` (C), `AmmoPress` and `Jei` additions (D).
+
 ## Sounds (`Sounds/`, server `Audio/Sounds`, client `Audio/SoundPlayer`)
 
 Sounds are Minecraft's sound events, played with files that ship with every Roblox client.
@@ -7230,6 +7449,13 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
   bubbles with `block.campfire.boil` (this game's; the server, at the campfire: Players/ItemUse;
   the splash pitched up). Straw and leaf armor go on with `item.armor.equip_leather`
   (`SoundList.ARMOR` prefixes "Straw" and "Leaf").
+- Turrets and the Metal Miner (appended after the seasons', the last events): `block.turret.servo`
+  (a turning turret: the falling wind pitched up, at most `Config.Turrets.Client.ServoLoops` of
+  them; Rendering/TurretView, builder B), `block.metal_miner.drill` and `block.ammo_press.stamp`
+  (a working miner and press, from their records: TransmitterModel.machineLoop's names, builder C),
+  each replaced by a Sound of its name in `SoundService.IceVoxelSounds`; until their players come
+  they wait on `tests/spec/SoundsClient`'s pending list. A turret's shots are its stand-in gun's
+  class fire sounds (ShotView), its dry click `item.firearm.dry`.
 
 **Who plays what** (Minecraft's split between server and client):
 
@@ -8597,7 +8823,8 @@ live edits after it must arrive in the order they were sent.
 | server → client | `CreateWorldResult` | u8 ok, u16 length + text: the answer to this player's CreateWorld |
 | server → client | `WorldList`     | u8 saving works, u16 length + text (how the last WorldAction went), u16 count (at most 200), then each saved world: id, name, type and seed text (u16 length + text each), u8 game mode, f64 last played, f64 bytes |
 | server → client | `WorldSave`     | u8 op: saving; saved (u8 flags ok / sizes / warn, then the sizes for operators only: f64 bytes, max, largest key, key limit; text); loading (u16 keys read, u16 of, text); state (u8 on / off / unavailable / session only, text why) |
-| server → client | `Shots`         | the shots near the player once a frame (Net/WeaponSync: shooter, item, shot counter, flags suppressed / jammed / refused, origin, each pellet's end and what it hit; see Weapons) |
+| server → client | `Shots`         | the shots near the player once a frame (Net/WeaponSync: shooter, item, shot counter, flags suppressed / jammed / refused / plain, origin, each pellet's end and what it hit; a turret's with shooter 0; see Weapons) |
+| server → client | `Turrets` (34)  | turrets' aim for the client: u16 count, 19 bytes each (i32 x, u16 y, i32 z, u16 yaw in 65536ths of a turn, i8 pitch in degrees, u32 target, u8 flags powered / firing / blocked / laser / scope / suppressor / tracking, u8 ammo); a chunk's non-idle ones with its edit list, changes to players within `Turrets.RecordRange` (see Turrets and the Metal Miner) |
 | server → client | `Lightning`     | a strike within `Weather.Lightning.Distance` (4096 blocks): f32 x, y, z (the struck cell's bottom centre), u32 seed (the bolt's shape), u8 flashes (1-3): 17 bytes |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
@@ -8987,7 +9214,16 @@ Saving worlds).
 - Kind modules require Machines/Core, Machines/Upgrades and plain shared modules (Items,
   Crafting/Smelting, DayCycle, Fluids), never Shared/Machines, Inventory/Menu or Shared/Transmitters
   (those require Machines: a cycle). A kind keeps per-machine state in its data fields, not in
-  module tables.
+  module tables. Kind modules may also require Shared/Turrets (pure: never Machines or
+  Transmitters) and Machines/MinerRules.
+- Turrets: a turret's shot is server-traced like a player's and never hurts a player or an animal
+  or breaks a block; turret noise goes through `NoiseBus.emit` with its cooldown; the turret's data
+  layout and state packing (`Turrets.packState`), the miner's and the press's layouts and the
+  miner's ore order are frozen (saved containers); the feed's tier statement is the feeder rule
+  (`Turrets.rpm`, `TransmitterWorld.feedTier`) plus the demand rule, specced on the real pipes
+  (`tests/spec/TurretFeed`), and the demand rule changes nothing for a destination that demands
+  nothing. Server Machines never requires the turrets (the service comes in through
+  `Machines.setTurretService`); the Turrets message and WeaponSync's `plain` ship with both ends.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.
 - The structure library is part of world generation: the server, every client and every worker
