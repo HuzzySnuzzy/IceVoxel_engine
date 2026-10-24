@@ -28,8 +28,10 @@
 	            points at, BlockInteraction.targetSide, and its mode; colour, items inside, water,
 	            a cable's capacity; a machine's energy and status from its Machines record, none
 	            for a fuel-only one; a heater's, cooler's or stove's room line from the viewer's
-	            own room, Player/SurvivalState.room: "Room +1 (out -9)"), and
-	            with F3 their packed modes, connections and network, a machine's energy numbers.
+	            own room, Player/SurvivalState.room: "Room +1 (out -9)"; a turret's rounds, feed and
+	            what is mounted from its Turrets record, Rendering/TurretView.state), and
+	            with F3 their packed modes, connections and network, a machine's energy numbers, a
+	            turret's target, aim and flags.
 	            Structure blocks add their mode and name, jigsaws their name, target and pool,
 	            from Net/StructureNet's records (with F3 a structure block's region and LOAD
 	            settings); operator blocks say "Creative only" where the harvest line goes.
@@ -94,11 +96,13 @@ local ItemIcon = require(script.Parent.ItemIcon)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
+local TurretView = require(script.Parent.Parent.Rendering.TurretView)
 local StructureNet = require(script.Parent.Parent.Net.StructureNet)
 local StructureRecords = require(script.Parent.Parent.World.StructureRecords)
 local Settings = require(Shared.Structures.Settings)
 local Machines = require(Shared.Machines)
 local Transmitters = require(Shared.Transmitters)
+local Turrets = require(Shared.Turrets)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
 local UiScale = require(script.Parent.UiScale)
@@ -626,8 +630,19 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 			room = { room = air, outside = outside }
 			roomKey = WailaInfo.roomReading(air, outside)
 		end
+		-- (A turret's record: its rounds, flags and target; with F3 its aim, to the degree.)
+		local turret: WailaInfo.TurretFacts? = nil
+		local turretKey = ""
+		if Turrets.isTurret(hit.block) then
+			local said = WailaInfo.turretFacts(TurretView.state(hit.x, hit.y, hit.z))
+			turret = said
+			turretKey = `{said.known} {said.ammo} {said.flags} {said.target}`
+			if extended then
+				turretKey ..= ` {math.round(math.deg(said.yaw))} {math.round(math.deg(said.pitch))}`
+			end
+		end
 		local key =
-			`b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey} {lightKey} {factor} {roomKey}`
+			`b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey} {lightKey} {factor} {roomKey} {turretKey}`
 		show(key, extended, function()
 			local biome = if extended then biomeAt(hit.x, hit.z) else nil
 			return WailaInfo.block(hit.block, held, hit.x, hit.y, hit.z, extended, {
@@ -637,6 +652,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				transmitter = transmitter,
 				tank = tank,
 				machine = machine,
+				turret = turret,
 				structure = structure,
 				jigsaw = jigsaw,
 				light = light,

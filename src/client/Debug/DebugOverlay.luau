@@ -6,7 +6,9 @@
 	player's movement hull (position, speed, ground / water / sprint / flying / noclip /
 	spectating / pose, game mode, flying speed; MovementController), the dropped items the client
 	knows about (EntityRenderer), the mobs it knows and how its zombies were drawn last frame (full
-	and reduced R15 rigs, the parts moved: Entities/MobRenderer.rigs), the time of day (the clock,
+	and reduced R15 rigs, the parts moved: Entities/MobRenderer.rigs), the turrets (drawn, the
+	records the client keeps, those tracking a target, the parts their heads use:
+	Rendering/TurretView.describe), the time of day (the clock,
 	day number, Minecraft's sky light outdoors and how much of it reaches the camera;
 	Rendering/LightingController), the season (Shared/Seasons/Calendar: its name, the day of its
 	length and the days left, the year, the progress through it, the sun's day share k, the
@@ -70,6 +72,7 @@ local ManaState = require(script.Parent.Parent.Player.ManaState)
 local ProjectileView = require(script.Parent.Parent.Rendering.ProjectileView)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
+local TurretView = require(script.Parent.Parent.Rendering.TurretView)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local WeatherClient = require(script.Parent.Parent.Weather)
 local Ambience = require(script.Parent.Parent.Audio.Ambience)
@@ -548,6 +551,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			foliageLine(streamer.renderer),
 			movementLine(),
 			mobsLine(),
+			TurretView.describe(),
 			originLine(),
 			timeLine(),
 			seasonLine(),

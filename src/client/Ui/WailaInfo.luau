@@ -28,6 +28,11 @@
 	            Machines.status, from the record's numbers and its kind's state code), then its
 	            tanks ("Oil: 3,000 / 10,000 mB", `MachineFacts.tanks`: the record's, Protocol's
 	            MachineRecord `tanks` from Machines.tankContents; empty without a record).
+	            A turret (Shared/Turrets) then says what its Turrets record says (`TurretFacts`:
+	            Rendering/TurretView.state): the rounds it holds ("Ammo 3 / 4 · 9mm"), its feed
+	            from the machine's packed state as its panel does ("Feed: Elite", "Feed: Basic →
+	            90 rpm", "Feed: by hand") and what is mounted ("Fitted: Laser Sight, Suppressor");
+	            with F3 its target, aim and flags (`turretLines`, `turretDetails`).
 	            A fuel-only machine (the Wood Stove, the Oil Heater) has no energy line. The
 	            seasons' heaters, coolers and stoves (`isHeatMachine`) say what they do from their
 	            state and rate ("Heating 32 HU", "At set point", "No power", "No fuel", "No room")
@@ -91,6 +96,10 @@ local MobList = require(Shared.Entities.MobList)
 local Settings = require(Shared.Structures.Settings)
 local Transmitters = require(Shared.Transmitters)
 local Rooms = require(Shared.Seasons.Rooms)
+local Describe = require(Shared.Weapons.Describe)
+local Protocol = require(Shared.Net.Protocol)
+local Tiers = require(Shared.Transmitters.Tiers)
+local Turrets = require(Shared.Turrets)
 
 export type Colour = "white" | "gray" | "darkGray" | "blue" | "green" | "red" | "yellow" | "gold"
 
@@ -152,6 +161,18 @@ export type MachineFacts = {
 	tanks: { MachineTankFacts }?,
 }
 
+-- What the client knows about a turret (its Turrets record: Rendering/TurretView.state; `known`
+-- false without one, the idle defaults): the rounds it holds, its TurretFlag bits, the mob it
+-- tracks (0: none) and its aim (radians).
+export type TurretFacts = {
+	known: boolean,
+	ammo: number,
+	flags: number,
+	target: number,
+	yaw: number,
+	pitch: number,
+}
+
 -- Optional facts about a block's surroundings that only the client knows.
 export type BlockContext = {
 	-- Mining progress (BlockInteraction.miningProgress).
@@ -162,6 +183,8 @@ export type BlockContext = {
 	transmitter: TransmitterFacts?,
 	tank: TankFacts?,
 	machine: MachineFacts?,
+	-- A turret's record (its energy and status are the machine's).
+	turret: TurretFacts?,
 	-- A structure block's or jigsaw's settings, as the server sent them (nil: not known yet).
 	structure: Settings.StructureSettings?,
 	jigsaw: Settings.JigsawSettings?,
@@ -560,6 +583,106 @@ function WailaInfo.machineLines(block: number, facts: MachineFacts): { Line }
 	return lines
 end
 
+--[[ Turrets ]]
+
+-- A turret's facts from its record (Protocol.TurretRecord; nil: none came, the idle defaults).
+function WailaInfo.turretFacts(record: Protocol.TurretRecord?): TurretFacts
+	if record == nil then
+		return { known = false, ammo = 0, flags = 0, target = 0, yaw = 0, pitch = 0 }
+	end
+	return {
+		known = true,
+		ammo = record.ammo,
+		flags = record.flags,
+		target = record.target,
+		yaw = record.yaw,
+		pitch = record.pitch,
+	}
+end
+
+local TurretFlag = Protocol.TurretFlag
+-- What a mounted thing is called, by its flag (a suppressor of either kind is one flag).
+local MOUNTED: { { flag: number, item: string } } = {
+	{ flag = TurretFlag.Laser, item = "LaserSight" },
+	{ flag = TurretFlag.Scope, item = "RifleScope" },
+	{ flag = TurretFlag.Suppressor, item = "Suppressor" },
+}
+-- The flags' names, in bit order (F3).
+local FLAG_NAMES: { { flag: number, name: string } } = {
+	{ flag = TurretFlag.Powered, name = "powered" },
+	{ flag = TurretFlag.Firing, name = "firing" },
+	{ flag = TurretFlag.Blocked, name = "blocked" },
+	{ flag = TurretFlag.Laser, name = "laser" },
+	{ flag = TurretFlag.Scope, name = "scope" },
+	{ flag = TurretFlag.Suppressor, name = "suppressor" },
+	{ flag = TurretFlag.Tracking, name = "tracking" },
+}
+
+-- The feed as the turret's panel says it (Machines/Kinds/Turret): "Elite", "Basic → 90 rpm", "by
+-- hand", from the packed state's feed (Shared/Turrets.unpackState).
+function WailaInfo.feedText(block: number, state: number): string
+	local spec = Turrets.spec(block)
+	local _, feed = Turrets.unpackState(state)
+	local tier = Tiers.TIERS[feed]
+	if spec == nil or feed <= 0 or tier == nil then
+		return "by hand"
+	elseif feed >= spec.tier then
+		return tier.name
+	end
+	return `{tier.name} → {Turrets.rpm(spec, feed)} rpm`
+end
+
+--[[
+	A turret's lines under its machine lines (energy, status): the rounds it holds of its buffer and
+	its calibre ("Ammo 3 / 4 · 9mm", from its record), the feed ("Feed: Elite", from the machine's
+	packed `state`) and what is mounted ("Fitted: Laser Sight, Suppressor"; nothing: no line).
+]]
+function WailaInfo.turretLines(block: number, facts: TurretFacts, state: number): { Line }
+	local spec = Turrets.spec(block)
+	if spec == nil then
+		return {}
+	end
+	local lines: { Line } = {
+		{
+			segment("Ammo ", "gray"),
+			segment(`{facts.ammo} / {spec.buffer}`, if facts.ammo > 0 then "white" else "red"),
+			segment(` · {Describe.calibre(spec.calibre)}`, "gray"),
+		},
+		labelled("Feed: ", WailaInfo.feedText(block, state)),
+	}
+	local fitted = {}
+	for _, mount in MOUNTED do
+		if bit32.btest(facts.flags, mount.flag) then
+			table.insert(fitted, Items.displayName(Items.id[mount.item]))
+		end
+	end
+	if #fitted > 0 then
+		table.insert(lines, labelled("Fitted: ", table.concat(fitted, ", ")))
+	end
+	return lines
+end
+
+-- The extended (F3) lines of a turret: its target, aim and flags as its record says.
+function WailaInfo.turretDetails(facts: TurretFacts): { Line }
+	if not facts.known then
+		return { gray("Turret: no record (idle)") }
+	end
+	local names = {}
+	for _, entry in FLAG_NAMES do
+		if bit32.btest(facts.flags, entry.flag) then
+			table.insert(names, entry.name)
+		end
+	end
+	local target = if facts.target ~= 0 then `mob {facts.target}` else "none"
+	local flagText = if #names > 0 then table.concat(names, ", ") else "none"
+	return {
+		gray(
+			string.format("Turret target %s, yaw %.1f, pitch %.0f", target, math.deg(facts.yaw), math.deg(facts.pitch))
+		),
+		gray(`Flags {facts.flags} ({flagText}), {facts.ammo} rounds`),
+	}
+end
+
 --[[ The seasons' rooms ]]
 
 -- The machine kinds that heat or cool a room (Shared/Machines kinds: the seasons').
@@ -909,6 +1032,12 @@ function WailaInfo.block(
 		for _, line in WailaInfo.machineLines(block, machine) do
 			table.insert(lines, line)
 		end
+		local turret = context and context.turret
+		if turret and Turrets.isTurret(block) then
+			for _, line in WailaInfo.turretLines(block, turret, machine.state) do
+				table.insert(lines, line)
+			end
+		end
 		local room = context and context.room
 		local roomText = if room and WailaInfo.isHeatMachine(block)
 			then WailaInfo.roomLine(room.room, room.outside)
@@ -940,6 +1069,12 @@ function WailaInfo.block(
 		elseif machine then
 			for _, line in WailaInfo.machineDetails(block, machine) do
 				table.insert(lines, line)
+			end
+			local turret = context and context.turret
+			if turret and Turrets.isTurret(block) then
+				for _, line in WailaInfo.turretDetails(turret) do
+					table.insert(lines, line)
+				end
 			end
 		elseif Blocks.isStructureBlock(block) and context and context.structure then
 			for _, line in WailaInfo.structureDetails(block, context.structure) do

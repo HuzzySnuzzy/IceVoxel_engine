@@ -467,7 +467,6 @@ return function(t, shared, require, _server, client)
 		-- comes off with the code that plays it (its own line only: the comments stay between them).
 		local pending: { [string]: boolean } = {
 			-- The servo: client Rendering/TurretView (turret builder B).
-			["block.turret.servo"] = true,
 			-- The drill and the stamp: Rendering/TransmitterModel.machineLoop's names (miner builder C).
 		}
 		-- A firearm's shot is played by its class through its FirearmSpec `sound` (Rendering/

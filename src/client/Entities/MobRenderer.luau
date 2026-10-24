@@ -28,7 +28,8 @@
 	(see `start`), so none is lost while the client boots.
 
 	`mobsNear` and `pick` let other modules (Ui/Waila, Interaction/BlockInteraction) see where the
-	mobs are drawn, read only.
+	mobs are drawn, read only, and `aimPoint` where a turret's gun points at one (Rendering/
+	TurretView).
 
 	The floating origin (Shared/World/Origin): mobs stay in world blocks (doubles) and
 	are placed every frame at render studs (world studs minus the origin, after the origin's render
@@ -39,6 +40,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Ballistics = require(Shared.Weapons.Ballistics)
 local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
 local Origin = require(Shared.World.Origin)
@@ -227,6 +229,30 @@ function MobRenderer.mobsNear(x: number, y: number, z: number, radius: number): 
 		end
 	end
 	return found
+end
+
+--[[
+	Where a turret aims at mob `id` as it is drawn (Rendering/TurretView): the centre of its body
+	box, or with `head` its head box (Shared/Weapons/Ballistics.mobBoxes, the server's turrets' aim
+	points, at its drawn place and facing), world blocks. nil for a mob the client does not know or
+	one dying. Nothing is made (turrets ask every frame).
+]]
+function MobRenderer.aimPoint(id: number, head: boolean?): (number?, number?, number?)
+	local model = models[id]
+	if model == nil or model.diedAt ~= nil then
+		return nil, nil, nil
+	end
+	local x, y, z, yaw = MobModel.pose(model, os.clock())
+	local boxes = Ballistics.kindBoxes(model.kind)
+	if head then
+		-- (mobBoxes' head: its centre turned with the facing.)
+		local h = boxes.head
+		local c, s = math.cos(yaw), math.sin(yaw)
+		local lx, lz = (h[1] + h[4]) / 2, (h[3] + h[6]) / 2
+		return x + c * lx + s * lz, y + (h[2] + h[5]) / 2, z - s * lx + c * lz
+	end
+	local b = boxes.body
+	return x + (b[1] + b[4]) / 2, y + (b[2] + b[5]) / 2, z + (b[3] + b[6]) / 2
 end
 
 -- The nearest live mob on the ray from `origin` along the unit `direction` (blocks) within

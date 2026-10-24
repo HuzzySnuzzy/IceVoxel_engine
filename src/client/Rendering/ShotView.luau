@@ -5,13 +5,14 @@
 	own, drawn at once when fired (`ownShot`, Interaction/Firearms). What each shot shows and plays
 	is Rendering/ShotRules':
 
-	  Flash     at the muzzle (Player/HeldItems.muzzle: the drawn gun's barrel end, else where the
-	            shot was fired from) a small Neon ball with a PointLight for FLASH_SECONDS; none
-	            when suppressed.
+	  Flash     at the muzzle (Player/HeldItems.muzzle: the drawn gun's barrel end; a turret's shot,
+	            shooter ShotRules.TURRET, at its drawn barrel's end: Rendering/TurretView
+	            .muzzleNear, given by `setTurretMuzzle`; else where the shot was fired from) a
+	            small Neon ball with a PointLight for FLASH_SECONDS; none when suppressed.
 	  Tracers   a thin bar from the muzzle to where each pellet's flight ended (the player's own:
 	            to what the aim pointed at, the predicted end), for Config.Weapons.TracerSeconds,
-	            Neon unless the muzzle device takes the glow away (the suppressor), when
-	            Config.Weapons.Tracers is on.
+	            Neon unless the muzzle device takes the glow away (the suppressor; a turret's
+	            record says it itself: `plain`), when Config.Weapons.Tracers is on.
 	  Impacts   where each pellet ended: a block (or the air next to it) throws dust in the block's
 	            colour, a mob or a player dark red blood (ParticleEmitter:Emit on pooled
 	            emitters), with entity.bullet.impact or entity.bullet.flesh there; glass shows
@@ -101,6 +102,9 @@ local cycles: { Cycle } = {}
 local nextCycle = 1
 local effects = ShotRules.newEffects()
 local ownHandler: ((shot: WeaponSync.Shot) -> ())? = nil
+-- Where a turret's shot that started at (ox, oy, oz) leaves its drawn barrel (nil: not drawn).
+type TurretMuzzle = (ox: number, oy: number, oz: number) -> (number?, number?, number?)
+local turretMuzzle: TurretMuzzle? = nil
 local getBlock: (x: number, y: number, z: number) -> number? = function()
 	return nil
 end
@@ -232,6 +236,18 @@ local function muzzleOf(player: Player?, ox: number, oy: number, oz: number): (n
 	return ox, oy, oz
 end
 
+-- The drawn barrel's end of the turret whose shot started at (ox, oy, oz), else that origin.
+local function turretMuzzleOf(ox: number, oy: number, oz: number): (number, number, number)
+	local finder = turretMuzzle
+	if finder then
+		local x, y, z = finder(ox, oy, oz)
+		if x and y and z then
+			return x, y, z
+		end
+	end
+	return ox, oy, oz
+end
+
 --[[ Shots ]]
 
 local function onShot(shot: WeaponSync.Shot, now: number, listener: Vector3?)
@@ -239,7 +255,8 @@ local function onShot(shot: WeaponSync.Shot, now: number, listener: Vector3?)
 	local distance = if listener
 		then math.sqrt((listener.X - shot.ox) ^ 2 + (listener.Y - shot.oy) ^ 2 + (listener.Z - shot.oz) ^ 2)
 		else 0
-	-- A suppressed shot's tracers glow as the shooter's muzzle device says (their held look).
+	-- A suppressed shot's tracers glow as the shooter's muzzle device says (their held look); a
+	-- turret's as its record says (`plain`: ShotRules.effects).
 	local glow = true
 	if shooter and shot.suppressed then
 		local key = shooter:GetAttribute(Types.HELD_LOOK_ATTRIBUTE)
@@ -256,7 +273,11 @@ local function onShot(shot: WeaponSync.Shot, now: number, listener: Vector3?)
 	end
 	local mx, my, mz = shot.ox, shot.oy, shot.oz
 	if effects.flash or effects.tracer then
-		mx, my, mz = muzzleOf(shooter, shot.ox, shot.oy, shot.oz)
+		if shooter == nil and ShotRules.isTurret(shot) then
+			mx, my, mz = turretMuzzleOf(shot.ox, shot.oy, shot.oz)
+		else
+			mx, my, mz = muzzleOf(shooter, shot.ox, shot.oy, shot.oz)
+		end
 	end
 	if effects.flash then
 		flashAt(mx, my, mz, now)
@@ -402,6 +423,12 @@ end
 -- fire (refused, or the gun jammed): Interaction/Firearms.
 function ShotView.onOwnShot(handler: (shot: WeaponSync.Shot) -> ())
 	ownHandler = handler
+end
+
+-- Gives where a turret's shot leaves its drawn barrel (Rendering/TurretView.muzzleNear: from the
+-- record's origin, world blocks; nil: not drawn, the origin it is); nil: none, the origins.
+function ShotView.setTurretMuzzle(finder: TurretMuzzle?)
+	turretMuzzle = finder
 end
 
 --[[

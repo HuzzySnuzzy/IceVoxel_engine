@@ -13,7 +13,8 @@
 	            its shot time).
 	  Flash     at the muzzle, none when suppressed (`flash`).
 	  Tracer    from the muzzle to where each pellet's flight ended (Config.Weapons.Tracers), glowing
-	            (Neon) unless the muzzle device says `glow` false (the suppressor: `glow`).
+	            (Neon) unless the muzzle device says `glow` false (the suppressor: `glow`) or the
+	            record says `plain` (a suppressed turret's shot: its device's glow is off).
 	  Impact    where a pellet ended, by what it hit (Net/WeaponSync.Hit): a block or nothing in
 	            reach of a block throws dust in the block's colour with entity.bullet.impact; a
 	            mob or a player (body or head) dark red blood with entity.bullet.flesh; glass
@@ -23,6 +24,11 @@
 	            the aim, the kick); the server's record of it (same shooter) only adds the
 	            authoritative impacts, and its `refused` or `jammed` flag stops automatic fire
 	            (`effects`' `stop`; a jam also clicks).
+	  Turrets   a turret's shot (Shared/Turrets) is a record with shooter TURRET (0: no player) and
+	            the turret's stand-in gun as its item, so it sounds as that gun's class (the SMG's
+	            item.firearm.smg.fire, the rifle's, the sniper's heavy shot), suppressed or far as
+	            any shot, flashes unless suppressed, draws its tracers from the turret's barrel
+	            (Rendering/ShotView), plain when the record says so, and is never the player's own.
 	  Looks     a held gun's look key (Shared/Weapons/WeaponState.lookKey, the player attribute
 	            Types.HELD_LOOK_ATTRIBUTE: "mag,optic,muzzle,light,lit") read back into its parts
 	            (`lookParts`).
@@ -69,6 +75,8 @@ ShotRules.IMPACT = "entity.bullet.impact"
 ShotRules.FLESH = "entity.bullet.flesh"
 -- A pump's or a bolt's rack comes this share of a shot's time after the shot.
 ShotRules.CYCLE_SHARE = 0.4
+-- The shooter of a turret's shot (Net/WeaponSync: no player's UserId).
+ShotRules.TURRET = 0
 
 local Hit = WeaponSync.Hit
 
@@ -144,10 +152,15 @@ function ShotRules.cycleDelay(spec: Weapons.FirearmSpec, mode: number): number?
 	return ShotRules.CYCLE_SHARE * Handling.shotTicks(spec, mode) * Handling.TICK
 end
 
+-- Is `shot` a turret's (shooter TURRET)?
+function ShotRules.isTurret(shot: WeaponSync.Shot): boolean
+	return shot.shooter == ShotRules.TURRET
+end
+
 --[[
 	Fills `out` with what to draw for `shot` (Net/WeaponSync.Shot) seen by the player whose
 	UserId is `localUserId`, `distance` blocks from where it was fired, the shooter's tracers
-	glowing or not (`glow`); returns `out`.
+	glowing or not (`glow`; never when the record is `plain`); returns `out`.
 ]]
 function ShotRules.effects(
 	shot: WeaponSync.Shot,
@@ -156,11 +169,11 @@ function ShotRules.effects(
 	glow: boolean,
 	out: Effects
 ): Effects
-	local own = shot.shooter == localUserId
+	local own = shot.shooter == localUserId and not ShotRules.isTurret(shot)
 	out.own = own
 	out.jammed = shot.jammed
 	out.stop = own and (shot.refused or shot.jammed)
-	out.glow = glow
+	out.glow = glow and shot.plain ~= true
 	if own or shot.refused then
 		-- (Drawn already when fired; a refused shot has no pellets.)
 		out.flash = false
