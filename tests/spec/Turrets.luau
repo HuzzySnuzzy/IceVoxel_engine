@@ -11,8 +11,9 @@
 	never worn, the ammo slot taking only its calibre up to its buffer, no transporter reaching the
 	attachments, inert with the turrets off or no service), the simulation's statuses from the
 	order alone (no turret block, no hostiles),
-	MachineWorld handing the service once a step, the panels and their lines, the miner's and the
-	press's frozen layouts, the decor, and the game with the features switched off.
+	MachineWorld handing the service once a step, the panels and their lines (the range with the
+	optic), the miner's and the press's frozen layouts, the decor, and the game with the features
+	switched off.
 ]]
 
 local Loader = require("../lib/Loader")
@@ -863,6 +864,51 @@ return function(t, shared, require, server, client)
 		t.eq(TurretRules.feedRate(5, -3), 5 - 5 / Config.Turrets.FeedRateTicks, "nothing arriving decays it")
 	end)
 
+	t.test("turret kind: the panel's range is the one it engages at, with its optic (written every tick)", function()
+		-- The review's: an Advanced rifle (32 blocks) with a Rifle Scope engages at 40.
+		local spec = Turrets.of("rifle", 2)
+		local r = rig(spec)
+		r.hold = true
+		r.container.slots[SLOT.OPTIC] = Items.newStack(I.RifleScope, 1)
+		r.tick()
+		t.eq(Machines.get(r.container, "range"), 40)
+		t.eq(MenuLayout.lineTexts(r.container)[1], "Range 40 · 75 rpm", "the scoped range")
+		r.container.slots[SLOT.OPTIC] = nil
+		r.tick()
+		t.eq(MenuLayout.lineTexts(r.container)[1], "Range 32 · 75 rpm", "taken out: its own")
+		-- Every turret with each optic it takes and none: TurretRules.range, as the simulation's.
+		for _, each in Turrets.SPECS do
+			local optics: { number } = { 0 }
+			for item in each.optics do
+				table.insert(optics, item)
+			end
+			for _, optic in optics do
+				local rigged = rig(each)
+				rigged.hold = true
+				rigged.container.slots[SLOT.OPTIC] = if optic ~= 0 then Items.newStack(optic, 1) else nil
+				rigged.tick()
+				local want = `Range {TurretRules.range(each, optic)} · {each.rpm} rpm`
+				t.eq(MenuLayout.lineTexts(rigged.container)[1], want, `{each.name}, optic {optic}`)
+			end
+		end
+		t.eq(MenuLayout.lineTexts(rig(Turrets.of("sniper", 4)).container)[1], "Range 64 · 40 rpm", "before a tick")
+		-- Inert (no service) it still says what it would engage at.
+		local inert = rig(Turrets.of("sniper", 4))
+		inert.ctx.turret = nil
+		inert.container.slots[SLOT.OPTIC] = Items.newStack(I.RifleScope, 1)
+		inert.tick()
+		t.eq(MenuLayout.lineTexts(inert.container)[1], "Range 80 · 40 rpm", "64 x 1.25 to MaxRange")
+		-- No data, or a range from elsewhere: its own.
+		local view = Machines.view(r.container)
+		t.eq(Machines.lines(spec.block, view)[1], "Range 32 · 75 rpm", "no window data")
+		local data = Machines.newData(spec.block)
+		local index = Machines.field(spec.block, "range") :: number
+		for _, bad in { 0 / 0, -1, 0, 1e9, math.huge } do
+			data[index] = bad
+			t.eq(Machines.lines(spec.block, view, data)[1], "Range 32 · 75 rpm", `{bad}: its own`)
+		end
+	end)
+
 	t.test("panels: the turrets', the miner's and the press's slots, lines and buttons fit", function()
 		local blocks = { Turrets.of("smg", 1).block, Turrets.of("sniper", 4).block, B.MetalMiner, B.AmmoPress }
 		for _, block in blocks do
@@ -929,7 +975,7 @@ return function(t, shared, require, server, client)
 			end
 		end
 		for _, spec in Turrets.SPECS do
-			fields(spec.block, { "credit", "state", "lure", "held", "feedRate", "activeDelay" })
+			fields(spec.block, { "credit", "state", "lure", "held", "feedRate", "activeDelay", "range" })
 			local kind = Machines.kindOf(spec.block) :: any
 			t.eq(#kind.slots, 3)
 			t.eq(kind.slots[1].limit, spec.buffer)

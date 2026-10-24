@@ -218,9 +218,10 @@ local function toolNeeded(def: Blocks.BlockDef): string?
 end
 
 --[[
-	A turret's stat line: its range (blocks), its own rate (rounds a minute, which a slower feeder
-	lowers: Turrets.rpm), the rounds its ammo slot holds and its calibre as players read it
-	("Range 24 · 240 rpm · holds 4 · 9mm"; "5.56", ".308": Weapons/Describe.calibre).
+	A turret's stat line: its own range (blocks, without an optic: a Rifle Scope's is the panel's,
+	Machines/Kinds/Turret), its own rate (rounds a minute, which a slower feeder lowers:
+	Turrets.rpm), the rounds its ammo slot holds and its calibre as players read it ("Range 24 ·
+	240 rpm · holds 4 · 9mm"; "5.56", ".308": Weapons/Describe.calibre).
 ]]
 function Tooltip.turretLine(spec: Turrets.Spec): string
 	return `Range {spec.range} · {spec.rpm} rpm · holds {spec.buffer} · {Describe.calibre(spec.calibre)}`

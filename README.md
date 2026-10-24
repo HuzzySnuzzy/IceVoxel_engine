@@ -1489,8 +1489,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   20 / 40 / 80 / 160 kJ stores, 4 / 8 / 12 / 16 J a tick idle, twice that while tracking, and 30
   (SMG), 80 (rifle) or 300 (sniper) J a shot: power is a requirement, ammo the real cost. Its panel
   has the ammo, optic and muzzle slots (outlined while empty), the status ("No target",
-  "Targeting", "Firing", "No ammo", "No power", "Blocked", "Disabled"), "Range 24 · 240 rpm", the
-  feed ("Feed: Elite", "Feed: Basic → 90 rpm", "Feed: by hand"), the rounds arriving ("In: 2.4/s"),
+  "Targeting", "Firing", "No ammo", "No power", "Blocked", "Disabled"), "Range 24 · 240 rpm" (with
+  its optic: a scoped Advanced rifle says "Range 40"), the feed ("Feed: Elite", "Feed: Basic → 90
+  rpm", "Feed: by hand"), the rounds arriving ("In: 2.4/s"),
   the Lure and its button, and the energy bar; WAILA shows the status. Transporters reach only the
   ammo slot (through every side but the top, where the gun sits) and never take anything out; a
   block, a transporter or deep snow over a turret blocks it (one layer of snow, a torch or water
@@ -1504,7 +1505,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   around the one below, with gold, diamonds or emeralds in the corners (as the transmitters'
   upgrades), keeping its energy and its Lure. The parts, the Laser Sight and the Basic to Elite
   turrets are the Electric Age's, the Ultimates the Atomic Age's. Broken with a pickaxe a turret
-  keeps its energy and its Lure. Its tooltip says "Range 24 · 240 rpm · holds 4 · 9mm". A turret
+  keeps its energy and its Lure. Its tooltip says "Range 24 · 240 rpm · holds 4 · 9mm" (its own
+  range, without an optic). A turret
   shoots only zombies (any monster: never a player or an animal, which its shots fly through). It
   takes the nearest it can see, with a little weight on how far it must turn, and keeps it until
   it dies, leaves its range or stays hidden half a second. It turns at its tier's rate (SMG

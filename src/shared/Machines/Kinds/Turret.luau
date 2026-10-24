@@ -19,7 +19,8 @@
 	their stacks); a Ruined one does nothing (Weapons/Handling.muzzleWorks), as on a gun.
 	`demand`: the demand rule (server Transmitters/Transport) keeps its line ready.
 
-	Data after the header (Shared/Machines), frozen (saved containers and items depend on it):
+	Data after the header (Shared/Machines), frozen (saved containers and items depend on it; only
+	appended to):
 	   7 credit       the cadence's credit (0..Shared/Turrets/TurretRules.CREDIT)
 	   8 state        Shared/Turrets.packState(status, feed, lure, tracking), the kind's `state`
 	                  (Machines records carry it: WAILA's status, the feed and the Lure)
@@ -29,9 +30,11 @@
 	                  "In: 2.4/s")
 	  12 activeDelay  Mekanism's deactivation delay (Machines.showActive: ACTIVE while it targets
 	                  or fires)
+	  13 range        the blocks it engages at with its optic (TurretRules.range: a Rifle Scope on
+	                  a rifle or sniper x 1.25, to MaxRange), written every tick (the panel's)
 	RATE is minus the J it used this tick (idle or tracking, and a shot's).
 
-	Each tick:
+	Each tick (first its range with its optic, whatever follows):
 	  1. Config.Turrets.Enabled false, or no service yet: "Disabled", no energy taken, nothing
 	     else done (the rounds' count still kept, so the feed rate reads true).
 	  2. It takes its tracking energy if it tracked last tick, else its idle energy, all or
@@ -50,10 +53,11 @@
 	without one No ammo with no round, else No target); the kind writes what it says.
 
 	Its panel: the title (the block's name), the ammo, optic and muzzle slots in a row with their
-	outlines (Shared/Turrets.GHOSTS), the status line, four lines ("Range 24 · 240 rpm", the feed:
-	"Feed: Elite", "Feed: Basic → 90 rpm" or "Feed: by hand", "In: 2.4/s" with the window's
-	data, "Lure: on"), the Lure button and Mekanism's energy bar. Its `info` (JEI, tooltips):
-	range, rpm, buffer, idle, tracking, shot.
+	outlines (Shared/Turrets.GHOSTS), the status line, four lines ("Range 24 · 240 rpm": the range
+	with its optic from the window's data, its own without; the feed: "Feed: Elite", "Feed: Basic
+	→ 90 rpm" or "Feed: by hand"; "In: 2.4/s" with the window's data; "Lure: on"), the Lure button
+	and Mekanism's energy bar. Its `info` (JEI, tooltips): range (its own, without an optic), rpm,
+	buffer, idle, tracking, shot.
 ]]
 
 local Core = require(script.Parent.Parent.Core)
@@ -73,9 +77,11 @@ type Spec = Turrets.Spec
 local SLOT = Turrets.SLOT
 local STATUS = Turrets.STATUS
 local CREDIT = TurretRules.CREDIT
--- The Lure button's id, and the feed rate's data index (its fifth field).
+-- The Lure button's id, and the feed rate's and the range's data indices (its fifth and seventh
+-- fields).
 local LURE_BUTTON = 0
 local FEED_RATE = Core.HEADER + 5
+local RANGE = Core.HEADER + 7
 
 -- One order and one outcome lent to the service, refilled for every turret (ticks never overlap).
 local order: TurretTypes.Order = {
@@ -135,6 +141,9 @@ local function tick(spec: Spec, container: Container, ctx: Core.TickContext)
 	local held = whole(Core.get(container, "held"), 0, Items.MAX_STACK)
 	local count = roundsIn(spec, container)
 	local feedRate = Core.get(container, "feedRate")
+	-- (The range it engages at, for the panel: the simulation's, TurretRules.range.)
+	local optic = mounted(container, SLOT.OPTIC)
+	Core.set(container, "range", TurretRules.range(spec, optic))
 	local service = ctx.turret
 	if not Config.Turrets.Enabled or service == nil then
 		-- 1. Inert: nothing taken, nothing done.
@@ -157,7 +166,6 @@ local function tick(spec: Spec, container: Container, ctx: Core.TickContext)
 	local credit = whole(Core.get(container, "credit"), 0, CREDIT)
 	local ready = credit + rpm >= CREDIT
 	-- 5. The service's answer.
-	local optic = mounted(container, SLOT.OPTIC)
 	local muzzle, muzzleFraction = mounted(container, SLOT.MUZZLE)
 	order.tick = ctx.tick
 	order.key = Coords.posKey(ctx.x, ctx.y, ctx.z)
@@ -207,10 +215,16 @@ local function tierName(feed: number): string
 	return if tier then tier.name else "?"
 end
 
--- The panel's lines (see the header); the feed rate only with the window's data.
+-- The panel's lines (see the header); the range with its optic and the feed rate only with the
+-- window's data.
 local function lines(spec: Spec, view: Core.View, data: { number }?): { string }
 	local _, feed, lure = Turrets.unpackState(view.state)
-	local shown = { `Range {spec.range} · {spec.rpm} rpm` }
+	local written = if data then data[RANGE] else nil
+	local range = TurretRules.range(spec)
+	if type(written) == "number" and written > 0 and written <= Config.Turrets.MaxRange then
+		range = written
+	end
+	local shown = { `Range {string.format("%g", range)} · {spec.rpm} rpm` }
 	if feed <= 0 then
 		table.insert(shown, "Feed: by hand")
 	elseif feed >= spec.tier then
@@ -255,7 +269,7 @@ local function define(spec: Spec): Core.Kind
 			{ x = 26, y = 35, accepts = accepts(SLOT.OPTIC), limit = 1, insert = {}, ghost = Turrets.GHOSTS.optic },
 			{ x = 44, y = 35, accepts = accepts(SLOT.MUZZLE), limit = 1, insert = {}, ghost = Turrets.GHOSTS.muzzle },
 		},
-		fields = { "credit", "state", "lure", "held", "feedRate", "activeDelay" },
+		fields = { "credit", "state", "lure", "held", "feedRate", "activeDelay", "range" },
 		keep = { "lure" },
 		defaults = { lure = 1 },
 		state = "state",
@@ -295,6 +309,7 @@ local kinds: { [string]: Core.Kind } = {}
 for _, spec in Turrets.SPECS do
 	local kind = define(spec)
 	assert(kind.index.feedRate == FEED_RATE, "a turret's feed rate is its fifth field")
+	assert(kind.index.range == RANGE, "a turret's range is its seventh field")
 	kinds[spec.kind] = kind
 end
 

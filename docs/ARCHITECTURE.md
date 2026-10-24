@@ -4525,7 +4525,8 @@ item has one); what the item is (a tool's harvest level, the best blocks it harv
 BlockList's `toolLevel`, ores first, and its mining speed; a block item's tool, light, Gravity
 behaviour, climbable, friction, chest slots, flammable, Config.ToughAsNails' heating and cooling
 blocks, creative only, `Machines.energyOf` capacity, its tank and `Transmitters/Tiers` numbers, and a turret's stat line (`Tooltip.turretLine(spec)`,
-from its Shared/Turrets Spec: "Range 24 · 240 rpm · holds 4 · 9mm", the range, its own rate, the
+from its Shared/Turrets Spec: "Range 24 · 240 rpm · holds 4 · 9mm", its own range (without an
+optic: the panel's has a Rifle Scope's), its own rate, the
 rounds its ammo slot holds and the calibre as `Describe.calibre` writes it: "5.56", ".308"));
 then the stat blocks, each an empty line and a gray heading: "When in Main Hand:"
 (`Combat.attackOf`), the wear ("Durability: n / max", from `stack.damage`), "When on <slot>:"
@@ -7283,7 +7284,9 @@ require it):
   muzzle device (by hand and shift-click only); transporters never take anything out, attachments
   never wear on a turret. Data (frozen): 7 credit, 8 state (packed; the kind's `state`, so Machines
   records and WAILA carry status, feed and Lure), 9 lure (1 on, the default, kept in the item), 10
-  held, 11 feedRate, 12 activeDelay; RATE minus the J used. Each tick: inert with
+  held, 11 feedRate, 12 activeDelay, 13 range (appended: `TurretRules.range` with its optic, as the
+  simulation engages, written first every tick, inert too; the panel's); RATE minus the J used.
+  Each tick: inert with
   `Config.Turrets.Enabled` false or no service ("Disabled", nothing taken); its tracking energy if
   it tracked last tick, else its idle energy, all or nothing; blocked from the cell above
   (`ctx.getBlock`); the feeder rule's rate from last tick's feed; armed (a round and a shot's
@@ -7295,9 +7298,10 @@ require it):
   `FiringTicks` of a shot, No ammo unarmed, else Targeting; without one No ammo with no round, else
   No target). `demand = true` (the demand rule). Its panel: the three slots in a row at the left
   (ammo, optic, muzzle) with their outlines, the status line over them, four lines right of them
-  ("Range 24 · 240 rpm", "Feed: Elite" / "Feed: Basic → 90 rpm" / "Feed: by hand", "In: 2.4/s"
-  from the window's data, "Lure: on"), the Lure button (id 0) and the energy bar; `info` range,
-  rpm, buffer, idle, tracking, shot.
+  ("Range 24 · 240 rpm", the range from the window's data, so with its optic: an Advanced rifle
+  with a Rifle Scope "Range 40"; its own without data; "Feed: Elite" / "Feed: Basic → 90 rpm" /
+  "Feed: by hand", "In: 2.4/s" from the window's data, "Lure: on"), the Lure button (id 0) and the
+  energy bar; `info` range (its own, as the item's tooltip), rpm, buffer, idle, tracking, shot.
 - The Metal Miner (`Machines/Kinds/Miner`, kind "miner"; `Machines/MinerRules`). Frozen: slot 1 the
   output (pushed out every 10 ticks), 2-3 the cards (`Upgrades.slots(8, 53)`); data 7 progress, 8
   ticksRequired, 9 energyPerTick, 10 mining (the ore block seen), 11 state (`MinerRules.packState`:
