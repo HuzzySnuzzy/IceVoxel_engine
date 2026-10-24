@@ -15,7 +15,7 @@ local roblox = require("@lune/roblox")
 
 local FakeClient = require("../lib/FakeClient")
 
-return function(t, shared, require, _server, client)
+return function(t, shared, require, server, client)
 	local Ballistics = require(shared.Weapons.Ballistics)
 	local Blocks = require(shared.Blocks)
 	local ChunkLayout = require(shared.World.ChunkLayout)
@@ -1187,63 +1187,318 @@ return function(t, shared, require, _server, client)
 			h.frame(1 / 30)
 		end
 		t.eq(next(h.loops), nil, "settled: silent")
-		-- Ran dry while tracking: a click at the gun; a record that starts empty says nothing.
-		h.send({ rec(2, 64, 0, { target = 11, flags = tracking, ammo = 0 }) })
+		-- Dry (it would fire now, no round: the server's No ammo while tracking): a click at the
+		-- gun; a record that starts dry, an idle one, one waiting on its cadence say nothing.
+		local dry = tracking + Flag.Dry
+		h.send({ rec(2, 64, 0, { target = 11, flags = dry, ammo = 0 }) })
 		local click = h.plays[#h.plays]
 		t.ok(click and click.name == ShotRules.DRY, "the dry click")
 		local cx, cy, cz = TurretRules.pivot(2, 64, 0)
 		t.ok(click.x == cx and click.y == cy and click.z == cz, "at the gun")
 		local played = #h.plays
-		h.send({ rec(40, 64, 0, { target = 3, flags = tracking, ammo = 0 }) })
+		h.send({ rec(40, 64, 0, { target = 3, flags = dry, ammo = 0 }) })
 		h.send({ rec(4, 64, 0, { flags = Flag.Powered, ammo = 2 }) })
 		h.send({ rec(4, 64, 0, { flags = Flag.Powered, ammo = 0 }) })
-		t.eq(#h.plays, played, "no click without a fall to 0 while tracking (no turret, idle)")
-		h.send({ rec(6, 64, 0, { target = 13, flags = tracking, ammo = 0 }) })
-		t.eq(#h.plays, played + 1, "tracking when it fell to 0: a click")
+		h.send({ rec(4, 64, 0, { target = 12, flags = tracking, ammo = 0 }) })
+		t.eq(#h.plays, played, "no click without Dry rising (no turret, idle, waiting on its cadence)")
+		h.send({ rec(6, 64, 0, { target = 13, flags = dry, ammo = 0 }) })
+		t.eq(#h.plays, played + 1, "Dry rising: a click")
+		h.send({ rec(6, 64, 0, { target = 13, flags = dry, ammo = 0, yaw = 0.3 }) })
+		t.eq(#h.plays, played + 1, "once while it stays dry")
 	end)
 
-	t.test("turret view: a fed one-round turret never clicks dry; run dry, it clicks once", function()
+	-- The dry clicks a view heard.
+	local function dryClicks(h: any): number
+		local n = 0
+		for _, play in h.plays do
+			if play.name == ShotRules.DRY then
+				n += 1
+			end
+		end
+		return n
+	end
+
+	t.test("turret view: a fed one-round turret never clicks dry; run dry, it clicks once, after a kill too", function()
 		local h = boot()
 		local x, y, z = 2, 64, 3
 		local s = spec("rifle", 1)
 		t.eq(s.buffer, 1, "one round")
 		h.set(x, y, z, s.block)
 		h.load(0, 0)
-		local function clicks(): number
-			local n = 0
-			for _, play in h.plays do
-				if play.name == ShotRules.DRY then
-					n += 1
-				end
-			end
-			return n
-		end
 		local tracking = Flag.Powered + Flag.Tracking
 		local firing = tracking + Flag.Firing
-		-- Fed as the server sends it: none held after each shot (Firing), the next round a tick or
-		-- two later.
+		local dry = tracking + Flag.Dry
+		-- Fed as the server sends it (one Basic transporter): none held from each shot to its next
+		-- round, Firing, then Targeting (the cadence not ready yet) until the round comes.
 		h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 1 }) })
 		for _ = 1, 10 do
 			h.send({ rec(x, y, z, { target = 5, flags = firing, ammo = 0 }) })
-			h.frame(0.1)
-			h.send({ rec(x, y, z, { target = 5, flags = firing, ammo = 1 }) })
-			h.frame(0.1)
+			h.frame(0.5)
+			h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 0 }) })
+			h.frame(0.6)
+			h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 1 }) })
+			h.frame(0.25)
 		end
-		t.eq(clicks(), 0, "fed: never a dry click")
-		-- The last round shot and none coming: when Firing ends (the server's No ammo), one click.
+		t.eq(dryClicks(h), 0, "fed: never a dry click")
+		-- The last round shot and none coming: Dry once its cadence would fire, one click.
 		h.send({ rec(x, y, z, { target = 5, flags = firing, ammo = 0 }) })
-		t.eq(clicks(), 0, "still Firing")
 		h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 0 }) })
-		t.eq(clicks(), 1, "run dry: a click")
+		t.eq(dryClicks(h), 0, "waiting on its cadence")
+		h.send({ rec(x, y, z, { target = 5, flags = dry, ammo = 0 }) })
+		t.eq(dryClicks(h), 1, "run dry: a click")
 		local click = h.plays[#h.plays]
 		local px, py, pz = TurretRules.pivot(x, y, z)
 		t.ok(click.x == px and click.y == py and click.z == pz, "at the gun")
-		h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 0, yaw = 0.5 }) })
-		t.eq(clicks(), 1, "once")
-		-- A round, the shot that kills its target: no longer tracking, nothing to click at.
+		h.send({ rec(x, y, z, { target = 5, flags = dry, ammo = 0, yaw = 0.5 }) })
+		t.eq(dryClicks(h), 1, "once")
+		-- A round, the shot that kills its target (idle after), then the next zombie, tracked dry.
 		h.send({ rec(x, y, z, { target = 5, flags = tracking, ammo = 1 }) })
+		h.send({ rec(x, y, z, { target = 5, flags = firing, ammo = 0 }) })
 		h.send({ rec(x, y, z, { flags = Flag.Powered, ammo = 0 }) })
-		t.eq(clicks(), 1, "not tracking: no click")
+		t.eq(dryClicks(h), 1, "the kill: idle, no click")
+		h.send({ rec(x, y, z, { target = 6, flags = dry, ammo = 0, yaw = 0.4 }) })
+		t.eq(dryClicks(h), 2, "the next zombie, dry: a click")
+	end)
+
+	--[[
+		The real server's records into the view: a turret on the real machines and pipes (server
+		Machines/MachineWorld with the real kind, Transmitters/TransmitterWorld, Turrets/TurretWorld),
+		fed from a chest through one transporter of tier `feeder`, a zombie in sight in front; the
+		view gets every record as the glue sends them. Returns the shots, the dry clicks heard and
+		the ticks its status (the panel's, WAILA's) said No ammo over `ticks` ticks after `warm`
+		to fill and settle.
+	]]
+	local ZOMBIE = MobList.kinds[MobList.find("Zombie") :: number]
+	local function realFeed(s: Turrets.Spec, feeder: number, warm: number, ticks: number): (number, number, number)
+		local ContainersMod = require(server.Players.Containers)
+		local MachineWorld = require(server.Machines.MachineWorld)
+		local TransmitterWorld = require(server.Transmitters.TransmitterWorld)
+		local TurretWorld = require(server.Turrets.TurretWorld)
+		local Transmitters = require(shared.Transmitters)
+		local pipes = {
+			B.BasicLogisticalTransporter,
+			B.AdvancedLogisticalTransporter,
+			B.EliteLogisticalTransporter,
+			B.UltimateLogisticalTransporter,
+		}
+		local h = boot()
+		local Y = 64
+		local blocks: { [number]: number } = {}
+		local containers = ContainersMod.new()
+		local function getBlock(x: number, y: number, z: number): number?
+			if y < 0 or y >= 1024 then
+				return nil
+			end
+			return blocks[Coords.posKey(x, y, z)] or B.Air
+		end
+		local at = 2
+		local zombie = { id = 7, kind = ZOMBIE, variant = 0, x = at + 0.5, y = Y, z = 12.5, yaw = 0 }
+		local line: any = nil
+		local sim = TurretWorld.new({
+			getBlock = getBlock,
+			hostiles = function(into: { any }): number
+				local entry = into[1] or {}
+				into[1] = entry
+				entry.id, entry.kind, entry.variant = zombie.id, zombie.kind, zombie.variant
+				entry.x, entry.y, entry.z, entry.yaw = zombie.x, zombie.y, zombie.z, zombie.yaw
+				return 1
+			end,
+			mob = function(id: number): any
+				return if id == zombie.id then zombie else nil
+			end,
+			hurt = function(): number
+				return 1
+			end,
+			noise = function() end,
+			lureTime = function(): boolean
+				return false
+			end,
+			feed = function(x: number, y: number, z: number): number
+				return TransmitterWorld.feedTier(line, x, y, z, s.block)
+			end,
+			random = function(): number
+				return 0.5
+			end,
+			settings = TurretWorld.settings(),
+		} :: any)
+		local function service(order: any, out: any): any
+			return TurretWorld.step(sim, order, out)
+		end
+		line = TransmitterWorld.new({
+			getBlock = getBlock,
+			containers = containers,
+			inventoryChanged = function() end,
+			drop = function() end,
+		} :: any)
+		local machines = MachineWorld.new({
+			getBlock = getBlock,
+			containers = containers,
+			transmitters = line,
+			dayTime = function()
+				return 6000
+			end,
+			turret = function()
+				return service
+			end,
+		} :: any)
+		local function set(x: number, y: number, z: number, new: number)
+			local key = Coords.posKey(x, y, z)
+			local old = blocks[key] or B.Air
+			blocks[key] = new
+			TransmitterWorld.blockChanged(line, x, y, z, old, new)
+			MachineWorld.blockChanged(machines, x, y, z, old, new)
+		end
+		set(0, Y, 0, B.Chest)
+		local chest = containers:get(0, Y, 0, B.Chest)
+		for slot = 1, 27 do
+			chest.slots[slot] = Items.newStack(s.ammo, Items.maxStack(s.ammo))
+		end
+		set(1, Y, 0, pipes[feeder])
+		assert(TransmitterWorld.setMode(line, 1, Y, 0, 4, Transmitters.MODES.PULL))
+		set(at, Y - 1, 0, B.CreativeEnergyCube)
+		set(at, Y, 0, s.block)
+		-- The client: the same turret, its chunk loaded, the zombie drawn where the server has it.
+		h.set(at, Y, 0, s.block)
+		h.load(0, 0)
+		h.mobs[zombie.id] = { zombie.x, zombie.y + 0.9, zombie.z }
+		local turret = containers:get(at, Y, 0, s.block)
+		local shots, before, empty = 0, 0, 0
+		for tick = 1, warm + ticks do
+			TransmitterWorld.step(line)
+			MachineWorld.step(machines)
+			local fired = TurretWorld.takeShots(sim)
+			if tick > warm then
+				shots += #fired
+				if Turrets.unpackState(Machines.get(turret, "state")) == Turrets.STATUS.NO_AMMO then
+					empty += 1
+				end
+			end
+			local records = TurretWorld.takeRecords(sim)
+			if #records > 0 then
+				local copies = {}
+				for _, record in records do
+					table.insert(copies, table.clone(record))
+				end
+				h.send(copies)
+			end
+			h.frame(1 / 20)
+			if tick == warm then
+				before = dryClicks(h)
+			end
+		end
+		return shots, dryClicks(h) - before, empty
+	end
+
+	t.test(
+		"turret view: the real server on real pipes: fed by a Basic or an Advanced transporter, never dry",
+		function()
+			for _, s in Turrets.SPECS do
+				for feeder = 1, 2 do
+					local shots, clicks, empty = realFeed(s, feeder, 300, 1200)
+					local rate = Turrets.rpm(s, feeder)
+					-- (Its rate the feed's: a minute's worth of shots, to one.)
+					t.ok(
+						math.abs(shots - rate) <= 1,
+						`{s.name} fed by tier {feeder}: {shots} shots in 60 s at {rate} rpm`
+					)
+					t.eq(clicks, 0, `{s.name} fed by tier {feeder}: no dry click`)
+					t.eq(empty, 0, `{s.name} fed by tier {feeder}: never No ammo on its panel`)
+				end
+			end
+		end
+	)
+
+	t.test("turret view: the real server: the last round kills, the next zombie tracked dry clicks once", function()
+		local TurretWorld = require(server.Turrets.TurretWorld)
+		local h = boot()
+		local s = spec("smg", 1)
+		local mobs: { any } = {}
+		local env: any = {
+			getBlock = function(_x: number, y: number, _z: number): number?
+				return if y < 64 then B.Stone else B.Air
+			end,
+			hostiles = function(into: { any }): number
+				local n = 0
+				for _, mob in mobs do
+					if not mob.dead then
+						n += 1
+						local entry = into[n] or {}
+						into[n] = entry
+						entry.id, entry.kind, entry.variant = mob.id, mob.kind, 0
+						entry.x, entry.y, entry.z, entry.yaw = mob.x, mob.y, mob.z, 0
+					end
+				end
+				return n
+			end,
+			mob = function(id: number): any
+				local mob = mobs[id]
+				return if mob and not mob.dead then mob else nil
+			end,
+			hurt = function(id: number, amount: number): number
+				local mob = mobs[id]
+				mob.health -= amount
+				mob.dead = mob.health <= 0
+				return amount
+			end,
+			noise = function() end,
+			lureTime = function(): boolean
+				return false
+			end,
+			feed = function(): number
+				return 0
+			end,
+			random = function(): number
+				return 0.5
+			end,
+			settings = TurretWorld.settings(),
+		}
+		local sim = TurretWorld.new(env)
+		local container = Machines.newContainer(s.block)
+		container.data[Machines.ENERGY] = s.capacity
+		container.slots[Turrets.SLOT.AMMO] = Items.newStack(s.ammo, 1)
+		local ctx: any = {
+			block = s.block,
+			x = 0,
+			y = 64,
+			z = 0,
+			energy = assert(Machines.energyOf(s.block)),
+			tick = 0,
+			dayTime = 6000,
+			getBlock = env.getBlock,
+			turret = function(order: any, out: any): any
+				return TurretWorld.step(sim, order, out)
+			end,
+		}
+		h.set(0, 64, 0, s.block)
+		h.load(0, 0)
+		-- A zombie one shot kills, in front: its last round kills it; five seconds on, the next.
+		mobs[1] = { id = 1, kind = ZOMBIE, x = 0.5, y = 64, z = 8.5, health = 1, dead = false }
+		h.mobs[1] = { 0.5, 64.9, 8.5 }
+		local status = 0
+		for tick = 1, 400 do
+			if tick == 100 then
+				t.ok(mobs[1].dead, "the last round killed it")
+				t.eq(dryClicks(h), 0, "no click for the kill")
+				mobs[2] = { id = 2, kind = ZOMBIE, x = 3.5, y = 64, z = 9.5, health = 1e9, dead = false }
+				h.mobs[2] = { 3.5, 64.9, 9.5 }
+			end
+			container.data[Machines.ENERGY] = s.capacity
+			ctx.tick += 1
+			Machines.tick(container, ctx)
+			TurretWorld.takeShots(sim)
+			local records = TurretWorld.takeRecords(sim)
+			if #records > 0 then
+				local copies = {}
+				for _, record in records do
+					table.insert(copies, table.clone(record))
+				end
+				h.send(copies)
+			end
+			h.frame(1 / 20)
+			status = Turrets.unpackState(Machines.get(container, "state"))
+		end
+		t.eq(status, Turrets.STATUS.NO_AMMO, "tracking the next one dry: No ammo")
+		t.eq(dryClicks(h), 1, "one dry click")
 	end)
 
 	t.test("turret view: a turret's shot leaves its drawn barrel", function()

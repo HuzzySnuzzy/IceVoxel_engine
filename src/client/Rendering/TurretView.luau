@@ -28,10 +28,10 @@
 	neither is (they come again with the edit list). A change of a position's block forgets its
 	record (the server starts a new turret idle); when this player's own predicted break took it,
 	it is kept UNDO_WINDOW seconds and comes back if the server refuses the break (then dropped).
-	A record that tracks with no rounds and no longer Firing (the server's No ammo), after one that
-	held rounds or was Firing, clicks item.firearm.dry (Rendering/ShotRules.DRY) at the gun: a
-	one-round turret holds none from each shot to its next round but is Firing then, so a fed one
-	never clicks.
+	A record that says Dry (Protocol.TurretFlag: it tracks and would fire now with no round, the
+	server's No ammo) after one that did not clicks item.firearm.dry (Rendering/ShotRules.DRY) at
+	the gun, once: a fed turret's next round comes before its cadence is ready, so it never clicks;
+	one that runs dry does, also when its last round killed its target and it takes the next.
 	Drawn: every REFRESH_INTERVAL (and when something changed) the turrets within Config.Turrets
 	.Client.DrawDistance of the camera whose chunk is shown, nothing over the gun
 	(Shared/Turrets.headClear of the cell above, as the client sees it) and the record not
@@ -322,10 +322,10 @@ local function dropChunkRecords(chunk: number)
 	end
 end
 
--- Does `record` say it is out of rounds while it tracks (the server's No ammo: none held and no
--- longer Firing)?
+-- Does `record` say it would fire now and has no round (TurretFlag.Dry: the server's No ammo while
+-- it tracks)?
 local function dry(record: Record): boolean
-	return record.ammo == 0 and bit32.btest(record.flags, Flag.Tracking) and not bit32.btest(record.flags, Flag.Firing)
+	return bit32.btest(record.flags, Flag.Dry)
 end
 
 local function onRecords(list: { Record })
@@ -335,8 +335,8 @@ local function onRecords(list: { Record })
 			local key = posKey(x, y, z)
 			local old = records[key]
 			local entry = entries[key]
-			-- Ran dry while tracking, after rounds or a shot: the gun clicks.
-			if entry and old and dry(record) and (old.ammo > 0 or bit32.btest(old.flags, Flag.Firing)) then
+			-- It would fire and has no round (it was not so last): the gun clicks, once.
+			if entry and old and dry(record) and not dry(old) then
 				local px, py, pz = TurretRules.pivot(x, y, z)
 				SoundPlayer.play(ShotRules.DRY, px, py, pz)
 			end

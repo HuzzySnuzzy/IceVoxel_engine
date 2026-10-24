@@ -42,7 +42,9 @@
 	One turret's tick (Config.Turrets is `s`):
 	  Status     in the design's precedence: No power (it holds still and keeps its target), then
 	             Blocked (the cell over the gun: it drops its target), then with a target Firing
-	             within FiringTicks of its last shot, No ammo unarmed, else Targeting; without
+	             within FiringTicks of its last shot, No ammo unarmed while its cadence is ready
+	             (it would fire now; with no round its record says Dry), else Targeting (a fed
+	             turret's next round comes before its cadence is ready: never No ammo); without
 	             one No ammo with no round, else No target. Disabled is the kind's.
 	  Feed       the feeder rule (`env.feed`) at its first tick and every FeedTicks after,
 	             staggered by its cell; the Outcome's `feed` every tick.
@@ -1174,7 +1176,7 @@ local function stepTurret(world: World, order: Order, out: Outcome, spec: Spec):
 	local mounted = spec.muzzles[order.muzzle] == true
 	local powered, blocked = order.powered == true, order.blocked == true
 	local step = math.rad(spec.turn) / TurretRules.TICK_RATE
-	local fired = false
+	local fired, dry = false, false
 	local status: number
 	-- (A shot waits on only while it is refused tick after tick.)
 	local shotSince = turret.shotSince
@@ -1260,8 +1262,11 @@ local function stepTurret(world: World, order: Order, out: Outcome, spec: Spec):
 			end
 			if tick - turret.shotAt < s.FiringTicks then
 				status = STATUS.FIRING
-			elseif not order.armed then
+			elseif not order.armed and order.ready then
+				-- (It would fire now: dry with no round. Waiting on its cadence it is Targeting,
+				-- so a fed one's next round comes before it would.)
 				status = STATUS.NO_AMMO
+				dry = order.ammo < 1
 			else
 				status = STATUS.TARGETING
 			end
@@ -1283,6 +1288,7 @@ local function stepTurret(world: World, order: Order, out: Outcome, spec: Spec):
 		+ (if scope then Flag.Scope else 0)
 		+ (if mounted then Flag.Suppressor else 0)
 		+ (if tracking then Flag.Tracking else 0)
+		+ (if dry then Flag.Dry else 0)
 	local rounds = (if order.ammo == order.ammo then order.ammo else 0) - (if fired then 1 else 0)
 	turret.ammo = math.clamp(math.floor(rounds), 0, 255)
 	if recordDue(world, turret) then

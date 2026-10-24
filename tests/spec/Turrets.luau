@@ -1082,7 +1082,8 @@ return function(t, shared, require, server, client)
 		t.eq(Protocol.TURRET_BYTES, 19)
 		local F = Protocol.TurretFlag
 		t.ok(F.Powered == 1 and F.Firing == 2 and F.Blocked == 4 and F.Laser == 8, "flags")
-		t.ok(F.Scope == 16 and F.Suppressor == 32 and F.Tracking == 64)
+		t.ok(F.Scope == 16 and F.Suppressor == 32 and F.Tracking == 64 and F.Dry == 128)
+		t.eq(Protocol.MAX_TURRET_FLAGS, 255, "every bit a flag")
 		local records = {
 			{
 				x = -1000,
@@ -1091,7 +1092,7 @@ return function(t, shared, require, server, client)
 				yaw = 1.2345,
 				pitch = math.rad(-40.4),
 				target = 77,
-				flags = 127,
+				flags = 255,
 				ammo = 6,
 			},
 			{ x = 0, y = 1023, z = 0, yaw = -2.5, pitch = math.rad(74.6), target = 0, flags = 1, ammo = 0 },
@@ -1110,10 +1111,6 @@ return function(t, shared, require, server, client)
 			t.ok(got.target == record.target and got.flags == record.flags and got.ammo == record.ammo, `{i}: the rest`)
 		end
 		t.eq(#(Protocol.decodeTurrets(Protocol.encodeTurrets({})) :: any), 0, "none")
-		local bad = buffer.create(buffer.len(b))
-		buffer.copy(bad, 0, b)
-		buffer.writeu8(bad, 2 + 17, 128)
-		t.eq(Protocol.decodeTurrets(bad), nil, "unknown flags")
 		local cut = buffer.create(buffer.len(b) - 1)
 		buffer.copy(cut, 0, b, 0, buffer.len(cut))
 		t.eq(Protocol.decodeTurrets(cut), nil, "cut short")

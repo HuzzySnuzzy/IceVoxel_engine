@@ -307,13 +307,14 @@
 	  Turrets        u16 count, count x (i32 x, u16 y, i32 z, u16 yaw (a turn in 65536 steps), i8
 	                 pitch (whole degrees), u32 target (the mob it tracks, 0 none), u8 flags
 	                 (TurretFlag: bit 0 powered, 1 firing, 2 blocked, 3 a Laser Sight, 4 a Rifle
-	                 Scope, 5 a suppressor of either kind, 6 tracking), u8 ammo (rounds held)):
-	                 19 bytes a turret (Shared/Turrets: server Turrets/TurretWorld's aim and
-	                 target for client Rendering/TurretView). A record replaces what the client
-	                 knew about that position; a turret without one is idle (aimed level, yaw 0,
-	                 no target, nothing mounted). Sent with a chunk's edit list (the turrets not
-	                 in that state) and to the players near a change. Unknown flags or a length
-	                 that is not what the count says are malformed.
+	                 Scope, 5 a suppressor of either kind, 6 tracking, 7 dry: no round while it
+	                 tracks and its cadence would fire, the server's No ammo), u8 ammo (rounds
+	                 held)): 19 bytes a turret (Shared/Turrets: server Turrets/TurretWorld's aim
+	                 and target for client Rendering/TurretView). A record replaces what the
+	                 client knew about that position; a turret without one is idle (aimed level,
+	                 yaw 0, no target, nothing mounted). Sent with a chunk's edit list (the turrets
+	                 not in that state) and to the players near a change. A length that is not
+	                 what the count says is malformed.
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -3624,10 +3625,11 @@ Protocol.TurretFlag = table.freeze({
 	Scope = 16,
 	Suppressor = 32,
 	Tracking = 64,
+	Dry = 128,
 })
 -- Records a Turrets message carries at most (u16), and its flags' largest value.
 Protocol.MAX_TURRETS = 65535
-Protocol.MAX_TURRET_FLAGS = 127
+Protocol.MAX_TURRET_FLAGS = 255
 
 -- The first MAX_TURRETS of `records`.
 function Protocol.encodeTurrets(records: { TurretRecord }): buffer

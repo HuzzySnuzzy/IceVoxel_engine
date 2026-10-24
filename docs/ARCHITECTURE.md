@@ -7315,8 +7315,8 @@ require it):
   the slot in a new stack table, the shot's energy, CREDIT off the credit); then the feed rate, the
   rounds held, the packed state, RATE, ACTIVE (while targeting or firing). The service decides the
   status in the design's precedence (Disabled, No power, Blocked; with a target Firing within
-  `FiringTicks` of a shot, No ammo unarmed, else Targeting; without one No ammo with no round, else
-  No target). `demand = true` (the demand rule). Its panel: the three slots in a row at the left
+  `FiringTicks` of a shot, No ammo unarmed while `ready`, else Targeting; without one No ammo with
+  no round, else No target). `demand = true` (the demand rule). Its panel: the three slots in a row at the left
   (ammo, optic, muzzle) with their outlines, the status line over them, four lines right of them
   ("Range 24 · 240 rpm", the range from the window's data, so with its optic: an Advanced rifle
   with a Rifle Scope "Range 40"; its own without data; "Feed: Elite" / "Feed: Basic → 90 rpm" /
@@ -7423,8 +7423,11 @@ machines read (never generating terrain), for the simulation's Env.
   `feed(x, y, z)`, `random`, `settings`). State per turret by its cell's key, not saved: turrets
   come back idle. Each tick of a turret:
   - **Status**: No power (it holds still and keeps its target), Blocked (it drops it), then with a
-    target Firing within `FiringTicks` of its last shot, No ammo unarmed, else Targeting; without
-    one No ammo with no round, else No target.
+    target Firing within `FiringTicks` of its last shot, No ammo unarmed while its cadence is ready
+    (it would fire now; with no round its record says Dry), else Targeting; without one No ammo
+    with no round, else No target. A fed turret's next round comes before its cadence is ready, so
+    the panel and WAILA never show No ammo between its shots (a Basic rifle on one Basic
+    transporter: the round 22 ticks after the shot, the cadence 27).
   - **Feed**: the feeder rule's tier at its first tick and every `FeedTicks`, staggered by its cell.
   - **Targets**: only the Env's hostiles (`Mobs.hostiles`: live, unfrozen `hostile` kinds; never
     players or animals). It aims at the body box's centre (Ballistics.mobBoxes), a scoped sniper at
@@ -7503,8 +7506,9 @@ machines read (never generating terrain), for the simulation's Env.
 
 **The protocol.** ServerMessage `Turrets` (34): u16 count, 19 bytes a turret: i32 x, u16 y, i32 z,
 u16 yaw (65536ths of a turn), i8 pitch (whole degrees), u32 target, u8 flags (`TurretFlag`:
-powered, firing, blocked, laser, scope, suppressor, tracking), u8 ammo (`Protocol.encodeTurrets`,
-`decodeTurrets`; `TurretRecord`). A turret's shots are Shots records (33) with shooter 0, the
+powered, firing, blocked, laser, scope, suppressor, tracking, and bit 7 dry: no round while it
+tracks and its cadence would fire), u8 ammo (`Protocol.encodeTurrets`, `decodeTurrets`;
+`TurretRecord`). A turret's shots are Shots records (33) with shooter 0, the
 stand-in gun as the item and the turret's own counter, from its muzzle, and WeaponSync's flag bit 3
 `plain` (tracers without glow, for a suppressed turret's shot). Both ends ship together: an older
 client refuses bit 3.
@@ -7571,10 +7575,11 @@ record's aim, turns with `step` and is moved only when its aim or `Origin.epoch`
 render position survives a rebase. A powered Laser Sight's beam runs to the first block that blocks sight (the turret's own
 cell left out, rechecked every 0.1 s and as soon as the drawn aim turned a degree) or to the drawn
 target it passes, at most `BeamLength` 24. The servo `block.turret.servo` loops at the `ServoLoops`
-4 nearest turning guns. A tracking turret that runs dry clicks `item.firearm.dry`: a record with no
-rounds and no longer Firing (the server's No ammo) after one with rounds or Firing; a one-round
-turret holds none from each shot to its next round but is Firing then, so a fed one never clicks.
-Times follow the frames.
+4 nearest turning guns. A turret that runs dry clicks `item.firearm.dry` once: a record whose Dry
+flag rises (it tracks and would fire now with no round: the server's No ammo); a fed turret's next
+round comes before its cadence would fire, so it never clicks (every type and tier, through a Basic
+or an Advanced transporter, `tests/spec/TurretClient` on the real pipes), and one whose last round
+killed its target clicks when it takes the next zombie. Times follow the frames.
 
 **Shots, WAILA, F3.** A turret's shot (shooter `ShotRules.TURRET` = 0) sounds as its stand-in gun's
 class, is never the player's own, and `plain` removes the tracer glow; ShotView starts its flash and
@@ -9045,7 +9050,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `WorldList`     | u8 saving works, u16 length + text (how the last WorldAction went), u16 count (at most 200), then each saved world: id, name, type and seed text (u16 length + text each), u8 game mode, f64 last played, f64 bytes |
 | server → client | `WorldSave`     | u8 op: saving; saved (u8 flags ok / sizes / warn, then the sizes for operators only: f64 bytes, max, largest key, key limit; text); loading (u16 keys read, u16 of, text); state (u8 on / off / unavailable / session only, text why) |
 | server → client | `Shots`         | the shots near the player once a frame (Net/WeaponSync: shooter, item, shot counter, flags suppressed / jammed / refused / plain, origin, each pellet's end and what it hit; a turret's with shooter 0; see Weapons) |
-| server → client | `Turrets` (34)  | turrets' aim for the client: u16 count, 19 bytes each (i32 x, u16 y, i32 z, u16 yaw in 65536ths of a turn, i8 pitch in degrees, u32 target, u8 flags powered / firing / blocked / laser / scope / suppressor / tracking, u8 ammo); a chunk's non-idle ones with its edit list, changes to players within `Turrets.RecordRange` (see Turrets and the Metal Miner) |
+| server → client | `Turrets` (34)  | turrets' aim for the client: u16 count, 19 bytes each (i32 x, u16 y, i32 z, u16 yaw in 65536ths of a turn, i8 pitch in degrees, u32 target, u8 flags powered / firing / blocked / laser / scope / suppressor / tracking / dry, u8 ammo); a chunk's non-idle ones with its edit list, changes to players within `Turrets.RecordRange` (see Turrets and the Metal Miner) |
 | server → client | `Lightning`     | a strike within `Weather.Lightning.Distance` (4096 blocks): f32 x, y, z (the struck cell's bottom centre), u32 seed (the bolt's shape), u8 flashes (1-3): 17 bytes |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write

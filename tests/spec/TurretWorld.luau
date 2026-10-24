@@ -967,7 +967,7 @@ return function(t, shared, require, server)
 		t.eq(turret.out.status, STATUS.NO_AMMO, "no round, no target: No ammo")
 	end)
 
-	t.test("turret world: the status precedence: Firing after a shot, No ammo unarmed, Targeting", function()
+	t.test("turret world: the status precedence: Firing after a shot, No ammo unarmed and ready, Targeting", function()
 		local spec = Turrets.of("rifle", 1)
 		local e = newGame()
 		e.add(ZOMBIE, 0.5, FLOOR, 10.5)
@@ -983,11 +983,28 @@ return function(t, shared, require, server)
 		turret.order.armed, turret.order.ammo = false, 0
 		r.step(S.FiringTicks - 1)
 		t.eq(turret.out.status, STATUS.FIRING, "Firing within FiringTicks of it, unarmed or not")
+		local function flags(): number
+			return r.state(turret).flags
+		end
 		r.step(1)
-		t.eq(turret.out.status, STATUS.NO_AMMO, "then No ammo, the target still held")
+		-- Waiting on its cadence with no round (its next round on its way): Targeting.
+		t.eq(turret.out.status, STATUS.TARGETING, "then, the cadence not ready, Targeting")
+		t.ok(not bit32.btest(flags(), Flag.Dry), "not dry")
+		turret.order.ready = true
+		r.step(1)
+		t.eq(turret.out.status, STATUS.NO_AMMO, "it would fire now: No ammo, the target still held")
 		t.ok(turret.out.tracking)
-		turret.order.armed, turret.order.ammo = true, 1
+		t.ok(bit32.btest(flags(), Flag.Dry), "dry: no round")
+		-- A round but no shot's energy: No ammo, not dry.
+		turret.order.ammo = 1
 		r.step(1)
+		t.eq(turret.out.status, STATUS.NO_AMMO)
+		t.ok(not bit32.btest(flags(), Flag.Dry), "a round held: not dry")
+		turret.order.armed = true
+		r.step(1)
+		t.ok(turret.out.fired, "armed and ready: it fires")
+		turret.order.ready = false
+		r.step(S.FiringTicks)
 		t.eq(turret.out.status, STATUS.TARGETING)
 		-- Unpowered and blocked come first whatever.
 		turret.order.powered, turret.order.blocked = false, true

@@ -616,6 +616,7 @@ local FLAG_NAMES: { { flag: number, name: string } } = {
 	{ flag = TurretFlag.Scope, name = "scope" },
 	{ flag = TurretFlag.Suppressor, name = "suppressor" },
 	{ flag = TurretFlag.Tracking, name = "tracking" },
+	{ flag = TurretFlag.Dry, name = "dry" },
 }
 
 -- The feed as the turret's panel says it (Machines/Kinds/Turret): "Elite", "Basic → 90 rpm", "by
