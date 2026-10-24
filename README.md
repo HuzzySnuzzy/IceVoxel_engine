@@ -3204,10 +3204,10 @@ the codecs; only Studio shows the look, the sound, the feel and the cost on a de
 
 - **Turret views:** TurretView's per-frame BulkMoveTo of about 600 parts with 30-48 turning guns on
   a low-end phone; the heads at each tier (the Basic band, the barrels) and no z-fighting between
-  the turntable and the base's decor top; the barrel at steep pitches (below about −31° it may dip
-  into the base; an SMG's can may graze a corner at −20° diagonally); the laser beam by day and
-  night, resized every frame; the servo loop not restarting; parked heads never seen in the
-  workspace.
+  the turntable and the base's decor top; the barrel at steep pitches (never into the base at any
+  pitch its type allows; near a diagonal the tracers under about −50° and an SMG's or a rifle's
+  beam under −55° cross the base's corner); the laser beam by day and night, resized every frame;
+  the servo loop not restarting; parked heads never seen in the workspace.
 - **Shots:** the flash and tracer starting at the drawn barrel while the client is still turning;
   a suppressed turret's tracers plain; turret fire heard at the right class and far sound; shots
   with no shooter in ShotView; the server's mob ids matching the client's mob records.

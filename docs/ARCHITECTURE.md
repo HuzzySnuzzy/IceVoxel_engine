@@ -7557,9 +7557,10 @@ it clears the turret's own block at every yaw down to −55° (every aim a snipe
 receiver, where it was, it ran up to 0.34 through the block's corner at −51°). Steeper, near a
 diagonal, an SMG's or a rifle's beam crosses the block's corner, at most 0.18 at −60°, less than the
 shots' own line does there: the bore meets the block's top inside it below −49° at a diagonal and at
-every yaw below −58.6°. Out of the block at −60° the emitter would have to stand a third of a block
-to the side of the bore, or over the top of the cell above, which the level gun stays under; the
-TurretClient sweep holds the beam to both.
+every yaw below −58.6° (the shot flies through its own cell, which is air to it, and its tracer from
+the muzzle crosses the corner too, up to 0.47 at −60°). Out of the block at −60° the emitter would
+have to stand a third of a block to the side of the bore, or over the top of the cell above, which
+the level gun stays under; the TurretClient sweep holds the beam to both.
 
 Looks
 (`look(spec, flags)`) are made once and frozen. `place` writes each box's centre and its rotation
