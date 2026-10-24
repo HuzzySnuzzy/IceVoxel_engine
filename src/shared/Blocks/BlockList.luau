@@ -3895,7 +3895,7 @@ addDoor({
 	                layers), the energy store of its tier (Config.Turrets.Capacity), filled as fast
 	                as the network gives.
 	  Metal Miner   copies the ore block under it (Config.Miner), a 200 kJ store.
-	  Ammo Press    presses iron and gunpowder into rounds (Config.AmmoPress), a 20 kJ store.
+	  Ammo Press    presses brass, lead and gunpowder into rounds (Config.AmmoPress), a 20 kJ store.
 ]]
 -- (Shared/Turrets' types: their key, their part of the block name, their part of the shown name.)
 local TURRET_TYPES = {

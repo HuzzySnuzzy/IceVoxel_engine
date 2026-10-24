@@ -668,7 +668,7 @@ A fast, Minecraft-style voxel engine for Roblox.
     and now and then a pistol magazine, soldiers 5.56 rounds and a rifle magazine, construction
     workers rarely a pipe wrench. Crossbow Bolts are crafted (an Iron Nugget over a Stick over a
     Feather make four, in the Iron Age), the Improvised Suppressor from a Glass Bottle and Duct
-    Tape; the Ammo Press (below) presses 9mm, 5.56 and .308 rounds from iron and gunpowder.
+    Tape; the Ammo Press (below) presses 9mm, 5.56 and .308 rounds from brass, lead and gunpowder.
   - **Off:** `Config.Weapons.Enabled = false` keeps guns as clubs that never fire;
     `Config.Weapons.Melee.Enabled = false` puts melee back as it was.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
@@ -1549,15 +1549,20 @@ A fast, Minecraft-style voxel engine for Roblox.
   a Universal Cable, over Blocks of Iron around an Electric Furnace, over diamonds around a
   Diamond Pickaxe (the Electric Age's). While it works its grille glows yellow-orange and it
   hums heavily. JEI's "Duplicating" lists each ore, its drop, time and energy (`U` on the miner).
-- **Ammo Press.** Presses an Iron Ingot and a Gunpowder into 16 9mm, 10 5.56 or 5 .308 rounds in
-  10 seconds at 50 J a tick (`Config.AmmoPress`), the calibre picked by its Calibre button (kept in
-  its item), with upgrade cards (swapped mid-operation they keep the share done); the rounds are
-  pushed out on their own. Gunpowder needs the Demolition skill, so ammo stays the real cost of
-  defence. Recipe: iron around a Servo Motor, over
-  osmium around an Electric Furnace, over iron around a Block of Iron (the Electric Age's). Its
-  status says "Using 50 J/t", "No input" (one input without the other), "Output full" or "No
-  power"; switching the calibre mid-operation keeps the progress. While it works its window glows
-  and it hums. JEI's "Pressing" lists its three calibres (`U` on the press).
+- **Ammo Press.** Presses a Brass Ingot (the cases), a Lead Ingot (the bullets) and a Gunpowder
+  into 16 9mm, 10 5.56 or 5 .308 rounds in 10 seconds at 50 J a tick (`Config.AmmoPress`), the
+  calibre picked by its Calibre button (kept in its item), with upgrade cards (swapped
+  mid-operation they keep the share done); the rounds are pushed out on their own. Its row reads
+  brass, lead, gunpowder, then the arrow and the rounds; each slot takes only its item, by hand,
+  shift-click or a transporter through any side. Gunpowder needs the Demolition skill, so ammo
+  stays the real cost of defence. Recipe: iron around a Servo Motor, over osmium around an
+  Electric Furnace, over iron around a Block of Iron (the Electric Age's). Its status says "Using
+  50 J/t", what it lacks while it holds some of the three ("No lead", "No brass or gunpowder"),
+  "Output full" or "No power"; taking any input away starts the operation over, switching the
+  calibre keeps the progress. A press from a world saved before lead and brass keeps its slots
+  (the lead's is new and empty); its Iron Ingots stay in the brass slot, pressing nothing, until you
+  take them out. While it works its window glows and it hums. JEI's "Pressing" lists its three
+  calibres, each from the three inputs (`U` on the press).
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
   pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
   Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
@@ -2880,7 +2885,7 @@ for performance:
 | `Miner.Enabled` / `Capacity` | true / 200000 | The Metal Miner: false makes it inert with no recipe; its energy store (J, before Energy Upgrades). |
 | `Miner.Ores` | Coal 600 ticks at 800 J/t (floor 400 kJ), Iron and Osmium 400 at 200, Gold 800 at 300, Emerald 3600 at 800, Diamond 4800 at 800 | Per ore block: ticks an item takes and J a tick (Speed and Energy Upgrades change both, Mekanism's maths), and the least J an item costs whatever the cards (`floor`: coal never makes more energy than it took). |
 | `AmmoPress.Enabled` / `Capacity` / `Ticks` / `Joules` | true / 20000 / 200 / 50 | The Ammo Press: false makes it inert with no recipe; its store; an operation's ticks and J a tick (before upgrade cards). |
-| `AmmoPress.Calibres` | 16 9mm, 10 5.56, 5 .308 | What an Iron Ingot and a Gunpowder make, by the Calibre button's choice (in order). |
+| `AmmoPress.Calibres` | 16 9mm, 10 5.56, 5 .308 | What a Brass Ingot, a Lead Ingot and a Gunpowder make, by the Calibre button's choice (in order). |
 | `Camera.Enabled` | true | The DayZ camera (client `Player/CameraRig`): over the shoulder or from the eyes, freelook, focus, the body facing the aim and drawn in first person. false: Roblox's camera exactly as before (its zoom; shift lock, which the server gives back through `Player.DevEnableMouseLock`; `Weapons.ShoulderOffset` while raised; the body turning where it walks at `Movement.TurnSpeed`; Minecraft's hand; the crosshair for a gamepad only). |
 | `Camera.DefaultView` / `FirstPersonBody` / `FreelookToggle` | "third" / true / false | The Camera, First-Person Body and Freelook settings' defaults. |
 | `Camera.Profiles` | standing { 4.8, 0.9, 0.25, 0 } | The third-person camera by what the body does: { distance behind the pivot, shoulder, height above the eyes, forward } in studs (DayZ's third-person cameras, × 3): `standing`, `sprinting`, `crouching`, `lying` (crawling, swimming), `climbing`, `flying`, `raised` (a firearm: 2.4 behind, 1.5 to the side), `raisedHands` (a melee guard), `crouchRaised`; a change eases over DayZ's blend times. |
@@ -3244,8 +3249,9 @@ the codecs; only Studio shows the look, the sound, the feel and the cost on a de
   tick: 4 a second each).
 - **Panels:** the turret's three outlined slots in a row, four lines and the Lure button at every
   GUI scale and on touch (the lines' width beside the energy bar: "Feed: Advanced → 150 rpm"); the
-  miner's two lines and the press's line beside the energy bar, the press's Calibre button; JEI's
-  "240 s, 3.84 MJ" in its 72 pixels, the Duplicating and Pressing tab icons.
+  miner's two lines and the press's line beside the energy bar, the press's Calibre button and its
+  row of three inputs over the cards; JEI's "240 s, 3.84 MJ" in its 72 pixels, Pressing's three
+  inputs and "10 s, 10 kJ" in its 54, the Duplicating and Pressing tab icons.
 - **The Metal Miner:** on a diamond ore in an unloaded chunk (and after a server restart) it keeps
   mining and its chest fills; its grille's glow; transporters taking its output.
 - **Sounds:** the miner's and press's hums and the servo (Ambience's nearest-loops cap) and their

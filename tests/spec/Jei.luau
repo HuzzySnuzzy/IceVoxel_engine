@@ -1146,7 +1146,7 @@ return function(t, shared, require, _server, client)
 		t.eq(JeiData.pageCount(#entries, JeiLayout.perPage("duplicating")), 4, "twelve ores on four pages")
 	end)
 
-	t.test("jei: Pressing: the Ammo Press makes each calibre's rounds of an ingot and a gunpowder", function()
+	t.test("jei: Pressing: the Ammo Press makes each calibre's rounds of a brass, a lead and a gunpowder", function()
 		local Machines = require(shared.Machines)
 		local info = Machines.info(Blocks.id.AmmoPress)
 		local entries = entriesOf("pressing")
@@ -1154,9 +1154,11 @@ return function(t, shared, require, _server, client)
 		t.eq(#entries, #rounds, "one per calibre")
 		for index, round in rounds do
 			local entry = entries[index]
-			same(entry.inputs[1], { id.IronIngot }, "an Iron Ingot")
-			same(entry.inputs[2], { id.Gunpowder }, "and a Gunpowder")
-			t.eq(entry.inputs[3], nil)
+			-- (Three inputs since lead and brass: the press's panel order.)
+			same(entry.inputs[1], { id.BrassIngot }, "a Brass Ingot")
+			same(entry.inputs[2], { id.LeadIngot }, "a Lead Ingot")
+			same(entry.inputs[3], { id.Gunpowder }, "and a Gunpowder")
+			t.eq(entry.inputs[4], nil)
 			t.eq(entry.output and entry.output.item, round[1], `calibre {index}, in item order`)
 			t.eq(entry.output and entry.output.count, round[2], `{round[2]} rounds`)
 			t.eq(entry.output and entry.output.count, info[Items.get(round[1]).name], "its info's count")
@@ -1168,20 +1170,34 @@ return function(t, shared, require, _server, client)
 			same(JeiData.machineTexts(entry) :: any, { "10 s, 10 kJ", "50 J/t" } :: any, "its texts")
 			same(categories(JeiData.recipes(round[1])) :: any, { "pressing" } :: any, "rounds: only pressed")
 		end
-		-- Every calibre is among the uses of both inputs and of the press (its catalyst).
-		for _, item in { id.IronIngot, id.Gunpowder, id.AmmoPress } do
+		-- Every calibre is among the uses of the three inputs and of the press (its catalyst); iron
+		-- presses nothing now.
+		for _, item in { id.BrassIngot, id.LeadIngot, id.Gunpowder, id.AmmoPress } do
 			local group = groupOf(JeiData.uses(item), "pressing")
 			t.eq(group and #group.entries, #rounds, `{Items.displayName(item)}: every pressing`)
 		end
+		t.eq(groupOf(JeiData.uses(id.IronIngot), "pressing"), nil, "no pressing of iron")
 		same(categories(JeiData.uses(id.AmmoPress)) :: any, { "pressing" } :: any)
+		same(categories(JeiData.uses(id.LeadIngot)) :: any, { "crafting", "pressing" } :: any, "lead: crafted, pressed")
 		same(categories(JeiData.recipes(id.IronIngot)) :: any, { "crafting", "smelting" } :: any, "made as before")
 		same(JeiData.CATALYSTS.pressing :: any, { "AmmoPress" } :: any)
 		t.eq(JeiData.TITLES.pressing, "Pressing")
 		t.eq(JeiData.TAB_ITEMS.pressing, "AmmoPress")
+		-- The layout: the brass over the lead, the gunpowder beside them in the arrow's row, then the
+		-- arrow, the rounds and the texts (wide enough for its longest, the time and the energy).
 		local layout = JeiLayout.entry("pressing")
-		t.eq(#layout.inputs, 2, "the ingot over the gunpowder")
-		t.ok(layout.inputs[1].x == layout.inputs[2].x and layout.inputs[1].y < layout.inputs[2].y, "stacked")
-		t.ok(layout.output ~= nil and layout.arrow ~= nil and #layout.texts == 2)
+		t.eq(#layout.inputs, 3, "a cell for each input")
+		local brass, lead, powder = layout.inputs[1], layout.inputs[2], layout.inputs[3]
+		t.ok(brass.x == lead.x and brass.y + 18 == lead.y, "the brass over the lead")
+		t.ok(powder.x == brass.x + 18 and powder.y == layout.output.y, "the gunpowder beside them, in the output's row")
+		t.ok(powder.y > brass.y and powder.y < lead.y, "between the two")
+		t.ok(layout.arrow ~= nil and layout.arrow.x >= powder.x + 17, "the arrow after the inputs")
+		t.ok(layout.output ~= nil and layout.output.x > layout.arrow.x + layout.arrow.w, "then the rounds")
+		t.eq(#layout.texts, 2)
+		for _, r in layout.texts do
+			t.ok(r.x > layout.output.x + 17 and r.w >= 54, "the texts after them")
+		end
+		t.eq(JeiLayout.perPage("pressing"), 3, "three a page, as before")
 		t.eq(JeiData.pageCount(#entries, JeiLayout.perPage("pressing")), 1, "the three calibres on one page")
 	end)
 

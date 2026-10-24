@@ -1,20 +1,21 @@
 --!strict
 --[[
 	The Ammo Press (kind "press"; BlockList `AmmoPress`, `energy = { capacity = 20 kJ, input =
-	20 kJ/t }`, Config.AmmoPress): an Iron Ingot and a Gunpowder pressed into rounds of the calibre
-	its button picks, so turrets (and guns) need not live on loot alone: one operation makes 16
-	9mm, 10 5.56 or 5 .308 rounds in 200 ticks at 50 J a tick (10 kJ: an Electric Furnace's item),
-	faster with Speed Upgrades (Mekanism's maths, Machines/Upgrades). Gunpowder needs the
-	Demolition skill, so the press opens nothing new on its own.
+	20 kJ/t }`, Config.AmmoPress): a Brass Ingot (the cases), a Lead Ingot (the bullets) and a
+	Gunpowder pressed into rounds of the calibre its button picks, so turrets (and guns) need not
+	live on loot alone: one operation makes 16 9mm, 10 5.56 or 5 .308 rounds in 200 ticks at 50 J
+	a tick (10 kJ: an Electric Furnace's item), faster with Speed Upgrades (Mekanism's maths,
+	Machines/Upgrades). Gunpowder needs the Demolition skill, so the press opens nothing new on its
+	own.
 
 	It works as the Electric Furnace does (Kinds/Smelter): every tick it works uses
-	`energyPerTick` J and moves the progress on by one; after `ticksRequired` ticks one Iron Ingot
-	and one Gunpowder become the calibre's rounds in the output. It works only with a whole tick's
-	energy stored and room in the output for all of an operation's rounds (the same round, within
-	its stack); without either the progress waits where it is and goes on when they come
-	(Mekanism pauses on both). Taking either input away starts the progress over (Mekanism resets
-	it when the input runs out). Every calibre costs the same, so the Calibre button keeps the
-	progress: what comes out is the calibre chosen when the operation finishes.
+	`energyPerTick` J and moves the progress on by one; after `ticksRequired` ticks one of each
+	input becomes the calibre's rounds in the output. It works only with all three inputs, a whole
+	tick's energy stored and room in the output for all of an operation's rounds (the same round,
+	within its stack); without the energy or the room the progress waits where it is and goes on
+	when they come (Mekanism pauses on both). Taking any input away starts the progress over
+	(Mekanism resets it when the input runs out). Every calibre costs the same, so the Calibre
+	button keeps the progress: what comes out is the calibre chosen when the operation finishes.
 
 	Every tick `settings` works out Mekanism's upgrade maths from the cards installed, as the
 	Electric Furnace's: the ticks an operation takes (Config.AmmoPress.Ticks x 10^(-speed/8),
@@ -29,14 +30,20 @@
 	nothing, keeps its progress and says "Idle" (its recipe is left out then: Crafting/Recipes,
 	Progression/Ages).
 
-	Slots (frozen):
-	  1 ingot      Iron Ingots only: by hand, shift-click and transporters through any face
+	Slots (frozen; 6 appended after the cards, so a press saved with five keeps every slot: a
+	world save's container goes into the block's fresh six-slot container, slot by slot, Save/
+	WorldSnapshot):
+	  1 brass      Brass Ingots only: by hand, shift-click and transporters through any face (it
+	               took Iron Ingots before lead and brass: an old press's stay there and press
+	               nothing, NO_INPUT beside gunpowder, until a hand or a shift-click takes them
+	               out; transporters take only the rounds)
 	  2 gunpowder  Gunpowder only, the same way
 	  3 output     the rounds (Minecraft's result frame at (116, 35)): taken by hand, shift-click
 	               and transporters, and pushed out on its own every 10 ticks into the chests
 	               next to it (Mekanism's ejector: server Transmitters/Eject and Transport)
 	  4 speed      up to 8 Speed Upgrades, at (8, 53)
 	  5 energy     up to 8 Energy Upgrades, at (26, 53)
+	  6 lead       Lead Ingots only, the same way as the brass
 	Data after the header (Shared/Machines), frozen:
 	   7 progress       ticks worked on the operation (the arrow: progress / ticksRequired)
 	   8 ticksRequired  ticks an operation takes (Config.AmmoPress.Ticks; fewer with cards)
@@ -44,18 +51,22 @@
 	  10 calibre        the calibre pressed: an index into Config.AmmoPress.Calibres (1 9mm, 2
 	                    5.56, 3 .308; a fresh press's 1), which the Calibre button cycles; kept
 	                    in the item
-	  11 state          why it is not working (the status line, WAILA): IDLE (nothing in it, or
-	                    switched off), NO_POWER (less than a tick's energy), OUTPUT_FULL (no room
-	                    for the rounds), NO_INPUT (an ingot without gunpowder, or the other way
-	                    round)
+	  11 state          why it is not working (the status line, WAILA): a code, IDLE (none of the
+	                    three in it, or switched off), NO_POWER (less than a tick's energy),
+	                    OUTPUT_FULL (no room for the rounds) or NO_INPUT (one or two of the three
+	                    without the rest), plus with NO_INPUT 4 x the inputs missing (1 brass, 2
+	                    lead, 4 gunpowder: Mekanism names the input a recipe lacks), so the status
+	                    says "No lead" or "No brass or gunpowder" (a 3 saved before lead, or from
+	                    elsewhere, says "No input" until the next tick)
 	  12 activeDelay    Mekanism's deactivation delay (Machines.showActive: ACTIVE while it works,
 	                    its window glows and it stamps)
 	RATE is minus the J it used this tick. It takes as much energy as its store holds in a tick
 	(`rates`: its capacity, as the Electric Furnace).
 
-	Its panel: the ingot and the gunpowder, the progress arrow and the output in a row, the status
-	line, the Calibre button and a line naming what one operation makes ("16 9mm Rounds"), the
-	upgrade slots and the energy bar. JEI's "Pressing" (an Iron Ingot and a Gunpowder into rounds,
+	Its panel: the brass, the lead and the gunpowder in a row (x 20, 38, 56: the cases, the bullets,
+	the powder, as an operation reads), the progress arrow and the output, the status line, the
+	Calibre button and a line naming what one operation makes ("16 9mm Rounds"), the upgrade slots
+	and the energy bar. JEI's "Pressing" (a Brass Ingot, a Lead Ingot and a Gunpowder into rounds,
 	the Ammo Press the catalyst) reads `info`: ticks, joules, capacity and each round's count by
 	its item name.
 ]]
@@ -71,17 +82,33 @@ type Container = Types.Container
 
 local PRESS = Config.AmmoPress
 
--- Slots.
-local INGOT, GUNPOWDER, OUTPUT, SPEED, ENERGY = 1, 2, 3, 4, 5
+-- Slots (lead appended after the cards: the five before it are frozen).
+local BRASS, GUNPOWDER, OUTPUT, SPEED, ENERGY, LEAD = 1, 2, 3, 4, 5, 6
 
--- State codes (the `state` field; Shared/Machines KindSpec `state`).
+-- State codes (the `state` field's code, state % CODES; Shared/Machines KindSpec `state`). With
+-- NO_INPUT, CODES x the missing inputs' bits (INPUTS) go on top of it.
 local IDLE, NO_POWER, OUTPUT_FULL, NO_INPUT = 0, 1, 2, 3
+local CODES = 4
 
 -- The Calibre button's id, and the calibre's data index (its fourth field).
 local CALIBRE_BUTTON = 0
 local CALIBRE = Core.HEADER + 4
 
-local IRON, POWDER = Items.id.IronIngot, Items.id.Gunpowder
+local BRASS_INGOT, LEAD_INGOT, POWDER = Items.id.BrassIngot, Items.id.LeadIngot, Items.id.Gunpowder
+
+--[[
+	The three inputs, one of each an operation, in the panel's order (the cases, the bullets, the
+	powder): the slot, the item it takes, the bit it sets in a NO_INPUT state while missing and the
+	word the status names it by.
+]]
+type Input = { slot: number, item: number, bit: number, word: string }
+local INPUTS: { Input } = {
+	{ slot = BRASS, item = BRASS_INGOT, bit = 1, word = "brass" },
+	{ slot = LEAD, item = LEAD_INGOT, bit = 2, word = "lead" },
+	{ slot = GUNPOWDER, item = POWDER, bit = 4, word = "gunpowder" },
+}
+-- (Every bit set: the most a state's missing part holds.)
+local ALL_MISSING = 7
 
 -- What each calibre choice makes: the round's item, how many, its calibre's name, and an
 -- operation's result as a stack (read only: the output gets a new one).
@@ -107,27 +134,53 @@ local function calibreOf(value: number): number
 	return value
 end
 
+-- An input slot at (x, 35) taking only `item` (by hand, shift-click and transporters alike).
+local function inputSlot(x: number, item: number): Core.SlotSpec
+	return {
+		x = x,
+		y = 35,
+		accepts = function(other: number): boolean
+			return other == item
+		end,
+	}
+end
+
+-- (The row reads brass, lead, gunpowder, 18 apart, then the arrow and the output.)
 local SLOTS: { Core.SlotSpec } = {
-	{
-		x = 38,
-		y = 35,
-		accepts = function(item: number): boolean
-			return item == IRON
-		end,
-	},
-	{
-		x = 56,
-		y = 35,
-		accepts = function(item: number): boolean
-			return item == POWDER
-		end,
-	},
+	inputSlot(20, BRASS_INGOT),
+	inputSlot(56, POWDER),
 	{ x = 116, y = 35, output = true, big = true },
 }
 for _, slot in Upgrades.slots(8, 53) do
 	table.insert(SLOTS, slot)
 end
-assert(#SLOTS == ENERGY and INGOT == 1 and GUNPOWDER == 2 and OUTPUT == 3 and SPEED == 4, "the Ammo Press's slots")
+table.insert(SLOTS, inputSlot(38, LEAD_INGOT))
+assert(
+	#SLOTS == LEAD and BRASS == 1 and GUNPOWDER == 2 and OUTPUT == 3 and SPEED == 4 and ENERGY == 5,
+	"the Ammo Press's slots"
+)
+
+--[[
+	The status of a NO_INPUT state's missing part (INPUTS' bits): "No lead", "No brass or
+	gunpowder"; "No input" for none (a state saved before lead, or from elsewhere) or anything
+	else.
+]]
+local function missingText(missing: number): string
+	if missing < 1 or missing > ALL_MISSING or missing ~= math.floor(missing) then
+		return "No input"
+	end
+	local words: { string } = {}
+	for _, input in INPUTS do
+		if bit32.btest(missing, input.bit) then
+			table.insert(words, input.word)
+		end
+	end
+	local last = table.remove(words) :: string
+	if #words == 0 then
+		return `No {last}`
+	end
+	return `No {table.concat(words, ", ")} or {last}`
+end
 
 --[[
 	Ticks an operation takes, J a tick of work uses and the capacity, now: Config.AmmoPress's
@@ -179,14 +232,23 @@ local function tick(container: Container, ctx: Core.TickContext)
 	local calibre = CALIBRES[choice]
 
 	local slots = container.slots
-	local hasIngot, hasPowder = holds(container, INGOT, IRON), holds(container, GUNPOWDER, POWDER)
+	-- (Anything else in an input slot is no input: an old press's Iron Ingots, data from elsewhere.)
+	local missing, held = 0, 0
+	for _, input in INPUTS do
+		if holds(container, input.slot, input.item) then
+			held += 1
+		else
+			missing += input.bit
+		end
+	end
 	-- (Never past the end, whatever the data says: a full arrow finishes on the next tick.)
 	progress = math.clamp(math.floor(progress), 0, ticks)
 	local state, working = IDLE, false
-	if not (hasIngot and hasPowder) then
-		-- Nothing to press: idle when empty, waiting for the other input with one of them.
+	if missing ~= 0 then
+		-- Nothing to press: idle when it holds none of the three, else waiting for the rest (and
+		-- saying which).
 		progress = 0
-		state = if hasIngot or hasPowder then NO_INPUT else IDLE
+		state = if held > 0 then NO_INPUT + CODES * missing else IDLE
 	elseif not fits(container, calibre) then
 		state = OUTPUT_FULL
 	elseif not Core.use(container, energyPerTick) then
@@ -200,10 +262,11 @@ local function tick(container: Container, ctx: Core.TickContext)
 			slots[OUTPUT] = if output
 				then Items.withCount(output, output.count + calibre.count)
 				else Items.newStack(calibre.ammo, calibre.count)
-			-- (What is left of each input keeps its wear and data.)
-			local ingot, powder = slots[INGOT] :: Items.Stack, slots[GUNPOWDER] :: Items.Stack
-			slots[INGOT] = Items.withCount(ingot, ingot.count - 1)
-			slots[GUNPOWDER] = Items.withCount(powder, powder.count - 1)
+			-- (One of each; what is left of an input keeps its wear and data.)
+			for _, input in INPUTS do
+				local stack = slots[input.slot] :: Items.Stack
+				slots[input.slot] = Items.withCount(stack, stack.count - 1)
+			end
 		end
 	end
 	Core.set(container, "progress", progress)
@@ -243,14 +306,15 @@ local kind = Core.define("press", {
 		return Core.capacity(container), 0
 	end,
 	status = function(view: Core.View): string?
+		local code = view.state % CODES
 		if view.rate < 0 then
 			return `Using {Items.formatEnergy(-view.rate)}/t`
-		elseif view.state == NO_POWER then
+		elseif code == NO_POWER then
 			return "No power"
-		elseif view.state == OUTPUT_FULL then
+		elseif code == OUTPUT_FULL then
 			return "Output full"
-		elseif view.state == NO_INPUT then
-			return "No input"
+		elseif code == NO_INPUT then
+			return missingText(view.state // CODES)
 		end
 		return "Idle"
 	end,

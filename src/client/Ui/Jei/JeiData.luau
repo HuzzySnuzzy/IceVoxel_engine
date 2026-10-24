@@ -27,8 +27,9 @@
 	            order): `inputs[1]` the ore block under it, `output` its drop (one), `ticks` an
 	            item takes, the `energy` (J) an item costs (at least the ore's floor) at `power`
 	            J/t, before upgrade cards; none with Config.Miner.Enabled false;
-	  pressing  the Ammo Press (Machines.info of its block): `inputs[1]` an Iron Ingot,
-	            `inputs[2]` a Gunpowder, `output` a calibre's rounds (one entry a round its `info`
+	  pressing  the Ammo Press (Machines.info of its block): `inputs[1]` a Brass Ingot,
+	            `inputs[2]` a Lead Ingot, `inputs[3]` a Gunpowder (one of each an operation, in
+	            the panel's order), `output` a calibre's rounds (one entry a round its `info`
 	            counts, in item order: 16 9mm, 10 5.56, 5 .308), `ticks`, `energy` and `power` as
 	            duplicating's; none with Config.AmmoPress.Enabled false.
 	The two machines' entries say "10 s, 10 kJ" and "50 J/t" (`machineTexts`).
@@ -406,8 +407,9 @@ local function machineEntries(): { Entry }
 		end
 	end
 	local press = infoOf("AmmoPress")
-	local iron, powder = rawget(Items.id :: any, "IronIngot"), rawget(Items.id :: any, "Gunpowder")
-	if Config.AmmoPress.Enabled and press.ticks and press.joules and press.ticks > 0 and iron and powder then
+	local brass, lead = rawget(Items.id :: any, "BrassIngot"), rawget(Items.id :: any, "LeadIngot")
+	local powder = rawget(Items.id :: any, "Gunpowder")
+	if Config.AmmoPress.Enabled and press.ticks and press.joules and press.ticks > 0 and brass and lead and powder then
 		-- (Every other number in its info is a round's count by its item name.)
 		local rounds: { number } = {}
 		local counts: { [number]: number } = {}
@@ -423,7 +425,7 @@ local function machineEntries(): { Entry }
 			table.insert(entries, {
 				category = "pressing",
 				recipe = nil,
-				inputs = { { iron }, { powder } },
+				inputs = { { brass }, { lead }, { powder } },
 				output = { item = item, count = counts[item] },
 				shapeless = false,
 				ticks = press.ticks,

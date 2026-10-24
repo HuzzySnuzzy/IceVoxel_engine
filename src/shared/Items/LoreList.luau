@@ -193,7 +193,7 @@ local lore: { [string]: string } = {
 	InsulatedDoor = "A padded door. Closed, it keeps a room's warmth in.",
 	-- (The twelve turrets: the loop at the end.)
 	MetalMiner = "Copies the ore block under it forever, for power. Pushes it out.",
-	AmmoPress = "Presses iron and gunpowder into 9mm, 5.56 or .308 rounds.",
+	AmmoPress = "Presses brass, lead and gunpowder into 9mm, 5.56 or .308 rounds.",
 
 	-- Armor -------------------------------------------------------------------------------------
 	LeatherHelmet = "Warm hide. Leather keeps the frost off.",

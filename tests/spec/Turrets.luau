@@ -1036,12 +1036,16 @@ return function(t, shared, require, server, client)
 		t.ok(code == 3 and index == 6)
 		t.eq(Machines.info(B.MetalMiner).DiamondOreTicks, 4800)
 		t.eq(Machines.info(B.MetalMiner).capacity, 200000)
-		-- The press: ingot, gunpowder, output, cards; the Calibre button kept in the item.
+		-- The press: brass (Iron Ingots before lead and brass), gunpowder, output, cards, and lead
+		-- appended as 6 (tests/spec/AmmoPress); the Calibre button kept in the item.
 		local press = Machines.kindOf(B.AmmoPress) :: any
-		t.eq(#press.slots, 5)
-		t.ok(Machines.mayPlace(B.AmmoPress, 1, I.IronIngot) and not Machines.mayPlace(B.AmmoPress, 1, I.Gunpowder))
-		t.ok(Machines.mayPlace(B.AmmoPress, 2, I.Gunpowder) and not Machines.mayPlace(B.AmmoPress, 2, I.IronIngot))
+		t.eq(#press.slots, 6)
+		t.ok(Machines.mayPlace(B.AmmoPress, 1, I.BrassIngot) and not Machines.mayPlace(B.AmmoPress, 1, I.Gunpowder))
+		t.ok(Machines.mayPlace(B.AmmoPress, 2, I.Gunpowder) and not Machines.mayPlace(B.AmmoPress, 2, I.BrassIngot))
+		t.ok(Machines.mayPlace(B.AmmoPress, 6, I.LeadIngot) and not Machines.mayPlace(B.AmmoPress, 6, I.BrassIngot))
+		t.ok(not Machines.mayPlace(B.AmmoPress, 1, I.IronIngot), "no iron now")
 		t.ok(Machines.isOutput(B.AmmoPress, 3), "the output")
+		t.ok(Machines.mayPlace(B.AmmoPress, 4, I.SpeedUpgrade) and Machines.mayPlace(B.AmmoPress, 5, I.EnergyUpgrade))
 		local container = Machines.newContainer(B.AmmoPress)
 		t.eq(Machines.get(container, "calibre"), 1, "9mm when fresh")
 		Machines.button(container, B.AmmoPress, 0)

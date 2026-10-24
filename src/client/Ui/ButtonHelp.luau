@@ -191,7 +191,7 @@ local TEXTS: { [string]: Entry } = {
 		combustion = "What a combustion generator burns for energy.",
 		boiling = "What a campfire boils.",
 		duplicating = "What a metal miner copies from the ore under it, for energy.",
-		pressing = "What an ammo press presses from iron and gunpowder.",
+		pressing = "What an ammo press presses from brass, lead and gunpowder.",
 	},
 
 	--[[ Maps (Map/) ]]

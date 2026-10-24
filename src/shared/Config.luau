@@ -2572,8 +2572,9 @@ local Config = {
 	},
 
 	--[[
-		The Ammo Press (Machines/Kinds/AmmoPress): an Iron Ingot and a Gunpowder pressed into
-		rounds of the calibre its button picks, Ticks ticks at Joules J a tick an operation.
+		The Ammo Press (Machines/Kinds/AmmoPress): a Brass Ingot (the cases), a Lead Ingot (the
+		bullets) and a Gunpowder pressed into rounds of the calibre its button picks, Ticks ticks
+		at Joules J a tick an operation.
 	]]
 	AmmoPress = {
 		-- false: the press ticks inert and has no recipe (its block stays registered).
@@ -2582,7 +2583,9 @@ local Config = {
 		Capacity = 20000,
 		Ticks = 200,
 		Joules = 50,
-		-- What one operation makes, by the Calibre button's choice (in its order).
+		-- What one operation makes, by the Calibre button's choice (in its order). The same as
+		-- when it took an Iron Ingot: the turrets' feed is balanced on them, and the Metal Miner
+		-- copies copper, zinc and lead as it does iron, so the extra ingot costs little.
 		Calibres = {
 			{ ammo = "Rounds9mm", count = 16 },
 			{ ammo = "Rounds556", count = 10 },

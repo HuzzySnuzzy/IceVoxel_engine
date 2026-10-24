@@ -5530,11 +5530,14 @@ on the input `Ui/Screens` hands it before anything else.
   `Config.Miner.Enabled` / `Config.AmmoPress.Enabled` is on when the index is built): the Metal
   Miner's six ores in `MinerRules.ORES` order, each ore block into its drop (one), the time an
   item takes and its J (ticks × J/t, never under the ore's floor) at J/t ("240 s, 3.84 MJ",
-  "800 J/t" for a diamond; coal "30 s, 480 kJ"); and the Ammo Press's calibres in item order, an
-  Iron Ingot over a Gunpowder into 16 9mm, 10 5.56 or 5 .308 rounds ("10 s, 10 kJ", "50 J/t";
-  `machineTexts`). Both are drawn 150 × 36 (three a page: the ore or the two inputs stacked, a
-  progress bar filling over the time, the result, two lines of text). Their catalysts and tabs
-  are the Metal Miner and the Ammo Press.
+  "800 J/t" for a diamond; coal "30 s, 480 kJ"); and the Ammo Press's calibres in item order, a
+  Brass Ingot, a Lead Ingot and a Gunpowder (`inputs` 1-3, the panel's order) into 16 9mm, 10
+  5.56 or 5 .308 rounds ("10 s, 10 kJ", "50 J/t"; `machineTexts`). Both are drawn 150 × 36 (three
+  a page: the ore, or the brass over the lead with the gunpowder beside them in the arrow's row; a
+  progress bar filling over the time, the result, two lines of text, the press's one slot further
+  right with its texts in 54 pixels: three inputs in a row would leave them too little, three
+  stacked would show two calibres a page). Their catalysts and tabs are the Metal Miner and the
+  Ammo Press.
 
 `recipes(item)` are the entries that make the item (crafting, smelting, refining), `uses(item)`
 those that take it (in any cell, as a smelting input, as a fuel, as a fluid). A catalyst, the
@@ -7300,8 +7303,8 @@ alone as a refused record with no pellets, its jam flag set when the reason is "
 SMG, Rifle and Sniper turrets in the transmitters' four tiers (Basic, Advanced, Elite, Ultimate)
 that shoot zombies with the rounds a Logistical Transporter feeds them and Mekanism energy; the
 Metal Miner, which copies the ore block under it forever for energy; and the Ammo Press, which
-presses iron and gunpowder into rounds. All three are ordinary machine kinds (Electricity and
-machines): nothing new in world saves, their state is their container's slots and data.
+presses brass, lead and gunpowder into rounds. All three are ordinary machine kinds (Electricity
+and machines): nothing new in world saves, their state is their container's slots and data.
 
 **Shared** (`Shared/Turrets`, pure; requires Config, Blocks, Items, Weapons and
 Transmitters/Tiers, never Shared/Transmitters or Shared/Machines, which load the kinds that
@@ -7397,23 +7400,35 @@ require it):
   ticksRequired, "4:00 an item" (tenths when not whole: "0:14.9"); none without an ore. On a Heat
   Generator's 200 J/t a diamond miner works a tick in four and glows steadily; a generator burning
   coal into the cheapest coal miner gets 15 coal back for 20 burnt.
-- The Ammo Press (`Machines/Kinds/AmmoPress`, kind "press"). Frozen: slots 1 Iron Ingots and 2
-  Gunpowder (both through every face), 3 the output (pushed out every 10 ticks, given through every
-  face), 4-5 the cards (`Upgrades.slots(8, 53)`); data 7 progress, 8 ticksRequired, 9 energyPerTick,
-  10 calibre (1 9mm, 2 5.56, 3 .308: Config.AmmoPress.Calibres, cycled by the Calibre button (id 0),
-  kept in the item), 11 state, 12 activeDelay; a 20 kJ store taking its capacity a tick. It works as
-  the Electric Furnace does: each tick with an ingot and a gunpowder, room in the output for all of
-  an operation's rounds (the same round within its stack: 9mm and 5.56 to 60, .308 to 40) and a
-  tick's energy, it uses `energyPerTick` and moves the progress on; at `ticksRequired` the two
-  inputs become 16 9mm, 10 5.56 or 5 .308 rounds (200 ticks at 50 J/t: 10 kJ). States IDLE (empty,
-  or switched off), NO_INPUT ("No input": one input without the other), OUTPUT_FULL and NO_POWER
-  (the progress waits on both); taking an input away starts over. The Calibre button keeps the
-  progress: every calibre costs the same, and what comes out is the calibre chosen when the
-  operation finishes; a calibre from elsewhere reads as 9mm. Mekanism's card maths as the Electric
-  Furnace's (149 ticks with one Speed card, 20 with 8 at 5 kJ/t, so 100 kJ an operation; 8 + 8 cards
-  bring it back to 10 kJ in a 200 kJ store); cards in or out mid-operation keep its share done
+- The Ammo Press (`Machines/Kinds/AmmoPress`, kind "press"). Frozen: slots 1 Brass Ingots (Iron
+  Ingots before lead and brass) and 2 Gunpowder (both through every face), 3 the output (pushed out
+  every 10 ticks, given through every face), 4-5 the cards (`Upgrades.slots(8, 53)`), 6 Lead Ingots
+  (appended after the cards, through every face); data 7 progress, 8 ticksRequired, 9
+  energyPerTick, 10 calibre (1 9mm, 2 5.56, 3 .308: Config.AmmoPress.Calibres, cycled by the
+  Calibre button (id 0), kept in the item), 11 state, 12 activeDelay; a 20 kJ store taking its
+  capacity a tick. It works as the Electric Furnace does: each tick with a brass, a lead and a
+  gunpowder, room in the output for all of an operation's rounds (the same round within its
+  stack: 9mm and 5.56 to 60, .308 to 40) and a tick's energy, it uses `energyPerTick` and moves
+  the progress on; at `ticksRequired` one of each input becomes 16 9mm, 10 5.56 or 5 .308 rounds
+  (200 ticks at 50 J/t: 10 kJ; the counts are those of the iron it took before: the turrets' feed
+  is balanced on them). States: a code, IDLE (none of the three, or switched off), NO_INPUT (one or
+  two of them without the rest), OUTPUT_FULL and NO_POWER (the progress waits on both), and with
+  NO_INPUT 4 x the inputs missing (1 brass, 2 lead, 4 gunpowder: Mekanism's recipe errors name the
+  missing input), so the status says "No lead", "No brass or gunpowder" (a bare 3, saved before
+  lead, says "No input" until the next tick); taking any input away starts over. Transporters put
+  each item into the slot whose rule takes it, through any face, and shift-click does the same
+  (`Machines.insertSlots` 1, 2, 6; `quickMoveTargets`). A press saved with five slots loads into
+  six: the region's container record says 5, and `WorldSnapshot.restore` copies its slots into the
+  block's fresh six-slot container (slot 6 empty) with its data; Iron Ingots in slot 1 stay there,
+  pressing nothing (NO_INPUT beside gunpowder: "No brass or lead"), until a hand or a shift-click
+  takes them out (transporters take only the output). The Calibre button keeps the progress:
+  every calibre costs the same, and what comes out is the calibre chosen when the operation
+  finishes; a calibre from elsewhere reads as 9mm. Mekanism's card maths as the Electric Furnace's
+  (149 ticks with one Speed card, 20 with 8 at 5 kJ/t, so 100 kJ an operation; 8 + 8 cards bring it
+  back to 10 kJ in a 200 kJ store); cards in or out mid-operation keep its share done
   (`Upgrades.rescale`, as the miner's), so a swap skips no work. `Config.AmmoPress.Enabled` false
-  (read every tick): inert, nothing used or made, the progress kept, "Idle". Its line names what an
+  (read every tick): inert, nothing used or made, the progress kept, "Idle". Its panel's row reads
+  brass (20, 35), lead (38, 35), gunpowder (56, 35), the arrow, the output; its line names what an
   operation makes ("16 9mm Rounds", from the window's data); `info` gives ticks, joules, capacity
   and each round's count by its item name.
 
@@ -7694,8 +7709,10 @@ shots, the cost of 48 guns; MobRenderer.aimPoint; WAILA and F3), `Miner` (the or
 energy, cards and the floor at every count, coal against the real Heat Generator and in a closed
 loop, no or changed ore, an unknown cell below, a full output, starvation, the ejector and a
 transporter line on the real worlds, sustained energy, switched off, the panel, WAILA and records,
-the client's glow and loops), `AmmoPress` (the press on its own and on the real server worlds),
-`Jei` (Duplicating, Pressing, the switches, the tabs), `Tooltips` (the turrets' line), `Crafting`
+the client's glow and loops), `AmmoPress` (the press on its own and on the real server worlds:
+its three inputs by hand, shift-click and transporters, every combination of missing ones, a
+press saved with five slots and Iron Ingots loading into six), `Jei` (Duplicating, Pressing and
+its three inputs, the switches, the tabs), `Tooltips` (the turrets' line), `Crafting`
 (each new grid makes only its result), `Weapons` (`plain`).
 
 ## Sounds (`Sounds/`, server `Audio/Sounds`, client `Audio/SoundPlayer`)
@@ -9545,7 +9562,8 @@ Saving worlds).
 - Turrets: a turret's shot is server-traced like a player's and never hurts a player or an animal
   or breaks a block; turret noise goes through `NoiseBus.emit` with its cooldown; the turret's data
   layout and state packing (`Turrets.packState`), the miner's and the press's layouts and the
-  miner's ore order are frozen (saved containers); the feed's tier statement is the feeder rule
+  miner's ore order are frozen (saved containers: a new slot is appended, as the press's lead
+  slot 6, which a container saved with fewer loads into empty); the feed's tier statement is the feeder rule
   (`Turrets.rpm`, `TransmitterWorld.feedTier`) plus the demand rule, specced on the real pipes
   (`tests/spec/TurretFeed`), and the demand rule changes nothing for a destination that demands
   nothing. Server Machines never requires the turrets (the service comes in through

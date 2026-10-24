@@ -40,8 +40,10 @@
 	                 duplicating  150 x 36: as refining with items: the ore, an arrow filling
 	                           over the time an item takes, its drop, two lines of text right
 	                           of them
-	                 pressing  150 x 36: the Iron Ingot over the Gunpowder, then as
-	                           duplicating (the arrow, the rounds, two lines of text)
+	                 pressing  150 x 36: the Brass Ingot over the Lead Ingot, the Gunpowder
+	                           beside them in the middle, then as duplicating one slot
+	                           further right (the arrow, the rounds, two lines of text in 54
+	                           pixels: "10 s, 10 kJ" is the longest)
 
 	A slot's (x, y) is its item's top left corner, as in MenuLayout (the frame is one pixel up and
 	left, a large frame five).
@@ -215,20 +217,21 @@ local DUPLICATING: EntryLayout = {
 	texts = { rect(78, 9, 72, 8), rect(78, 21, 72, 8) },
 }
 
--- The Ammo Press: the ingot over the gunpowder (Mekanism's main input over its extra one), then
--- as the miner's.
+-- The Ammo Press: the brass over the lead (the two metals), the gunpowder beside them in the
+-- arrow's row, then the miner's arrow, output and texts one slot further right (three inputs in
+-- a row would leave the texts too little room; stacked, a page would show two calibres, not three).
 local PRESSING: EntryLayout = {
 	w = 150,
 	h = 36,
-	inputs = { { x = 1, y = 1, big = false }, { x = 1, y = 19, big = false } },
-	output = { x = 55, y = 10, big = false },
+	inputs = { { x = 1, y = 1, big = false }, { x = 1, y = 19, big = false }, { x = 19, y = 10, big = false } },
+	output = { x = 73, y = 10, big = false },
 	fluidInputs = {},
 	fluidOutput = nil,
-	arrow = rect(24, 10, 24, 16),
+	arrow = rect(42, 10, 24, 16),
 	flame = nil,
 	plus = nil,
 	shapeless = nil,
-	texts = { rect(78, 9, 72, 8), rect(78, 21, 72, 8) },
+	texts = { rect(96, 9, 54, 8), rect(96, 21, 54, 8) },
 }
 
 JeiLayout.ENTRIES = {
