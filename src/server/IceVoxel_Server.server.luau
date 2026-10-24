@@ -80,7 +80,9 @@
 	                   apocalypse's survival rules (Apocalypse/Survival: bites, wounds, survivor
 	                   records) and noises (Apocalypse/NoiseBus: sounds and blasts zombies hear);
 	                   then the weapons (Weapons/: firearms in the manner of DayZ, Shared/Weapons:
-	                   shots, raising and guarding, the inventory's weapon actions timed)
+	                   shots, raising and guarding, the inventory's weapon actions timed), and the
+	                   turrets (Turrets/: the simulation every turret's machine tick asks,
+	                   Shared/Turrets, handed to the machines; their shots and records)
 	 12. progress   -> knowledge, the Ages and the skill tree (Players/Progression: what players
 	                   earn mining, crafting, smelting, exploring and killing mobs, the recipe gate
 	                   on their windows, the perks the parts above ask for, saving, /knowledge and
@@ -175,6 +177,7 @@ local Magic = require(Server.Players.Magic)
 local FallenStars = require(Server.Players.FallenStars)
 local Mobs = require(Server.Mobs.Mobs)
 local Weapons = require(Server.Weapons)
+local Turrets = require(Server.Turrets.Turrets)
 local Eating = require(Server.Players.Eating)
 local UseState = require(Server.Players.UseState)
 local Survival = require(Server.Apocalypse.Survival)
@@ -213,6 +216,8 @@ local function startWorld(settings: WorldSettings.Settings)
 		Transmitters.blockChanged(x, y, z, old, new)
 		-- Machines come and go, and energy networks are worked out again around them.
 		Machines.blockChanged(x, y, z, old, new)
+		-- A turret gone is forgotten by the turrets' simulation.
+		Turrets.blockChanged(x, y, z, old, new)
 		-- Structure blocks and jigsaws keep their settings while they stand.
 		StructureBlocks.blockChanged(x, y, z, old, new)
 		-- Zombies' damage on a block replaced starts over.
@@ -260,6 +265,7 @@ local function startWorld(settings: WorldSettings.Settings)
 		chunksSent = function(player: Player, coords: { { number } })
 			Transmitters.sendChunks(player, coords)
 			Machines.sendChunks(player, coords)
+			Turrets.sendChunks(player, coords)
 			StructureBlocks.sendChunks(player, coords)
 		end,
 		operator = StructureBlocks.operator,
@@ -295,6 +301,9 @@ local function startWorld(settings: WorldSettings.Settings)
 	Mobs.start(net, world)
 	-- Firearms after mobs (their targets and damage) and inventories (the rounds fired).
 	Weapons.start(net, world)
+	-- Turrets after the machines (their ticks ask it), mobs (their targets) and weapons (their
+	-- shots): its simulation goes to the machines from here (Machines.setTurretService).
+	Turrets.start(net, world)
 	-- Other players' poses to those who may see them (Players/PlayerRelay; with
 	-- Config.Players.ServerPositions only).
 	PlayerRelay.start(net)
@@ -389,6 +398,8 @@ local function startWorld(settings: WorldSettings.Settings)
 		-- The pipes after the edits: a client knows a transmitter's block before its state.
 		Transmitters.update(dt)
 		Machines.update(dt)
+		-- (The turrets' shots and records, after the machine ticks that ran them.)
+		Turrets.update(dt)
 		-- (Rooms' air and the snow's heat melt after the machines, whose heat they read.)
 		RoomWorld.step(dt)
 		SnowWorld.step(dt)

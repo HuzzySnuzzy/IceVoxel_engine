@@ -148,6 +148,33 @@ function TransmitterWorld.network(world: World, x: number, y: number, z: number)
 end
 
 --[[
+	The feeder rule (Shared/Turrets.rpm, server Turrets/): the best tier (1..4) among the Logistical
+	Transporters next to the inventory `block` at (x, y, z) that feed it, 0 when none does. One
+	feeds it when its side towards the block is joined to it and gives items (NORMAL or PUSH:
+	Transmitters.outputs) and the block takes items through that face (its insert slots there: a
+	turret's ammo, never through its top). The Restrictive Transporter counts as Basic.
+]]
+function TransmitterWorld.feedTier(world: World, x: number, y: number, z: number, block: number): number
+	local best = 0
+	for side = 0, 5 do
+		local dx, dy, dz = Transmitters.offset(side)
+		local node = TransmitterWorld.node(world, x + dx, y + dy, z + dz)
+		local back = Transmitters.opposite(side)
+		if
+			node
+			and node.kind == "item"
+			and has(node.acceptors, back)
+			and Transmitters.outputs(Transmitters.modeOf(node.modes, back))
+			and #Transmitters.insertSlots(block, side) > 0
+		then
+			local tier = if Transmitters.isRestrictive(node.block) then 1 else Transmitters.tierOf(node.block) or 1
+			best = math.max(best, tier)
+		end
+	end
+	return best
+end
+
+--[[
 	The block at (x, y, z) as the connection rule should see it: transmitters and tanks are only
 	what this world knows of (a transmitter the world holds but no node stands for is nothing),
 	anything else comes from Env.getBlock (nil: unknown, joins nothing).

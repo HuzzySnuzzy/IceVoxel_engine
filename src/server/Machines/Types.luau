@@ -19,6 +19,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Machines = require(Shared.Machines)
 local Protocol = require(Shared.Net.Protocol)
 local InventoryTypes = require(Shared.Inventory.Types)
+local TurretTypes = require(Shared.Turrets.Types)
 
 local Containers = require(script.Parent.Parent.Players.Containers)
 local TransmitterTypes = require(script.Parent.Parent.Transmitters.Types)
@@ -84,6 +85,11 @@ export type Env = {
 	-- pulled by a pipe): Players/Inventories.resultsTaken credits them as smelted to the
 	-- player who last used its window (Progression), as if taken out by hand.
 	resultsTaken: ((x: number, y: number, z: number, container: Container, stack: InventoryTypes.Stack) -> ())?,
+	-- The turrets' simulation (Shared/Turrets/Types' Service), for the kinds' TickContext.turret:
+	-- asked once a step, so a service registered later (Machines.setTurretService, from server
+	-- Turrets/Turrets.start) reaches the next step; nil, or a getter giving nil: none (the
+	-- turrets show "Disabled").
+	turret: (() -> TurretTypes.Service?)?,
 }
 
 export type World = {

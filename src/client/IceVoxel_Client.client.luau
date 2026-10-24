@@ -47,7 +47,9 @@
 	                             (Shared/Weapons): Firearms (raising, firing, reloading, the aim
 	                             camera, poses and HUD), MeleeInput (light and heavy attacks,
 	                             guarding), and Rendering/ShotView (every shot near: flashes,
-	                             tracers, impacts, sounds), started after BlockInteraction
+	                             tracers, impacts, sounds), started after BlockInteraction;
+	                             then Rendering/TurretView (the turrets' guns turning as the
+	                             server's Turrets records say, their beams and servos)
 	  Entities/EntityRenderer    dropped items
 	  Entities/MobRenderer       mobs (cows, sheep, pigs, chickens and the apocalypse's zombies):
 	                             boxes gliding between the server's updates, hurt flashes,
@@ -161,6 +163,7 @@ local BlockInteraction = require(Client.Interaction.BlockInteraction)
 local Firearms = require(Client.Interaction.Firearms)
 local MeleeInput = require(Client.Interaction.MeleeInput)
 local ShotView = require(Client.Rendering.ShotView)
+local TurretView = require(Client.Rendering.TurretView)
 local ClientInventory = require(Client.Inventory.ClientInventory)
 local Screens = require(Client.Ui.Screens)
 local EntityRenderer = require(Client.Entities.EntityRenderer)
@@ -511,6 +514,7 @@ BlockInteraction.start(world)
 Firearms.start(world)
 MeleeInput.start()
 ShotView.start(world)
+TurretView.start(world)
 GameModeSwitcher.start()
 DebugOverlay.start(streamer)
 Waila.start(world, generator)

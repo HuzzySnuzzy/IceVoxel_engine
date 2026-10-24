@@ -8,12 +8,26 @@
 	Pulling (LogisticalTransporterBase.onUpdateServer). A transporter with PULL sides on inventories
 	pulls through each of them, then waits PULL_DELAY (10) ticks; when nothing was there it looks
 	again after 3 ticks, and when items were there but could go nowhere it backs off
-	min(40, e^failures) ticks. A pull is Mekanism's TransitRequest: the item types the inventory
-	gives through its face towards the transporter (Transmitters.available: a chest's anything, a
-	furnace's or machine's results only, never its input or fuel), in order; the first type with
-	a destination sends up to the tier's pull amount (1 / 16 / 32 / 64, never more than a stack)
-	or as many as the destination takes. The destination is found before anything is taken, so
-	items are never pulled with nowhere to go. A pulled item takes the transporter's colour.
+	min(40, e^failures) ticks, unless the demand rule says to wait (below). A pull is Mekanism's
+	TransitRequest: the item types the inventory gives through its face towards the transporter
+	(Transmitters.available: a chest's anything, a furnace's or machine's results only, never its
+	input or fuel), in order; the first type with a destination sends up to the tier's pull amount
+	(1 / 16 / 32 / 64, never more than a stack) or as many as the destination takes. The
+	destination is found before anything is taken, so items are never pulled with nowhere to go. A
+	pulled item takes the transporter's colour.
+
+	The demand rule (Shared/Turrets: a turret holds a few rounds, so a full one is full most of
+	the time). When items were there but nothing took them, and a destination the pull could reach
+	(on a NORMAL or PUSH side, not the inventory pulled from) is a machine that demands them
+	(Machines.demands: KindSpec `demand`, a turret) whose slots through that face would take one
+	were they empty (Transmitters.room over no slots), the pull "waits": it looks again after 3
+	ticks (IDLE_DELAY) instead of backing off, its failures left as they were. So a line sends the
+	next round as soon as the turret has room (with rounds on their way counted, as always), and a
+	turret fed through one transporter of its tier or better holds its full rate (tests/spec/
+	TurretFeed). The pull's result ranks sent, then waiting, then failed, then nothing. Lines into
+	chests, furnaces and every other machine are exactly as before; with Config.Turrets.Enabled
+	false no machine demands anything. The cost: an idle, full turret's line searches its route
+	every 3 ticks, inside SEARCH_BUDGET.
 
 	Ejected items (Mekanism's ejector: TileComponentEjector into canReceiveFrom sides). A furnace
 	or a machine with output slots (Transmitters.ejects) pushes its results out on its own into
@@ -66,6 +80,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local Protocol = require(Shared.Net.Protocol)
 local Transmitters = require(Shared.Transmitters)
 
@@ -592,10 +607,30 @@ local function isResult(results: { Stack }, item: number): boolean
 end
 
 --[[
-	One pull of `node` through `side` (Mekanism's TransitRequest): "sent", "failed" (items there,
-	nowhere to send them) or "none" (nothing to take). `routes` gives the route search, which is
-	the same for every side of the transporter (it is only run when needed). `ejected`: a NORMAL
-	side taking what a furnace or machine pushes out (its output slots only), else a PULL side.
+	The demand rule (see the header): would a machine that demands it (Machines.demands), reached
+	through one of `candidates` on a side that gives items (not `skip`, where it came from), take
+	some of `stack` were its slots empty? Then the pull waits for it instead of failing.
+]]
+local function demanded(world: World, candidates: { Candidate }, stack: Stack, skip: number): boolean
+	for _, candidate in candidates do
+		local inventory = candidate.inventory
+		if candidate.outputs and inventory ~= skip then
+			local block = inventoryAt(world, inventory)
+			if block and Machines.demands(block) and Transmitters.room(block, candidate.face, EMPTY, stack) >= 1 then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--[[
+	One pull of `node` through `side` (Mekanism's TransitRequest): "sent", "waiting" (items there,
+	nowhere to send them now, but a machine that demands them will have room: the demand rule),
+	"failed" (items there, nowhere to send them) or "none" (nothing to take). `routes` gives the
+	route search, which is the same for every side of the transporter (it is only run when
+	needed). `ejected`: a NORMAL side taking what a furnace or machine pushes out (its output
+	slots only), else a PULL side.
 ]]
 local function pullSide(
 	world: World,
@@ -672,6 +707,13 @@ local function pullSide(
 			end
 		end
 	end
+	-- (The demand rule: a turret that will have room for them.)
+	for _, kind in types do
+		local most = if ejects then math.min(Items.maxStack(kind.item), Items.MAX_STACK) else pull
+		if demanded(world, candidates, Items.withCount(kind, math.min(kind.count, most)) :: Stack, inventory) then
+			return "waiting"
+		end
+	end
 	return "failed"
 end
 
@@ -685,7 +727,7 @@ local function pull(world: World, node: Node)
 		-- (The tick's searches are used up: it stays due and pulls on a later tick.)
 		return
 	end
-	local sent, failed = false, false
+	local sent, waiting, failed = false, false, false
 	local candidates: { Candidate }? = nil
 	local back: { [number]: number }? = nil
 	local function routes(): ({ Candidate }, { [number]: number })
@@ -702,6 +744,8 @@ local function pull(world: World, node: Node)
 			local result = pullSide(world, node, side, routes, mode ~= PULL)
 			if result == "sent" then
 				sent = true
+			elseif result == "waiting" then
+				waiting = true
 			elseif result == "failed" then
 				failed = true
 			end
@@ -710,10 +754,12 @@ local function pull(world: World, node: Node)
 	if sent then
 		node.pullFailures = 0
 		node.pullDelay = PULL_DELAY - 1
-	elseif failed then
+	elseif failed and not waiting then
 		node.pullFailures += 1
 		node.pullDelay = math.min(MAX_BACKOFF, math.floor(math.exp(node.pullFailures))) - 1
 	else
+		-- (Nothing to take, or the demand rule's wait: look again soon, the failures in a row as
+		-- they were.)
 		node.pullDelay = IDLE_DELAY - 1
 	end
 end

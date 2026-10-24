@@ -14,7 +14,8 @@
 	            into energy networks (EnergyNet), worked out again where links change.
 
 	Each `step` (20 a second, Shared/Machines' order): queued network work, then every machine's
-	kind tick (Machines.tick: its own work, energy kept within its capacity), then the energy
+	kind tick (Machines.tick: its own work, energy kept within its capacity; the kinds' context
+	carries the turrets' simulation, Env `turret`, asked once a step), then the energy
 	networks move energy (EnergyNet.solve). A kind whose tick errors is reported once and skipped.
 	Every Eject.INTERVAL (10) ticks a machine with output slots also pushes its results into the
 	chests next to it after its tick (Transmitters/Eject, Mekanism's ejector; the transporters
@@ -114,6 +115,7 @@ function MachineWorld.new(env: Env): World
 			sky = nil,
 			climate = env.climate,
 			near = env.near,
+			turret = nil,
 		},
 	}
 	world.ctx.sky = function(x: number, y: number, z: number): boolean
@@ -441,6 +443,9 @@ function MachineWorld.step(world: World)
 	local dayTime = world.env.dayTime
 	ctx.tick = world.tick
 	ctx.dayTime = if dayTime then dayTime() else NOON
+	-- (The turrets' simulation as registered now: Env `turret`.)
+	local turret = world.env.turret
+	ctx.turret = if turret then turret() else nil
 	local eject = world.tick % Eject.INTERVAL == 0
 	local pipes = world.env.transmitters
 	for _, machine in world.machines do

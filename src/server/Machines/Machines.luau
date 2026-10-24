@@ -31,6 +31,13 @@
 	            within RECORD_RANGE blocks (sideways) of their feet (Players/PlayerPositions), as
 	            Tanks records do.
 
+	Turrets    a turret's machine tick asks the turrets' simulation (Shared/Turrets/Types'
+	           Service: server Turrets/TurretWorld), which server Turrets/Turrets hands over with
+	           `setTurretService` when it starts (after the mobs and weapons it needs). This module
+	           never requires the turrets (Players/ToughAsNails requires this, and Mobs requires
+	           ToughAsNails): until a service is set, turrets show "Disabled". `knownBlock` is the
+	           blocks the machines read, for the turrets' simulation too.
+
 	Nothing is saved: machines' energy and contents last for the session, like chests.
 ]]
 
@@ -42,6 +49,7 @@ local ChunkLayout = require(Shared.World.ChunkLayout)
 local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
 local Protocol = require(Shared.Net.Protocol)
+local TurretTypes = require(Shared.Turrets.Types)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local EditRules = require(script.Parent.Parent.Network.EditRules)
@@ -78,12 +86,33 @@ local Machines = {}
 local state: MachineWorld.World? = nil
 local net: Net? = nil
 local started = false
+-- The turrets' simulation (`setTurretService`) and the blocks as the machines read them (`start`).
+local turretService: TurretTypes.Service? = nil
+local knownBlocks: ((x: number, y: number, z: number) -> number?)? = nil
 -- Each player's last known feet (blocks: x, y, z).
 local lastFeet: { [Player]: { number } } = {}
 
 -- The simulation (nil before `start`).
 function Machines.world(): MachineWorld.World?
 	return state
+end
+
+--[[
+	Hands the turrets' simulation to every turret's machine tick (TickContext `turret`, from the
+	next step on); nil takes it back (turrets show "Disabled"). Server Turrets/Turrets calls it.
+]]
+function Machines.setTurretService(service: TurretTypes.Service?)
+	turretService = service
+end
+
+--[[
+	The block at (x, y, z) as the machines read it (the loaded chunk, else its edit list; nil for
+	an unloaded, unedited cell, which is generated terrain); never generates terrain. nil before
+	`start`.
+]]
+function Machines.knownBlock(x: number, y: number, z: number): number?
+	local read = knownBlocks
+	return if read then read(x, y, z) else nil
 end
 
 -- For WorldServer.onChanged: block (x, y, z) changed from `old` to `new`.
@@ -182,6 +211,7 @@ function Machines.start(serverNet: Net, world: WorldServer.World)
 		local edits = world:chunkEdits(cx, cz)
 		return if edits then edits[ChunkLayout.localIndex(lx, y, lz)] else nil
 	end
+	knownBlocks = knownBlock
 
 	-- Whether a cell sees the sky (solar panels): the chunk if the server has it, else its edits
 	-- over the generator's ground height; MachineWorld caches it.
@@ -201,6 +231,10 @@ function Machines.start(serverNet: Net, world: WorldServer.World)
 		-- TickContext.climate and near.)
 		climate = RoomWorld.climateAt,
 		near = RoomWorld.playerNear,
+		-- (The turrets' simulation once server Turrets/Turrets registered it.)
+		turret = function(): TurretTypes.Service?
+			return turretService
+		end,
 	})
 	state = simulation
 	-- A machine's energy stays in its item (Mekanism's sustained data).
