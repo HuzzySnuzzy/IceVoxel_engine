@@ -99,6 +99,28 @@ return function(t, shared, require)
 		t.eq(Blocks.get(Blocks.id.Chest).container, 27)
 	end)
 
+	t.test("items: packed and blue ice drop themselves with a pickaxe (Silk Touch's stand-in)", function()
+		-- Minecraft gives them only to Silk Touch, which the game has not: a pickaxe stands in, so
+		-- the Air Conditioner's packed ice and nine of it, blue ice, can be had. Ice gives nothing.
+		for _, name in { "PackedIce", "BlueIce" } do
+			local block = Blocks.id[name]
+			t.eq(Items.drops(block), nil, `{name} by hand: nothing`)
+			t.eq(Items.drops(block, Items.id.WoodenShovel), nil, `{name}: not with a shovel`)
+			t.eq(Items.drops(block, Items.id.Shears), nil, `{name}: nor Shears`)
+			for _, pickaxe in { "WoodenPickaxe", "GoldenPickaxe", "DiamondPickaxe" } do
+				local drop = Items.drops(block, Items.id[pickaxe])
+				t.ok(drop ~= nil and drop.item == Items.id[name] and drop.count == 1, `{name} with a {pickaxe}`)
+			end
+		end
+		t.eq(Items.drops(Blocks.id.Ice, Items.id.DiamondPickaxe), nil, "ice: nothing, pickaxe or not")
+		-- Minecraft's times with a pickaxe (hardness 0.5 and 2.8, a wooden pickaxe's speed 2); by
+		-- hand slower than Minecraft's (/ 100: the pickaxe is what drops them, BlockList `toolLevel`).
+		t.eq(Mining.ticks(Blocks.id.PackedIce, true, false, Items.id.WoodenPickaxe), 8)
+		t.eq(Mining.ticks(Blocks.id.BlueIce, true, false, Items.id.WoodenPickaxe), 42)
+		t.eq(Mining.ticks(Blocks.id.PackedIce), 50, "by hand 2.5 s")
+		t.eq(Mining.ticks(Blocks.id.Ice), 15, "ice by hand: Minecraft's 0.75 s")
+	end)
+
 	t.test("items: search matches names and display names in any case", function()
 		-- (Trimmed, any case; what it finds by name, not a count, so a new oak log leaves it alone.)
 		local oak = false

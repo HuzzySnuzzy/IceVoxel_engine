@@ -4,7 +4,9 @@
 	bricks and their cracked form, smooth stone, the polished stones, cut and smooth sandstone, and
 	blue ice (nine packed ice).
 
-	  * Blue ice chills a player near it (`cools`, Tough As Nails).
+	  * Blue ice drops itself with a pickaxe, as packed ice does (blocks/terrain: the stand-in for
+	    Minecraft's Silk Touch, `toolLevel` 0: by hand 14 s and nothing, Minecraft's 4.2 s), and
+	    chills a player near it (`cools`, Tough As Nails).
 	  * knowledge: smelting glass or smooth stone gives Minecraft's furnace experience, 0.1.
 	  * blastResistance: Minecraft 1.20.1's where it differs from the hardness (the stone family
 	    and bricks 6: a TNT blast barely scratches them); the rest keep their hardness.
@@ -143,9 +145,10 @@ return {
 		friction = 0.989,
 		hardness = 2.8,
 		tool = "pickaxe",
-		drops = false,
+		-- (A pickaxe for Silk Touch: see the header.)
+		toolLevel = 0,
 		texture = { All = "blue ice" },
-		lore = "The slipperiest ice there is.",
+		lore = "The slipperiest ice there is. Mine it with a pickaxe to keep it.",
 		cools = true,
 	},
 } :: { BlockSpec }

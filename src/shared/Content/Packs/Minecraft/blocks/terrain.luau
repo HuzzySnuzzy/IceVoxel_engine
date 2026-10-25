@@ -15,6 +15,11 @@
 	    pickaxe gets it (9.4 s; by hand 250 s and nothing), drops itself.
 	  * Gravel gives Flint one time in 10 in place of itself (its `loot`: Minecraft's gravel loot
 	    table without Fortune), broken by a player or a blast.
+	  * Ice, packed ice (and blocks/building's blue ice) need Silk Touch in Minecraft, which the
+	    game has not: ice gives nothing, and packed ice drops itself with a pickaxe, the stand-in
+	    for Silk Touch (`toolLevel` 0: by hand it mines 3.3 times slower, 2.5 s where Minecraft's
+	    takes 0.75, and gives nothing; any pickaxe takes Minecraft's time), so it and what is made
+	    of it (blue ice, the Survival pack's Air Conditioner) can be had.
 	  * Tough As Nails: ice, packed ice and snow chill a player near them (`cools`), lava warms
 	    (`heats`: every level, and CaveLava).
 	  * knowledge: smelting cobblestone into stone gives Minecraft's furnace experience, 0.1.
@@ -184,10 +189,11 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			material = "Ice",
 			friction = 0.98,
 			hardness = 0.5,
-			drops = false,
 			tool = "pickaxe",
+			-- (A pickaxe for Silk Touch: see the header.)
+			toolLevel = 0,
 			texture = { All = "packed ice" },
-			lore = "Ice packed hard. Chills you when close.",
+			lore = "Ice packed hard. Mine it with a pickaxe to keep it. Chills you when close.",
 			cools = true,
 		},
 		{
