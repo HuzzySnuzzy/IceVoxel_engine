@@ -12,6 +12,9 @@
 	    here a coal or charcoal and a flint make two (the pack's recipes; the Ores pack's
 	    saltpetre and sulfur make it too), and five of them with four sand make TNT. A dark grey
 	    heap of grains with a few lighter specks, as Minecraft's icon.
+
+	Each carries its lore and a blank icon. Flint and Steel is the Iron Age's; Gunpowder the
+	Industrial Age's, and the Demolition skill's too (Progression/Skills), as TNT is.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -35,6 +38,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 2, 2.5, 0.4 }, offset = { -1, 1.5, 1.6 }, color = shade(FLINT, 1.9) },
 				{ size = { 1.5, 3, 0.4 }, offset = { 1.5, -2, 1.6 }, color = shade(FLINT, 0.7) },
 			},
+			icon = "",
+			lore = "Sharp stone from gravel. Makes Flint and Steel and gunpowder.",
 		},
 		{
 			name = "FlintAndSteel",
@@ -50,6 +55,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 5, 6, 2.5 }, offset = { 3, 3.5, 0 }, rotation = 25, color = FLINT, material = "Slate" },
 				{ size = { 1.8, 2.2, 0.4 }, offset = { 2.4, 4.4, 1.4 }, rotation = 25, color = shade(FLINT, 1.9) },
 			},
+			icon = "",
+			lore = "Sets fires and lights TNT.",
+			age = "iron",
 		},
 		{
 			name = "Gunpowder",
@@ -65,6 +73,10 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 1.5, 1.5, 0.4 }, offset = { 3.5, -4.5, 2.1 }, color = shade(GUNPOWDER, 0.6) },
 				{ size = { 1.5, 1.5, 0.4 }, offset = { -0.5, 2, 2.1 }, color = shade(GUNPOWDER, 0.6) },
 			},
+			icon = "",
+			lore = "Explosive powder. Makes TNT; brews Strength.",
+			age = "industrial",
+			skill = "demolition",
 		},
 	}
 end

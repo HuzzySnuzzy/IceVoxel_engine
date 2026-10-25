@@ -2,7 +2,8 @@
 --[[
 	Glow Dust: what glow lichen (2) and the Glow Block (4, which make a block again) drop, the
 	game's blue glowing dust in place of Minecraft's glowstone dust (and of redstone in Mekanism's
-	recipes): a small heap with bright specks. It was named "GlowstoneDust" (Items.RENAMED).
+	recipes): a small heap with bright specks. It was named "GlowstoneDust" (Items.RENAMED). Its
+	entry carries its lore and a blank icon.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -28,6 +29,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 1, 1, 0.5 }, offset = { -0.5, 2.5, 1.85 }, color = SPARK, material = "Neon" },
 				{ size = { 1, 1, 0.5 }, offset = { 3.5, -3.5, -2.1 }, color = SPARK, material = "Neon" },
 			},
+			icon = "",
+			lore = "Glowing powder for lights, cables, potions and mana.",
 		},
 	}
 end

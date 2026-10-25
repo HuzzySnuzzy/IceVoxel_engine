@@ -16,14 +16,17 @@
 	  ingot(colour), nugget(colour)   an ingot's bar and a nugget's cluster
 	  HELMET, CHESTPLATE, LEGGINGS, BOOTS   the armor pieces' shapes
 	  ARMOR_PIECES    each piece's name suffix, slot and model, head to feet
-	  armorSet(material)   a material's four pieces (ArmorMaterial: points, toughness, `tan`)
+	  armorSet(material)   a material's four pieces (ArmorMaterial: points, toughness, `tan`; what
+	                  every piece says of itself: equip sound, lore, Age, each one's icon)
 	  HANDLE, HANDLE_DARK   the tools' wooden handle and its darker grip
 	  handle(length, y)   a tool's handle box
 	  TOOL_SHAPES     the sword, shovel, pickaxe, axe and hoe, each a model of its head's colour
-	  toolSet(tier)   a tier's five tools (ToolTier: speed, level, durability, each shape's attack)
+	  toolSet(tier)   a tier's five tools (ToolTier: speed, level, durability, each shape's attack,
+	                  lore and icon; every tool's Age and fuel)
 	  GLASS, bottle(water?)   the Glass Bottle, with a band of its liquid
 	  BUCKET_IRON, bucket(top), filledBucket(colour, material)   Minecraft's bucket, empty or full
-	  potion(variant, colour)   a potion item (PotionList's variant) in its effect's colour
+	  potion(variant, colour, extra?)   a potion item (PotionList's variant) in its effect's
+	                  colour, `extra`'s fields (lore, icon, Age) put over it
 
 	Blocks (Define/Blocks: BlockList's generators)
 	  DIRECTIONS, OPPOSITE   the horizontal directions as offsets, and each one's opposite

@@ -8,7 +8,9 @@
 	edible, with a likely Thirst effect), Bones (zombies now and then, and the ruins' loot), String
 	(cobwebs, and the ruins' loot: four make White Wool). Pixel boxes like the other items: a ragged
 	hide, slabs of meat with their fat or bone, a drumstick, a quill, a knobbed bone and a looped
-	thread, as Minecraft's icons (the meat's are the pack's _models).
+	thread, as Minecraft's icons (the meat's are the pack's _models). Each carries its lore and a
+	blank icon; cooked meat gives 0.35 knowledge a piece out of a furnace (Minecraft's cooked food
+	experience).
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -46,24 +48,64 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 6, 1, 0.4 }, offset = { -0.5, 1.5, 0.8 }, rotation = 15, color = shade(LEATHER, 1.2) },
 				{ size = { 4, 1, 0.4 }, offset = { 1, -2.5, 0.8 }, rotation = -10, color = shade(LEATHER, 0.75) },
 			},
+			icon = "",
+			lore = "Cow hide for armor, an Aglet and the Tuxedo.",
 		},
-		{ name = "RawBeef", color = RAW_BEEF, model = slab(RAW_BEEF, FAT, false) },
+		{ name = "RawBeef", color = RAW_BEEF, model = slab(RAW_BEEF, FAT, false), icon = "", lore = "Better cooked." },
 		{
 			name = "CookedBeef",
 			displayName = "Steak",
 			color = STEAK,
 			model = slab(STEAK, { 176, 136, 92 }, false),
+			icon = "",
+			lore = "A hearty meal.",
+			knowledge = { smelt = 0.35 },
 		},
-		{ name = "RawMutton", color = RAW_MUTTON, model = slab(RAW_MUTTON, FAT, true) },
-		{ name = "CookedMutton", color = COOKED_MUTTON, model = slab(COOKED_MUTTON, { 186, 140, 96 }, true) },
-		{ name = "RawPorkchop", color = RAW_PORKCHOP, model = slab(RAW_PORKCHOP, FAT, false) },
+		{
+			name = "RawMutton",
+			color = RAW_MUTTON,
+			model = slab(RAW_MUTTON, FAT, true),
+			icon = "",
+			lore = "Better cooked.",
+		},
+		{
+			name = "CookedMutton",
+			color = COOKED_MUTTON,
+			model = slab(COOKED_MUTTON, { 186, 140, 96 }, true),
+			icon = "",
+			lore = "A filling meal.",
+			knowledge = { smelt = 0.35 },
+		},
+		{
+			name = "RawPorkchop",
+			color = RAW_PORKCHOP,
+			model = slab(RAW_PORKCHOP, FAT, false),
+			icon = "",
+			lore = "Better cooked.",
+		},
 		{
 			name = "CookedPorkchop",
 			color = COOKED_PORKCHOP,
 			model = slab(COOKED_PORKCHOP, { 232, 200, 150 }, false),
+			icon = "",
+			lore = "A hearty meal.",
+			knowledge = { smelt = 0.35 },
 		},
-		{ name = "RawChicken", color = RAW_CHICKEN, model = drumstick(RAW_CHICKEN) },
-		{ name = "CookedChicken", color = COOKED_CHICKEN, model = drumstick(COOKED_CHICKEN) },
+		{
+			name = "RawChicken",
+			color = RAW_CHICKEN,
+			model = drumstick(RAW_CHICKEN),
+			icon = "",
+			lore = "Eating it raw is a gamble. Cook it first.",
+		},
+		{
+			name = "CookedChicken",
+			color = COOKED_CHICKEN,
+			model = drumstick(COOKED_CHICKEN),
+			icon = "",
+			lore = "A filling meal.",
+			knowledge = { smelt = 0.35 },
+		},
 		{
 			name = "Feather",
 			color = FEATHER,
@@ -74,6 +116,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 2.5, 10, 1 }, offset = { 1.4, 2.5, 0 }, color = shade(FEATHER, 0.88) },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "From chickens. Three go into the Anklet of the Wind.",
 		},
 		{
 			name = "RottenFlesh",
@@ -85,6 +129,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 3, 1.5, 0.4 }, offset = { -1, 1.5, 1.6 }, color = { 156, 74, 60 } },
 				{ size = { 2, 2, 0.4 }, offset = { 2, -2, 1.6 }, color = { 82, 96, 40 } },
 			},
+			icon = "",
+			lore = "Zombie meat. Eat it only if you must.",
 		},
 		{
 			name = "Bone",
@@ -98,6 +144,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 0.6, 11, 2.1 }, offset = { 0.6, 0, 0 }, color = shade(BONE, 0.85) },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "Old bones. Zombies drop them now and then; ruins hide more.",
 		},
 		{
 			name = "String",
@@ -110,6 +158,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 7, 0.8, 0.8 }, offset = { -0.5, -3.5, 0 }, rotation = 12 },
 				{ size = { 0.8, 5, 0.8 }, offset = { -4, -5.5, 0 }, rotation = 30 },
 			},
+			icon = "",
+			lore = "From cobwebs. Makes wool, rope and the Tuxedo.",
 		},
 	}
 end

@@ -142,6 +142,37 @@ return function(t, shared, require)
 		t.eq(names(armor), "TinHelmet TinChestplate TinLeggings TinBoots")
 		t.eq(armor[3].armor.defense, 3)
 		t.eq(armor[4].armor.slot, "Feet")
+		t.eq(armor[1].equipSound, nil, "a material naming nothing more gives its pieces nothing more")
+		t.eq(armor[1].lore, nil)
+		t.eq(armor[1].icon, nil)
+		-- What every piece says of itself, named once by the material; icons piece by piece.
+		local dressed = Define.armorSet({
+			name = "Tin",
+			color = { 1, 1, 1 },
+			material = "Metal",
+			points = { 1, 2, 3, 4 },
+			toughness = 1,
+			equipSound = "item.armor.equip_iron",
+			lore = "Tin plate.",
+			age = "iron",
+			icons = { Helmet = "", Boots = "rbxassetid://1" },
+		})
+		for _, piece in dressed do
+			t.eq(piece.equipSound, "item.armor.equip_iron", `{piece.name}'s equip sound`)
+			t.eq(piece.lore, "Tin plate.")
+			t.eq(piece.age, "iron")
+		end
+		t.eq(dressed[1].icon, "", "the helmet's icon")
+		t.eq(dressed[2].icon, nil, "a piece the icons leave out")
+		t.eq(dressed[4].icon, "rbxassetid://1")
+		t.ok(not pcall(Define.armorSet, {
+			name = "Tin",
+			color = { 1, 1, 1 },
+			material = "Metal",
+			points = { 1, 2, 3, 4 },
+			toughness = 1,
+			icons = { Helmett = "" },
+		}), "an icon for no piece")
 		local tools = Define.toolSet({
 			name = "Tin",
 			speed = 3,
@@ -154,14 +185,53 @@ return function(t, shared, require)
 		t.eq(names(tools), "TinSword TinShovel TinPickaxe TinAxe TinHoe")
 		t.eq(tools[4].tool.kind, "axe")
 		t.eq(tools[4].attack.damage, 7)
+		t.eq(tools[1].lore, nil, "a tier naming nothing more gives its tools nothing more")
+		t.eq(tools[1].fuel, nil)
+		-- Lore and icons by shape, as `attack`; the Age and fuel of every tool.
+		local tier = {
+			name = "Tin",
+			speed = 3,
+			level = 1,
+			durability = 99,
+			color = { 1, 1, 1 },
+			material = "Metal",
+			attack = { Sword = { 4, 1.6 }, Shovel = { 2, 1 }, Pickaxe = { 2, 1 }, Axe = { 7, 1 }, Hoe = { 1, 1 } },
+			lore = { Sword = "A tin blade.", Hoe = "A tin hoe." },
+			icons = { Sword = "", Shovel = "", Pickaxe = "", Axe = "", Hoe = "" },
+			age = "iron",
+			fuel = 50,
+		}
+		local named = Define.toolSet(tier)
+		t.eq(named[1].lore, "A tin blade.")
+		t.eq(named[5].lore, "A tin hoe.")
+		t.eq(named[2].lore, nil, "a shape the lore leaves out")
+		for _, tool in named do
+			t.eq(tool.icon, "", `{tool.name}'s icon`)
+			t.eq(tool.age, "iron")
+			t.eq(tool.fuel, 50)
+		end
+		tier.lore = { Pickax = "?" }
+		t.ok(not pcall(Define.toolSet, tier), "a line for no shape")
 		local potion = Define.potion({ item = "PotionOfTest", displayName = "Potion of Test" }, { 9, 9, 9 })
 		t.eq(potion.maxStack, 1)
 		t.eq(potion.model[#potion.model].color[1], 9, "the bottle's liquid in the effect's colour")
+		t.eq(potion.lore, nil)
+		local brewed = Define.potion(
+			{ item = "PotionOfTest", displayName = "Potion of Test" },
+			{ 9, 9, 9 },
+			{ lore = "Brewed for a test.", icon = "", age = "iron" }
+		)
+		t.eq(brewed.lore, "Brewed for a test.", "`extra`'s fields put over it")
+		t.eq(brewed.icon, "")
+		t.eq(brewed.age, "iron")
+		t.eq(brewed.maxStack, 1, "and the potion's own kept")
 		t.eq(#Define.bottle(nil) + 1, #Define.bottle({ 1, 2, 3 }), "a filled bottle shows its liquid")
 		t.eq(#Define.filledBucket({ 1, 2, 3 }, "Glass"), #Define.bucket({}) + 2)
 		valid("items", armor)
+		valid("items", dressed)
 		valid("items", tools)
-		valid("items", { potion })
+		valid("items", named)
+		valid("items", { potion, brewed })
 	end)
 
 	t.test("define: every helper its header lists is there", function()

@@ -102,20 +102,9 @@ Knowledge.LOG = 0.25
 -- (The new ores' are on their entries: Minecraft's copper ingot gives 0.7, lead and zinc as it,
 -- uranium as gold, the powders 0.1.)
 Knowledge.SMELTED = merged({
-	IronIngot = 0.7,
-	GoldIngot = 1,
-	Diamond = 1,
-	Emerald = 1,
-	Coal = 0.1,
-	Charcoal = 0.15,
 	Glass = 0.1,
 	Stone = 0.1,
 	SmoothStone = 0.1,
-	-- (The mobs' meat: Minecraft's cooked food gives 0.35.)
-	CookedBeef = 0.35,
-	CookedMutton = 0.35,
-	CookedPorkchop = 0.35,
-	CookedChicken = 0.35,
 }, "smelt", "Knowledge.SMELTED")
 Knowledge.SMELT_DEFAULT = 0.1
 

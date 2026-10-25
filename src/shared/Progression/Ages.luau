@@ -86,39 +86,17 @@ export type Age = {
 }
 
 local Content = require(script.Parent.Parent.Content)
-local PotionList = require(script.Parent.Parent.Effects.PotionList)
 local Config = require(script.Parent.Parent.Config)
 
 -- (The side lists: what each Age opens, by name, for the entries that name no `age` yet.)
 
-local TOOLS = { "Pickaxe", "Axe", "Shovel", "Hoe", "Sword" }
-local ARMOR = { "Helmet", "Chestplate", "Leggings", "Boots" }
-
--- Names `prefix` .. each of `pieces`, added to `list`.
-local function each(list: { string }, prefix: string, pieces: { string }): { string }
-	for _, piece in pieces do
-		table.insert(list, prefix .. piece)
-	end
-	return list
-end
-
 local iron: { string } = {}
-each(iron, "Iron", TOOLS)
-each(iron, "Iron", ARMOR)
-each(iron, "Golden", TOOLS)
-each(iron, "Gold", ARMOR)
 for _, name in
 	{
 		"IronBlock",
 		"RawIronBlock",
-		"IronNugget",
-		"GoldIngot",
-		"GoldNugget",
 		"GoldBlock",
 		"RawGoldBlock",
-		"Shears",
-		"Bucket",
-		"FlintAndSteel",
 		"Lantern",
 		"Canteen",
 		"Thermometer",
@@ -152,20 +130,12 @@ for _, name in
 do
 	table.insert(iron, name)
 end
--- (Potions: the base variant the Iron Age's, its strong and long ones the Industrial Age's.)
-local potions: { string } = {}
-for _, variant in PotionList.all() do
-	table.insert(if variant.from == PotionList.BASE then iron else potions, variant.item)
-end
 
 local industrial: { string } = {}
-each(industrial, "Diamond", TOOLS)
-each(industrial, "Diamond", ARMOR)
 for _, name in
 	{
 		"DiamondBlock",
 		"EmeraldBlock",
-		"Gunpowder",
 		"Tnt",
 		-- (And uranium smelting, on its ingot's entry: a smelting result is never of an Age after
 		-- the transporters', which feed furnaces with no window and so no gate.)
@@ -177,9 +147,6 @@ for _, name in
 		"OilHeater",
 	}
 do
-	table.insert(industrial, name)
-end
-for _, name in potions do
 	table.insert(industrial, name)
 end
 

@@ -175,7 +175,7 @@ local SPECS: { Spec } = {
 		age = "industrial",
 		requires = { "prospector" },
 		perk = NONE,
-		recipes = { "Gunpowder", "Tnt" },
+		recipes = { "Tnt" },
 	},
 	{
 		id = "scholar",

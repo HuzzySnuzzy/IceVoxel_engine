@@ -151,6 +151,100 @@ return function(t, shared, require, _server, _client)
 		t.eq(smelts, 2, "the ore and the raw lump smelt")
 	end)
 
+	t.test(
+		"content: the Minecraft pack's items carry their own fields, and the side tables no longer name them",
+		function()
+			local content = Content.default
+			local LoreList = require(shared.Items.LoreList)
+			local TexturePack = require(shared.TexturePack)
+			local Ages = require(shared.Progression.Ages)
+			local Skills = require(shared.Progression.Skills)
+			local Knowledge = require(shared.Progression.Knowledge)
+			local Recipes = require(shared.Crafting.Recipes)
+			local Sounds = require(shared.Sounds)
+			local SoundList = require(shared.Sounds.SoundList)
+			local PotionList = require(shared.Effects.PotionList)
+			local function item(name: string): any
+				return content.item(name)
+			end
+			-- Every item of the pack: its lore line and its icon (blank until made) on its entry.
+			local seen = 0
+			for _, spec in content.items do
+				if string.find(content.where("item", spec.name), "pack Minecraft", 1, true) then
+					seen += 1
+					t.ok(type(spec.lore) == "string" and LoreList[spec.name] == spec.lore, `{spec.name}'s lore`)
+					t.eq(spec.icon, "", `{spec.name}'s icon on its entry`)
+					t.eq(TexturePack.Icons[spec.name], "", `{spec.name}: TexturePack.Icons`)
+				end
+			end
+			t.ok(seen > 0, "the pack has items")
+			-- The armor sets: each material's equip sound, lore and Age on all four pieces.
+			local iron = Ages.byId("iron") :: any
+			local industrial = Ages.byId("industrial") :: any
+			for name, sound in
+				{ LeatherBoots = "leather", ChainmailHelmet = "chain", IronHelmet = "iron", GoldLeggings = "gold" }
+			do
+				t.eq(item(name).equipSound, `item.armor.equip_{sound}`, `{name}'s equipSound`)
+				t.eq(Sounds.armorEquip(Items.id[name]), Sounds.id[`item.armor.equip_{sound}`], `{name} sounds its own`)
+			end
+			t.eq(item("DiamondChestplate").age, "industrial")
+			t.eq(Ages.ofName("GoldBoots"), iron.index, "gold armor: the Iron Age")
+			t.eq(item("LeatherHelmet").age, nil, "leather: the first Age")
+			t.eq(item("IronBoots").lore, "Solid iron protection.")
+			-- The tool sets: each tool's lore, the tier's Age and the wooden ones' fuel.
+			t.eq(item("WoodenPickaxe").fuel, 200)
+			t.eq(Recipes.fuel.WoodenSword, 200, "-> Recipes.fuel")
+			t.eq(item("StonePickaxe").fuel, nil, "only wood burns")
+			t.eq(Ages.ofName("GoldenHoe"), iron.index)
+			t.eq(Ages.ofName("DiamondAxe"), industrial.index)
+			t.eq(item("IronPickaxe").lore, "Mines gold, diamond, emerald and uranium ore.", "a tool's own line")
+			-- Hand-written entries: fuel, knowledge, Age and skill.
+			t.eq(item("Coal").fuel, 1600)
+			t.eq(Recipes.fuel.Stick, 100)
+			t.eq(Knowledge.SMELTED.IronIngot, 0.7, "knowledge.smelt -> Knowledge.SMELTED")
+			t.eq(Knowledge.SMELTED.CookedChicken, 0.35)
+			t.eq(item("Gunpowder").skill, "demolition")
+			t.eq((Skills.ofName("Gunpowder") :: any).id, "demolition", "-> the skill's recipes")
+			t.eq(Ages.ofName("Gunpowder"), industrial.index)
+			t.eq(Ages.ofName("Shears"), iron.index)
+			-- Potions: a base potion the Iron Age's, its strong and long variants the Industrial Age's.
+			for _, variant in PotionList.all() do
+				local age = if variant.from == PotionList.BASE then iron else industrial
+				t.eq(Ages.ofName(variant.item), age.index, `{variant.item}'s Age`)
+				t.ok(type(item(variant.item).lore) == "string", `{variant.item}'s lore`)
+			end
+			t.eq(item("LongPotionOfSwiftness").lore, "Brewed longer with coal. Run faster.")
+			-- (SoundList.ARMOR keeps only other packs' prefixes.)
+			for _, row in SoundList.ARMOR do
+				for _, material in { "Leather", "Chainmail", "Iron", "Gold", "Diamond" } do
+					t.ok(row.prefix ~= material, `SoundList.ARMOR no longer names {material}`)
+				end
+			end
+		end
+	)
+
+	t.test("content: a potion PotionList makes needs its line in the Minecraft pack, and a line its potion", function()
+		-- (A fresh game, PotionList edited before the packs load.)
+		local function loading(edit: (list: { any }) -> ()): string
+			local env, root = fresh()
+			edit(env.require(root.Effects.PotionList).list)
+			local ok, err = pcall(env.require, root.Content)
+			return if ok then "(it loaded)" else tostring(err)
+		end
+		local added = loading(function(list)
+			table.insert(list, { name = "Testing", ingredient = "Stick", effect = "Speed", seconds = 10 })
+		end)
+		t.ok(has(added, { "PotionOfTesting has no lore line and icon in the Minecraft pack's items/potions" }), added)
+		local removed = loading(function(list)
+			table.remove(list)
+		end)
+		-- (Resistance's two lines are left: either one may be named first.)
+		t.ok(
+			has(removed, { "items/potions has a line for", "PotionOfResistance, which PotionList makes no potion of" }),
+			removed
+		)
+	end)
+
 	--[[ Discovery, order, ids, overrides, tags (the fixture packs) ]]
 
 	t.test("content: Luau and JSON packs are found, sorted by order then name; ids by place", function()
@@ -905,8 +999,10 @@ return function(t, shared, require, _server, _client)
 		clash({ items = { { name = "HermesBoots", override = true, icon = "" } } }, { "TexturePack" }, {
 			"TexturePack: pack Terraria (patched by Clash), item HermesBoots has its icon both on its entry and in LEGACY_ICONS",
 		})
-		clash({ items = { { name = "Shears", override = true, age = "iron" } } }, { "Progression", "Ages" }, {
-			"Ages: pack Minecraft (patched by Clash), items/tools, item Shears names its Age, and the side lists name one for it too (iron)",
+		-- (The Canteen: an item the side lists still name. The Shears named their Age there until the
+		-- Minecraft pack's items took theirs onto their entries.)
+		clash({ items = { { name = "Canteen", override = true, age = "iron" } } }, { "Progression", "Ages" }, {
+			"Ages: pack Survival (patched by Clash), items/drinks, item Canteen names its Age, and the side lists name one for it too (iron)",
 		})
 		clash({ blocks = { { name = "Tnt", override = true, skill = "demolition" } } }, { "Progression", "Skills" }, {
 			"Skills: pack Minecraft (patched by Clash), blocks/fire, block Tnt names its skill, and demolition's recipes name it too",
@@ -955,11 +1051,13 @@ return function(t, shared, require, _server, _client)
 			{ "Sounds" },
 			{ `Sounds: {STONE} has unknown action smash` }
 		)
+		-- (Straw armor: SoundList.ARMOR still names it by prefix. Iron's was there until the Minecraft
+		-- pack's armor named its sounds on its entries.)
 		clash(
-			{ items = { { name = "IronHelmet", override = true, equipSound = "item.armor.equip_gold" } } },
+			{ items = { { name = "StrawHelmet", override = true, equipSound = "item.armor.equip_gold" } } },
 			{ "Sounds" },
 			{
-				"Sounds: pack Minecraft (patched by Clash), items/armor, item IronHelmet has its equip sound, and SoundList.ARMOR's Iron names it too",
+				"Sounds: pack Survival (patched by Clash), items/gear, item StrawHelmet has its equip sound, and SoundList.ARMOR's Straw names it too",
 			}
 		)
 		clash({ blocks = { { name = "Ice", override = true, cools = true } } }, { "ToughAsNails", "Temperature" }, {

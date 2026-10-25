@@ -71,19 +71,11 @@ Recipes.smelting = smelting
 -- Burn time (ticks) of furnace fuel (Minecraft's AbstractFurnaceBlockEntity.getFuel), by item name
 -- or "#tag": the side table, for what has no `fuel` on its entry yet.
 local LEGACY_FUEL: { [string]: number } = {
-	Coal = 1600,
-	Charcoal = 1600,
 	CoalBlock = 16000,
 	["#logs"] = 300,
 	["#planks"] = 300,
 	CraftingTable = 300,
 	Chest = 300,
-	Stick = 100,
-	WoodenPickaxe = 200,
-	WoodenAxe = 200,
-	WoodenShovel = 200,
-	WoodenHoe = 200,
-	WoodenSword = 200,
 	Bowl = 100,
 	WhiteWool = 100,
 	Ladder = 300,
