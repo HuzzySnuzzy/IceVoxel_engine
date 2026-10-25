@@ -24,7 +24,8 @@
 	    cables and machines touching it. A dark steel casing with amber fuel stripes, a combustion
 	    chamber window low on each side and an exhaust on top (BlockDecor "CombustionGenerator";
 	    the client may light the window while it burns, COMBUSTION_WINDOW).
-	  Both are Mekanism's machine block: hardness 3.5, a pickaxe to drop anything.
+	  Both are Mekanism's machine block: hardness 3.5, a pickaxe to drop anything; both are the
+	  Electric Age's.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -42,18 +43,20 @@ return function(define: Define.Context): { BlockSpec }
 		reflectance = 0.2,
 	}, 20)
 	define.append(list, oil)
-	define.append(
-		list,
-		define.fluid("Fuel", {
-			name = "Fuel",
-			color = { 232, 172, 44 },
-			material = "Glass",
-			transparency = 0.4,
-			reflectance = 0.05,
-			blastResistance = 0,
-		}, 5, { flammable = { ignite = 100, burn = 100 } })
-	)
+	local fuel = define.fluid("Fuel", {
+		name = "Fuel",
+		color = { 232, 172, 44 },
+		material = "Glass",
+		transparency = 0.4,
+		reflectance = 0.05,
+		blastResistance = 0,
+	}, 5, { flammable = { ignite = 100, burn = 100 } })
+	define.append(list, fuel)
 	table.insert(list, define.caveFluid(oil[1]))
+	-- (The lore is the sources', the Oil and Fuel items' blocks; given after CaveOil is copied from
+	-- Oil's, as its item is Oil's and it has no line of its own.)
+	oil[1].lore = "Crude oil from underground wells. Refine it into Fuel."
+	fuel[1].lore = "Refined oil. Burns in a Combustion Generator."
 	define.append(list, {
 		{
 			name = "OilRefinery",
@@ -66,6 +69,8 @@ return function(define: Define.Context): { BlockSpec }
 			decor = "OilRefinery",
 			machine = { kind = "refinery" },
 			energy = { capacity = 40000, input = 40000 },
+			lore = "Turns Oil into Fuel with energy.",
+			age = "electric",
 		},
 		{
 			name = "CombustionGenerator",
@@ -78,6 +83,8 @@ return function(define: Define.Context): { BlockSpec }
 			decor = "CombustionGenerator",
 			machine = { kind = "combustion" },
 			energy = { capacity = 1000000, output = 5000 },
+			lore = "Burns Fuel for a lot of energy.",
+			age = "electric",
 		},
 	})
 	return list

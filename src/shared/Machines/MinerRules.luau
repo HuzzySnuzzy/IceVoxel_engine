@@ -64,7 +64,6 @@ local MAX_CODE = MinerRules.STATE.IDLE
 local NAMES = {
 	"CoalOre",
 	"IronOre",
-	"OsmiumOre",
 	"GoldOre",
 	"EmeraldOre",
 	"DiamondOre",

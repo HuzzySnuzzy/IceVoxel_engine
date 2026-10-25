@@ -1020,7 +1020,11 @@ return function(t, shared, require, server, client)
 			t.eq(ore.block, B[name])
 			t.eq(ore.drop, I[drop], `{name} gives {drop}`)
 			t.eq(MinerRules.ORES[ore.index], ore, `{name} in its place`)
-			t.eq(ore.ticks, Config.Miner.Ores[name].ticks)
+			-- (Config's side table, or the ore's own entry's `miner`: Osmium Ore carries its own, in
+			-- the Mekanism pack.)
+			local numbers = (Config.Miner.Ores :: any)[name]
+				or (require(shared.Content).default.block(name) :: any).miner
+			t.eq(ore.ticks, numbers.ticks)
 		end
 		local diamond = (MinerRules.ore(B.DiamondOre) :: MinerRules.Ore).index
 		t.eq((MinerRules.ore(B.CoalOre) :: MinerRules.Ore).floor, 400000, "coal's floor")
@@ -1080,7 +1084,9 @@ return function(t, shared, require, server, client)
 					return B.DiamondOre
 				end,
 			})
-			local state = if mining then MinerRules.packState(MinerRules.STATE.MINING, 6) else 0
+			-- (Diamond Ore's own place in MinerRules.ORES, not a number: Osmium Ore's moving onto
+			-- its Mekanism entry moved it, and content may move it again.)
+			local state = if mining then MinerRules.packState(MinerRules.STATE.MINING, diamond) else 0
 			t.eq(Machines.state(stub), state, `{Blocks.get(block).name}: state {state}`)
 			t.eq(Machines.energy(stub), if mining then 1000 - 800 else 1000, "the miner's 800 J, else nothing used")
 			t.eq(select(1, Machines.rates(stub)), Machines.capacity(stub), "takes its capacity a tick")

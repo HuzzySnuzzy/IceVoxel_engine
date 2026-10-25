@@ -1,20 +1,22 @@
 --!strict
 --[[
 	Mekanism's items: the Configurator, osmium's raw lump, ingot and nugget, the upgrade cards, and
-	the oil and fuel buckets.
+	the oil and fuel buckets. Blank icons, so each look is one id to paste.
 
 	  * The Configurator (Mekanism's tool) sets how each side of a transmitter connects and colours
 	    transporters: a wrench with a blue head and a small screen on its grip, modelled upright and
-	    tilted like the tools.
+	    tilted like the tools. The Industrial Age's.
 	  * Mekanism's osmium: what Osmium Ore drops (Raw Osmium), the ingot it smelts into and the
 	    nugget, drawn like their iron and gold counterparts in a bluish silver. Mekanism's later
-	    machines and cables are made from the ingot.
+	    machines and cables are made from the ingot. Raw Osmium comes in any Age; the ingot is the
+	    Iron Age's (smelting one is a milestone of the Industrial Age) and each one smelted gives
+	    iron's knowledge, 0.7; the nugget is the Industrial Age's.
 	  * Mekanism's upgrade cards (Shared/Machines/Upgrades): the Speed Upgrade and the Energy
 	    Upgrade, which the Electric Furnace and the Solar Panel take in their upgrade slots, 8 of
 	    each at most (Mekanism's Upgrade.getMax); they stack to that 8 too (Mekanism's own stack to
 	    64). A small circuit card with gold contacts and the upgrade's symbol in its colour
 	    (Mekanism's EnumColor: red for speed, bright green for energy): two chevrons, a bolt (the
-	    pack's _models).
+	    pack's _models). The Electric Age's.
 	  * Buckets of oil and fuel (BuildCraft's): Minecraft's bucket (Content/Define's
 	    `filledBucket`) with the fluid's colour to the rim (Shared/Fluids' colours; oil glossy).
 	    They don't stack, and each leaves the empty Bucket when used up (Items.craftingRemainder).
@@ -55,21 +57,47 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 1, 3, 1.6 }, offset = { -2.5, 6.5, 0 }, color = shade(CONFIGURATOR_BLUE, 1.2) },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "Click a pipe's side to push, pull or close it; sneak-click to colour it.",
+			age = "industrial",
 		},
 		{
 			name = "RawOsmium",
 			color = RAW_OSMIUM,
 			material = "Rock",
 			model = define.lump(RAW_OSMIUM, { 200, 218, 238 }, { 84, 106, 136 }),
+			icon = "",
+			lore = "Smelt it into an Osmium Ingot.",
 		},
-		{ name = "OsmiumIngot", color = OSMIUM, material = "Metal", model = define.ingot(OSMIUM), tilt = 25 },
-		{ name = "OsmiumNugget", color = OSMIUM, material = "Metal", model = define.nugget(OSMIUM) },
+		{
+			name = "OsmiumIngot",
+			color = OSMIUM,
+			material = "Metal",
+			model = define.ingot(OSMIUM),
+			tilt = 25,
+			icon = "",
+			lore = "Mekanism's metal: machines, generators and cables.",
+			age = "iron",
+			knowledge = { smelt = 0.7 },
+		},
+		{
+			name = "OsmiumNugget",
+			color = OSMIUM,
+			material = "Metal",
+			model = define.nugget(OSMIUM),
+			icon = "",
+			lore = "A ninth of an osmium ingot.",
+			age = "industrial",
+		},
 		{
 			name = "SpeedUpgrade",
 			maxStack = 8,
 			color = SPEED_RED,
 			material = "Metal",
 			model = models.upgradeCard(speedSymbol),
+			icon = "",
+			lore = "Put it in a machine: it works faster, but uses more energy.",
+			age = "electric",
 		},
 		{
 			name = "EnergyUpgrade",
@@ -82,6 +110,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 4, 1.3, 0.4 }, offset = { 0, 1.5, 1 }, material = "Neon" },
 				{ size = { 1.4, 4.5, 0.4 }, offset = { 0.55, -0.55, 1 }, rotation = -25, material = "Neon" },
 			}),
+			icon = "",
+			lore = "Put it in a machine: it uses less energy and stores more.",
+			age = "electric",
 		},
 		{
 			name = "OilBucket",
@@ -89,6 +120,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = OIL,
 			material = "Metal",
 			model = define.filledBucket(OIL, "Glass"),
+			icon = "",
+			lore = "Crude oil. Pour it into an Oil Refinery.",
 		},
 		{
 			name = "FuelBucket",
@@ -96,6 +129,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = FUEL,
 			material = "Metal",
 			model = define.filledBucket(FUEL, "SmoothPlastic"),
+			icon = "",
+			lore = "Refined fuel for the Combustion Generator.",
 		},
 	}
 end

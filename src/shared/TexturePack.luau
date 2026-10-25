@@ -162,7 +162,6 @@ local LEGACY_BLOCKS: { [string]: Faces } = {
 	GoldOre = { All = "gold ore" },
 	DiamondOre = { All = "diamond ore" },
 	EmeraldOre = { All = "emerald ore" },
-	OsmiumOre = { All = "osmium ore" },
 	CoalBlock = { All = "coal block" },
 	IronBlock = { All = "iron block" },
 	GoldBlock = { All = "gold block" },
@@ -170,8 +169,6 @@ local LEGACY_BLOCKS: { [string]: Faces } = {
 	EmeraldBlock = { All = "emerald block" },
 	RawIronBlock = { All = "raw iron block" },
 	RawGoldBlock = { All = "raw gold block" },
-	OsmiumBlock = { All = "osmium block" },
-	RawOsmiumBlock = { All = "raw osmium block" },
 
 	-- Trees
 	OakLog = { Sides = "log", Top = "log top", Bottom = "log top" },

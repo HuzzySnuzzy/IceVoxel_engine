@@ -90,7 +90,6 @@ end
 Knowledge.ORES = merged({
 	CoalOre = 1,
 	IronOre = 2,
-	OsmiumOre = 2,
 	GoldOre = 3,
 	DiamondOre = 5,
 	EmeraldOre = 5,
@@ -105,7 +104,6 @@ Knowledge.LOG = 0.25
 Knowledge.SMELTED = merged({
 	IronIngot = 0.7,
 	GoldIngot = 1,
-	OsmiumIngot = 0.7,
 	Diamond = 1,
 	Emerald = 1,
 	Coal = 0.1,

@@ -34,6 +34,11 @@
 	    cubes do). A dark steel cube with corners in the tier's colour (Mekanism's energy cube
 	    frame), a charge gauge on each side and a terminal on top (BlockDecor "<Tier>Battery"; the
 	    client fills the gauges from the machine's record, Rendering/TransmitterModel.machineBoxes).
+	  * Ages: the Heat Generator is the Industrial Age's (entering the Electric Age takes one),
+	    the Electric Furnace and the Basic and Advanced Batteries the Electric Age's, the Solar
+	    Panel and the Elite and Ultimate Batteries the Atomic Age's. The Batteries are a list of
+	    their tiers, Basic to Ultimate: each row is one tier's name, lore and Age, and the loop
+	    under it makes the tier's entry of it.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -43,7 +48,6 @@ local Tiers = require(script.Parent.Parent.Parent.Parent.Parent.Transmitters.Tie
 type BlockSpec = Schema.BlockSpec
 type ShapeBox = Schema.ShapeBox
 
-local TIER_NAMES = { "Basic", "Advanced", "Elite", "Ultimate" }
 local STEEL = { 112, 116, 124 }
 local SOLAR_CELL = { 28, 46, 104 }
 
@@ -73,6 +77,7 @@ return function(define: Define.Context): { BlockSpec }
 			decor = "CreativeEnergyCube",
 			machine = { kind = "creative" },
 			energy = { capacity = math.huge, output = math.huge },
+			lore = "Never runs out of energy. Creative only.",
 		},
 		{
 			name = "HeatGenerator",
@@ -85,6 +90,8 @@ return function(define: Define.Context): { BlockSpec }
 			decor = "HeatGenerator",
 			machine = { kind = "generator" },
 			energy = { capacity = 160000, output = 400 },
+			lore = "Burns furnace fuel or lava for energy. Lava around it helps.",
+			age = "industrial",
 		},
 		{
 			name = "ElectricFurnace",
@@ -97,6 +104,8 @@ return function(define: Define.Context): { BlockSpec }
 			decor = "ElectricFurnace",
 			machine = { kind = "smelter" },
 			energy = { capacity = 20000, input = 20000 },
+			lore = "Smelts with energy instead of fuel. Takes upgrades.",
+			age = "electric",
 		},
 		{
 			name = "SolarPanel",
@@ -112,12 +121,20 @@ return function(define: Define.Context): { BlockSpec }
 			shape = solarShape,
 			machine = { kind = "solar" },
 			energy = { capacity = 96000, output = 100 },
+			lore = "Makes energy under an open sky by day.",
+			age = "atomic",
 		},
 	}
-	for tier, name in TIER_NAMES do
+	local batteries = {
+		{ name = "BasicBattery", lore = "Stores energy, and keeps it when broken.", age = "electric" },
+		{ name = "AdvancedBattery", lore = "A bigger battery that keeps its charge.", age = "electric" },
+		{ name = "EliteBattery", lore = "A large battery that keeps its charge.", age = "atomic" },
+		{ name = "UltimateBattery", lore = "The largest battery there is.", age = "atomic" },
+	}
+	for tier, own in batteries do
 		local numbers = Tiers.TIERS[tier]
 		table.insert(list, {
-			name = `{name}Battery`,
+			name = own.name,
 			color = { 52, 54, 60 },
 			material = "Metal",
 			sound = "metal",
@@ -125,9 +142,11 @@ return function(define: Define.Context): { BlockSpec }
 			tool = "pickaxe",
 			toolLevel = 0,
 			maxStack = 1,
-			decor = `{name}Battery`,
+			decor = own.name,
 			machine = { kind = "battery" },
 			energy = { capacity = numbers.batteryCapacity, input = numbers.batteryRate, output = numbers.batteryRate },
+			lore = own.lore,
+			age = own.age,
 		})
 	end
 	return list

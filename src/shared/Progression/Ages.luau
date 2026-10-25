@@ -122,7 +122,6 @@ for _, name in
 		"Lantern",
 		"Canteen",
 		"Thermometer",
-		"OsmiumIngot",
 		"Rail",
 		-- (Terraria's things of iron, gold and emerald, and the Mana Potion: brewing.)
 		"Aglet",
@@ -166,18 +165,6 @@ for _, name in
 	{
 		"DiamondBlock",
 		"EmeraldBlock",
-		"OsmiumBlock",
-		"RawOsmiumBlock",
-		"OsmiumNugget",
-		"BasicLogisticalTransporter",
-		"RestrictiveTransporter",
-		"BasicMechanicalPipe",
-		"BasicFluidTank",
-		"AdvancedLogisticalTransporter",
-		"AdvancedMechanicalPipe",
-		"AdvancedFluidTank",
-		"Configurator",
-		"HeatGenerator",
 		"Gunpowder",
 		"Tnt",
 		-- (And uranium smelting, on its ingot's entry: a smelting result is never of an Age after
@@ -197,18 +184,6 @@ for _, name in potions do
 end
 
 local electric: { string } = {
-	"BasicUniversalCable",
-	"AdvancedUniversalCable",
-	"ElectricFurnace",
-	"BasicBattery",
-	"AdvancedBattery",
-	"SpeedUpgrade",
-	"EnergyUpgrade",
-	"OilRefinery",
-	"CombustionGenerator",
-	"EliteLogisticalTransporter",
-	"EliteMechanicalPipe",
-	"EliteFluidTank",
 	-- (The seasons: electric heating and cooling.)
 	"ElectricHeater",
 	"AirConditioner",
@@ -216,14 +191,6 @@ local electric: { string } = {
 }
 
 local atomic: { string } = {
-	"SolarPanel",
-	"EliteUniversalCable",
-	"UltimateUniversalCable",
-	"EliteBattery",
-	"UltimateBattery",
-	"UltimateLogisticalTransporter",
-	"UltimateMechanicalPipe",
-	"UltimateFluidTank",
 	"Nuke",
 	-- (And uranium's nugget and blocks, on their entries; the ore and Raw Uranium are mined in any
 	-- Age, and the ingot smelted from the Industrial Age.)

@@ -2622,7 +2622,6 @@ local Config = {
 		Ores = {
 			CoalOre = { ticks = 600, joules = 800, floor = 400000 },
 			IronOre = { ticks = 400, joules = 200 },
-			OsmiumOre = { ticks = 400, joules = 200 },
 			GoldOre = { ticks = 800, joules = 300 },
 			EmeraldOre = { ticks = 3600, joules = 800 },
 			DiamondOre = { ticks = 4800, joules = 800 },
