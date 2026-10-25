@@ -10,6 +10,7 @@
 	                     blocks, loot/ruins
 	  bunkers            barricades, the Bunker Hatch, the Ceiling Lamp (and its cave twin), the
 	                     bunkers' loot tables: blocks, recipes, textures, loot/bunkers
+	  wounds             Bleeding and a bite's Infection: effects
 	  medical            bandages, the medkit, antibiotics, painkillers, the herbal poultice:
 	                     items/supplies, recipes (Shared/Items/Foods)
 	  DayZ items         rags, duct tape, nails, scrap metal, the ruins' food and drink, bats, the

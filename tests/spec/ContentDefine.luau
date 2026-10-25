@@ -363,6 +363,48 @@ return function(t, shared, require)
 		valid("items", { potion, brewed })
 	end)
 
+	t.test("define: a potion's variants, and the items and recipes brewing makes of it", function()
+		local potion = {
+			name = "Test",
+			displayName = "Testing",
+			ingredient = "Stick",
+			effect = "Speed",
+			seconds = 10,
+			long = 30,
+			lore = { base = "Brewed for a test.", long = "Brewed longer." },
+			icon = { long = "rbxassetid://5" },
+			age = { base = "iron", strong = "industrial", long = "industrial" },
+		}
+		local variants = Define.potionVariants(potion)
+		t.eq(#variants, 2, "the base and the long one (no strong)")
+		t.eq(variants[1].item, "PotionOfTest")
+		t.eq(variants[1].displayName, "Potion of Testing")
+		t.ok(variants[1].ticks == 200 and variants[1].amplifier == 0 and variants[1].form == "base")
+		t.ok(
+			variants[1].from == "PurifiedWaterBottle" and variants[1].with == "Stick",
+			"a water bottle and its ingredient"
+		)
+		t.eq(variants[2].item, "LongPotionOfTest")
+		t.ok(variants[2].ticks == 600 and variants[2].from == "PotionOfTest" and variants[2].with == "#coals")
+		local strong =
+			Define.potionVariants({ name = "Hurt", ingredient = "Stick", effect = "InstantDamage", strong = true })
+		t.ok(strong[1].ticks == 1 and strong[2].ticks == 1 and strong[2].amplifier == 1, "an instant one: a tick")
+		t.ok(strong[2].item == "StrongPotionOfHurt" and strong[2].with == "GlowDust")
+		local brew = Define.brew(potion, { 9, 9, 9 })
+		t.eq(#brew.items, 2)
+		t.eq(brew.items[1].lore, "Brewed for a test.", "each item's line")
+		t.eq(brew.items[1].icon, "", "blank where it gives none")
+		t.eq(brew.items[2].icon, "rbxassetid://5")
+		t.eq(brew.items[1].age, "iron")
+		t.eq(brew.items[2].age, "industrial")
+		t.eq(brew.items[1].color[1], 9, "its effect's colour")
+		t.eq(brew.recipes[2].type, "shapeless")
+		t.eq(table.concat(brew.recipes[2].ingredients, " "), "PotionOfTest #coals")
+		t.eq(brew.recipes[2].result, "LongPotionOfTest")
+		valid("items", brew.items)
+		valid("recipes", brew.recipes)
+	end)
+
 	t.test("define: every helper its header lists is there", function()
 		for _, name in
 			{
@@ -378,6 +420,8 @@ return function(t, shared, require)
 				"bucket",
 				"filledBucket",
 				"potion",
+				"potionVariants",
+				"brew",
 				"onWall",
 				"wallBounds",
 				"fluid",

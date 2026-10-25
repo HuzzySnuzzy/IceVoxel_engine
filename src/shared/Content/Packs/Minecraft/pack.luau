@@ -2,8 +2,9 @@
 --[[
 	Vanilla Minecraft (1.20.1) as this game has it: the features below, each a file of its kind
 	folders (blocks/, items/, recipes/, textures/), the mineshafts' loot (loot), the vanilla ore
-	features (ores) and the biomes (biomes). The pack's own shape and model helpers are _shapes and
-	_models; the shared ones are Content/Define's.
+	features (ores), the biomes (biomes), the status effects (effects) and the potions (potions).
+	The pack's own shape and model helpers are _shapes and _models; the shared ones are
+	Content/Define's.
 
 	  terrain     the ground, stones, sand, snow and ice, water and lava (and CaveLava), obsidian:
 	              blocks/terrain, textures/terrain, recipes/stone (and its ice and snow), ores
@@ -39,7 +40,10 @@
 	  buckets     the bucket, water and lava buckets: items/buckets, recipes/buckets
 	  mob drops   leather, meat, feathers, rotten flesh, bones and string, cooked meat:
 	              items/mobs, recipes/mobs (_models' meat)
-	  potions     every potion of Shared/Effects/PotionList: items/potions, recipes/potions
+	  effects     Minecraft's status effects, and its Hunger (with the food bar): effects
+	  potions     Minecraft's potions, and this game's Haste and Resistance: potions (Content
+	              brews each into its items, drinks included, and their recipes, after the pack's
+	              own)
 	  biomes      the 18 biomes, their climate, weather, ground, trees, ground plants and biome
 	              tags, in the generator's order: biomes (the Survival pack adds its herbs)
 
@@ -52,6 +56,6 @@
 ]]
 return {
 	order = 100,
-	description = "Vanilla Minecraft: terrain, stone, ores, wood, plants, lights, doors, tools, armor, food, potions, mineshafts, biomes.",
+	description = "Vanilla Minecraft: terrain, stone, ores, wood, plants, lights, doors, tools, armor, food, effects, potions, mineshafts, biomes.",
 	requires = { "Core" },
 }

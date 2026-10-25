@@ -3,8 +3,8 @@
 	What content packs build entries with (Shared/Content): a kind module written as
 	`function(define) -> data` is called with this module, and any pack module may require it.
 	Pure: it makes tables and requires only Config and the content types. The helpers live in its
-	submodules (Items, Blocks, Plants, Recipes, Metal) and are all here as `define.<name>`; a pack's
-	own helpers are its "_" modules.
+	submodules (Items, Blocks, Plants, Recipes, Metal, Potions) and are all here as
+	`define.<name>`; a pack's own helpers are its "_" modules.
 
 	  Config          the game's tunables, for packs that read switches and numbers (the turrets',
 	                  the miner's and the press's `Enabled`, the cave lava's level)
@@ -25,8 +25,8 @@
 	                  lore and icon; every tool's Age and fuel)
 	  GLASS, bottle(water?)   the Glass Bottle, with a band of its liquid
 	  BUCKET_IRON, bucket(top), filledBucket(colour, material)   Minecraft's bucket, empty or full
-	  potion(variant, colour, extra?)   a potion item (PotionList's variant) in its effect's
-	                  colour, `extra`'s fields (lore, icon, Age) put over it
+	  potion(variant, colour, extra?)   a potion item (a variant: its item name and shown name)
+	                  in its effect's colour, `extra`'s fields (lore, icon, Age) put over it
 
 	Blocks (Define/Blocks: BlockList's generators)
 	  DIRECTIONS, OPPOSITE   the horizontal directions as offsets, and each one's opposite
@@ -60,6 +60,14 @@
 	  mushroom(spec), sapling(spec)
 	  herb(spec)      a Tough As Nails herb, planted by its item
 
+	Potions (Define/Potions: Minecraft's brewing in a crafting grid, what Content makes of a
+	pack's `potions`)
+	  potionVariants(potion)   a potion's items in order (base, strong, long), each a variant: its
+	                  item name, shown name, effect, ticks and amplifier, what it is brewed from
+	                  and with (PotionList's `variants`)
+	  brew(potion, colour)   { items, recipes }: a potion's items, in its effect's colour, with
+	                  their lore, icons and Ages from its own fields, and their recipes
+
 	Recipes (Define/Recipes) and metals (Define/Metal)
 	  shaped, shapeless, smelting   recipe records
 	  storage(item, block)   nine of `item` into `block` and back (two recipes)
@@ -74,6 +82,7 @@ local Config = require(script.Parent.Parent.Config)
 local ItemsDefine = require(script.Items)
 local MetalDefine = require(script.Metal)
 local PlantsDefine = require(script.Plants)
+local PotionsDefine = require(script.Potions)
 local RecipesDefine = require(script.Recipes)
 
 export type ArmorPiece = ItemsDefine.ArmorPiece
@@ -83,6 +92,7 @@ export type ToolTier = ItemsDefine.ToolTier
 export type DoorWood = BlocksDefine.DoorWood
 export type MetalSpec = MetalDefine.MetalSpec
 export type Metal = MetalDefine.Metal
+export type PotionVariant = PotionsDefine.Variant
 
 local Define = {}
 
@@ -118,6 +128,10 @@ Define.BUCKET_IRON = ItemsDefine.BUCKET_IRON
 Define.bucket = ItemsDefine.bucket
 Define.filledBucket = ItemsDefine.filledBucket
 Define.potion = ItemsDefine.potion
+
+-- Potions.
+Define.potionVariants = PotionsDefine.variants
+Define.brew = PotionsDefine.brew
 
 -- Blocks.
 Define.DIRECTIONS = BlocksDefine.DIRECTIONS

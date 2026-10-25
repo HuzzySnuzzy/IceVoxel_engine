@@ -372,6 +372,48 @@ return function(t, shared, require, _server, _client)
 		t.eq((nearBiome :: any)[1], "Taiga", "a biome's name is near too")
 	end)
 
+	t.test(
+		"content tool: effects and potions listed with their ids and packs; a potion shown with its items",
+		function()
+			local view = withLint()
+			local effects = assert(ContentTool.list(view, "effects", "Minecraft"))
+			t.ok(
+				has(effects, { tostring(view.content.effectId.Speed), "Speed", "beneficial", "Minecraft" }),
+				"id, name, category, pack"
+			)
+			t.ok(not has(effects, { "Thirst" }), "only that pack's")
+			local potions = assert(ContentTool.list(view, "potions"))
+			t.ok(has(potions, { "Swiftness", "Speed, 3 items", "Minecraft" }), "name, effect, items, pack")
+			t.ok(has(potions, { "Healing", "InstantHealth, 2 items" }))
+			-- (The potion and the effect named Strength: both shown.)
+			local page = assert(ContentTool.show(view, "Strength"))
+			t.ok(
+				has(page, { "effect Strength", `id {view.content.effectId.Strength}`, "pack Minecraft" }),
+				"the effect"
+			)
+			t.ok(has(page, { "melee = 3" }), "its fields")
+			t.ok(has(page, { "potions: Strength" }), "the potions giving it")
+			t.ok(has(page, { "potion Strength: pack Minecraft" }), "and the potion")
+			t.ok(
+				has(
+					page,
+					{ "StrongPotionOfStrength", "Potion of Strength II", "Strength 2 for 1800 ticks", "+ GlowDust" }
+				),
+				"an item it brews"
+			)
+			local item = assert(ContentTool.show(view, "PotionOfStrength"))
+			t.ok(has(item, { "item PotionOfStrength", "pack Minecraft" }), "a potion's item, its pack's")
+			t.ok(
+				has(item, { "pack Minecraft, potion Strength, recipe #1: shapeless PotionOfStrength" }),
+				"made by its brewed recipe, named by its potion as the loader names it"
+			)
+			local recipes = assert(ContentTool.list(view, "recipes", "Minecraft"))
+			t.ok(has(recipes, { "StrongPotionOfStrength", "Minecraft" }), "brewed recipes are their pack's")
+			local _, near = ContentTool.show(view, "Strenght")
+			t.eq((near :: any)[1], "Strength", "an effect's or potion's name is near")
+		end
+	)
+
 	--[[ A new pack ]]
 
 	t.test("content tool: a new pack loads and passes the check as it is made", function()

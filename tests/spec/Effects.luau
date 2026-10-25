@@ -585,7 +585,12 @@ return function(t, shared, require, server, client)
 
 	t.test("potions: items, brewing and drinking", function()
 		local all = PotionList.all()
-		t.eq(#all, 29, "12 potions, 9 strong, 8 long")
+		-- (Each potion's base, strong and long variants, not a total: any pack may add potions now.)
+		local variants = 0
+		for _, potion in PotionList.list do
+			variants += 1 + (if potion.strong then 1 else 0) + (if potion.long then 1 else 0)
+		end
+		t.ok(#all == variants and #all > 0, "every potion's variants")
 		for _, variant in all do
 			local item = Items.id[variant.item]
 			local def = Items.get(item)

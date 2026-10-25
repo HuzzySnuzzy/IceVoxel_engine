@@ -7,7 +7,7 @@
 	               Anklet of the Wind, the bands of Regeneration and Starpower, Obsidian Skull,
 	               Flipper, Cobalt Shield, Feral Claws (Items/Accessories)
 	  mana         Fallen Stars (server Players/FallenStars), Mana Crystals, Lesser Mana and Mana
-	               Potions (Shared/Mana)
+	               Potions (Shared/Mana), and the Mana Sickness they bring (effects)
 	  magic        the Wand of Sparking, the Emerald Staff and Water Bolt (Shared/Magic)
 	  vanity       the Top Hat, Tuxedo Shirt and Tuxedo Pants
 

@@ -6,6 +6,7 @@
 	generators):
 
 	  Tough As Nails
+	    effects      Thirst, Internal Warmth, Internal Chill and Climate Clemency: effects
 	    water        the Glass Bottle, dirty and purified water bottles, the canteen: items/drinks,
 	                 recipes
 	    herbs        Mint and Wild Ginger, Mint Leaves and Ginger Root: blocks/herbs, items/herbs,

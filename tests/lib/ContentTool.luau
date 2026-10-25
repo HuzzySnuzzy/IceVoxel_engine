@@ -38,9 +38,10 @@
 	  summary(view)             a line per pack: its order and how much of each kind it holds
 	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack
 	  show(view, name)          lines about everything named `name` (a block, item, texture, loot
-	                            table, tag, ore feature, Age or biome): its merged fields, id, pack
-	                            and the packs that patched it, and what the registries made of it;
-	                            nil and the nearest names when nothing has the name
+	                            table, tag, ore feature, Age, biome, effect or potion): its merged
+	                            fields, id, pack and the packs that patched it, and what the
+	                            registries made of it (a potion's brewed items); nil and the
+	                            nearest names when nothing has the name
 	  reach(view)               when survival play first gives each item (an Age index) and how
 	  scaffold(name, order)     a new pack's modules, { { path, text } }: one block, one item, a
 	                            shaped and a smelting recipe, a texture and a loot table, each field
@@ -65,10 +66,12 @@
 	  food(name), drink(name)   what eating and drinking it does, as Items/Foods and
 	                   ToughAsNails/Drinks give it (effects by name, the empty container's name,
 	                   a canteen's sips; nil: none), for `show`
+	  variants(potion) a potion's items (Effects/PotionList.variants)
 
 	Where an entry comes from is the loader's own record (content.origin): the pack and file that
 	made it, the packs whose overrides patched it, a recipe's place in its file, the packs that
-	put names in a tag.
+	put names in a tag. A potion's brewed items and recipes are its pack's, their file
+	"potion <Name>" (as the loader names them).
 ]]
 
 local ContentTool = {}
@@ -738,7 +741,14 @@ end
 -- The names of every `kind` the content holds (a recipe's: its merged place).
 local function namesOf(content: any, kind: string): { any }
 	local names = {}
-	if kind == "blocks" or kind == "items" or kind == "ores" or kind == "biomes" then
+	if
+		kind == "blocks"
+		or kind == "items"
+		or kind == "ores"
+		or kind == "biomes"
+		or kind == "effects"
+		or kind == "potions"
+	then
 		for _, entry in content[kind] do
 			table.insert(names, entry.name)
 		end
@@ -943,6 +953,25 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 						biome.name,
 						if #biome.bands > 0 then table.concat(biome.bands, ", ") else "(no band)",
 						madeText(view, each, biome.name),
+					})
+				end
+			end
+		elseif each == "effects" then
+			right[1] = true
+			for _, effect in content.effects or {} do
+				if listed(view, each, effect.name, pack) then
+					local id = tostring(content.effectId[effect.name])
+					table.insert(rows, { id, effect.name, effect.category, madeText(view, each, effect.name) })
+				end
+			end
+		elseif each == "potions" then
+			for _, potion in content.potions or {} do
+				if listed(view, each, potion.name, pack) then
+					local n = 1 + (if potion.strong then 1 else 0) + (if potion.long then 1 else 0)
+					table.insert(rows, {
+						potion.name,
+						`{potion.effect}, {n} item{if n == 1 then "" else "s"}`,
+						madeText(view, each, potion.name),
 					})
 				end
 			end
@@ -1362,6 +1391,50 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 			end
 		end
 	end
+	for _, effect in content.effects or {} do
+		if effect.name == name then
+			section(`effect {name}: id {content.effectId[name]}, pack {packOf(view, "effects", name)}`)
+			patches("effects")
+			table.insert(lines, "  fields:")
+			for _, line in fieldLines(effect, { name = true }) do
+				table.insert(lines, line)
+			end
+			local potions = {}
+			for _, potion in content.potions or {} do
+				if potion.effect == name then
+					table.insert(potions, potion.name)
+				end
+			end
+			if #potions > 0 then
+				for _, line in wrap("  potions: ", potions) do
+					table.insert(lines, line)
+				end
+			end
+		end
+	end
+	for _, potion in content.potions or {} do
+		if potion.name == name then
+			section(`potion {name}: pack {packOf(view, "potions", name)}`)
+			patches("potions")
+			table.insert(lines, "  fields:")
+			for _, line in fieldLines(potion, { name = true }) do
+				table.insert(lines, line)
+			end
+			if view.variants then
+				table.insert(lines, "  items (brewed):")
+				for _, variant in view.variants(potion) do
+					local id = content.itemId[variant.item]
+					table.insert(
+						lines,
+						cut(
+							`    {variant.item} (id {id}): {variant.displayName}, {variant.effect} {variant.amplifier + 1} for {variant.ticks} ticks, {variant.from} + {variant.with}`,
+							ContentTool.WIDTH
+						)
+					)
+				end
+			end
+		end
+	end
 	if #lines > 0 then
 		return lines, nil
 	end
@@ -1383,6 +1456,11 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	end
 	for _, biome in content.biomes or {} do
 		names[biome.name] = true
+	end
+	for _, list in { content.effects or {}, content.potions or {} } do
+		for _, entry in list do
+			names[entry.name] = true
+		end
 	end
 	local near = view.suggest(name, names)
 	return nil, if near then { near } else {}

@@ -43,7 +43,7 @@
 	             amplifier, Minecraft's Hunger from HungerFrom, Nausea from NauseaFrom; `renewal`
 	             gives or renews each of them (see there) so they last Sickness.Ticks after the dose
 	             falls below their band, and an effect that acts on an interval (the sickness's
-	             hurt: EffectList `interval`) keeps acting on it.
+	             hurt: its effect's `interval`) keeps acting on it.
 	  Clicks     `clickRate(rate)`: clicks a second, Config.Radiation.Clicks.PerSvh x the rate's
 	             square root, at most Max (none below MinRate); `clicks(rate, dt, roll)`: whether a
 	             frame of `dt` seconds clicks, a Poisson process's chance rate x dt (at most one a
@@ -416,7 +416,7 @@ function Radiation.symptoms(level: number): { Symptom }
 	return list
 end
 
--- Ticks effect `effect` at `amplifier` is renewed by at a time: its acting interval (EffectList
+-- Ticks effect `effect` at `amplifier` is renewed by at a time: its acting interval (its entry's
 -- `interval` >> amplifier, at least 1), else RENEW_TICKS.
 function Radiation.step(effect: number, amplifier: number): number
 	local def = Effects.get(effect)

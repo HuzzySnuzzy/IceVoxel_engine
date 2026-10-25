@@ -10,9 +10,13 @@
 	(`origin`); biomes: the game's (the Minecraft pack's, the Survival pack's herbs patched in), the
 	fixture packs' (Beta's in JSON, Gamma's override patching it field by field) and a pack's biome
 	and override reaching Biomes, Locate and the generator (tests/fixtures/content/biomes/Wilds
-	grafted into a fresh game); and every check: the schema's (unknown fields with their "did you
-	mean", wrong types, missing fields), names and overrides, manifests and `requires`, every
-	cross-reference, discovery's, the registries' own checks on the entries' values, and the biome
+	grafted into a fresh game); effects and potions: the game's, by pack, and a pack's own status
+	effect and potion (the Brewing fixture pack, grafted the same way: the potion's items, recipes,
+	lore, drink and tooltip from its entry alone, and a patched effect and potion of the Minecraft
+	pack's); and every check: the schema's (unknown fields with their "did you mean", wrong types,
+	missing fields, an effect's icon and view the client has), names and overrides, manifests and
+	`requires`, every cross-reference (a potion's effect, ingredient and variants), discovery's, the
+	registries' own checks on the entries' values (Effects' names among them), and the biome
 	registries' (bands, tree builders, a band without biomes, a biome code needs).
 
 	Nothing here pins an id or a total: the game's content may grow.
@@ -24,6 +28,7 @@ local PACKS = "tests/fixtures/content/packs"
 local FOLDERS = "tests/fixtures/content/folders"
 local FIELDS = "tests/fixtures/content/fields/Fields"
 local BIOMES = "tests/fixtures/content/biomes/Wilds"
+local BREWING = "tests/fixtures/content/brewing/Brewing"
 
 return function(t, shared, require, _server, _client)
 	local Content = require(shared.Content)
@@ -214,26 +219,153 @@ return function(t, shared, require, _server, _client)
 		t.eq(item("LongPotionOfSwiftness").lore, "Brewed longer with coal. Run faster.")
 	end)
 
-	t.test("content: a potion PotionList makes needs its line in the Minecraft pack, and a line its potion", function()
-		-- (A fresh game, PotionList edited before the packs load.)
-		local function loading(edit: (list: { any }) -> ()): string
-			local env, root = fresh()
-			edit(env.require(root.Effects.PotionList).list)
-			local ok, err = pcall(env.require, root.Content)
-			return if ok then "(it loaded)" else tostring(err)
+	-- (The potions were PotionList's, their lines the Minecraft pack's items/potions table, which
+	-- the old test here kept in step; a potion is the `potions` kind now and carries its own lines,
+	-- and a line for a variant it has not fails the load: the cross-reference checks below.)
+	t.test("content: the Minecraft pack's effects and potions are its own; the others' in their packs", function()
+		local content = Content.default
+		local Effects = require(shared.Effects)
+		local PotionList = require(shared.Effects.PotionList)
+		for name, pack in
+			{
+				Speed = "Minecraft",
+				Glowing = "Minecraft",
+				Hunger = "Minecraft",
+				OilCoated = "Mekanism",
+				FuelSoaked = "Mekanism",
+				Thirst = "Survival",
+				ClimateClemency = "Survival",
+				ManaSickness = "Terraria",
+				Bleeding = "Apocalypse",
+				Infection = "Apocalypse",
+				RadiationSickness = "Ores",
+			}
+		do
+			t.eq(content.where("effect", name), `pack {pack}, effect {name}`, `{name} is the {pack} pack's`)
 		end
-		local added = loading(function(list)
-			table.insert(list, { name = "Testing", ingredient = "Stick", effect = "Speed", seconds = 10 })
-		end)
-		t.ok(has(added, { "PotionOfTesting has no lore line and icon in the Minecraft pack's items/potions" }), added)
-		local removed = loading(function(list)
-			table.remove(list)
-		end)
-		-- (Resistance's two lines are left: either one may be named first.)
-		t.ok(
-			has(removed, { "items/potions has a line for", "PotionOfResistance, which PotionList makes no potion of" }),
-			removed
+		-- Ids by place, the registry's the same.
+		t.eq(Effects.COUNT, #content.effects)
+		for index, spec in content.effects do
+			t.eq(content.effectId[spec.name], index, `{spec.name}'s id is its place`)
+			t.eq(Effects.id[spec.name], index)
+		end
+		t.ok(#content.effects <= Content.MAX_EFFECTS, "ids fit a u8")
+		t.eq(PotionList.list, content.potions, "PotionList.list")
+		t.eq(content.where("potion", "Swiftness"), "pack Minecraft, potion Swiftness")
+		-- Each potion's items are brewed after the pack's own items, their recipes after its recipes.
+		t.ok(Items.id.PotionOfSwiftness > Items.id.Stick, "after the pack's own items")
+		t.eq(
+			content.where("item", "LongPotionOfSwiftness"),
+			"pack Minecraft, potion Swiftness, item LongPotionOfSwiftness",
+			"an item names its potion"
 		)
+		local Recipes = require(shared.Crafting.Recipes)
+		local brewed = 0
+		for _, recipe in Recipes.shapeless do
+			if recipe.result == "StrongPotionOfSwiftness" then
+				brewed += 1
+				t.eq(table.concat(recipe.ingredients, " "), "PotionOfSwiftness GlowDust")
+			end
+		end
+		t.eq(brewed, 1, "a recipe a variant")
+	end)
+
+	t.test("content: a pack's own effect and potion: items, recipes, lore and tooltip from its entry alone", function()
+		local env, root = fresh(function(env, packs)
+			env.graft(BREWING, packs, "Brewing")
+		end)
+		local function need(path: { string }): any
+			local node = root
+			for _, name in path do
+				node = node[name]
+			end
+			return env.require(node)
+		end
+		local FreshEffects = need({ "Effects" })
+		local FreshItems = need({ "Items" })
+		local PotionList = need({ "Effects", "PotionList" })
+		local LoreList = need({ "Items", "LoreList" })
+		local TexturePack = need({ "TexturePack" })
+		local Ages = need({ "Progression", "Ages" })
+		local Crafting = need({ "Crafting" })
+		local Drinks = need({ "ToughAsNails", "Drinks" })
+		local Tooltip = need({ "Items", "Tooltip" })
+		local content = need({ "Content" }).default
+		local E, I = FreshEffects.id, FreshItems.id
+		-- The effect: the last id, its own fields, /effect finds it.
+		t.eq(E.Luck, FreshEffects.COUNT, "after every other pack's effects")
+		local luck = FreshEffects.get(E.Luck)
+		t.eq(luck.colorValue, 51 * 65536 + 153 * 256, "Minecraft's LUCK colour")
+		t.ok(luck.beneficial and luck.icon == "star")
+		t.eq(FreshEffects.find("minecraft:luck"), E.Luck, "/effect give @s luck")
+		t.eq(content.where("effect", "Luck"), "pack Brewing, effect Luck")
+		-- Speed patched: its place kept, the colour its potions' liquid takes.
+		t.eq(E.Speed, require(shared.Effects).id.Speed, "its id kept")
+		t.eq(FreshEffects.get(E.Speed).color[1], 10, "patched")
+		t.eq(FreshEffects.get(E.Speed).command, "speed", "the rest kept")
+		t.eq(FreshItems.get(I.PotionOfSwiftness).color[1], 10, "a potion takes its effect's colour, patched")
+		t.eq(content.where("effect", "Speed"), "pack Minecraft (patched by Brewing), effect Speed")
+		-- The potion's items, after the pack's own: the base potion and the long one (no strong).
+		t.ok(I.PotionOfLuck == I.FourLeafClover + 1 and I.LongPotionOfLuck == I.PotionOfLuck + 1, "after its own")
+		t.eq(FreshItems.find("StrongPotionOfLuck"), nil, "no strong variant")
+		t.eq(FreshItems.get(I.LongPotionOfLuck).displayName, "Long Potion of Luck")
+		t.eq(FreshItems.get(I.PotionOfLuck).maxStack, 1)
+		t.eq(FreshItems.get(I.PotionOfLuck).color[2], 153, "its effect's colour")
+		t.eq(content.where("item", "PotionOfLuck"), "pack Brewing, potion Luck, item PotionOfLuck")
+		-- Each item's lore line, icon and Age, from the potion's.
+		t.eq(LoreList.PotionOfLuck, "Brewed from an emerald. Feel lucky.")
+		t.eq(LoreList.LongPotionOfLuck, "Brewed longer with coal. Feel lucky for longer.")
+		t.eq(TexturePack.Icons.PotionOfLuck, "rbxassetid://777", "its icon")
+		t.eq(TexturePack.Icons.LongPotionOfLuck, "", "blank where it gives none")
+		t.eq(Ages.ofName("PotionOfLuck"), Ages.byId("iron").index)
+		t.eq(Ages.ofName("LongPotionOfLuck"), Ages.byId("industrial").index)
+		-- Its recipes: a Purified Water Bottle with the ingredient, the potion with a coal.
+		local made = Crafting.match({
+			[1] = { item = I.PurifiedWaterBottle, count = 1 },
+			[2] = { item = I.Emerald, count = 1 },
+		}, 2)
+		t.eq(made and made.item, I.PotionOfLuck, "brewed")
+		local long =
+			Crafting.match({ [1] = { item = I.PotionOfLuck, count = 1 }, [2] = { item = I.Charcoal, count = 1 } }, 2)
+		t.eq(long and long.item, I.LongPotionOfLuck, "lengthened")
+		-- Drinking it, and its tooltip.
+		local given = Drinks.of(I.PotionOfLuck).effects[1]
+		t.ok(given.effect == E.Luck and given.ticks == 6000 and given.amplifier == 0, "5:00 of Luck I")
+		t.eq(Drinks.entry(I.PotionOfLuck).empty, I.GlassBottle, "the bottle back")
+		local tip = Tooltip.texts(I.PotionOfLuck)
+		t.ok(table.find(tip, "Luck (5:00)") ~= nil, "the tooltip's effect line")
+		t.ok(table.find(tip, "Brewed from an emerald. Feel lucky.") ~= nil, "and its lore")
+		-- Swiftness patched: 4:00, its new line; the Minecraft pack's own data untouched.
+		t.eq(Drinks.of(I.PotionOfSwiftness).effects[1].ticks, 4800, "patched: 4:00")
+		t.eq(Drinks.of(I.StrongPotionOfSwiftness).effects[1].ticks, 1800, "its II kept")
+		t.eq(LoreList.PotionOfSwiftness, "Patched by Brewing. Run faster for longer.")
+		t.eq(content.where("potion", "Swiftness"), "pack Minecraft (patched by Brewing), potion Swiftness")
+		t.eq(PotionList.list[#PotionList.list].name, "Luck", "the potions in load order")
+		t.eq(require(shared.Content).default.potions[1].seconds, 180, "the game's own Swiftness unpatched")
+		-- Where each came from, as data (`origin`): the effects and potions, their overrides, and a
+		-- brewed item's and recipe's potion.
+		local function origin(kind: string, name: any): string
+			local from = content.origin(kind, name)
+			if from == nil then
+				return "nil"
+			end
+			local index = if from.index then ` #{from.index}` else ""
+			return `{from.pack} {from.file or "-"}{index} [{table.concat(from.patched, ",")}]`
+		end
+		t.eq(origin("effect", "Luck"), "Brewing - []", "an effect's")
+		t.eq(origin("effects", "Speed"), "Minecraft - [Brewing]", "an effect patched")
+		t.eq(origin("potion", "Luck"), "Brewing - []", "a potion's")
+		t.eq(origin("potion", "Swiftness"), "Minecraft - [Brewing]", "a potion patched")
+		t.eq(origin("item", "LongPotionOfLuck"), "Brewing potion Luck []", "a brewed item: its potion's")
+		t.eq(origin("item", "PotionOfSwiftness"), "Minecraft potion Swiftness []")
+		local brewedAt: number? = nil
+		for index, recipe in content.recipes do
+			if recipe.result == "LongPotionOfLuck" then
+				brewedAt = index
+			end
+		end
+		t.eq(origin("recipe", brewedAt), "Brewing potion Luck #2 []", "a brewed recipe: its potion's, its place")
+		t.eq(origin("effect", "Nothing"), "nil")
 	end)
 
 	t.test("content: the game's biomes are the Minecraft pack's, in order; the Survival pack adds herbs", function()
@@ -287,7 +419,10 @@ return function(t, shared, require, _server, _client)
 	t.test("content: Luau and JSON packs are found, sorted by order then name; ids by place", function()
 		local content = fixtures()
 		t.eq(names(content.packs), "Beta Alpha Gamma", "order 10, then order 20 by name")
-		t.eq(content.packs[1].description, "The JSON fixture pack (tests/spec/Content): every kind as a .json file.")
+		t.eq(
+			content.packs[1].description,
+			"The JSON fixture pack (tests/spec/Content): every kind as a .json file but potions (brewed from the game's bottles: the Brewing pack)."
+		)
 		t.eq(table.concat(content.packs[2].requires, ","), "Beta")
 		t.eq(
 			names(content.blocks),
@@ -308,6 +443,10 @@ return function(t, shared, require, _server, _client)
 		t.eq(content.loot.beta_chest[1].entries[2][1], false, "false in a loot entry")
 		t.eq(content.ages[1].id, "beta_age")
 		t.eq(content.lore.BetaGem, "A gem of the JSON pack.")
+		t.eq(names(content.effects), "BetaGlow AlphaHaste", "effects in load order")
+		t.eq(content.effectId.BetaGlow, 1, "effect ids from 1, by place")
+		t.eq(content.effectId.AlphaHaste, 2)
+		t.eq(content.effects[1].color[2], 220, "an effect from JSON")
 		t.eq(
 			names(content.recipes, "type"),
 			"smelting shapeless shaped shapeless shaped shapeless shaped shapeless smelting smelting shaped"
@@ -349,6 +488,12 @@ return function(t, shared, require, _server, _client)
 		t.eq(texture.Color, "rbxassetid://7", "a texture patched")
 		t.eq(texture.Material, "Slate")
 		t.eq(texture.override, nil)
+		local glow = content.effects[content.effectId.BetaGlow] :: any
+		t.eq(glow.displayName, "Beta Shine", "an effect patched")
+		t.eq(glow.view, "glowing", "the rest kept")
+		t.eq(glow.override, nil)
+		t.eq(content.effectId.BetaGlow, 1, "its place kept")
+		t.eq(content.where("effect", "BetaGlow"), "pack Beta (patched by Gamma), effect BetaGlow")
 	end)
 
 	t.test("content: tags are a union of every pack's lists and the entries' own, each name once", function()
@@ -791,6 +936,71 @@ return function(t, shared, require, _server, _client)
 			{ "pack P, Age a: color is missing" },
 			"an Age"
 		)
+		-- Effects: the client's closed sets of icons and views (Effects/Looks), and their own rules.
+		local function effect(extra: { [string]: any }): any
+			local spec: { [string]: any } =
+				{ name = "E", command = "e", color = { 1, 2, 3 }, category = "harmful", icon = "drop" }
+			for field, value in extra do
+				spec[field] = value
+			end
+			return spec
+		end
+		fails(
+			{ pack("P", { effects = { effect({ intervall = 5 }) } }) },
+			{ "pack P, effect E: intervall is no field it may have (did you mean interval?)" },
+			"an effect's typo"
+		)
+		fails(
+			{ pack("P", { effects = { effect({ icon = "spiralz" }) } }) },
+			{ "pack P, effect E: icon must be one of speed, slowness, pickaxe", 'not the string "spiralz"' },
+			"an icon the client has no glyph for"
+		)
+		fails(
+			{ pack("P", { effects = { effect({ view = "xray" }) } }) },
+			{ "view must be one of nightVision, blindness, nausea, glowing" },
+			"a view the client has not"
+		)
+		fails(
+			{ pack("P", { effects = { effect({ command = "Oil-Coated" }) } }) },
+			{ "command must be lower_snake" },
+			"a command"
+		)
+		fails(
+			{ pack("P", { effects = { effect({ interval = 0 }) } }) },
+			{ "interval must be a number of at least 1, not 0" },
+			"an interval"
+		)
+		fails(
+			{ pack("P", { effects = { effect({ category = "good" }) } }) },
+			{ "category must be one of beneficial, harmful, neutral" },
+			"a category"
+		)
+		fails(
+			{ pack("P", { effects = { { name = "E", command = "e", color = { 1, 2, 3 }, category = "harmful" } } }) },
+			{ "pack P, effect E: icon is missing" },
+			"an effect's icon"
+		)
+		-- Potions.
+		fails(
+			{ pack("P", { potions = { { name = "X", ingredient = "A", effect = "E", secnds = 5 } } }) },
+			{ "pack P, potion X: secnds is no field it may have (did you mean seconds?)" },
+			"a potion's typo"
+		)
+		fails(
+			{ pack("P", { potions = { { name = "X", ingredient = "A", effect = "E", strong = "2" } } }) },
+			{ 'strong must be a number above 0 or true, not the string "2"' },
+			"a strong variant"
+		)
+		fails(
+			{ pack("P", { potions = { { name = "X", ingredient = "A", effect = "E", lore = { bse = "x" } } } }) },
+			{ "pack P, potion X: lore.bse is no field it may have (did you mean base?)" },
+			"a variant's line"
+		)
+		fails(
+			{ pack("P", { potions = { { name = "X", ingredient = "A" } } }) },
+			{ "pack P, potion X: effect is missing" },
+			"an effect"
+		)
 	end)
 
 	t.test("content: packs: manifests, names, order, requires, kinds", function()
@@ -891,6 +1101,33 @@ return function(t, shared, require, _server, _client)
 			many[i] = { name = `B{i}` }
 		end
 		fails({ pack("P", { blocks = many }) }, { "block ids must stay under ITEM_BASE" }, "too many blocks")
+		local E = { name = "E", command = "e", color = { 1, 2, 3 }, category = "harmful", icon = "drop" }
+		fails(
+			{ pack("P1", { effects = { E } }), pack("P2", { effects = { E } }, { order = 20 }) },
+			{ "pack P2, effect E: the name is taken by pack P1, effect E" },
+			"an effect twice"
+		)
+		fails(
+			{ pack("P", { effects = { { name = "Z", override = true } } }) },
+			{ "pack P, effect Z overrides an effect no earlier pack makes" },
+			"an effect override of nothing"
+		)
+		local X = { name = "X", ingredient = "A", effect = "E" }
+		fails(
+			{ pack("P1", { potions = { X } }), pack("P2", { potions = { X } }, { order = 20 }) },
+			{ "pack P2, potion X: the name is taken by pack P1, potion X" },
+			"a potion twice"
+		)
+		fails(
+			{ pack("P", { potions = { { name = "Z", override = true } } }) },
+			{ "pack P, potion Z overrides a potion no earlier pack makes" },
+			"a potion override of nothing"
+		)
+		local effects = {}
+		for i = 1, Content.MAX_EFFECTS + 1 do
+			effects[i] = { name = `E{i}`, command = "e", color = { 1, 2, 3 }, category = "harmful", icon = "drop" }
+		end
+		fails({ pack("P", { effects = effects }) }, { "effect ids must fit a u8" }, "too many effects")
 	end)
 
 	t.test("content: every cross-reference is checked, naming the pack and the entry", function()
@@ -1012,6 +1249,85 @@ return function(t, shared, require, _server, _client)
 			"a tint"
 		)
 		fails(with({ lore = { Ghost = "x" } }), { "pack P, lore Ghost: lore names unknown item Ghost" }, "lore")
+		-- A potion: its effect, its ingredient, its variants (an instant effect's and a lasting
+		-- one's), its lines, its items' names; then the bottles it brews from (the game's).
+		local EFFECTS = {
+			{ name = "Quick", command = "quick", color = { 1, 2, 3 }, category = "beneficial", icon = "speed" },
+			{
+				name = "Hurt",
+				command = "hurt",
+				color = { 1, 2, 3 },
+				category = "harmful",
+				icon = "broken",
+				instant = "harm",
+			},
+		}
+		local function brewing(potion: any, more: { [string]: any }?): { Content.PackData }
+			local kinds: { [string]: any } = { effects = EFFECTS, potions = { potion } }
+			for kind, value in more or {} do
+				kinds[kind] = value
+			end
+			return with(kinds)
+		end
+		fails(
+			brewing({ name = "X", ingredient = "Stone", effect = "Quik", seconds = 5 }),
+			{ "pack P, potion X: effect names unknown effect Quik (did you mean Quick?)" },
+			"a potion's effect"
+		)
+		fails(
+			brewing({ name = "X", ingredient = "Stnoe", effect = "Quick", seconds = 5 }),
+			{ "pack P, potion X: ingredient names unknown item Stnoe (did you mean Stone?)" },
+			"a potion's ingredient"
+		)
+		fails(
+			brewing({ name = "X", ingredient = "Stone", effect = "Hurt", seconds = 5 }),
+			{ "pack P, potion X: seconds is for a lasting effect: Hurt is instant" },
+			"seconds for an instant effect"
+		)
+		fails(
+			brewing({ name = "X", ingredient = "Stone", effect = "Quick" }),
+			{ "pack P, potion X: seconds is missing (Quick lasts" },
+			"none for a lasting one"
+		)
+		fails(
+			brewing({ name = "X", ingredient = "Stone", effect = "Quick", seconds = 5, strong = true }),
+			{ "pack P, potion X: strong must be its seconds (Quick lasts), not true" },
+			"a lasting effect's strong variant"
+		)
+		fails(
+			brewing({ name = "X", ingredient = "Stone", effect = "Hurt", strong = 5 }),
+			{ "pack P, potion X: strong must be true for an instant effect (Hurt), not 5" },
+			"an instant one's"
+		)
+		fails(
+			brewing({ name = "X", ingredient = "Stone", effect = "Hurt", long = 5 }),
+			{ "pack P, potion X: long is for a lasting effect: Hurt is instant" },
+			"an instant effect's long variant"
+		)
+		fails(
+			brewing({
+				name = "X",
+				ingredient = "Stone",
+				effect = "Quick",
+				seconds = 5,
+				lore = { base = "x", long = "y" },
+			}),
+			{ "pack P, potion X: lore.long is for a long variant, and it has no long" },
+			"a line for no item"
+		)
+		fails(
+			brewing(
+				{ name = "X", ingredient = "Stone", effect = "Quick", seconds = 5 },
+				{ items = { { name = "PotionOfX", model = MODEL } } }
+			),
+			{ "pack P, potion X, item PotionOfX: the name is taken by pack P, item PotionOfX" },
+			"a potion's item's name"
+		)
+		fails(
+			brewing({ name = "X", ingredient = "Stone", effect = "Quick", seconds = 5 }),
+			{ "pack P, potion X, recipe #1 (PotionOfX): ingredients names unknown item PurifiedWaterBottle" },
+			"what it brews from (the game's bottle, missing here)"
+		)
 		fails(
 			with({ blocks = { { name = "A", lore = "x" } }, lore = { A = "y" } }),
 			{ "pack P, block A: its lore is pack P's lore too" },
@@ -1548,5 +1864,13 @@ return function(t, shared, require, _server, _client)
 		t.ok(not loaded and has(tostring(problem), {
 			"Biomes: TerrainGenerator (its islands far out at sea) needs a biome named MushroomFields, which no pack makes",
 		}), tostring(problem))
+	end)
+
+	t.test("content: a registry's own check names the pack: two effects /effect finds by one word", function()
+		refused({
+			effects = {
+				{ name = "Quick", command = "speed", color = { 1, 2, 3 }, category = "beneficial", icon = "speed" },
+			},
+		}, { "Effects" }, { 'Effects: pack Patch, effect Quick is found by "speed", and so is Speed' })
 	end)
 end

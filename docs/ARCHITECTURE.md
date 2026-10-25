@@ -19,19 +19,20 @@ thousands of parts from the server is slow. IceVoxel never does either:
 
 ## Content packs (`Content/`, `Content/Schema`, `Content/Define`, `Content/Packs/`)
 
-Every block, item, recipe, item tag, texture, loot table, ore feature, Age, lore line, fuel tag
-and biome comes from a content pack, a folder under `Content/Packs` the game finds as it loads
-(Minecraft's data packs). The registries build themselves from what `Shared/Content` loads; none
-keeps a list of content of its own, nor any value about an entry by its name:
+Every block, item, recipe, item tag, texture, loot table, ore feature, Age, lore line, fuel tag,
+biome, status effect and potion comes from a content pack, a folder under `Content/Packs` the game
+finds as it loads (Minecraft's data packs). The registries build themselves from what
+`Shared/Content` loads; none keeps a list of content of its own, nor any value about an entry by
+its name:
 
 ```
 Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, lore, fuel,
-   │                   biomes
+   │                   biomes, effects, potions
    │                   (each a .luau module, its data or function(define) -> data, or a .json
    │                   file; or a kind folder of them: Minecraft/blocks/terrain, .../plants...)
    │  Content.load: find the packs, sort by (order, name), require each kind (a kind folder's
-   │                files in name order), check it (Schema), merge, check every cross-reference,
-   │                give ids by place
+   │                files in name order), check it (Schema), merge, brew the potions into items
+   │                and recipes, check every cross-reference, give ids by place
    ▼
 Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePack (textures, faces, icons)
                 ─► Items/ItemList ─► Items (loot)       ─► Items/LoreList ─► Tooltip
@@ -42,6 +43,7 @@ Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePa
                 ─► ToughAsNails/Temperature (heating, cooling) ─► server Players/Climate, Tooltip
                 ─► Items/Foods, ToughAsNails/Drinks (food, drink) ─► eating, drinking, Tooltip
                 ─► Biomes (the generator's biomes) ─► Generation/Structures (features), Locate (tags)
+                ─► Effects (status effects)             ─► Effects/PotionList (potions' variants)
 ```
 
 **A pack** is a folder holding `pack`, its manifest (`{ order, description, requires? }`), and
@@ -49,8 +51,9 @@ any of the kinds: `blocks` and `items` (entries, Schema's BlockSpec and ItemSpec
 (`{ type = "shaped" | "shapeless" | "smelting", ... }`), `tags` (tag -> names), `textures` (name
 -> Texture), `loot` (table name -> pools, ScavengeLoot's format), `ores` (ore features, the block
 by name), `ages` (the Age records), `lore` (name -> line), `fuel` (tag -> burn ticks: Core's
-logs and planks) and `biomes` (Schema's BiomeSpec: bands, climate, weather, ground, trees,
-plants, tags). Each is a module of the kind's name:
+logs and planks), `biomes` (Schema's BiomeSpec: bands, climate, weather, ground, trees, plants,
+tags), `effects` (status effects, Schema's EffectSpec) and `potions` (Schema's PotionSpec, each
+brewed into its items and their recipes). Each is a module of the kind's name:
 a Luau module returning its data, or a function the loader calls with `Content/Define` (the shared
 helpers and Config, for packs that build entries or read switches), or a `.json` file (Rojo 7
 makes one a ModuleScript returning its table; the Lune loader does the same and skips Rojo's
@@ -74,8 +77,9 @@ adding a file.
 order; a pack's `requires` must load before it. A block's id is its place among every pack's
 blocks (Core, order 0, holds Air and Cave Air: ids 0 and 1, so a zero-filled chunk buffer is
 air), an item's ITEM_BASE (4096, now `Content.ITEM_BASE`) + its place among the items (every
-placeable block is an item with its block's id, as before), dense and given at load: no
-append-only rule, no positions to keep. There must be fewer blocks than ITEM_BASE (checked by
+placeable block is an item with its block's id, as before), an effect's its place among the
+effects from 1 (a u8 on the wire: `Content.MAX_EFFECTS`, 255, at most), dense and given at load:
+no append-only rule, no positions to keep. There must be fewer blocks than ITEM_BASE (checked by
 Content and by Items). Every machine loads the same packs in the same order, so client and server
 agree on every id; saves still hold ids until they keep names (the saves phase). Nothing may lean
 on where an entry stands: ids, the creative order (`Items.list`: blocks by id, then items) and
@@ -93,13 +97,22 @@ joins Core's tag). Recipes, ore features (each named once) and Ages (each id onc
 order; loot tables, lore lines and fuel tags are named once. Biomes merge by name like blocks,
 keeping their place, but an override patches a table of fields (`weather`, `patches`, `foliage`
 and its `flowers` and `herbs`) field by field in turn, and replaces a list (`bands`, `features`,
-`plants`, `species`, `tags`) whole; the patched biome is checked whole again.
+`plants`, `species`, `tags`) whole; the patched biome is checked whole again. Effects and potions
+merge by name as blocks and items do (each kind's names its own: the potion Strength gives the
+effect Strength). Once every pack has merged, each potion is brewed (`Content/Define`'s `brew`,
+Minecraft's brewing in a grid) into its items, a Purified Water Bottle with its ingredient, the
+potion with Glow Dust (level II) and with a coal or charcoal (long), in its effect's colour with
+its own lore lines, icons and Ages and each one's `drink` (its effect, the Glass Bottle back), and
+their shapeless recipes, which go after its pack's own items and recipes ("pack Minecraft,
+potion Swiftness, item PotionOfSwiftness"). So a pack adds a potion, items, recipes, drinks and
+tooltip included, with one entry, and patches a potion's items by patching the potion.
 `content.where(kind, name)` says where a thing came from ("pack Minecraft (patched by Patch),
 blocks/terrain, block Stone") for every message, and `content.origin(kind, name)` gives it as
 data: the pack and kind folder file that made it, the packs that patched it in load order (a
-biome's overrides too; a tag's: the first pack putting names in it and the packs adding to it), a
-recipe's (`name` its place in `content.recipes`) pack, file and place in that file's list (the
-content tool reads where things came from this way).
+biome's, an effect's and a potion's overrides too; a tag's: the first pack putting names in it
+and the packs adding to it; a brewed item's or recipe's: its potion's pack, its file `potion
+<Name>`), a recipe's (`name` its place in `content.recipes`) pack, file and place in that file's
+list (the content tool reads where things came from this way).
 
 **Per-entry fields.** Every value about an entry is on the entry, and each registry reads it
 from there (`tests/spec/Content` follows each one end to end):
@@ -147,7 +160,10 @@ pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `
   `size`, a miner's `floor`); an unknown field is an error with a "did you mean" (`harndess` ->
   hardness, by edit distance), and so are a wrong type, a colour outside 0..255, a missing field
   (a block's name, an item's model, a recipe's type and the fields its type needs, and only
-  those), a manifest's `order`.
+  those), a manifest's `order`; an effect's `icon` and `view` are one of the client's closed sets,
+  which live in the shared `Effects/Looks` (`ICONS`: client `Ui/EffectIcons` has a glyph for each
+  and no other, and asserts so as it loads; `VIEWS`: client `Rendering/EffectView`'s and the
+  server's Glowing), its `command` lower_snake and its `interval` at least 1.
 - Names and packs: a name taken twice, an override of nothing, two packs of one name, a
   `requires` that is not there or loads later, a kind given as the wrong shape, an unknown module.
 - Every cross-reference: the items and blocks recipes, tags and loot tables name; the tags recipes
@@ -155,12 +171,16 @@ pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `
   a block's loot table; an ore feature's block; `age`; a block's textures and the blocks textures
   are tinted like; the Ages' milestones; every lore line's item; a line given both by an entry
   and by a pack's `lore`; a fuel tag's tag (and its ticks, above 0); a biome's blocks (top,
-  filler, steep, underwater, beach, patches) and plants (single plants or lower halves). Unknown
-  names come with a hint too (`Stnoe` -> Stone).
+  filler, steep, underwater, beach, patches) and plants (single plants or lower halves); a
+  potion's effect and ingredient, and its variants against its effect (`Schema.checkVariants`: no
+  `seconds` and no long variant for an instant effect, `seconds` for a lasting one, `strong` true
+  or seconds as the effect takes, no lore line or icon for a variant it has not), and its items'
+  names. Unknown names come with a hint too (`Stnoe` -> Stone).
 - In the registries, as they load (with `where`): what only a registry knows of an entry's
   value: a skill (Skills), a sound event or action (Sounds), the miner's numbers (MinerRules), a
   radiation or shielding number (Radiation), a fuel's ticks (Recipes), a biome's bands and that
-  every band has one (Biomes), its tree builders (Generation/Structures).
+  every band has one (Biomes), its tree builders (Generation/Structures), two effects `/effect`
+  would find by one word (Effects).
 
 **The packs.** Each manifest's header says what the pack adds, file by file, where the code
 for it lives, and the calls made placing things (what went where when a feature's things are
@@ -174,23 +194,27 @@ another's too); every feature is behind the same switches as before.
   lights (torches, lanterns, glow lichen, the Glow Block and Glow Dust), the chest, crafting table
   and furnace, fire, TNT and the Nuke (whose uranium core is the Ores pack's recipe), wool, doors,
   fences, the mineshafts' blocks and loot table, structure blocks and jigsaws, tools, armor,
-  buckets, mob drops and every potion of `Effects/PotionList` (a loop: the potions' items and
-  recipes follow PotionList, nothing counts their places), plus the stone varieties' and vanilla
-  ores' features and the biomes (`biomes`, in the generator's order, with Minecraft's biome tags).
+  buckets, mob drops, Minecraft's status effects (`effects`: the eighteen the game has, then
+  Hunger, which came with the food bar) and its potions (`potions`, with this game's Haste and
+  Resistance: each entry brewed into its items, drinks and recipes, which follow the pack's own),
+  plus the stone varieties' and vanilla ores' features and the biomes (`biomes`, in the
+  generator's order, with Minecraft's biome tags).
 - **Mekanism** (200): osmium (its blocks, items, recipes and three ore features), the
   transmitters, Fluid Tanks and Universal Cables, the Configurator, the machines and generators,
   the batteries, the upgrade cards, and the oil and fuel (BuildCraft's fluids, with the refinery
-  that makes fuel).
-- **Survival** (300): Tough As Nails (the Glass Bottle and water bottles, the canteen, herbs,
-  bowls and teas, the campfire, straw and its armor, the thermometer) and the seasons (snow
-  layers, the heaters and coolers, insulated planks, glass and door). Its `biomes` are overrides
-  putting the herbs in the Minecraft pack's biomes (`foliage.herbs`), the worked example of a
-  biome override.
-- **Terraria** (400): the accessories, mana (Fallen Stars, Mana Crystals, mana potions), the magic
+  that makes fuel) with the effects they give the skin, Oil Coated and Fuel Soaked.
+- **Survival** (300): Tough As Nails (its four effects, Thirst, Internal Warmth, Internal Chill
+  and Climate Clemency; the Glass Bottle and water bottles, the canteen, herbs, bowls and teas,
+  the campfire, straw and its armor, the thermometer) and the seasons (snow layers, the heaters
+  and coolers, insulated planks, glass and door). Its `biomes` are overrides putting the herbs in
+  the Minecraft pack's biomes (`foliage.herbs`), the worked example of a biome override.
+- **Terraria** (400): the accessories, mana (Fallen Stars, Mana Crystals, mana potions, Mana
+  Sickness), the magic
   weapons and the vanity clothes (items and recipes only; the chests' accessories are rolled by
   the Minecraft and Apocalypse loot tables, a table being one pack's).
 - **Apocalypse** (500): cities' and roads' blocks, the scavenging crates and the ruins' loot,
-  bunkers (barricades, the hatch, the ceiling lamp, their loot), medical supplies, DayZ's items,
+  bunkers (barricades, the hatch, the ceiling lamp, their loot), Bleeding and a bite's Infection
+  (its effects), medical supplies, DayZ's items,
   and the firearms, magazines, rounds, attachments and melee weapons (`Weapons/WeaponList` keeps
   their numbers).
 - **Turrets** (600): the twelve turrets and their parts, the Metal Miner and the Ammo Press, each
@@ -198,8 +222,8 @@ another's too); every feature is behind the same switches as before.
 - **Ores** (700, requires Core and Minecraft): the new ores, the worked example of a feature in
   one pack: copper, lead, zinc, brass, sulfur, saltpetre, uranium and the Hazmat suit, their
   blocks, items, recipes (the metals' storage and smelting, brass, black powder, the Nuke's uranium
-  core, the Hazmat suit), textures and ore features, each entry with its lore, texture, icon, Age,
-  knowledge, miner numbers, radiation and shielding.
+  core, the Hazmat suit), textures, ore features and Radiation Sickness (its effect), each entry
+  with its lore, texture, icon, Age, knowledge, miner numbers, radiation and shielding.
   `_metals` holds the five metals for `define.metal`. Last, so its ids come last.
 
 `Blocks.BlockList`, `Items.ItemList` and `Crafting.Recipes` remain as the merged lists (BlockList
@@ -215,7 +239,9 @@ helpers `shade`, `lump`, `ingot`, `nugget`, the armor shapes and `armorSet`, the
 and `caveFluid`, torches and lanterns, Mekanism's frames, `transmitter`, `cable`, `tank`, `door`,
 `fence`, `layers`, `machine`, wall boxes); `Define/Plants` (the plant boxes, `plant`, `flower`,
 `tulip`, `tallFlower`, `tallPlant`, `mushroom`, `sapling`, `herb`, Minecraft's outlines);
-`Define/Recipes` (`shaped`, `shapeless`, `smelting`, `storage`); `Define/Metal` (`metal(spec)`: a
+`Define/Recipes` (`shaped`, `shapeless`, `smelting`, `storage`); `Define/Potions` (the brewing:
+`potionVariants(potion)`, a potion's items as PotionList gives them, and `brew(potion, colour)`,
+its items and recipes as Content makes them); `Define/Metal` (`metal(spec)`: a
 metal's ore, storage block and raw block, raw lump, ingot and nugget, their storage recipes both
 ways and smelting, and their blank textures, as `{ blocks, items, recipes, textures }` for each
 kind module to take its part of; `ore = false` for an alloy: brass). A helper only one pack uses
@@ -264,22 +290,24 @@ Gamma, order 20 after Alpha by name, overriding both) and the kind folder ones i
 file and a `_` helper at its top; Epsilon, JSON), grafts `tests/fixtures/content/fields/Fields`
 (every per-entry field) into a fresh game to follow each field to its registry, and
 `tests/fixtures/content/biomes/Wilds` (a biome, and an override of Plains) to follow a biome to
-Biomes, Locate and the generator, builds packs in memory for every check (`Content.build`, and the
+Biomes, Locate and the generator, and `tests/fixtures/content/brewing/Brewing` (an effect and a
+potion of it, and Speed and Swiftness patched: the potion's items, recipes, lore, tooltip and
+drink from its entry alone), builds packs in memory for every check (`Content.build`, and the
 Lune loader's `folder` / `module` / `graft`), and pins no id or total.
 
 **The content tool** (`tests/content`: `check`, `list`, `show`, `new`; README, Development) sees
 what the game sees: `tests/lib/ContentGame` mounts `src/shared` with the Lune loader, requires
 Content and every registry built from it (their load-time checks are the game's), and gathers a
 View: the merged content (where each entry came from is its own record, `content.origin`), and
-what the registries made of each entry (LoreList, TexturePack's faces and icons,
-Blocks' resolved faces, the Ages' names, Crafting.match, Items' drops) and of the world (the
+what the registries made of each entry (LoreList, TexturePack's faces and icons, Blocks' resolved
+faces, the Ages' names, Crafting.match, Items' drops, a potion's items) and of the world (the
 blocks the generators' sources name, the ore features', biomes' and structure templates' blocks,
-the chests' loot tables, mobs' drops, buckets and fills). `tests/lib/ContentTool` is pure over a View:
-the checks (lore, faces, icons, unused textures, Ages, recipes Crafting.match never reaches, and
-survival's reach: the least fixed point of the earliest Age each item can be had in, through
-drops, recipes, placing and fills; the creative tier's machines, a machine kind with
-`creative` such as the Creative Energy Cube, are by design never made, so left out), the summary,
-lists, pages and a new pack's text.
+the chests' loot tables, mobs' drops, buckets and fills). `tests/lib/ContentTool` is pure over a
+View: the checks (lore, faces, icons, unused textures, Ages, recipes Crafting.match never
+reaches, and survival's reach: the least fixed point of the earliest Age each item can be had in,
+through drops, recipes, placing and fills; the creative tier's machines, a machine kind with
+`creative` such as the Creative Energy Cube, are by design never made, so left out), the
+summary, lists, pages and a new pack's text.
 `tests/spec/ContentTool` runs it on `tests/fixtures/content/tool` (Lint, one of each finding;
 LintPatch, a JSON override) grafted into a fresh game, and on a new pack built in memory (the
 loader's `source`) before any file is written.
@@ -5215,8 +5243,9 @@ HUD drops its FOOD icon).
   jump; a block broken 0.005; a hurt that landed 0.1) and an attack that landed on a mob 0.1
   (EXHAUSTION_ATTACK, server `Mobs/Mobs` -> `ToughAsNails.attacked`: the food bar's only, so
   thirst is exactly what it was); the HOT zone's sweating is thirst's alone. Minecraft's **Hunger**
-  effect (EffectList 28, a running effect, `drainsFood`) adds `Config.Hunger.EffectExhaustion`
-  (0.005) × (amplifier + 1) every tick (`Hunger.effectExhaustion` of the player's levels).
+  effect (the Minecraft pack's, a running effect, `drainsFood`) adds
+  `Config.Hunger.EffectExhaustion` (0.005) × (amplifier + 1) every tick (`Hunger.effectExhaustion`
+  of the player's levels).
 - **A tick** (after the effects, Player.tick's order): the effect's exhaustion, the exhaustion
   into lost points, then, hurt and with natural regeneration (`NaturalRegeneration`, Minecraft's
   game rule) and not held: a full bar with saturation heals min(saturation, 6) / 6 half hearts
@@ -5499,16 +5528,19 @@ radiant), the coolers cold sources, while their `heat` says so.
 
 ## Status effects (`Effects/`, server `Players/Effects`, client `Player/EffectState`, `Ui/EffectHud`, `Rendering/EffectView`)
 
-Minecraft 1.20.1's MobEffect and MobEffectInstance, this game's two from the fluids and Tough As
-Nails' four, in one list. Tested in `tests/spec/Effects`.
+Minecraft 1.20.1's MobEffect and MobEffectInstance, this game's two from the fluids, Tough As
+Nails' four and the other features' own, each in its feature's content pack. Tested in
+`tests/spec/Effects`.
 
-**The registry** (`Shared/Effects`, its data in `Effects/EffectList`; ids are u8 list positions,
-append only, sent in the Effects message): 1 Speed, 2 Slowness, 3 Haste, 4 Mining Fatigue, 5
-Strength, 6 Instant Health, 7 Instant Damage, 8 Jump Boost, 9 Nausea, 10 Regeneration, 11
-Resistance, 12 Fire Resistance, 13 Blindness, 14 Night Vision, 15 Weakness, 16 Poison, 17 Wither, 18
-Glowing, 19 Oil Coated, 20 Fuel Soaked, 21 Thirst, 22 Internal Warmth, 23 Internal Chill, 24 Climate
-Clemency, 25 Mana Sickness, 26 Bleeding, 27 Infection, 28 Hunger, 29 Radiation Sickness
-(Radiation). A record holds its name, `/effect` id
+**The registry** (`Shared/Effects`, its data the content packs' `effects`, Content/Schema's
+EFFECT_FIELDS; an effect's id is its place among every pack's effects, given at load, a u8 in
+the Effects message, and saves keep names): the Minecraft pack's Speed, Slowness, Haste, Mining
+Fatigue, Strength, Instant Health, Instant Damage, Jump Boost, Nausea, Regeneration, Resistance,
+Fire Resistance, Blindness, Night Vision, Weakness, Poison, Wither, Glowing and Hunger (ids 1 to
+19); Mekanism's Oil Coated and Fuel Soaked; Survival's Thirst, Internal Warmth, Internal Chill
+and Climate Clemency; Terraria's Mana Sickness; the Apocalypse's Bleeding and Infection; the Ores
+pack's Radiation Sickness (Radiation). Code names them by name (`Effects.id.Speed`), never by
+number. A record holds its name, `/effect` id
 (Minecraft's), colour (MobEffect's int), category (beneficial, harmful, neutral), HUD glyph and what
 it does as data. `find` takes a name, a display name or an `/effect` id with or without a namespace;
 `levelName` writes "Speed II" (roman to X), `formatTicks` "m:ss" / "h:mm:ss" / "**:**".
@@ -5598,12 +5630,14 @@ Players/Operators) and Minecraft's answers ("Applied effect Speed to Steve", "Re
 2 targets", "Unable to apply this effect (...)", "Unknown effect: x", "Integer must not be more than
 255, found 256"). Dead players take nothing.
 
-**Potions** (`Effects/PotionList`, pure data): twelve potions, each a Purified Water Bottle brewed
-with an ingredient in a crafting grid, with a strong (Glow Dust: level II) and a long (a coal or
-charcoal) variant where Minecraft has them; 29 items (the Minecraft pack's `items/potions`, stack
-1, the effect's colour in a bottle), 29 shapeless recipes (its `recipes/potions`; the `tulips` tag),
-both made from PotionList in a loop, and each item's `drink` its variant's effect, so 29
-`Drinks.ITEMS` entries whose `Drink` carries `effects` (no water; `Drinks.isPotion`: drinkable any time, Tough As Nails on
+**Potions** (`Effects/PotionList`, the registry of the content packs' `potions`): the Minecraft
+pack's twelve, each a Purified Water Bottle brewed with an ingredient in a crafting grid, with a
+strong (Glow Dust: level II) and a long (a coal or charcoal) variant where Minecraft has them;
+Content brews each into its items (stack 1, the effect's colour in a bottle, each with its lore
+line and Age from the potion's entry, and its `drink`: its variant's effect) and their shapeless
+recipes (the `tulips` tag for Weakness), after the pack's own (Content packs, Merging), so a pack
+adds a potion with one entry; 29 `Drinks.ITEMS` entries whose `Drink` carries `effects` (no
+water; `Drinks.isPotion`: drinkable any time, Tough As Nails on
 or off, so Players/ToughAsNails keeps its Drink listener and records with both switches off,
 without ticking, and bottles fill at water then too). The inventory tooltip lists the effect, its
 level and time (blue, harmful red).
@@ -5685,7 +5719,7 @@ false turns all of it off (a saved dose is kept as it is).
   one the dose halves every `HalfLife` (600 s; Mekanism's 0.9995 a second is 23 minutes).
   Creative and spectator players are never exposed and their dose only decays; death clears it.
 - **Sickness** (`level`, `symptoms`, `renewal`): the level is the highest of `Sickness.Bands`
-  reached (Mekanism's 0.1, 1 and 10 Sv); it brings Radiation Sickness (EffectList 29, a plain data
+  reached (Mekanism's 0.1, 1 and 10 Sv); it brings Radiation Sickness (the Ores pack's, a plain data
   effect: `interval = 300, damage = 1, lethal = true`, a half heart every 15, 7.5, 3.75 s by
   magic, and it kills) at the level's amplifier, Minecraft's Hunger from `HungerFrom` (Hunger I at
   II, II at III) and Nausea from `NauseaFrom` (III), given through `Players/Effects`. A symptom is
@@ -5789,9 +5823,9 @@ Hazmat suit the Iron Age's, uranium smelting the Industrial Age's and uranium's 
 the Atomic Age's (the ore and Raw Uranium are mined in any Age). No smelting result is of a later
 Age than the transporters' (Industrial): they feed furnaces and the Electric Furnace with no window,
 so with no gate, and `tests/spec/Ores` checks every smelting result against it. What the mobs brought
-(cooked meat, leather armor, White Wool) is the Stone Age's; the potions (Effects/PotionList)
-are brewed from the Iron Age (each potion's base variant), their level II and long variants from
-the Industrial Age (`tests/spec/Crossover` checks every one).
+(cooked meat, leather armor, White Wool) is the Stone Age's; the potions (the Minecraft pack's
+`potions`, each entry's `age`) are brewed from the Iron Age (each potion's base variant), their
+level II and long variants from the Industrial Age (`tests/spec/Crossover` checks every one).
 
 **The recipe gate.** `Progression.allows(state, item)`: the item's Age reached and the node that
 names it (Demolition's gunpowder and TNT, Fission's Nuke) unlocked; a nil state allows
@@ -7418,10 +7452,11 @@ medicine and the rising on a real world server).
   `Characters.Enabled` off, each world's player record (Save/PlayerCodec since version 3, flag bit
   5: the same four numbers, written only when not all 0) carries them through `World/WorldSave`'s
   capture, leaving fallback and restore.
-- **Bleeding** is a plain data effect (EffectList: `interval = 80, damage = 1, lethal = false`):
-  EffectRules' `current > 1` rule stops it at the last half heart; amplifier 1 halves the
-  interval. Every hurt the survival rules deal goes through `Characters.magicHurt` or EffectRules,
-  so Resistance applies and the hurt cooldown holds.
+- **Bleeding** (the Apocalypse pack's) is a plain data effect
+  (`interval = 80, damage = 1, lethal = false`): EffectRules' `current > 1` rule stops it at the
+  last half heart; amplifier 1 halves the interval. Every hurt the survival rules deal goes
+  through `Characters.magicHurt` or EffectRules, so Resistance applies and the hurt cooldown
+  holds.
 - **Medicine** reuses eating (Protocol Eat): the medical items' `food` (`Items/Foods`) carries `useTicks`, `cures`
   (Shared/Effects names), `effects`, `aftermath` (Antibiotics' Weakness, given when the infection
   the cure ended had reached its `stage`, read through the `infectionStage` hook before the cure),
@@ -9975,10 +10010,10 @@ Saving worlds).
 - Block and item ids (items from 4096) are places in the content packs' merged lists (Content
   packs), given at load: nothing may count on an entry's place (find it by name), and until saves
   keep names a saved world needs the packs it was made with.
-- Status effect ids are list positions in `Effects/EffectList` (sent as a u8), and potion items
-  follow `Effects/PotionList`'s order (and each potion's base, strong, long): append, never
-  reorder. The Minecraft pack makes every potion's items and recipes from PotionList in a loop,
-  so a new potion is a PotionList entry. A new item gets a blank `TexturePack.Icons` entry, so its
+- Status effect ids are places among the content packs' effects (sent as a u8, at most 255),
+  given at load like block and item ids: code names an effect by name (`Effects.id.Speed`).
+  Content brews every pack's potions into their items and recipes, so a new potion is a
+  `potions` entry in any pack. A new item gets a blank `TexturePack.Icons` entry, so its
   picture is one id to paste later. Every hurt a player takes on the server goes through `Players/Effects.incomingDamage`
   (Resistance), and the mining factor reaches both the client's progress and ServerNet's check
   (`Mining`'s `factor`), or their timings drift apart.

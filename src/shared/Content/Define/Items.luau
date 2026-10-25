@@ -351,10 +351,10 @@ function Items.filledBucket(colour: { number }, material: string): { ModelBox }
 end
 
 --[[
-	A potion item (Shared/Effects/PotionList's `variants`: its item name and shown name): the Glass
-	Bottle with the liquid in `colour` (its effect's: Minecraft's potion colour is its effect's),
-	one to a stack as Minecraft's potions, with `extra`'s fields put over it (its lore, icon,
-	Age...: what a hand-written entry would carry).
+	A potion item (a variant of Define/Potions: its item name and shown name): the Glass Bottle
+	with the liquid in `colour` (its effect's: Minecraft's potion colour is its effect's), one to
+	a stack as Minecraft's potions, with `extra`'s fields put over it (its lore, icon, Age...: what
+	a hand-written entry would carry). Define/Potions' `brew` makes every potion's this way.
 ]]
 function Items.potion(
 	variant: { item: string, displayName: string },

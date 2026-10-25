@@ -1,11 +1,14 @@
 --!strict
 --[[
 	Status effects (Minecraft 1.20.1's MobEffect and MobEffectInstance), shared and pure: the
-	registry of EffectList (ids are u8 list positions, append only: 1 Speed .. 18 Glowing,
-	19 Oil Coated, 20 Fuel Soaked, 21..24 Tough As Nails' Thirst, Internal Warmth, Internal Chill,
-	Climate Clemency, 25 Terraria's Mana Sickness, 26 Bleeding, 27 Infection, 28 Minecraft's
-	Hunger, 29 Radiation Sickness: Shared/Radiation) and the rules both sides need, so the client's
-	prediction and the server's checks agree:
+	registry of the content packs' `effects` (Shared/Content; Content/Schema's EFFECT_FIELDS say
+	what each field does) and the rules both sides need, so the client's prediction and the
+	server's checks agree. An effect's id is its place among every pack's effects, given at load
+	(from 1, a u8 on the wire: Protocol `Effects`; saves keep names): the Minecraft pack's
+	(Minecraft's own, Speed .. Glowing and Hunger), Mekanism's (Oil Coated, Fuel Soaked: its oil
+	and fuel on the skin), Survival's (Tough As Nails' Thirst, Internal Warmth, Internal Chill,
+	Climate Clemency), Terraria's (Mana Sickness), the Apocalypse's (Bleeding, Infection) and the
+	Ores pack's (Radiation Sickness: Shared/Radiation). Code names them by name (`id.Name`):
 
 	  Registry   `id.Name`, `get`, `list`, `find` (a name or an /effect id, "minecraft:" or not, any
 	             case), `levelName` ("Speed II": the amplifier + 1 in roman numerals up to X, as
@@ -43,9 +46,12 @@
 	them down itself (`remaining`).
 ]]
 
-local EffectList = require(script.EffectList)
+local Content = require(script.Parent.Content)
+local Schema = require(script.Parent.Content.Schema)
 
-export type EffectSpec = EffectList.EffectSpec
+export type EffectSpec = Schema.EffectSpec
+
+local content = Content.default
 
 export type Effect = {
 	id: number,
@@ -59,7 +65,7 @@ export type Effect = {
 	category: string,
 	beneficial: boolean,
 	icon: string,
-	-- Per level (see EffectList); 0 / false / nil where it has none.
+	-- Per level (Content/Schema's EFFECT_FIELDS); 0 / false / nil where it has none.
 	speed: number,
 	mining: number,
 	fatigue: boolean,
@@ -103,7 +109,8 @@ local Effects = {}
 Effects.INFINITE = -1
 -- The highest amplifier (a byte in Minecraft's packets and /effect: 0..255).
 Effects.MAX_AMPLIFIER = 255
-Effects.COUNT = #EffectList
+-- How many effects there are: their ids are 1..COUNT (the packs' effects, in id order).
+Effects.COUNT = #content.effects
 -- Ticks a second.
 Effects.TICKS_PER_SECOND = 20
 -- Mining Fatigue's speed by amplifier (Player.getDestroySpeed), the last for every higher one.
@@ -118,10 +125,6 @@ Effects.BLIND_DISTANCE = 5
 
 assert(Effects.COUNT < 256, "Effect ids must fit a u8")
 
-local CATEGORIES: { [string]: boolean } = { beneficial = true, harmful = true, neutral = true }
-local VIEWS: { [string]: boolean } = { nightVision = true, blindness = true, nausea = true, glowing = true }
-local INSTANTS: { [string]: boolean } = { heal = true, harm = true }
-
 local list: { Effect } = {}
 local byName: { [string]: number } = {}
 local ids: { [string]: number } = {}
@@ -131,14 +134,9 @@ local function spaced(name: string): string
 	return (string.gsub(name, "(%l)(%u)", "%1 %2"))
 end
 
-for id, spec in EffectList do
-	assert(ids[spec.name] == nil, `Two effects are named {spec.name}`)
-	assert(CATEGORIES[spec.category], `Effect {spec.name} has an unknown category {spec.category}`)
-	assert(spec.view == nil or VIEWS[spec.view], `Effect {spec.name} has an unknown view {spec.view}`)
-	assert(spec.instant == nil or INSTANTS[spec.instant], `Effect {spec.name} has an unknown instant`)
-	assert(string.match(spec.command, "^[a-z_]+$"), `Effect {spec.name}'s command id must be lower_snake`)
-	assert(#spec.color == 3, `Effect {spec.name} needs a colour of three channels`)
-	assert((spec.interval or 1) >= 1, `Effect {spec.name}'s interval must be at least 1`)
+-- (Content checked each effect's fields as the packs loaded: its category, icon, view, command,
+-- colour, interval. What is left is this registry's own: `find`'s words, each one effect's.)
+for id, spec in content.effects do
 	local c = spec.color
 	local record: Effect = {
 		id = id,
@@ -175,7 +173,11 @@ for id, spec in EffectList do
 	ids[spec.name] = id
 	for _, key in { spec.name, spec.command, record.displayName, (string.gsub(spec.command, "_", "")) } do
 		local lower = string.lower(key)
-		assert(byName[lower] == nil or byName[lower] == id, `Effect name {key} is taken`)
+		if byName[lower] ~= nil and byName[lower] ~= id then
+			error(
+				`Effects: {content.where("effect", spec.name)} is found by "{key}", and so is {list[byName[lower]].name}`
+			)
+		end
 		byName[lower] = id
 	end
 end

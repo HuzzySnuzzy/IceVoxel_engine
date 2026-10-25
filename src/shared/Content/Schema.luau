@@ -20,6 +20,9 @@
 	  fuel      { [tag]: ticks }: furnace fuel by item tag (Core's logs and planks: every item in
 	            the tag burns this long, unless its entry gives its own `fuel`)
 	  biomes    { BiomeSpec }: biomes, in order (BIOME_FIELDS below; Shared/Biomes)
+	  effects   { EffectSpec }: status effects (Shared/Effects; EFFECT_FIELDS), ids in load order
+	  potions   { PotionSpec }: potions (Effects/PotionList; POTION_FIELDS), each made into its
+	            items and their recipes as packs load
 	A pack's `pack` module is its manifest (MANIFEST_FIELDS): { order, description, requires? }.
 
 	Per-entry fields that feed other registries (each registry reads them off the entries; see
@@ -59,8 +62,8 @@
 	                                (ToughAsNails/Drinks.ITEMS, whose header says what each does;
 	                                numbers left out are 0); `empty` the container it leaves, by
 	                                name
-	  override         block, item, texture, biome  patches the entry of that name an earlier pack
-	                   made
+	  override         block, item, texture, biome, effect, potion  patches the entry of that name
+	                   an earlier pack made
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
 	gone: each entry says its own).
@@ -425,6 +428,56 @@ export type BiomeSpec = {
 	override: boolean?,
 }
 
+-- A status effect (the `effects` kind; EFFECT_FIELDS below says what each field does).
+export type EffectSpec = {
+	name: string,
+	displayName: string?,
+	command: string,
+	color: { number },
+	category: string,
+	icon: string,
+	speed: number?,
+	mining: number?,
+	fatigue: boolean?,
+	jump: number?,
+	melee: number?,
+	resistance: number?,
+	interval: number?,
+	heal: number?,
+	damage: number?,
+	lethal: boolean?,
+	instant: string?,
+	fireImmune: boolean?,
+	burnFactor: number?,
+	burnBonus: number?,
+	ignites: boolean?,
+	washOff: boolean?,
+	view: string?,
+	noSprint: boolean?,
+	drainsFood: boolean?,
+	external: boolean?,
+	override: boolean?,
+}
+
+-- One line or name per variant of a potion (its `lore`, `icon`, `age`): the base potion's, the
+-- strong one's, the long one's.
+export type PotionText = { base: string?, strong: string?, long: string? }
+
+-- A potion (the `potions` kind; POTION_FIELDS below).
+export type PotionSpec = {
+	name: string,
+	displayName: string?,
+	ingredient: string,
+	effect: string,
+	seconds: number?,
+	strong: (number | boolean)?,
+	long: number?,
+	lore: PotionText?,
+	icon: PotionText?,
+	age: PotionText?,
+	override: boolean?,
+}
+
 -- A pack's manifest (its `pack` module).
 export type Manifest = { order: number, description: string?, requires: { string }? }
 
@@ -432,6 +485,8 @@ export type Manifest = { order: number, description: string?, requires: { string
 
 -- nil for a good value, else what is wrong (" must be ...") after the path into it.
 export type Check = (value: any) -> string?
+
+local Looks = require(script.Parent.Parent.Effects.Looks)
 
 local Schema = {}
 
@@ -1426,6 +1481,162 @@ Schema.BIOME_NEEDS = table.freeze({
 	"features",
 })
 
+--[[
+	Status effect fields (Minecraft 1.20.1's MobEffect, with this game's and Tough As Nails' own;
+	everything but `name`, `command`, `color`, `category` and `icon` is optional, and an override
+	needs only `name`). An effect's id is its place among every pack's effects (from 1), sent as
+	a u8 (Protocol `Effects`); saves keep its name.
+	  name         Unique, `Effects.id.Name`, and what data names it by (FluidList, a potion's
+	               `effect`, Foods).
+	  displayName  Shown on the HUD, in tooltips and in /effect's answers (default: the name with
+	               spaces, "JumpBoost" -> "Jump Boost").
+	  command      Its /effect id, lower_snake: Minecraft's (effect.minecraft.<id>: "jump_boost"),
+	               this game's ("oil_coated") or Tough As Nails' ("thirst"). "minecraft:" in front
+	               is accepted.
+	  color        { r, g, b } 0-255: Minecraft's MobEffect colour (a potion's liquid and icon).
+	  category     "beneficial" | "harmful" | "neutral" (MobEffectCategory): the HUD's rows, the
+	               tooltip's colour.
+	  icon         The HUD glyph drawn in the effect's colour: one of Shared/Effects/Looks' ICONS
+	               (client Ui/EffectIcons draws each).
+	Attribute modifiers, per level (amplifier + 1):
+	  speed        movement speed MULTIPLY_TOTAL (Speed +0.2, Slowness -0.15, Oil Coated -0.15):
+	               the ground speed is multiplied by 1 + speed x level, each effect in turn.
+	  mining       Haste's +0.2 (Player.getDestroySpeed: x (1 + 0.2 x level)).
+	  fatigue      Mining Fatigue's table instead: x 0.3, 0.09, 0.0027, 0.00081 (level 4 and up).
+	  jump         Jump Boost's +0.1 jump velocity (blocks a tick), and a block less of fall
+	               damage per level (LivingEntity.calculateFallDamage).
+	  melee        attack damage ADDITION (half hearts): Strength +3, Weakness -4.
+	  resistance   share of incoming damage taken off (Resistance 0.2: getDamageAfterMagicAbsorb's
+	               (25 - 5 x level) / 25; level 5 and up: nothing gets through).
+	Ticking (MobEffect.applyEffectTick, on the ticks isDurationEffectTick picks):
+	  interval     ticks between applications (at least 1), shifted right by the amplifier
+	               (Regeneration 50, Poison 25, Wither 40: interval >> amplifier, every tick once
+	               that is 0).
+	  heal         half hearts healed each application, while not at full health (Regeneration 1).
+	  damage       half hearts each application (Poison, Wither 1), magic: through armor.
+	  lethal       its damage may kill (Wither); without it the damage only lands while the
+	               health is above 1 half heart (Poison: `if (getHealth() > 1.0F)`).
+	  instant      "heal" (Instant Health: 4 << amplifier half hearts) or "harm" (Instant Damage:
+	               6 << amplifier, magic): applied once, on the tick after it is given, then gone
+	               (HealOrHarmMobEffect; given with 1 tick, never shown).
+	Fire (server Players/Burning):
+	  fireImmune   no hurt from fire, lava, campfires or burning (Fire Resistance: LivingEntity.hurt
+	               returns false for IS_FIRE damage; burning itself still counts down).
+	  burnFactor   burning set while it lasts lasts this many times longer (Oil Coated 2, Fuel
+	               Soaked 3: lava's 15 s become 30 / 45 s, a fire's 8 s 16 / 24 s).
+	  burnBonus    half hearts added to every burning hurt (Oil Coated 1: 2 every second).
+	  ignites      catches fire in a fire block at once (no 20 tick wait) and from any explosion
+	               that hurts (Fuel Soaked: petrol on the skin).
+	  washOff      water (a fluid that `extinguishes`) takes it off at once.
+	The client:
+	  view         one of Shared/Effects/Looks' VIEWS: "nightVision" | "blindness" | "nausea"
+	               (client Rendering/EffectView), "glowing" (an outline everyone sees through
+	               walls: the server's Highlight).
+	  noSprint     can't start sprinting while it lasts (Blindness: LocalPlayer.canStartSprinting).
+	Elsewhere:
+	  drainsFood   food exhaustion every tick, Config.Hunger.EffectExhaustion (0.005) per level
+	               (Minecraft's Hunger: HungerMobEffect.applyEffectTick, causeFoodExhaustion(0.005
+	               x (amplifier + 1)) on every tick); Shared/Hunger adds it (nothing with hunger
+	               off, nor for creative and spectator players).
+	  external     its state is kept by another module (Tough As Nails' Thirst, Internal Warmth,
+	               Internal Chill and Climate Clemency: server Players/ToughAsNails; a bite's
+	               Infection: server Apocalypse/Infection) and only read (and given or cleared by
+	               /effect) through an adapter (server Players/Effects `addExternal`), so the HUD
+	               lists every effect in one place.
+]]
+local function COMMAND(value: any): string?
+	if type(value) ~= "string" or not string.match(value, "^[a-z_]+$") then
+		return ` must be lower_snake (a..z and _), not {describe(value)}`
+	end
+	return nil
+end
+local function atLeast(least: number): Check
+	return function(value: any): string?
+		if type(value) ~= "number" or not (value >= least) then
+			return ` must be a number of at least {least}, not {describe(value)}`
+		end
+		return nil
+	end
+end
+local function ABOVE_ZERO(value: any): string?
+	if type(value) ~= "number" or not (value > 0) then
+		return ` must be a number above 0, not {describe(value)}`
+	end
+	return nil
+end
+Schema.EFFECT_FIELDS = {
+	name = STRING,
+	displayName = STRING,
+	command = COMMAND,
+	color = RGB,
+	category = enum({ "beneficial", "harmful", "neutral" }),
+	icon = enum(Looks.ICONS),
+	speed = NUMBER,
+	mining = NUMBER,
+	fatigue = BOOLEAN,
+	jump = NUMBER,
+	melee = NUMBER,
+	resistance = NUMBER,
+	interval = atLeast(1),
+	heal = NUMBER,
+	damage = NUMBER,
+	lethal = BOOLEAN,
+	instant = enum({ "heal", "harm" }),
+	fireImmune = BOOLEAN,
+	burnFactor = NUMBER,
+	burnBonus = NUMBER,
+	ignites = BOOLEAN,
+	washOff = BOOLEAN,
+	view = enum(Looks.VIEWS),
+	noSprint = BOOLEAN,
+	drainsFood = BOOLEAN,
+	external = BOOLEAN,
+	override = BOOLEAN,
+} :: { [string]: Check }
+
+--[[
+	Potion fields (Minecraft 1.20.1's Potions, brewed here in a crafting grid as the game has no
+	brewing stand; everything but `name`, `ingredient` and `effect` is optional, and an override
+	needs only `name`). A potion is items of its own, which Content makes as packs load (Content/
+	Define's `brew`), after its pack's items, their recipes after its pack's recipes: the base
+	potion, a Purified Water Bottle brewed with its `ingredient`, and the variants brewed from it.
+	Effects/PotionList gives them to the game (ToughAsNails/Drinks: drinking one).
+	  name         Unique among potions; its items are PotionOf<Name>, StrongPotionOf<Name> and
+	               LongPotionOf<Name>.
+	  displayName  Its items' names say "Potion of <displayName>" (default: the name).
+	  ingredient   What the water bottle is brewed with (shapeless, any grid): an item or block
+	               name, or a recipe "#tag".
+	  effect       The effect it gives at level I (an `effects` name).
+	  seconds      How long it lasts; left out for an instant effect (Instant Health, Instant
+	               Damage), which acts once.
+	  strong       Its level II, the potion brewed with Glow Dust: lasting `strong` seconds, or
+	               true for an instant effect's.
+	  long         Its long variant, the potion brewed with a coal or charcoal: level I for `long`
+	               seconds (a lasting effect's only).
+	  lore         { base = line, strong = line?, long = line? }: each item's tooltip line.
+	  icon         { base?, strong?, long? }: each item's picture, "rbxassetid://<n>" (left out
+	               or "": blank, still to make).
+	  age          { base?, strong?, long? }: the Age (an id) that opens each item's recipe (a
+	               table a pack's potions share may name variants a potion has not).
+	Checked once every pack has loaded (Schema.checkVariants): its effect and ingredient are
+	there, `seconds` is given for a lasting effect and left out for an instant one, `strong` and
+	`long` are what the effect takes, and lore and icon name only variants it has.
+]]
+local POTION_TEXT = record({ base = STRING, strong = STRING, long = STRING })
+Schema.POTION_FIELDS = {
+	name = STRING,
+	displayName = STRING,
+	ingredient = STRING,
+	effect = STRING,
+	seconds = ABOVE_ZERO,
+	strong = oneOf("a number above 0 or true", { ABOVE_ZERO, TRUE_ONLY }),
+	long = ABOVE_ZERO,
+	lore = POTION_TEXT,
+	icon = POTION_TEXT,
+	age = POTION_TEXT,
+	override = BOOLEAN,
+} :: { [string]: Check }
+
 Schema.MANIFEST_FIELDS = {
 	order = NUMBER,
 	description = STRING,
@@ -1447,6 +1658,8 @@ Schema.KINDS = table.freeze({
 	"lore",
 	"fuel",
 	"biomes",
+	"effects",
+	"potions",
 })
 -- Each kind's entries' name in messages.
 Schema.SINGULAR = table.freeze({
@@ -1461,6 +1674,8 @@ Schema.SINGULAR = table.freeze({
 	lore = "lore",
 	fuel = "fuel tag",
 	biomes = "biome",
+	effects = "effect",
+	potions = "potion",
 }) :: { [string]: string }
 -- The kinds that are lists of entries (the rest are tables of names).
 Schema.LISTS = table.freeze({
@@ -1470,6 +1685,8 @@ Schema.LISTS = table.freeze({
 	ores = true,
 	ages = true,
 	biomes = true,
+	effects = true,
+	potions = true,
 }) :: { [string]: boolean }
 
 -- Each kind's entry check, for the kinds whose entries are records.
@@ -1481,6 +1698,8 @@ local ENTRY_FIELDS: { [string]: { [string]: Check } } = {
 	ores = Schema.ORE_FIELDS,
 	ages = Schema.AGE_FIELDS,
 	biomes = Schema.BIOME_FIELDS,
+	effects = Schema.EFFECT_FIELDS,
+	potions = Schema.POTION_FIELDS,
 }
 -- What the other kinds' values must be.
 local VALUE_CHECKS: { [string]: Check } = {
@@ -1529,6 +1748,10 @@ function Schema.check(kind: string, entry: any): string?
 		elseif kind == "ores" then { "name", "block", "veins", "size", "minY", "maxY" }
 		elseif kind == "ages" then { "id", "name", "level", "milestones", "reward", "color" }
 		elseif kind == "biomes" then (if override then { "name" } else Schema.BIOME_NEEDS)
+		elseif kind == "effects" then (if override
+			then { "name" }
+			else { "name", "command", "color", "category", "icon" })
+		elseif kind == "potions" then (if override then { "name" } else { "name", "ingredient", "effect" })
 		else {}
 	if kind == "recipes" then
 		local rule = Schema.RECIPE_TYPES[entry.type]
@@ -1545,6 +1768,37 @@ function Schema.check(kind: string, entry: any): string?
 	for _, key in needs do
 		if entry[key] == nil then
 			return `{key} is missing`
+		end
+	end
+	return nil
+end
+
+--[[
+	What is wrong with a merged potion's variants (nil: nothing), `instant` when its effect acts
+	once (POTION_FIELDS): `seconds` given for a lasting effect and left out for an instant one,
+	`strong` its seconds (true for an instant effect), `long` a lasting effect's only, and its
+	lore and icon naming only the variants it has (a line for no item is a mistake; its `age` may
+	name all three, as the potions of a pack share one table).
+]]
+function Schema.checkVariants(potion: PotionSpec, instant: boolean): string?
+	local effect = potion.effect
+	if instant and potion.seconds ~= nil then
+		return `seconds is for a lasting effect: {effect} is instant (leave it out)`
+	elseif not instant and potion.seconds == nil then
+		return `seconds is missing ({effect} lasts; only an instant effect's potion has none)`
+	elseif instant and potion.strong ~= nil and potion.strong ~= true then
+		return `strong must be true for an instant effect ({effect}), not {describe(potion.strong)}`
+	elseif not instant and potion.strong == true then
+		return `strong must be its seconds ({effect} lasts), not true`
+	elseif instant and potion.long ~= nil then
+		return `long is for a lasting effect: {effect} is instant, and has no long variant`
+	end
+	for _, field in { "lore", "icon" } do
+		local texts = (potion :: any)[field]
+		for _, variant in { "strong", "long" } do
+			if texts and texts[variant] ~= nil and (potion :: any)[variant] == nil then
+				return `{field}.{variant} is for a {variant} variant, and it has no {variant}`
+			end
 		end
 	end
 	return nil

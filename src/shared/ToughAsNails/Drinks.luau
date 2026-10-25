@@ -6,9 +6,9 @@
 	Glass Bottle, Dirty / Purified Water Bottle, Canteen, Dirty / Purified Water Canteen, Bowl,
 	Dirty / Purified Water Bowl, Mint / Ginger / Herbal Tea, with a table of their numbers), the
 	Apocalypse pack's Bottled Water and Soda (items/supplies), the Terraria pack's mana potions
-	and the Minecraft pack's potions (items/potions, Shared/Effects/PotionList's). Dirty water is
-	purified in a furnace or with a mint leaf in a crafting grid, and a purified water bowl brews
-	a tea with a herb (the Survival pack's recipes).
+	and every pack's potions (its `potions`, brewed into items with their drinks as the packs load:
+	Content/Define's `brew`). Dirty water is purified in a furnace or with a mint leaf in a
+	crafting grid, and a purified water bowl brews a tea with a herb (the Survival pack's recipes).
 
 	A drink (Drink) gives `thirst` points and the `hydration` modifier (Thirst.drink adds thirst x
 	modifier x 2), and rolls TAN's Thirst effect at `chance` for `effectTicks` (dirty water: 50%,

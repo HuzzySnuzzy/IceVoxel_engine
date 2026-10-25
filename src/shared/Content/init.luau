@@ -1,22 +1,22 @@
 --!strict
 --[[
 	Content packs (Minecraft's data packs): every block, item, recipe, tag, texture, loot table, ore
-	feature, Age, lore line, fuel tag and biome of the game comes from a pack, a folder under
-	Content/Packs, and every value about an entry is on the entry. The registries (Blocks, Items,
-	TexturePack, Crafting, Progression, the Metal Miner, Radiation, generation, biomes, loot,
-	sounds, Tough As Nails) build themselves from what this module loads; adding content is adding
-	entries to a pack, or a pack.
+	feature, Age, lore line, fuel tag, biome, status effect and potion of the game comes from a
+	pack, a folder under Content/Packs, and every value about an entry is on the entry. The
+	registries (Blocks, Items, TexturePack, Crafting, Progression, the Metal Miner, Radiation,
+	generation, biomes, loot, sounds, Tough As Nails, Effects and PotionList) build themselves from
+	what this module loads; adding content is adding entries to a pack, or a pack.
 
 	A pack
 	  A folder holding `pack`, its manifest ({ order = n, description = "...", requires = { pack
 	  names }? }), and any of the kinds Content/Schema lists (blocks, items, recipes, tags, textures,
-	  loot, ores, ages, lore, fuel, biomes), each a module of the kind's name: a Luau module
-	  returning its data, or `function(define) -> data` (define: Content/Define, the shared helpers
-	  and Config, for packs that build entries or read switches), or a `.json` file holding it (Rojo
-	  makes a JSON file a ModuleScript returning its table, and so does the Lune loader). Any other
-	  module in a pack is an error (a misspelt kind would be ignored otherwise) unless its name
-	  starts with "_": the pack's own helpers, which its kind modules require (at the pack's top
-	  only).
+	  loot, ores, ages, lore, fuel, biomes, effects, potions), each a module of the kind's name: a
+	  Luau module returning its data, or `function(define) -> data` (define: Content/Define, the
+	  shared helpers and Config, for packs that build entries or read switches), or a `.json` file
+	  holding it (Rojo makes a JSON file a ModuleScript returning its table, and so does the Lune
+	  loader). Any other module in a pack is an error (a misspelt kind would be ignored otherwise)
+	  unless its name starts with "_": the pack's own helpers, which its kind modules require (at
+	  the pack's top only).
 
 	Kind folders
 	  A kind may also be a folder of the kind's name (`Minecraft/blocks/`), as Minecraft's data
@@ -36,9 +36,10 @@
 	  0); an item's is ITEM_BASE + its place among every pack's items, minus one (every placeable
 	  block is an item too, with its block's id: Shared/Items). Ids are dense and given here at
 	  load, the same on every machine, so packs may add, remove and reorder content (saves are to
-	  keep names, not ids); fewer than ITEM_BASE blocks. A pack's `requires` must load before it
-	  (a lower order, or the same and an earlier name); it orders packs, while the names an entry
-	  gives may be any pack's.
+	  keep names, not ids); fewer than ITEM_BASE blocks. An effect's id is its place among every
+	  pack's effects (from 1; sent as a u8, so MAX_EFFECTS at most). A pack's `requires` must load
+	  before it (a lower order, or the same and an earlier name); it orders packs, while the names
+	  an entry gives may be any pack's.
 
 	Merging
 	  blocks, items  by name: an entry with `override = true` patches the entry of that name an
@@ -58,6 +59,14 @@
 	                 and Ages (each id once).
 	  loot, lore     by name, each once; so is fuel (by tag: every item in the tag burns that
 	                 long, unless its entry gives its own `fuel`, Crafting/Recipes).
+	  effects, potions  by name, as blocks and items are (each kind's names its own: the potion
+	                 Strength gives the effect Strength). Once every pack has merged, each potion
+	                 is brewed (Content/Define's `brew`: Minecraft's brewing in a grid) from its
+	                 final fields and its effect's colour into its items (each with its `drink`)
+	                 and their recipes, which go after its pack's own items and recipes ("pack
+	                 Minecraft, potion Swiftness, item PotionOfSwiftness"); so a pack patches a
+	                 potion's items by patching the potion (its lore, icon, Age...), as they are
+	                 made after every pack's items.
 
 	Checks, as packs load (each message names the pack, the kind and the entry):
 	  * the manifest and every entry against Content/Schema: unknown fields (with "did you mean"),
@@ -68,12 +77,13 @@
 	    other half, a toggle's `to`, a block's loot table, an ore feature's block, the Ages entries
 	    name (`age`), the textures blocks name (`texture`) and the blocks textures are tinted like,
 	    the Ages' milestones' items, every lore line's item, a lore line both on an entry and in a
-	    pack's `lore`, and the blocks a biome names (its ground, and its plants: single plants or
-	    lower halves).
+	    pack's `lore`, the blocks a biome names (its ground, and its plants: single plants or lower
+	    halves), and a potion's effect, its ingredient and its variants (Schema.checkVariants: an
+	    instant effect's potion has no seconds and no long variant...).
 	  The registries check what only they know of an entry's value as they load, naming the pack
 	  too (`where`): a skill, a sound event or action, a machine kind, the miner's numbers, a
 	  radiation or shielding number, a fuel's ticks, a biome's bands (Biomes) and tree builders
-	  (Generation/Structures).
+	  (Generation/Structures), two effects /effect would find by one word (Effects).
 
 	API
 	  Content.default             the packs under Content/Packs, loaded once: what the game uses
@@ -85,8 +95,11 @@
 	                              the other kinds, merged
 	  content.biomes              the merged biomes, in load order (Schema's BiomeSpec; a biome's
 	                              place is its index in Shared/Biomes)
+	  content.effects, .potions   the effects in id order, the potions in load order (their items
+	                              and recipes are among .items and .recipes)
 	  content.packs               the packs, in load order
 	  content.blockId, .itemId    name -> id (items: those that are no blocks)
+	  content.effectId            name -> effect id (Shared/Effects')
 	  content.block(name), .item(name), .entry(name), .biome(name)
 	                              an entry by name, nil when there is none
 	  content.where(kind, name)   "pack Minecraft, blocks/terrain, block Stone" (kind: Schema
@@ -112,6 +125,8 @@ type Pool = Schema.Pool
 type OreFeature = Schema.OreFeature
 type AgeRecord = Schema.AgeRecord
 type BiomeSpec = Schema.BiomeSpec
+type EffectSpec = Schema.EffectSpec
+type PotionSpec = Schema.PotionSpec
 
 -- A pack, as loaded: its folder's name, its manifest's numbers.
 export type PackInfo = { name: string, order: number, description: string, requires: { string } }
@@ -145,8 +160,11 @@ export type Content = {
 	lore: { [string]: string },
 	fuel: { [string]: number },
 	biomes: { BiomeSpec },
+	effects: { EffectSpec },
+	potions: { PotionSpec },
 	blockId: { [string]: number },
 	itemId: { [string]: number },
+	effectId: { [string]: number },
 	block: (name: string) -> BlockSpec?,
 	item: (name: string) -> ItemSpec?,
 	entry: (name: string) -> Entry?,
@@ -159,6 +177,8 @@ local Content = {}
 
 -- First id of the items that are no blocks; there are fewer blocks than this.
 Content.ITEM_BASE = 4096
+-- The most effects there may be: an effect's id (from 1) goes over the wire as a u8.
+Content.MAX_EFFECTS = 255
 
 local SINGULAR = Schema.SINGULAR
 
@@ -284,6 +304,13 @@ function Content.build(input: { PackData }): Content
 	-- Biome name -> its place in `biomes` (content.biome; what a check of the biomes another kind
 	-- names looks up).
 	local biomeAt: { [string]: number } = {}
+	local effects: { EffectSpec } = {}
+	local potions: { PotionSpec } = {}
+	-- The kinds merged by name (`mergeEntry`): each one's entries, and name -> place among them.
+	local lists: { [string]: { any } } = { blocks = blocks, items = items, effects = effects, potions = potions }
+	local places: { [string]: { [string]: number } } = { blocks = blockAt, items = itemAt, effects = {}, potions = {} }
+	-- Where each pack's own items and recipes end (its potions' go after them).
+	local ends: { [string]: { items: number, recipes: number } } = {}
 
 	local function whereOf(kind: string, name: string): string
 		local pack = made[kind][name]
@@ -301,9 +328,12 @@ function Content.build(input: { PackData }): Content
 		return if file then `pack {pack}, {file}` else `pack {pack}`
 	end
 
-	-- The kind and pack that took a block's or item's name, or nil.
-	local function takenBy(name: string): string?
-		if made.blocks[name] then
+	-- The kind and pack that took a name of `kind`'s, or nil: blocks and items share their names,
+	-- effects and potions have names of their own.
+	local function takenBy(kind: string, name: string): string?
+		if kind == "effects" or kind == "potions" then
+			return if made[kind][name] then whereOf(kind, name) else nil
+		elseif made.blocks[name] then
 			return whereOf("blocks", name)
 		elseif made.items[name] then
 			return whereOf("items", name)
@@ -330,19 +360,19 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
-	-- A block or item entry of `pack` (checked; `file`: its kind folder's file): appended, or
-	-- patched onto the earlier one.
+	-- An entry of a kind merged by name (`lists`: a block, an item, an effect, a potion) of `pack`
+	-- (checked; `file`: its kind folder's file): appended, or patched onto the earlier one.
 	local function mergeEntry(kind: string, pack: string, file: string?, entry: any)
 		local name = entry.name :: string
-		local list: { any } = if kind == "blocks" then blocks else items
-		local at = if kind == "blocks" then blockAt else itemAt
+		local list = lists[kind]
+		local at = places[kind]
 		local here = `{placeOf(pack, file)}, {SINGULAR[kind]} {name}`
 		if entry.override then
 			local index = at[name]
 			if index == nil then
-				local other = takenBy(name)
+				local other = takenBy(kind, name)
 				fail(
-					`{here} overrides a {SINGULAR[kind]} no earlier pack makes{if other
+					`{here} overrides {if kind == "effects" then "an" else "a"} {SINGULAR[kind]} no earlier pack makes{if other
 						then ` ({other} has the name)`
 						else hint(name, at)}`
 				)
@@ -356,7 +386,7 @@ function Content.build(input: { PackData }): Content
 			list[index] = target
 			table.insert(patched[kind][name], pack)
 		else
-			local other = takenBy(name)
+			local other = takenBy(kind, name)
 			if other then
 				fail(`{here}: the name is taken by {other} (another name, or override = true to patch it)`)
 			end
@@ -479,7 +509,7 @@ function Content.build(input: { PackData }): Content
 						if problem then
 							fail(`{place}, {SINGULAR[kind]} {label}: {problem}`)
 						end
-						if kind == "blocks" or kind == "items" then
+						if places[kind] then
 							mergeEntry(kind, pack, file, entry)
 						elseif kind == "biomes" then
 							mergeBiome(pack, file, entry)
@@ -541,10 +571,80 @@ function Content.build(input: { PackData }): Content
 				end
 			end
 		end
+		ends[pack] = { items = #items, recipes = #recipes }
 	end
 
 	if #blocks >= Content.ITEM_BASE then
 		fail(`{#blocks} blocks: block ids must stay under ITEM_BASE ({Content.ITEM_BASE})`)
+	end
+	if #effects > Content.MAX_EFFECTS then
+		fail(
+			`{#effects} effects: effect ids must fit a u8 (Protocol's Effects), MAX_EFFECTS ({Content.MAX_EFFECTS}) at most`
+		)
+	end
+
+	--[[ Potions: each brewed into its items and their recipes, after its pack's own ]]
+
+	local effectAt = places.effects
+	-- Each pack's potions' items and recipes, and where each recipe is from.
+	local brewed: { [string]: { items: { ItemSpec }, recipes: { Recipe }, from: typeof(recipeFrom) } } = {}
+	for _, potion in potions do
+		local here = whereOf("potions", potion.name)
+		local at = effectAt[potion.effect]
+		if at == nil then
+			fail(`{here}: effect names unknown effect {potion.effect}{hint(potion.effect, effectAt)}`)
+		end
+		local effect = effects[at]
+		local problem = Schema.checkVariants(potion, effect.instant ~= nil)
+		if problem then
+			fail(`{here}: {problem}`)
+		end
+		local pack = made.potions[potion.name]
+		-- (Its items and recipes are its own file's, as messages and `origin` name them.)
+		local file = `potion {potion.name}`
+		local into = brewed[pack] or { items = {}, recipes = {}, from = {} }
+		brewed[pack] = into
+		local brew = Define.brew(potion, effect.color)
+		for _, spec in brew.items do
+			local other = takenBy("items", spec.name)
+			if other then
+				fail(
+					`{placeOf(pack, file)}, item {spec.name}: the name is taken by {other} (rename the potion or the item)`
+				)
+			end
+			made.items[spec.name] = pack
+			madeIn.items[spec.name] = file
+			patched.items[spec.name] = {}
+			table.insert(into.items, spec)
+		end
+		for index, recipe in brew.recipes do
+			table.insert(into.recipes, recipe)
+			table.insert(into.from, { from = placeOf(pack, file), pack = pack, file = file, index = index })
+		end
+	end
+	-- (The lists put back in pack order, each pack's potions' after its own.)
+	if next(brewed) then
+		local ownItems, ownRecipes, ownFrom = table.clone(items), table.clone(recipes), table.clone(recipeFrom)
+		table.clear(items)
+		table.clear(recipes)
+		table.clear(recipeFrom)
+		local item, recipe = 0, 0
+		for _, info in packs do
+			local mark = ends[info.name]
+			table.move(ownItems, item + 1, mark.items, #items + 1, items)
+			table.move(ownRecipes, recipe + 1, mark.recipes, #recipes + 1, recipes)
+			table.move(ownFrom, recipe + 1, mark.recipes, #recipeFrom + 1, recipeFrom)
+			item, recipe = mark.items, mark.recipes
+			local more = brewed[info.name]
+			if more then
+				table.move(more.items, 1, #more.items, #items + 1, items)
+				table.move(more.recipes, 1, #more.recipes, #recipes + 1, recipes)
+				table.move(more.from, 1, #more.from, #recipeFrom + 1, recipeFrom)
+			end
+		end
+		for index, spec in items do
+			itemAt[spec.name] = index
+		end
 	end
 
 	-- Ids, by place.
@@ -556,6 +656,7 @@ function Content.build(input: { PackData }): Content
 	for index, spec in items do
 		itemId[spec.name] = Content.ITEM_BASE + index - 1
 	end
+	local effectId: { [string]: number } = table.clone(effectAt)
 	local entries: { Entry } = table.clone(blocks) :: { any }
 	for _, spec in items do
 		table.insert(entries, spec)
@@ -669,6 +770,9 @@ function Content.build(input: { PackData }): Content
 			fail(`{whereOf(kind, entry.name)}: its lore is pack {made.lore[entry.name]}'s lore too`)
 		end
 	end
+	for _, potion in potions do
+		needIngredient(whereOf("potions", potion.name), "ingredient", potion.ingredient)
+	end
 	for index, recipe in recipes do
 		local from = recipeFrom[index]
 		local here = `{from.from}, recipe #{from.index} ({recipe.result})`
@@ -772,8 +876,11 @@ function Content.build(input: { PackData }): Content
 		lore = lore,
 		fuel = fuel,
 		biomes = biomes,
+		effects = effects,
+		potions = potions,
 		blockId = blockId,
 		itemId = itemId,
+		effectId = effectId,
 	} :: Content
 	function content.block(name: string): BlockSpec?
 		local index = blockAt[name]

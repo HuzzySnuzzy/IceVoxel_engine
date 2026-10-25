@@ -1,154 +1,62 @@
 --!strict
 --[[
 	The potions (Minecraft 1.20.1's Potions, brewed here in a crafting grid: the game has no
-	brewing stand). Pure data that requires nothing, read by the Minecraft content pack: the potion
-	items, in this order, each with its `drink` (ToughAsNails/Drinks: the 32 tick hold, the effect
-	given when it finishes, the Glass Bottle back), and their brewing recipes. A potion added here
-	gets its items, drinks and recipes with the others (item ids are given at load,
-	Shared/Content).
+	brewing stand): the registry of the content packs' `potions` (Shared/Content; Content/Schema's
+	POTION_FIELDS say what each field does). The Minecraft pack holds Minecraft's (its `potions`);
+	a pack adds one by adding an entry to its own. Content brews every potion into its items, each
+	with its `drink` (ToughAsNails/Drinks: the 32 tick hold, the effect given when it finishes, the
+	Glass Bottle back), and their recipes as the packs load (Content/Define's `brew`), so a potion
+	added in any pack has its items, its recipes, its drink and its tooltip with nothing else to
+	write.
 
-	A potion is a Purified Water Bottle brewed with its `ingredient` (shapeless, any grid; an item
-	or block name, or a recipe "#tag"), giving `effect` (an EffectList name) for `seconds` (nil:
+	A potion is a Purified Water Bottle (BASE) brewed with its `ingredient` (shapeless, any grid; an
+	item or block name, or a recipe "#tag"), giving `effect` (an effect's name) for `seconds` (nil:
 	an instant effect) at level I. Its variants, each an item of its own:
-	  strong  Glow Dust (the game's glowstone) brewed into it: level II for `strong` seconds
-	          (true for an instant effect's II): "Potion of Swiftness II"
-	  long    a coal or charcoal (the game has no redstone) brewed into it: level I for `long`
-	          seconds: "Long Potion of Swiftness"
-	Minecraft's numbers: 3:00, II 1:30, long 8:00 for most; Poison and Regeneration 0:45, II 0:21.6
-	and 0:22.5, long 1:30; Weakness 1:30, long 4:00. The ingredients are what the game has:
-	Minecraft's own where it has them (Glow Dust for glowstone), else the flower that gives the
-	effect in Minecraft's suspicious stew (Cornflower: Jump Boost, Oxeye Daisy: Regeneration, Lily
-	of the Valley: Poison, tulips: Weakness), else something fitting (Mint Leaves quicken, Ginger
-	Root warms against fire, a Gold Nugget heals as the glistering melon does, a Red Mushroom
-	harms, Gunpowder for blaze powder). Haste and Resistance are this game's potions (Minecraft has
-	none): a Gold Ingot (gold tools are the fastest) and an Iron Ingot.
+	  strong  Glow Dust (the game's glowstone: STRONG_INGREDIENT) brewed into it: level II for
+	          `strong` seconds (true for an instant effect's II): "Potion of Swiftness II"
+	  long    a coal or charcoal (the game has no redstone: LONG_INGREDIENT) brewed into it: level I
+	          for `long` seconds: "Long Potion of Swiftness"
+
+	  list                the potions, in load order (Content's merged entries)
+	  variants(potion)    its items: the base, the strong one, the long one (those it has), each
+	                      a Variant (its item, shown name, effect, ticks, amplifier, what it is
+	                      brewed from and with)
+	  all()               every potion's variants, in load order
+	  BASE, STRONG_INGREDIENT, LONG_INGREDIENT, EMPTY   the brewing's items (Content/Define/
+	                      Potions'), EMPTY the bottle drinking one leaves
 ]]
 
-export type PotionSpec = {
-	name: string,
-	displayName: string?,
-	ingredient: string,
-	effect: string,
-	seconds: number?,
-	strong: (number | boolean)?,
-	long: number?,
-}
+local Content = require(script.Parent.Parent.Content)
+local Potions = require(script.Parent.Parent.Content.Define.Potions)
+local Schema = require(script.Parent.Parent.Content.Schema)
 
+export type PotionSpec = Schema.PotionSpec
 -- One potion item: its item name, what it is shown as, and what drinking it gives.
-export type Variant = {
-	item: string,
-	displayName: string,
-	effect: string,
-	-- Ticks (an instant effect: 1) and amplifier.
-	ticks: number,
-	amplifier: number,
-	-- The item it is brewed from and with (the base: the Purified Water Bottle and `ingredient`).
-	from: string,
-	with: string,
-	potion: PotionSpec,
-}
-
-local list: { PotionSpec } = {
-	{ name = "Swiftness", ingredient = "MintLeaves", effect = "Speed", seconds = 180, strong = 90, long = 480 },
-	{ name = "Leaping", ingredient = "Cornflower", effect = "JumpBoost", seconds = 180, strong = 90, long = 480 },
-	{ name = "Strength", ingredient = "Gunpowder", effect = "Strength", seconds = 180, strong = 90, long = 480 },
-	{ name = "Healing", ingredient = "GoldNugget", effect = "InstantHealth", strong = true },
-	{ name = "Harming", ingredient = "RedMushroom", effect = "InstantDamage", strong = true },
-	{ name = "Poison", ingredient = "LilyOfTheValley", effect = "Poison", seconds = 45, strong = 21.6, long = 90 },
-	{
-		name = "Regeneration",
-		ingredient = "OxeyeDaisy",
-		effect = "Regeneration",
-		seconds = 45,
-		strong = 22.5,
-		long = 90,
-	},
-	{
-		name = "FireResistance",
-		displayName = "Fire Resistance",
-		ingredient = "GingerRoot",
-		effect = "FireResistance",
-		seconds = 180,
-		long = 480,
-	},
-	{
-		name = "NightVision",
-		displayName = "Night Vision",
-		ingredient = "GlowDust",
-		effect = "NightVision",
-		seconds = 180,
-		long = 480,
-	},
-	{ name = "Weakness", ingredient = "#tulips", effect = "Weakness", seconds = 90, long = 240 },
-	{ name = "Haste", ingredient = "GoldIngot", effect = "Haste", seconds = 180, strong = 90 },
-	{ name = "Resistance", ingredient = "IronIngot", effect = "Resistance", seconds = 90, strong = 45 },
-}
+export type Variant = Potions.Variant
 
 local PotionList = {}
 
-PotionList.list = list
+PotionList.list = Content.default.potions
 -- What every potion is brewed from, and what makes the strong and long variants.
-PotionList.BASE = "PurifiedWaterBottle"
-PotionList.STRONG_INGREDIENT = "GlowDust"
-PotionList.LONG_INGREDIENT = "#coals"
+PotionList.BASE = Potions.BASE
+PotionList.STRONG_INGREDIENT = Potions.STRONG
+PotionList.LONG_INGREDIENT = Potions.LONG
 -- The bottle drinking a potion leaves.
-PotionList.EMPTY = "GlassBottle"
-
-local TICKS_PER_SECOND = 20
+PotionList.EMPTY = Potions.EMPTY
 
 --[[
-	The potion items of `potion`, in the pack's order: the base, the strong one, the long one (those
-	it has).
+	The potion items of `potion`, in its order: the base, the strong one, the long one (those it
+	has).
 ]]
 function PotionList.variants(potion: PotionSpec): { Variant }
-	local shown = potion.displayName or potion.name
-	local base = `PotionOf{potion.name}`
-	local instant = potion.seconds == nil
-	local variants: { Variant } = {
-		{
-			item = base,
-			displayName = `Potion of {shown}`,
-			effect = potion.effect,
-			ticks = if instant then 1 else math.round((potion.seconds :: number) * TICKS_PER_SECOND),
-			amplifier = 0,
-			from = PotionList.BASE,
-			with = potion.ingredient,
-			potion = potion,
-		},
-	}
-	local strong = potion.strong
-	if strong then
-		table.insert(variants, {
-			item = `StrongPotionOf{potion.name}`,
-			displayName = `Potion of {shown} II`,
-			effect = potion.effect,
-			ticks = if type(strong) == "number" then math.round(strong * TICKS_PER_SECOND) else 1,
-			amplifier = 1,
-			from = base,
-			with = PotionList.STRONG_INGREDIENT,
-			potion = potion,
-		})
-	end
-	if potion.long then
-		table.insert(variants, {
-			item = `LongPotionOf{potion.name}`,
-			displayName = `Long Potion of {shown}`,
-			effect = potion.effect,
-			ticks = math.round(potion.long * TICKS_PER_SECOND),
-			amplifier = 0,
-			from = base,
-			with = PotionList.LONG_INGREDIENT,
-			potion = potion,
-		})
-	end
-	return variants
+	return Potions.variants(potion)
 end
 
--- Every potion item, in the pack's order.
+-- Every potion item, in the potions' order.
 function PotionList.all(): { Variant }
 	local all: { Variant } = {}
-	for _, potion in list do
-		for _, variant in PotionList.variants(potion) do
+	for _, potion in PotionList.list do
+		for _, variant in Potions.variants(potion) do
 			table.insert(all, variant)
 		end
 	end

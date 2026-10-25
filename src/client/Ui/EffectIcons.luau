@@ -1,14 +1,21 @@
 --!strict
 --[[
-	The status effects' icons (Ui/EffectHud): 9 x 9 pixel art glyphs, one per EffectList `icon`,
+	The status effects' icons (Ui/EffectHud): 9 x 9 pixel art glyphs, one per effect `icon`,
 	drawn 2 GUI pixels a pixel (18 x 18, Minecraft's effect sprite size) in the effect's colour.
-	Pure data and colour maths (no Roblox APIs but Color3), so the tests check every effect has a
-	glyph of the right size.
+	Pure data and colour maths (no Roblox APIs but Color3 and the shared Effects/Looks), so the
+	tests check every effect has a glyph of the right size. The glyphs' names are Shared/Effects/
+	Looks' ICONS, which the content packs' effects are checked against as they load: there is a
+	glyph for each and no other (checked here at load), so a new look is a glyph here and its
+	name there.
 
 	Characters: K outline, C the effect's colour, L a lighter shade of it, D a darker one, W white,
 	"." nothing. A dark effect (Blindness, Wither) still shows: the glyphs sit on Minecraft's light
 	grey effect background.
 ]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Looks = require(ReplicatedStorage:WaitForChild("IceVoxel").Effects.Looks)
 
 local EffectIcons = {}
 
@@ -205,6 +212,13 @@ EffectIcons.GLYPHS = table.freeze({
 		".KKKKKKK.",
 	},
 })
+
+for _, name in Looks.ICONS do
+	assert(EffectIcons.GLYPHS[name], `EffectIcons: no glyph for the icon {name} (Shared/Effects/Looks)`)
+end
+for name in EffectIcons.GLYPHS :: { [string]: { string } } do
+	assert(table.find(Looks.ICONS, name), `EffectIcons: the glyph {name} is no icon of Shared/Effects/Looks`)
+end
 
 -- The glyph named `icon` (the drop for an unknown one).
 function EffectIcons.glyph(icon: string): { string }

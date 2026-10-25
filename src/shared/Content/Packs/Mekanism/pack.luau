@@ -12,7 +12,8 @@
 	  machines      the Creative Energy Cube, the Heat Generator, the Electric Furnace, the Solar
 	                Panel and the Batteries (energy cubes): blocks/machines, recipes
 	  upgrade cards the Speed and Energy Upgrades: items, recipes
-	  oil and fuel  the Oil and Fuel fluids, CaveOil, the oil and fuel buckets, the Oil Refinery and
+	  oil and fuel  Oil Coated and Fuel Soaked, the effects they give the skin: effects; and
+	                the Oil and Fuel fluids, CaveOil, the oil and fuel buckets, the Oil Refinery and
 	                the Combustion Generator: blocks/oil, items, recipes
 
 	Every entry carries what it says of itself: its lore, its texture or (blank) icon, the Age that

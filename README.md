@@ -2178,9 +2178,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Content/                  content packs: the loader (discovery, order, ids, overrides, kind
                             folders, every check), Schema (each kind's fields and types), Define
                             (the helpers packs share: models, tools and armor, fluids, plants,
-                            doors, recipes, metal()), Packs/ (Core, Minecraft, Mekanism,
+                            doors, recipes, metal(), brewing), Packs/ (Core, Minecraft, Mekanism,
                             Survival, Terraria, Apocalypse, Turrets, Ores: every block, item,
-                            recipe, texture, loot table and biome)
+                            recipe, texture, loot table, biome, status effect and potion)
   Blocks/  BlockList        the block registry (BlockList: the packs' blocks, merged) -> ids,
                             appearances, lookup tables (hardness, tools, drops, menus, how long
                             zombies take to break them), plants (soil sets, tall halves, foliage
@@ -2255,12 +2255,14 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             zombies hear, and how far)
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools (and status effects' Haste and Mining Fatigue)
-  Effects/  EffectList      status effects (Minecraft's MobEffects, Oil Coated, Fuel Soaked, Tough
-                            As Nails' four, Mana Sickness, Bleeding, the Infection, Minecraft's
-                            Hunger and Radiation Sickness): the
-                            registry, the modifiers movement, mining, combat and burning read,
-                            ticking rules, the HUD's order and flashing;
-            PotionList      the potions (ingredients, levels, durations: items, recipes, drinks)
+  Effects/                  status effects (the packs' `effects`: Minecraft's MobEffects and
+                            Hunger, Oil Coated, Fuel Soaked, Tough As Nails' four, Mana Sickness,
+                            Bleeding, the Infection and Radiation Sickness): the registry, the
+                            modifiers movement, mining, combat and burning read, ticking rules,
+                            the HUD's order and flashing; Looks (the icons and views an effect
+                            may name: the client's glyphs and views);
+            PotionList      the potions (the packs' `potions`: their variants, levels and
+                            durations, for drinking; Content brews their items and recipes)
   ToughAsNails/             Tough As Nails, pure: Thirst (thirst, hydration, exhaustion,
                             dehydration, regeneration, the Thirst effect), Temperature (-10..10
                             in five zones, the target, the drift, hypothermia and hyperthermia,
@@ -3349,11 +3351,12 @@ screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"voi
 ## Extending
 
 **Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages, lore
-lines and biomes come from content packs, folders under `src/shared/Content/Packs/` that the game
-finds and checks as it loads, like Minecraft's data packs (docs/ARCHITECTURE.md, "Content packs"). A
-pack is a `pack` manifest (`{ order = 300, description = "..." }`) and any of `blocks`, `items`,
-`recipes`, `tags`, `textures`, `loot`, `ores`, `ages`, `lore` and `biomes`, each a Luau module (its
-data, or a function of `define`, the helpers in `Content/Define`) or a `.json` file. An entry
+lines, biomes, status effects and potions come from content packs, folders under
+`src/shared/Content/Packs/` that the game finds and checks as it loads, like Minecraft's data packs
+(docs/ARCHITECTURE.md, "Content packs"). A pack is a `pack` manifest
+(`{ order = 300, description = "..." }`) and any of `blocks`, `items`, `recipes`, `tags`,
+`textures`, `loot`, `ores`, `ages`, `lore`, `biomes`, `effects` and `potions`, each a Luau module
+(its data, or a function of `define`, the helpers in `Content/Define`) or a `.json` file. An entry
 carries what other registries used to keep in tables of their own: `lore`, `texture`, `icon`, `age`,
 `skill`, `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`... (`Content/Schema`
 lists them all, and a misspelt field is an error naming the pack and the entry). Ids are given at
@@ -4318,16 +4321,26 @@ full set at 2 a piece keeps a tundra (-10) neutral (-2); straw (warmth 1) and le
 sets are made the same way, by Content/Define's `armorSet` in the Survival pack's
 `items/gear.luau` (a material: name, colour, material, points, toughness and `tan`).
 
-**A status effect.** Append it to `src/shared/Effects/EffectList.luau` (ids are list positions,
-sent in the Effects message: at the end) with its name, `/effect` id, colour, category and HUD
-glyph (`icon`, one of `client/Ui/EffectIcons`' 9 × 9 glyphs; add one there for a new look), and
-what it does as data: `speed` / `mining` / `jump` / `melee` / `resistance` per level (the movement,
-mining, combat and hurt paths read them through `Shared/Effects`), `interval` with `heal` or
-`damage` (ticked on the server), `fireImmune`, `burnFactor`, `burnBonus`, `ignites`, `washOff`,
-`noSprint`, or a client `view`. It then works with `/effect`, potions, the HUD and F3:
+**A status effect.** Add an entry to a pack's `effects`: the Minecraft pack's
+`src/shared/Content/Packs/Minecraft/effects.luau` for a vanilla one, or `effects.luau` in a pack
+of your own (ids are given at load in pack order, sent as a u8: 255 effects at most). It has its
+name, `/effect` id (lower_snake), colour, category and HUD glyph (`icon`, one of
+`src/shared/Effects/Looks.luau`' ICONS, each a 9 × 9 glyph in `client/Ui/EffectIcons`; a new look
+is a glyph there and its name in Looks), and what it does as data: `speed` / `mining` / `jump` /
+`melee` / `resistance` per level (the movement, mining, combat and hurt paths read them through
+`Shared/Effects`), `interval` with `heal` or `damage` (ticked on the server), `fireImmune`,
+`burnFactor`, `burnBonus`, `ignites`, `washOff`, `noSprint`, `drainsFood`, or a client `view` (one
+of Looks' VIEWS); `Content/Schema`'s EFFECT_FIELDS say what each does, and a field it has not, an
+icon or view the client has not, fails the load naming the pack. It then works with `/effect`,
+potions, the HUD and F3, and code finds it by name (`Effects.id.Luck`):
 
 ```lua
-{ name = "Haste", command = "haste", color = { 217, 192, 67 }, category = "beneficial", icon = "pickaxe", mining = 0.2 },
+-- src/shared/Content/Packs/MyPack/effects.luau
+return {
+	{ name = "Luck", command = "luck", color = { 51, 153, 0 }, category = "beneficial", icon = "star" },
+	-- Another pack's effect, patched (its id kept): Speed in another colour.
+	{ name = "Speed", override = true, color = { 10, 20, 30 } },
+}
 ```
 
 Server code gives and reads effects through `Players/Effects`: `Effects.give(player, "Speed",
@@ -4342,13 +4355,38 @@ times the Progression perks', on the client and the server alike. A mob could ke
 levels. An effect kept elsewhere (Tough As Nails' four) is `external = true` and registered with
 `Effects.addExternal(id, { get, give, clear })`, so it is listed with the rest.
 
-**A potion.** Append it to `src/shared/Effects/PotionList.luau` (item ids follow its order: at the
-end): `{ name = "Swiftness", ingredient = "MintLeaves", effect = "Speed", seconds = 180, strong =
-90, long = 480 }` makes the items (`PotionOfSwiftness`, `StrongPotionOfSwiftness` "Potion of
-Swiftness II", `LongPotionOfSwiftness`), their recipes (a Purified Water Bottle with the
-ingredient; the potion with Glow Dust or a coal) and the drinks (each item's `drink`: the effect
-given when the 32 tick drink finishes, the Glass Bottle back), with nothing else to
-add. Leave `seconds` out for an instant effect (`strong = true` for its II).
+**A potion.** Add an entry to a pack's `potions` (the Minecraft pack's
+`src/shared/Content/Packs/Minecraft/potions.luau`, or `potions.luau` in your own pack). Content
+brews it as the packs load: its items (`PotionOfLuck`, `StrongPotionOfLuck` "Potion of Luck II"
+with `strong`, `LongPotionOfLuck` with `long`; stacking to 1, the bottle in its effect's colour,
+after the pack's own items), their recipes (a Purified Water Bottle with the ingredient, an item
+or "#tag"; the potion with Glow Dust for II or a coal for long), each item's lore line, icon and
+Age from the entry, and each item's `drink` (the effect given when the 32 tick drink finishes,
+the Glass Bottle back, and the tooltip's "When drunk:" line), with nothing else to add, and
+nothing in the Minecraft pack:
+
+```lua
+-- src/shared/Content/Packs/MyPack/potions.luau
+return {
+	{
+		name = "Luck",
+		ingredient = "Emerald",
+		effect = "Luck",
+		seconds = 300,
+		long = 600,
+		lore = {
+			base = "Brewed from an emerald. Feel lucky.",
+			long = "Brewed longer with coal. Feel lucky for longer.",
+		},
+		age = { base = "iron", long = "industrial" },
+	},
+}
+```
+
+Leave `seconds` out for an instant effect (`strong = true` for its II; it has no long one); its
+effect, ingredient and variants are checked as it loads (`Content/Schema`'s POTION_FIELDS), and
+`{ name = "Swiftness", override = true, seconds = 240 }` patches another pack's potion, items and
+drinks included (`tests/fixtures/content/brewing` is this example, end to end).
 
 **A fluid's effects.** A fluid's `effects` in FluidList lists what touching it gives: `{ effect =
 "Slowness", seconds = 1, amplifier = 1, when = "in" }` (refreshed every tick while in it), `when =
@@ -4417,7 +4455,8 @@ warning.
 `show <name>` gives an entry's merged fields, id, pack, the packs that patched it, its lore,
 faces or icon, Age, how survival gets it and the recipes making and using it (a biome's fields,
 index and patches; `show #is_forest` a biome tag's biomes; `list biomes` every biome with its
-bands and pack); `new <Pack>` writes
+bands and pack; an effect's id and the potions giving it, a potion's brewed items; `list effects`
+and `list potions` list those kinds as `list blocks` does blocks); `new <Pack>` writes
 `src/shared/Content/Packs/<Pack>/` (never over a folder) with a commented block, item, shaped and
 smelting recipe, texture and loot table that load and pass the check as written. The workings are
 `tests/lib/ContentTool` (`tests/spec/ContentTool` runs them on `tests/fixtures/content/tool`) and

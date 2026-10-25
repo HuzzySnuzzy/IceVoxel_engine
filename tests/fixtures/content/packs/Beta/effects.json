@@ -1,0 +1,10 @@
+[
+	{
+		"name": "BetaGlow",
+		"command": "beta_glow",
+		"color": [200, 220, 90],
+		"category": "neutral",
+		"icon": "star",
+		"view": "glowing"
+	}
+]

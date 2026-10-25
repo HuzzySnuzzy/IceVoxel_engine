@@ -22,7 +22,7 @@
 	Player.causeFoodExhaustion as well; attacks are hunger's alone, so thirst stays as it was), but
 	the HOT zone's sweating (Config.ToughAsNails.HotExhaustion) is thirst's alone. Minecraft's
 	Hunger effect adds Config.Hunger.EffectExhaustion (0.005) x (amplifier + 1) every tick
-	(`effectExhaustion`: the effects whose EffectList entry `drainsFood`).
+	(`effectExhaustion`: the effects whose entry `drainsFood`, Content/Schema's EFFECT_FIELDS).
 
 	One tick (`tick`, 20 a second), FoodData.tick after the status effects (Player.tick: super.tick
 	first, LivingEntity.tickEffects): `extra` exhaustion is added (the Hunger effect's), the

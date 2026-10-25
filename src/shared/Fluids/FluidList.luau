@@ -45,7 +45,7 @@
 	  emptySound     Sound event of a bucket pouring it (BucketItem.playEmptySound).
 	  effects        Status effects it gives a player touching it (optional; Shared/Effects, server
 	                 Players/EffectRules.touchFluids, every tick on the standing box as burning):
-	                 a list of { effect = EffectList name, seconds, amplifier = 0?, when, after? }:
+	                 a list of { effect = an effect's name, seconds, amplifier = 0?, when, after? }:
 	                   when "in"    while the body touches it, refreshed to `seconds` every tick
 	                                (so it lasts `seconds` after leaving);
 	                        "head"  the same while the eyes are in it;

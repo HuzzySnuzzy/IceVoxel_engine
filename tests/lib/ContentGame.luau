@@ -99,6 +99,7 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 	local Foods = require(shared.Items.Foods)
 	local FluidList = require(shared.Fluids.FluidList)
 	local Drinks = require(shared.ToughAsNails.Drinks)
+	local PotionList = require(shared.Effects.PotionList)
 	local Library = require(shared.Structures.Library)
 	local ScavengeLoot = require(shared.Generation.ScavengeLoot)
 	local Mineshafts = require(shared.Generation.Mineshafts)
@@ -364,6 +365,7 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		converts = converts,
 		creativeOnly = creativeOnly,
 		creativeMachines = creativeMachines,
+		variants = PotionList.variants,
 		itemId = function(name: string): number?
 			return Items.find(name)
 		end,
