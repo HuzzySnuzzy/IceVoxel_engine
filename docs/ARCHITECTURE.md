@@ -116,9 +116,9 @@ with a tool that harvests it (not Shears; server Network/EditRules) and when it 
 (leaves decaying, a blast: `leafDrop`), `Items.lootDrop` rolls its pools in order with the
 caller's random and the first item one rolls drops instead of the usual drop (none: the usual
 drop). A pool rolls `rolls[1]..rolls[2]` times, drawing only when they differ, each roll an entry
-by weight, its count drawn only when min and max differ: so the gravel rule (`{ "Flint", 1, 1, 1
-}, { false, 9, 0, 0 }`), the leaves' (a sapling pool, then a sticks pool) and the grass's Straw
-roll exactly as their code does today, ready to move into data.
+by weight, its count drawn only when min and max differ: so gravel's flint (`{ "Flint", 1, 1, 1
+}, { false, 9, 0, 0 }`), the leaves' (a sapling pool, then a sticks pool) and the grass's Straw,
+the Minecraft pack's entries' `loot`, roll exactly as Items' old rules for them did.
 
 **Checks**, as the packs load; every message names the pack, the kind and the entry:
 - Schema (`Content/Schema`): each kind's fields and their types, nested ones too (a shape box's
@@ -143,7 +143,7 @@ yet; naming a thing both there and on its entry is an error): LoreList's table; 
 Knowledge.ORES and SMELTED; MinerRules' `NAMES` with Config.Miner.Ores; Config.Radiation.Sources,
 Shielding (by name) and Hazmat (all empty now but Solid); Recipes' `LEGACY_FUEL`;
 Config.ToughAsNails.HeatingBlocks and CoolingBlocks; SoundList.BLOCK_SOUNDS and ARMOR; Items'
-leafDrop / randomDrop / STRAW_CHANCE rules.
+STRAW_CHANCE (its leafDrop and randomDrop rules are gone: leaves and gravel carry `loot`).
 
 **The packs.** Each manifest's header says what the pack adds, file by file, where the code
 for it lives, and the calls made placing things (what went where when a feature's things are
@@ -5406,10 +5406,11 @@ ice and a frozen biome's still cool.
   short allowed), plays `block.campfire.boil` and hands the stacks over. JEI shows it as a seventh category,
   "Campfire" (Ui/Jei/JeiData `boiling`: one entry per PURIFIED_OF pair, drawn as smelting with
   "Right click" under it; the Campfire is its catalyst);
-- **Straw** (ItemList): `Items.strawDrop`, which EditRules.drops asks after `leafDrop` when no
-  Shears are held: Short Grass gives one half the time, Tall Grass (its lower half answers for a
-  break of either) always, where Minecraft's grass gives wheat seeds one time in 8; Shears still
-  harvest the grass itself; grass gone by itself (water, fire, a blast) gives nothing;
+- **Straw** (ItemList): the grass's `loot` (the Minecraft pack's blocks/plants: `Items.lootDrop`,
+  which EditRules.drops asks when no Shears are held): Short Grass gives one half the time, Tall
+  Grass (its lower half answers for a break of either) always, where Minecraft's grass gives wheat
+  seeds one time in 8; Shears still harvest the grass itself; grass gone by water or fire gives
+  nothing, a blast its loot (Minecraft's loot tables decay in a blast the same way);
 - **Straw and Leaf armor** (the Survival pack's `items/gear`, `define.armorSet` of each
   material): leather's points (1 / 3 / 2 / 1, no
   toughness; armor doesn't wear in this game, so no durability), `tan = { warmth = 1 }` from
@@ -7738,7 +7739,8 @@ require it):
   index in this version's `MinerRules.ORES`, worked out from `mining` by `stateOf`, so no place in
   the list is ever saved and ores may come and go), 12 activeDelay; MINING ("Mining Diamond Ore"),
   NO_POWER, OUTPUT_FULL, NO_ORE ("No ore below"), IDLE (switched off); a 200 kJ store taking its
-  capacity a tick (`rates`); `info` the store and each ore's ticks, J a tick and floor. Config.Miner.Ores: coal 600 ticks at 800 J/t with a 400 kJ
+  capacity a tick (`rates`); `info` the store and each ore's ticks, J a tick and floor. The ores'
+  `miner` (Config.Miner.Ores for osmium): coal 600 ticks at 800 J/t with a 400 kJ
   floor, iron, osmium, copper, lead and zinc 400 at 200, sulfur and saltpetre 600 at 200, gold 800
   at 300, emerald and uranium 3600 at 800, diamond 4800 at 800. Each
   tick it reads the cell under it with `ctx.getBlock`: an ore of `ORES` is mined; another block is
@@ -8133,7 +8135,7 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
   volume 1..2, pitch 0.3..1; at most 4 at once), `block.fire.extinguish` (level event 1009,
   punching a fire out: volume 0.5, pitch 2.6; category block.break, side predicted) and
   `item.flintandsteel.use` (the server, at the new fire). A block may have its own action sounds
-  (`SoundList.BLOCK_SOUNDS`, read by `Sounds.block`): Fire's break is the extinguish hiss, so the
+  (its entry's `sounds`, read by `Sounds.block`): Fire's break is the extinguish hiss, so the
   client's playBlock and ServerNet's break sound need nothing new. Stand-ins: the falling wind
   pitched down into a roar and up into a hiss, the volume slider's tick for the strike.
 - The campfire (appended after the cave moods, at the very end of the events): campfires crackle

@@ -36,8 +36,9 @@
 	    player's facing (BaseRailBlock.getStateForPlacement), turning a structure swaps them. They
 	    lie on a sturdy block (`support` Down, Attached), have no collision, strength 0.7, a pickaxe
 	    mines them fast but anything drops them, metal sounds, never burn; water stops at them.
-	    Drawn as a sleeper board (the plate the "rail" picture goes on, its Front) under two iron
-	    bars. Minecraft's outline: 2 pixels high.
+	    Crafting them is the Iron Age's (iron ingots: `age`). Drawn as a sleeper board (the plate
+	    the "rail" picture goes on, its Front) under two iron bars. Minecraft's outline: 2 pixels
+	    high.
 	  * The Cobweb (Minecraft's WebBlock): moving through one is slowed to a quarter sideways and a
 	    twentieth up and down, with every move's speed lost, and stops a fall (`stuck`,
 	    makeStuckInBlock). Strength 4: a sword (speed 15, Shared/Mining) or Shears (15) are the
@@ -118,6 +119,10 @@ return function(define: Define.Context): { BlockSpec }
 			support = support,
 			behaviour = "Attached",
 			climbable = true,
+			-- (The item's; its picture covers the four.)
+			texture = if base then { Front = "ladder" } else nil,
+			lore = if base then "Climb it up and down." else nil,
+			fuel = if base then 300 else nil,
 		})
 	end
 
@@ -136,6 +141,8 @@ return function(define: Define.Context): { BlockSpec }
 		behaviour = "Attached",
 		climbable = true,
 		flammable = { ignite = 10, burn = 100 },
+		texture = { Sprite = "rope" },
+		lore = "Hangs down from a ceiling. Climb it, or slide down safely.",
 	})
 
 	-- Rails along each axis.
@@ -173,6 +180,10 @@ return function(define: Define.Context): { BlockSpec }
 			support = "Down",
 			behaviour = "Attached",
 			axis = axis,
+			-- (The item's; its picture covers both. Iron: the Iron Age's.)
+			texture = if northSouth then { Front = "rail" } else nil,
+			lore = if northSouth then "A straight piece of track." else nil,
+			age = if northSouth then "iron" else nil,
 		}
 		table.insert(list, rail)
 		table.insert(twinned, rail)
@@ -199,6 +210,8 @@ return function(define: Define.Context): { BlockSpec }
 		bounds = { min = { 0, 0, 0 }, max = { 16, 16, 16 } },
 		brokenByFluid = true,
 		stuck = { 0.25, 0.05, 0.25 },
+		texture = { Sprite = "cobweb" },
+		lore = "Slows anything caught in it. Gives String.",
 	}
 	table.insert(list, cobweb)
 	table.insert(twinned, cobweb)
@@ -213,6 +226,8 @@ return function(define: Define.Context): { BlockSpec }
 		hardness = 0.1,
 		tool = "hoe",
 		zombieBreak = 300,
+		texture = { All = "moss block" },
+		lore = "Soft green moss. Makes mossy cobblestone and carpets.",
 	})
 	local carpet: BlockSpec = {
 		name = "MossCarpet",
@@ -229,6 +244,9 @@ return function(define: Define.Context): { BlockSpec }
 		support = "Down",
 		brokenByFluid = true,
 		behaviour = "Attached",
+		-- (Minecraft's carpet model takes the moss block's picture.)
+		texture = { All = "moss block" },
+		lore = "A thin layer of moss.",
 	}
 	table.insert(list, carpet)
 	table.insert(twinned, carpet)
@@ -262,6 +280,9 @@ return function(define: Define.Context): { BlockSpec }
 			behaviour = "Attached",
 			climbable = true,
 			flammable = { ignite = 15, burn = 100 },
+			-- (The item's; its picture covers the four.)
+			texture = if base then { Front = "vine" } else nil,
+			lore = if base then "Climbable greenery that hangs from walls." else nil,
 		}
 		table.insert(list, vine)
 		table.insert(twinned, vine)
@@ -289,6 +310,8 @@ return function(define: Define.Context): { BlockSpec }
 		brokenByFluid = true,
 		behaviour = "Attached",
 		flammable = { ignite = 30, burn = 60 },
+		texture = { Sprite = "hanging roots" },
+		lore = "Roots poking down from a cave ceiling.",
 	}
 	table.insert(list, roots)
 	table.insert(twinned, roots)
@@ -304,6 +327,8 @@ return function(define: Define.Context): { BlockSpec }
 		tool = "pickaxe",
 		toolLevel = 0,
 		zombieBreak = 2400,
+		texture = { All = "mossy cobblestone" },
+		lore = "Cobblestone overgrown with moss.",
 	})
 
 	-- The cave twins, the vines' seasonless.

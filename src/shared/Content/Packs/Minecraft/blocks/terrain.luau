@@ -13,6 +13,11 @@
 	    underground lava lakes, a source in every way but cave air while caves are hidden.
 	  * Obsidian (Minecraft's): what water makes of a lava source. Hardness 50, only a diamond
 	    pickaxe gets it (9.4 s; by hand 250 s and nothing), drops itself.
+	  * Gravel gives Flint one time in 10 in place of itself (its `loot`: Minecraft's gravel loot
+	    table without Fortune), broken by a player or a blast.
+	  * Tough As Nails: ice, packed ice and snow chill a player near them (`cools`), lava warms
+	    (`heats`: every level, and CaveLava).
+	  * knowledge: smelting cobblestone into stone gives Minecraft's furnace experience, 0.1.
 	  * blastResistance: Minecraft 1.20.1's where it differs from the hardness (stone 6, packed mud
 	    3, obsidian 1200; Properties.strength(f) gives both, so the rest keep their hardness).
 	  * zombieBreak: ticks one ordinary zombie needs (server Mobs/MobAI): soil soon (300), stone
@@ -24,7 +29,14 @@ local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
 
 return function(define: Define.Context): { Schema.BlockSpec }
 	local list: { Schema.BlockSpec } = {
-		{ name = "Bedrock", color = { 45, 45, 50 }, material = "Basalt", breakable = false, placeable = false },
+		{
+			name = "Bedrock",
+			color = { 45, 45, 50 },
+			material = "Basalt",
+			breakable = false,
+			placeable = false,
+			texture = { All = "bedrock" },
+		},
 		{
 			name = "Stone",
 			color = { 125, 125, 128 },
@@ -35,6 +47,9 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			tool = "pickaxe",
 			toolLevel = 0,
 			zombieBreak = 2400,
+			texture = { All = "stone" },
+			lore = "Common rock. Breaks into Cobblestone.",
+			knowledge = { smelt = 0.1 },
 		},
 		{
 			name = "Cobblestone",
@@ -45,6 +60,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			tool = "pickaxe",
 			toolLevel = 0,
 			zombieBreak = 2400,
+			texture = { All = "cobblestone" },
+			lore = "Rough stone for tools, furnaces and walls. Smelts back into Stone.",
 		},
 		{
 			name = "Dirt",
@@ -53,6 +70,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.5,
 			tool = "shovel",
 			zombieBreak = 300,
+			texture = { All = "dirt" },
+			lore = "Soil that plants grow on.",
 		},
 		{
 			name = "Grass",
@@ -63,6 +82,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.6,
 			drops = "Dirt",
 			zombieBreak = 300,
+			texture = { Top = "grass top", Sides = "grass side", Bottom = "dirt" },
+			lore = "Dirt with a grassy top. Breaks into Dirt.",
 		},
 		{
 			name = "DryGrass",
@@ -76,6 +97,10 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			-- greener than the block itself so they read against it.
 			foliageColor = { 156, 160, 76 },
 			zombieBreak = 300,
+			-- (The same grass top in DryGrass's own colour; sides of its own, not the green
+			-- fringe.)
+			texture = { Top = "grass top", Sides = "dry grass side", Bottom = "dirt" },
+			lore = "Sun-baked savanna turf. Breaks into Dirt.",
 		},
 		{
 			name = "Snow",
@@ -87,6 +112,9 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			drops = "Snowball" :: string,
 			dropCount = 4,
 			zombieBreak = 300,
+			texture = { All = "snow" },
+			lore = "Packed snow. Dig it with a shovel for Snowballs. Chills you when close.",
+			cools = true,
 		},
 		{
 			name = "Sand",
@@ -96,6 +124,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.5,
 			tool = "shovel",
 			zombieBreak = 300,
+			texture = { All = "sand" },
+			lore = "Loose sand that falls. Smelts into Glass; four make Sandstone.",
 		},
 		{
 			name = "Sandstone",
@@ -105,6 +135,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			tool = "pickaxe",
 			toolLevel = 0,
 			zombieBreak = 2400,
+			texture = { Top = "sandstone top", Sides = "sandstone side", Bottom = "sandstone bottom" },
+			lore = "Sand pressed into stone. Cut or smelt it for a finer face.",
 		},
 		{
 			name = "Gravel",
@@ -114,6 +146,9 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.6,
 			tool = "shovel",
 			zombieBreak = 300,
+			texture = { All = "gravel" },
+			lore = "Loose stones that fall. Sometimes gives Flint.",
+			loot = { { rolls = { 1, 1 }, entries = { { "Flint", 1, 1, 1 }, { false, 9, 0, 0 } } } } :: { Schema.Pool },
 		},
 		{
 			name = "Ice",
@@ -123,6 +158,9 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.5,
 			drops = false,
 			tool = "pickaxe",
+			texture = { All = "ice" },
+			lore = "Slippery frozen water. Chills you when close.",
+			cools = true,
 		},
 	}
 
@@ -134,6 +172,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			material = "Glass",
 			transparency = 0.45,
 			reflectance = 0.05,
+			lore = "A water source. Fill bottles and buckets from it.",
 		}, 5)
 	)
 
@@ -147,6 +186,9 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.5,
 			drops = false,
 			tool = "pickaxe",
+			texture = { All = "packed ice" },
+			lore = "Ice packed hard. Chills you when close.",
+			cools = true,
 		},
 		{
 			name = "Calcite",
@@ -155,6 +197,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.75,
 			tool = "pickaxe",
 			toolLevel = 0,
+			texture = { All = "calcite" },
+			lore = "Pale stone from mountain sides.",
 		},
 		-- (Darker than Dirt: the texture pack draws it as "darker dirt", dirt's image in this colour.)
 		{
@@ -165,6 +209,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			blastResistance = 3,
 			tool = "pickaxe",
 			zombieBreak = 300,
+			texture = { All = "packed mud" },
+			lore = "Dried mud, firm enough to build with.",
 		},
 		{
 			name = "Mycelium",
@@ -175,6 +221,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.6,
 			drops = "Dirt" :: string,
 			zombieBreak = 300,
+			texture = { Top = "mycelium top", Sides = "mycelium side", Bottom = "dirt" },
+			lore = "Mushroom soil from far-off fields. Breaks into Dirt.",
 		},
 		{
 			name = "Podzol",
@@ -185,6 +233,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.5,
 			drops = "Dirt" :: string,
 			zombieBreak = 300,
+			texture = { Top = "podzol top", Sides = "podzol side", Bottom = "dirt" },
+			lore = "Forest floor of needles. Mushrooms grow on it.",
 		},
 		{
 			name = "CoarseDirt",
@@ -193,6 +243,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			hardness = 0.5,
 			tool = "shovel",
 			zombieBreak = 300,
+			texture = { All = "coarse dirt" },
+			lore = "Dirt mixed with gravel.",
 		},
 		-- Stone varieties by altitude (Generation/Ores; the ore features are the pack's `ores`).
 		{
@@ -203,6 +255,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			blastResistance = 6,
 			tool = "pickaxe",
 			toolLevel = 0,
+			texture = { All = "andesite" },
+			lore = "Gray igneous stone. Polish four into tiles.",
 		},
 		{
 			name = "Diorite",
@@ -212,6 +266,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			blastResistance = 6,
 			tool = "pickaxe",
 			toolLevel = 0,
+			texture = { All = "diorite" },
+			lore = "Speckled white stone. Polish four into tiles.",
 		},
 		{
 			name = "Granite",
@@ -221,6 +277,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			blastResistance = 6,
 			tool = "pickaxe",
 			toolLevel = 0,
+			texture = { All = "granite" },
+			lore = "Pink-red stone. Polish four into tiles.",
 		},
 	})
 
@@ -231,6 +289,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		material = "Neon",
 		light = 15,
 		lightColor = { 255, 140, 60 },
+		lore = "Molten rock. Burns anything that touches it.",
+		heats = true,
 	}, 30)
 	define.append(list, lava)
 	table.insert(list, define.caveFluid(lava[1]))
@@ -243,6 +303,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		blastResistance = 1200,
 		tool = "pickaxe",
 		toolLevel = 3,
+		texture = { All = "obsidian" },
+		lore = "Cooled lava, all but unbreakable. Needs a diamond pickaxe.",
 	})
 	return list
 end

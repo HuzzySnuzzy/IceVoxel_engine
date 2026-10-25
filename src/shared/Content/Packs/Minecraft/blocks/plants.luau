@@ -14,6 +14,10 @@
 	  * Tall grass gives 2 short grass with Shears and large ferns 2 ferns; short grass, ferns and
 	    dead bushes give themselves, and nothing (a dead bush a stick) without. Flowers and
 	    mushrooms always drop themselves.
+	  * Straw (the Survival pack's: its warm armor and rope) from grass broken without Shears, its
+	    `loot`: half the time from short grass, always from tall grass (a player breaking either
+	    half breaks the lower one), where Minecraft's grass drops wheat seeds one time in 8 (this
+	    game has no wheat). A blast takes it too, as Minecraft's loot tables do.
 	  * Flowers: a stem with a leaf or two and a head in Minecraft's colours, up to 10 pixels tall
 	    (Minecraft's 5..11 outline). Heads are two crossed boxes or one turned 45 degrees, so they
 	    look round from every side.
@@ -26,12 +30,15 @@
 	    pixel-art circle), the red one domed with a white spot. Minecraft's brown mushroom gives off
 	    a little light (1); this one gives none.
 	  * Saplings, one per wood (Minecraft's SaplingBlock): dropped by their leaves now and then
-	    (Items.leafDrop); under the open sky a random tick grows one into its tree (server
+	    (blocks/wood's `loot`); under the open sky a random tick grows one into its tree (server
 	    Behaviours/Sapling, World/RandomTicker; about 16 minutes on average) when the tree has room.
 	    Drawn as their texture pack sprite ("sapling": a black and white picture, tinted with each
 	    sapling's colour), else as a stem with leaf lumps.
 	  * What burns (Minecraft's FireBlock.bootStrap): every grass, fern, dead bush and flower, both
 	    halves of the tall ones, at 60 / 100; no sapling and no mushroom.
+	  * Textures: each plant's Sprite; a tall plant's upper half has its own ("tall grass top").
+	    The flower helpers take the whole entry (Content/Define's `flower`, `tulip`, `tallFlower`,
+	    `mushroom`, `sapling`: name, colour, boxes, lore, texture) and fill in the rest.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -71,6 +78,8 @@ return function(define: Define.Context): { BlockSpec }
 			hardness = 0.4,
 			sound = "wool",
 			sturdy = false,
+			texture = { Sides = "cactus side", Top = "cactus top", Bottom = "cactus top" },
+			lore = "A desert plant, all spines and water.",
 		},
 	}
 
@@ -95,6 +104,9 @@ return function(define: Define.Context): { BlockSpec }
 			shearDrops = true,
 			drops = false,
 			flammable = GRASS_FIRE,
+			texture = { Sprite = "short grass" },
+			lore = "Wild grass. Breaking it by hand may give Straw.",
+			loot = { { rolls = { 1, 1 }, entries = { { "Straw", 1, 1, 1 }, { false, 1, 0, 0 } } } } :: { Schema.Pool },
 		})
 	)
 
@@ -116,6 +128,8 @@ return function(define: Define.Context): { BlockSpec }
 			shearDrops = true,
 			drops = false,
 			flammable = GRASS_FIRE,
+			texture = { Sprite = "fern" },
+			lore = "A shady little fern.",
 		})
 	)
 
@@ -205,6 +219,9 @@ return function(define: Define.Context): { BlockSpec }
 			shearCount = 2,
 			drops = false,
 			flammable = GRASS_FIRE,
+			texture = { Sprite = "tall grass bottom" },
+			lore = "Grass two blocks tall. Breaking it by hand gives Straw.",
+			loot = { { rolls = { 1, 1 }, entries = { { "Straw", 1, 1, 1 } } } } :: { Schema.Pool },
 		}, {
 			name = "TallGrassTop",
 			displayName = "Tall Grass",
@@ -213,6 +230,7 @@ return function(define: Define.Context): { BlockSpec }
 			tinted = true,
 			shape = tallGrassTop,
 			flammable = GRASS_FIRE,
+			texture = { Sprite = "tall grass top" },
 		})
 	)
 	define.append(
@@ -233,6 +251,8 @@ return function(define: Define.Context): { BlockSpec }
 			shearCount = 2,
 			drops = false,
 			flammable = GRASS_FIRE,
+			texture = { Sprite = "large fern bottom" },
+			lore = "A fern two blocks tall.",
 		}, {
 			name = "LargeFernTop",
 			displayName = "Large Fern",
@@ -241,6 +261,7 @@ return function(define: Define.Context): { BlockSpec }
 			tinted = true,
 			shape = largeFernTop,
 			flammable = GRASS_FIRE,
+			texture = { Sprite = "large fern top" },
 		})
 	)
 
@@ -263,6 +284,8 @@ return function(define: Define.Context): { BlockSpec }
 			shearDrops = true,
 			drops = "Stick" :: string,
 			flammable = GRASS_FIRE,
+			texture = { Sprite = "dead bush" },
+			lore = "A dry desert shrub. Breaks into sticks.",
 		})
 	)
 
@@ -271,23 +294,35 @@ return function(define: Define.Context): { BlockSpec }
 	local DANDELION = { 255, 216, 36 }
 	table.insert(
 		list,
-		flower("Dandelion", DANDELION, {
-			stem(6),
-			leaf({ 0, GROUND, 0 }, { 1.4, 3.2, 0.4 }, 58, 30, LEAF),
-			lump({ 3.2, 2, 2.2 }, { 0, -1.2, 0 }, DANDELION, { 0, 20, 0 }),
-			lump({ 2.2, 2.4, 3.2 }, { 0, -1.2, 0 }, { 246, 196, 30 }, { 0, 20, 0 }),
+		flower({
+			name = "Dandelion",
+			color = DANDELION,
+			shape = {
+				stem(6),
+				leaf({ 0, GROUND, 0 }, { 1.4, 3.2, 0.4 }, 58, 30, LEAF),
+				lump({ 3.2, 2, 2.2 }, { 0, -1.2, 0 }, DANDELION, { 0, 20, 0 }),
+				lump({ 2.2, 2.4, 3.2 }, { 0, -1.2, 0 }, { 246, 196, 30 }, { 0, 20, 0 }),
+			},
+			texture = { Sprite = "dandelion" },
+			lore = "A cheerful yellow flower.",
 		})
 	)
 
 	local POPPY = { 214, 34, 30 }
 	table.insert(
 		list,
-		flower("Poppy", POPPY, {
-			stem(7, 4, 0),
-			leaf({ 0, -6.5, 0 }, { 1.4, 3.4, 0.4 }, 50, 220, LEAF),
-			lump({ 3.6, 2.6, 3.6 }, { 0.3, 0.1, 0 }, POPPY, { 0, 30, 0 }),
-			-- The dark middle, seen from above.
-			lump({ 1.3, 0.3, 1.3 }, { 0.3, 1.5, 0 }, { 44, 36, 20 }, { 0, 30, 0 }),
+		flower({
+			name = "Poppy",
+			color = POPPY,
+			shape = {
+				stem(7, 4, 0),
+				leaf({ 0, -6.5, 0 }, { 1.4, 3.4, 0.4 }, 50, 220, LEAF),
+				lump({ 3.6, 2.6, 3.6 }, { 0.3, 0.1, 0 }, POPPY, { 0, 30, 0 }),
+				-- The dark middle, seen from above.
+				lump({ 1.3, 0.3, 1.3 }, { 0.3, 1.5, 0 }, { 44, 36, 20 }, { 0, 30, 0 }),
+			},
+			texture = { Sprite = "poppy" },
+			lore = "A bright red flower.",
 		})
 	)
 
@@ -296,27 +331,40 @@ return function(define: Define.Context): { BlockSpec }
 	local orchidTop = along({ 0, GROUND, 0 }, 6, 300, 6.5)
 	table.insert(
 		list,
-		flower("BlueOrchid", ORCHID, {
-			stem(6.5, 6, 300),
-			leaf({ 0, GROUND, 0 }, { 1.2, 4, 0.4 }, 30, 120, LEAF),
-			lump({ 3.8, 1, 1.4 }, { orchidTop[1], orchidTop[2] + 0.3, orchidTop[3] }, ORCHID, { 0, 20, 18 }),
-			lump(
-				{ 1.4, 1.2, 3.8 },
-				{ orchidTop[1], orchidTop[2] + 0.6, orchidTop[3] },
-				{ 96, 200, 244 },
-				{ -15, 20, 0 }
-			),
-		}, "Blue Orchid")
+		flower({
+			name = "BlueOrchid",
+			displayName = "Blue Orchid",
+			color = ORCHID,
+			shape = {
+				stem(6.5, 6, 300),
+				leaf({ 0, GROUND, 0 }, { 1.2, 4, 0.4 }, 30, 120, LEAF),
+				lump({ 3.8, 1, 1.4 }, { orchidTop[1], orchidTop[2] + 0.3, orchidTop[3] }, ORCHID, { 0, 20, 18 }),
+				lump(
+					{ 1.4, 1.2, 3.8 },
+					{ orchidTop[1], orchidTop[2] + 0.6, orchidTop[3] },
+					{ 96, 200, 244 },
+					{ -15, 20, 0 }
+				),
+			},
+			texture = { Sprite = "blue orchid" },
+			lore = "A rare swamp flower.",
+		})
 	)
 
 	local ALLIUM = { 166, 92, 212 }
 	table.insert(
 		list,
-		flower("Allium", ALLIUM, {
-			stem(7.5),
-			leaf({ 0, GROUND, 0 }, { 1, 4.5, 0.35 }, 28, 160, LEAF),
-			lump({ 3.6, 2.4, 3.6 }, { 0, 0.25, 0 }, ALLIUM),
-			lump({ 2.6, 3.4, 2.6 }, { 0, 0.25, 0 }, { 192, 132, 230 }, { 0, 45, 0 }),
+		flower({
+			name = "Allium",
+			color = ALLIUM,
+			shape = {
+				stem(7.5),
+				leaf({ 0, GROUND, 0 }, { 1, 4.5, 0.35 }, 28, 160, LEAF),
+				lump({ 3.6, 2.4, 3.6 }, { 0, 0.25, 0 }, ALLIUM),
+				lump({ 2.6, 3.4, 2.6 }, { 0, 0.25, 0 }, { 192, 132, 230 }, { 0, 45, 0 }),
+			},
+			texture = { Sprite = "allium" },
+			lore = "A tall purple flower.",
 		})
 	)
 
@@ -325,38 +373,82 @@ return function(define: Define.Context): { BlockSpec }
 	local bluetTop = along({ 0, GROUND, 0 }, 6, 30, 5.6)
 	table.insert(
 		list,
-		flower("AzureBluet", WHITE, {
-			blade({ 0, GROUND, 0 }, { 0.6, 5.6, 0.6 }, 6, 30, BLUET_STEM),
-			lump({ 2.6, 0.8, 2.6 }, { bluetTop[1], bluetTop[2] + 0.2, bluetTop[3] }, WHITE, { 0, 45, 0 }),
-			lump({ 1, 0.4, 1 }, { bluetTop[1], bluetTop[2] + 0.7, bluetTop[3] }, { 232, 204, 70 }, { 0, 45, 0 }),
-			lump({ 1.8, 0.7, 1.8 }, { -1, -4.2, 0.6 }, { 226, 232, 236 }, { 0, 20, 0 }),
-		}, "Azure Bluet")
+		flower({
+			name = "AzureBluet",
+			displayName = "Azure Bluet",
+			color = WHITE,
+			shape = {
+				blade({ 0, GROUND, 0 }, { 0.6, 5.6, 0.6 }, 6, 30, BLUET_STEM),
+				lump({ 2.6, 0.8, 2.6 }, { bluetTop[1], bluetTop[2] + 0.2, bluetTop[3] }, WHITE, { 0, 45, 0 }),
+				lump({ 1, 0.4, 1 }, { bluetTop[1], bluetTop[2] + 0.7, bluetTop[3] }, { 232, 204, 70 }, { 0, 45, 0 }),
+				lump({ 1.8, 0.7, 1.8 }, { -1, -4.2, 0.6 }, { 226, 232, 236 }, { 0, 20, 0 }),
+			},
+			texture = { Sprite = "azure bluet" },
+			lore = "A tiny white flower.",
+		})
 	)
 
-	-- Tulips: a cup on a stem between two long leaves (Content/Define's `tulip`).
-	table.insert(list, tulip("RedTulip", { 212, 42, 34 }))
-	table.insert(list, tulip("OrangeTulip", { 240, 128, 36 }))
-	table.insert(list, tulip("WhiteTulip", { 234, 238, 234 }))
-	table.insert(list, tulip("PinkTulip", { 238, 162, 198 }))
+	-- Tulips: a cup on a stem between two long leaves (Content/Define's `tulip`). Any one brews
+	-- Weakness.
+	local TULIP_LORE = "A tulip. Brews a Potion of Weakness."
+	table.insert(
+		list,
+		tulip({ name = "RedTulip", color = { 212, 42, 34 }, texture = { Sprite = "red tulip" }, lore = TULIP_LORE })
+	)
+	table.insert(
+		list,
+		tulip({
+			name = "OrangeTulip",
+			color = { 240, 128, 36 },
+			texture = { Sprite = "orange tulip" },
+			lore = TULIP_LORE,
+		})
+	)
+	table.insert(
+		list,
+		tulip({
+			name = "WhiteTulip",
+			color = { 234, 238, 234 },
+			texture = { Sprite = "white tulip" },
+			lore = TULIP_LORE,
+		})
+	)
+	table.insert(
+		list,
+		tulip({ name = "PinkTulip", color = { 238, 162, 198 }, texture = { Sprite = "pink tulip" }, lore = TULIP_LORE })
+	)
 
 	table.insert(
 		list,
-		flower("OxeyeDaisy", WHITE, {
-			stem(6.5),
-			leaf({ 0, GROUND, 0 }, { 1.4, 3.2, 0.4 }, 50, 300, LEAF),
-			lump({ 4, 0.9, 4 }, { 0, -0.8, 0 }, { 242, 242, 238 }, { 12, 45, 0 }),
-			lump({ 1.6, 0.5, 1.6 }, { 0, -0.25, 0.1 }, { 236, 196, 40 }, { 12, 45, 0 }),
-		}, "Oxeye Daisy")
+		flower({
+			name = "OxeyeDaisy",
+			displayName = "Oxeye Daisy",
+			color = WHITE,
+			shape = {
+				stem(6.5),
+				leaf({ 0, GROUND, 0 }, { 1.4, 3.2, 0.4 }, 50, 300, LEAF),
+				lump({ 4, 0.9, 4 }, { 0, -0.8, 0 }, { 242, 242, 238 }, { 12, 45, 0 }),
+				lump({ 1.6, 0.5, 1.6 }, { 0, -0.25, 0.1 }, { 236, 196, 40 }, { 12, 45, 0 }),
+			},
+			texture = { Sprite = "oxeye daisy" },
+			lore = "A meadow daisy. Brews a Potion of Regeneration.",
+		})
 	)
 
 	local CORNFLOWER = { 70, 104, 228 }
 	table.insert(
 		list,
-		flower("Cornflower", CORNFLOWER, {
-			stem(6.5),
-			leaf({ 0, GROUND, 0 }, { 1, 4.2, 0.35 }, 30, 70, LEAF),
-			lump({ 3, 1.8, 3 }, { 0, -1, 0 }, CORNFLOWER, { 0, 45, 0 }),
-			lump({ 1.8, 2.6, 1.8 }, { 0, -0.2, 0 }, { 50, 78, 200 }),
+		flower({
+			name = "Cornflower",
+			color = CORNFLOWER,
+			shape = {
+				stem(6.5),
+				leaf({ 0, GROUND, 0 }, { 1, 4.2, 0.35 }, 30, 70, LEAF),
+				lump({ 3, 1.8, 3 }, { 0, -1, 0 }, CORNFLOWER, { 0, 45, 0 }),
+				lump({ 1.8, 2.6, 1.8 }, { 0, -0.2, 0 }, { 50, 78, 200 }),
+			},
+			texture = { Sprite = "cornflower" },
+			lore = "A blue flower. Brews a Potion of Leaping.",
 		})
 	)
 
@@ -365,18 +457,25 @@ return function(define: Define.Context): { BlockSpec }
 	local lilyTop = along({ 0, GROUND, 0 }, 15, 100, 7)
 	table.insert(
 		list,
-		flower("LilyOfTheValley", WHITE, {
-			blade({ -0.4, GROUND, 0.2 }, { 2.2, 7.5, 0.4 }, 8, 200, LILY_LEAF),
-			blade({ 0.4, GROUND, -0.2 }, { 2, 6.5, 0.4 }, 12, 20, LEAF_LIGHT),
-			blade({ 0, GROUND, 0 }, { 0.5, 7, 0.5 }, 15, 100, STEM),
-			-- (A row of bells along the arch, hanging under it.)
-			lump(
-				{ 1.2, 1.4, 2.4 },
-				{ lilyTop[1] * 0.8, lilyTop[2] - 1.1, lilyTop[3] * 0.75 },
-				{ 244, 246, 240 },
-				{ 0, 10, 0 }
-			),
-		}, "Lily of the Valley")
+		flower({
+			name = "LilyOfTheValley",
+			displayName = "Lily of the Valley",
+			color = WHITE,
+			shape = {
+				blade({ -0.4, GROUND, 0.2 }, { 2.2, 7.5, 0.4 }, 8, 200, LILY_LEAF),
+				blade({ 0.4, GROUND, -0.2 }, { 2, 6.5, 0.4 }, 12, 20, LEAF_LIGHT),
+				blade({ 0, GROUND, 0 }, { 0.5, 7, 0.5 }, 15, 100, STEM),
+				-- (A row of bells along the arch, hanging under it.)
+				lump(
+					{ 1.2, 1.4, 2.4 },
+					{ lilyTop[1] * 0.8, lilyTop[2] - 1.1, lilyTop[3] * 0.75 },
+					{ 244, 246, 240 },
+					{ 0, 10, 0 }
+				),
+			},
+			texture = { Sprite = "lily of the valley" },
+			lore = "Pretty, and poisonous. Brews a Potion of Poison.",
+		})
 	)
 
 	--[[ Tall flowers ]]
@@ -390,11 +489,20 @@ return function(define: Define.Context): { BlockSpec }
 	end
 	define.append(
 		list,
-		tallFlower("Sunflower", SUN_PETALS, {
-			blade({ 0, GROUND, 0 }, { 1.2, 16, 1.2 }, 0, 0, STEM),
-			leaf({ 0, -3, 0 }, { 2.4, 5.5, 0.4 }, 55, 160, LEAF),
-			leaf({ 0, 2, 0 }, { 2.2, 5, 0.4 }, 50, 340, LEAF_LIGHT),
-		}, sunflowerTop, shapes.sunflowerHead({ 0, 3.4, -0.9 }, false))
+		tallFlower({
+			name = "Sunflower",
+			color = SUN_PETALS,
+			shape = {
+				blade({ 0, GROUND, 0 }, { 1.2, 16, 1.2 }, 0, 0, STEM),
+				leaf({ 0, -3, 0 }, { 2.4, 5.5, 0.4 }, 55, 160, LEAF),
+				leaf({ 0, 2, 0 }, { 2.2, 5, 0.4 }, 50, 340, LEAF_LIGHT),
+			},
+			texture = { Sprite = "sunflower bottom" },
+			lore = "A tall flower that faces the sunrise.",
+		}, {
+			shape = sunflowerTop,
+			texture = { Sprite = "sunflower top" },
+		}, shapes.sunflowerHead({ 0, 3.4, -0.9 }, false))
 	)
 
 	local BUSH_LEAVES = { 70, 124, 46 }
@@ -408,11 +516,20 @@ return function(define: Define.Context): { BlockSpec }
 	table.insert(lilacLower, leaf({ 0, -6, 0 }, { 2.6, 5, 0.5 }, 50, 120, BUSH_LEAVES_LIGHT))
 	define.append(
 		list,
-		tallFlower("Lilac", LILAC, lilacLower, {
-			shapes.bushUpper(BUSH_LEAVES),
-			lump({ 4.6, 6.5, 4.6 }, { 0.6, -0.4, -0.4 }, LILAC, { 0, 15, -8 }),
-			lump({ 3.4, 5, 3.4 }, { -0.5, 3.4, 0.6 }, LILAC_LIGHT, { 10, 60, 0 }),
-			leaf({ 0.5, -4, -0.5 }, { 2.4, 4.5, 0.5 }, 55, 300, BUSH_LEAVES_LIGHT),
+		tallFlower({
+			name = "Lilac",
+			color = LILAC,
+			shape = lilacLower,
+			texture = { Sprite = "lilac bottom" },
+			lore = "A tall flowering shrub.",
+		}, {
+			shape = {
+				shapes.bushUpper(BUSH_LEAVES),
+				lump({ 4.6, 6.5, 4.6 }, { 0.6, -0.4, -0.4 }, LILAC, { 0, 15, -8 }),
+				lump({ 3.4, 5, 3.4 }, { -0.5, 3.4, 0.6 }, LILAC_LIGHT, { 10, 60, 0 }),
+				leaf({ 0.5, -4, -0.5 }, { 2.4, 4.5, 0.5 }, 55, 300, BUSH_LEAVES_LIGHT),
+			},
+			texture = { Sprite = "lilac top" },
 		}, {
 			lump({ 5.8, 4.4, 5.8 }, { 1.2, 5.4, -0.6 }, LILAC, { 0, 40, 0 }),
 			lump({ 3.6, 3, 3.6 }, { 0.8, 6.4, -0.4 }, LILAC_LIGHT, { 0, 70, 0 }),
@@ -426,12 +543,22 @@ return function(define: Define.Context): { BlockSpec }
 	table.insert(roseLower, rose({ -2.6, 4.4, -1.6 }))
 	define.append(
 		list,
-		tallFlower("RoseBush", ROSE, roseLower, {
-			shapes.bushUpper(ROSE_LEAVES),
-			lump({ 4.6, 5, 4.6 }, { 0.8, 0.4, -0.5 }, ROSE_LEAVES_LIGHT, { 0, 10, -10 }),
-			rose({ -3, -3, 2 }),
-			rose({ 1.6, 2.6, 1.4 }),
-		}, { rose({ 1, 7.4, -0.6 }) }, "Rose Bush")
+		tallFlower({
+			name = "RoseBush",
+			displayName = "Rose Bush",
+			color = ROSE,
+			shape = roseLower,
+			texture = { Sprite = "rose bush bottom" },
+			lore = "A tall bush of red roses.",
+		}, {
+			shape = {
+				shapes.bushUpper(ROSE_LEAVES),
+				lump({ 4.6, 5, 4.6 }, { 0.8, 0.4, -0.5 }, ROSE_LEAVES_LIGHT, { 0, 10, -10 }),
+				rose({ -3, -3, 2 }),
+				rose({ 1.6, 2.6, 1.4 }),
+			},
+			texture = { Sprite = "rose bush top" },
+		}, { rose({ 1, 7.4, -0.6 }) })
 	)
 
 	local PEONY = { 236, 176, 220 }
@@ -440,11 +567,20 @@ return function(define: Define.Context): { BlockSpec }
 	table.insert(peonyLower, leaf({ 0, -6, 0 }, { 2.6, 5, 0.5 }, 50, 300, BUSH_LEAVES))
 	define.append(
 		list,
-		tallFlower("Peony", PEONY, peonyLower, {
-			shapes.bushUpper(BUSH_LEAVES_LIGHT),
-			lump({ 5.4, 4, 5.4 }, { 0.6, -0.8, -0.4 }, PEONY, { 10, 15, -6 }),
-			lump({ 4, 3.4, 4 }, { -0.6, 1.8, 0.5 }, PEONY_LIGHT, { -8, 55, 0 }),
-			leaf({ 0.5, -4, -0.5 }, { 2.4, 4.5, 0.5 }, 55, 120, BUSH_LEAVES),
+		tallFlower({
+			name = "Peony",
+			color = PEONY,
+			shape = peonyLower,
+			texture = { Sprite = "peony bottom" },
+			lore = "A tall pink flower.",
+		}, {
+			shape = {
+				shapes.bushUpper(BUSH_LEAVES_LIGHT),
+				lump({ 5.4, 4, 5.4 }, { 0.6, -0.8, -0.4 }, PEONY, { 10, 15, -6 }),
+				lump({ 4, 3.4, 4 }, { -0.6, 1.8, 0.5 }, PEONY_LIGHT, { -8, 55, 0 }),
+				leaf({ 0.5, -4, -0.5 }, { 2.4, 4.5, 0.5 }, 55, 120, BUSH_LEAVES),
+			},
+			texture = { Sprite = "peony top" },
 		}, {
 			lump({ 5.8, 3.6, 5.8 }, { 1.2, 5.8, -0.6 }, PEONY, { 0, 15, 0 }),
 			lump({ 3.6, 2.4, 3.6 }, { 0.6, 6.6, -0.2 }, PEONY_LIGHT, { 0, 55, 0 }),
@@ -456,30 +592,77 @@ return function(define: Define.Context): { BlockSpec }
 	local BROWN_CAP = { 152, 112, 84 }
 	table.insert(
 		list,
-		define.mushroom("BrownMushroom", BROWN_CAP, {
-			lump({ 1.6, 3.6, 1.6 }, { 0, -6.2, 0 }, { 212, 196, 164 }),
-			lump({ 4.8, 1.4, 3.2 }, { 0, -3.8, 0 }, BROWN_CAP),
-			lump({ 3.2, 1.4, 4.8 }, { 0, -3.8, 0 }, BROWN_CAP),
-		}, "Brown Mushroom")
+		define.mushroom({
+			name = "BrownMushroom",
+			displayName = "Brown Mushroom",
+			color = BROWN_CAP,
+			shape = {
+				lump({ 1.6, 3.6, 1.6 }, { 0, -6.2, 0 }, { 212, 196, 164 }),
+				lump({ 4.8, 1.4, 3.2 }, { 0, -3.8, 0 }, BROWN_CAP),
+				lump({ 3.2, 1.4, 4.8 }, { 0, -3.8, 0 }, BROWN_CAP),
+			},
+			texture = { Sprite = "brown mushroom" },
+			lore = "Grows in the shade, on mycelium and podzol.",
+		})
 	)
 
 	local RED_CAP = { 200, 36, 32 }
 	table.insert(
 		list,
-		define.mushroom("RedMushroom", RED_CAP, {
-			lump({ 1.6, 3.4, 1.6 }, { 0, -6.3, 0 }, { 228, 220, 206 }),
-			lump({ 4.2, 1.6, 4.2 }, { 0, -4.4, 0 }, RED_CAP, { 0, 45, 0 }),
-			lump({ 2.8, 1.2, 2.8 }, { 0, -3.1, 0 }, RED_CAP),
-			lump({ 0.9, 0.3, 0.9 }, { 0.5, -2.4, -0.4 }, { 246, 240, 232 }),
-		}, "Red Mushroom")
+		define.mushroom({
+			name = "RedMushroom",
+			displayName = "Red Mushroom",
+			color = RED_CAP,
+			shape = {
+				lump({ 1.6, 3.4, 1.6 }, { 0, -6.3, 0 }, { 228, 220, 206 }),
+				lump({ 4.2, 1.6, 4.2 }, { 0, -4.4, 0 }, RED_CAP, { 0, 45, 0 }),
+				lump({ 2.8, 1.2, 2.8 }, { 0, -3.1, 0 }, RED_CAP),
+				lump({ 0.9, 0.3, 0.9 }, { 0.5, -2.4, -0.4 }, { 246, 240, 232 }),
+			},
+			texture = { Sprite = "red mushroom" },
+			lore = "A toadstool. Brews a Potion of Harming.",
+		})
 	)
 
 	--[[ Saplings ]]
 
-	table.insert(list, define.sapling("OakSapling", { 72, 124, 44 }, "Oak Sapling"))
-	table.insert(list, define.sapling("BirchSapling", { 116, 152, 72 }, "Birch Sapling"))
-	table.insert(list, define.sapling("SpruceSapling", { 50, 92, 58 }, "Spruce Sapling"))
-	table.insert(list, define.sapling("AcaciaSapling", { 112, 140, 44 }, "Acacia Sapling"))
-	table.insert(list, define.sapling("JungleSapling", { 46, 124, 36 }, "Jungle Sapling"))
+	-- (One black and white "sapling" picture, tinted with each sapling's colour.)
+	define.append(list, {
+		define.sapling({
+			name = "OakSapling",
+			displayName = "Oak Sapling",
+			color = { 72, 124, 44 },
+			texture = { Sprite = "sapling" },
+			lore = "Plant it on dirt and it grows into an oak.",
+		}),
+		define.sapling({
+			name = "BirchSapling",
+			displayName = "Birch Sapling",
+			color = { 116, 152, 72 },
+			texture = { Sprite = "sapling" },
+			lore = "Plant it on dirt and it grows into a birch.",
+		}),
+		define.sapling({
+			name = "SpruceSapling",
+			displayName = "Spruce Sapling",
+			color = { 50, 92, 58 },
+			texture = { Sprite = "sapling" },
+			lore = "Plant it on dirt and it grows into a spruce.",
+		}),
+		define.sapling({
+			name = "AcaciaSapling",
+			displayName = "Acacia Sapling",
+			color = { 112, 140, 44 },
+			texture = { Sprite = "sapling" },
+			lore = "Plant it on dirt and it grows into an acacia.",
+		}),
+		define.sapling({
+			name = "JungleSapling",
+			displayName = "Jungle Sapling",
+			color = { 46, 124, 36 },
+			texture = { Sprite = "sapling" },
+			lore = "Plant it on dirt and it grows into a jungle tree.",
+		}),
+	})
 	return list
 end

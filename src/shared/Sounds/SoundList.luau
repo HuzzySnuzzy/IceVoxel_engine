@@ -675,7 +675,7 @@ SoundList.EVENTS = {
 		client's random display tick picks it (block.fire.ambient, cue volume 1..2, pitch 0.3..1;
 		Audio/Ambience, SoundRules.fireCrackle), each client by itself. Punching a fire out sounds like
 		level event 1009 (block.fire.extinguish, volume 0.5, pitch 2.6 +- 0.8, as lava's fizz): it
-		is the Fire block's break sound (BLOCK_SOUNDS below), so the player who breaks it hears it
+		is the Fire block's break sound (its entry's `sounds`), so the player who breaks it hears it
 		at once and the server sends it to everyone else. Flint and steel striking
 		(item.flintandsteel.use, FlintAndSteelItem.useOn: volume 1, pitch 0.8..1.2), from the
 		server (Players/ItemUse). Stand-ins: the falling wind pitched down into a low roar for the
@@ -763,12 +763,9 @@ SoundList.EVENTS = {
 
 --[[
 	Blocks whose action sounds are their own rather than their sound type's (Sounds.block): by
-	block name, action -> event. Punching fire out is Minecraft's level event 1009 (the
-	extinguish hiss), not a wool block's break.
+	block name, action -> event.
 ]]
-SoundList.BLOCK_SOUNDS = {
-	Fire = { ["break"] = "block.fire.extinguish" },
-} :: { [string]: { [string]: string } }
+SoundList.BLOCK_SOUNDS = {} :: { [string]: { [string]: string } }
 
 --[[
 	The cave moods (Sounds/MusicList.Moods): ambient.cave.mood1, ambient.cave.mood2, ... in the

@@ -46,6 +46,8 @@
 	  fence(base)     a fence's 16 variants (lone post and arms) from its own fields
 	  layers(base, speeds)   a layered block's eight heights (snow layers)
 	  machine(spec)   a Mekanism style machine block (heaters, coolers) from its own fields
+	  (A block's lore, faces, Age, skill, fuel and tags are its item's: `fluid` puts them on the
+	  source, `door` on its item half, `fence` on the lone post; cave twins carry none.)
 
 	Plants (Define/Plants: Minecraft's ground foliage)
 	  GROUND, STEM, LEAF, LEAF_LIGHT   the ground's height, flower stems' and leaves' greens
@@ -53,9 +55,9 @@
 	  leaning, along, slat, blade, leaf, plantBox, stem   a plant's boxes: blades, leaves, heads
 	  plant(spec)     a plant's shared fields (not solid, broken at once, on its soil...)
 	  tallIcon(lower, extra), tallPlant(lower, upper)   a tall plant's item, its two halves joined
-	  tallFlower(name, colour, lower, upper, extra, displayName?)   a two block flower
-	  flower(name, colour, shape, displayName?), tulip(name, colour)   flowers on dirt
-	  mushroom(name, colour, shape, displayName), sapling(name, colour, displayName)
+	  tallFlower(lower, upper, extra)   a two block flower, from its two halves' entries
+	  flower(spec), tulip(spec)   flowers on dirt (these take the whole entry: name, boxes, lore...)
+	  mushroom(spec), sapling(spec)
 	  herb(spec)      a Tough As Nails herb, planted by its item
 
 	Recipes (Define/Recipes) and metals (Define/Metal)

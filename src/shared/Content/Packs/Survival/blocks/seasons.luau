@@ -147,12 +147,10 @@ return function(define: Define.Context): { BlockSpec }
 					),
 				}
 			end,
-			item = {
-				texture = { Front = "insulated door bottom" },
-				lore = "A padded door. Closed, it keeps a room's warmth in.",
-				age = "iron",
-			},
-			top = { texture = { Front = "insulated door top" } },
+			lore = "A padded door. Closed, it keeps a room's warmth in.",
+			age = "iron",
+			texture = { Front = "insulated door bottom" },
+			topTexture = { Front = "insulated door top" },
 		})
 	)
 	return list

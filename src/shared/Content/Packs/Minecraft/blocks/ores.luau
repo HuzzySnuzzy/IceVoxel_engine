@@ -4,8 +4,18 @@
 	(the pack's `ores` places them), and the blocks of coal, iron, gold, diamond, emerald, raw iron
 	and raw gold (nine of the item each, Crafting's storage recipes). The ores drop their item
 	(raw iron, raw gold) with a pickaxe of their tier. blastResistance 6 for every storage block
-	(Minecraft's metal and gem blocks); the Block of Coal burns as Minecraft's (5 / 5). Zombies
-	break none of them.
+	(Minecraft's metal and gem blocks); the Block of Coal burns as Minecraft's (5 / 5), and 16 000
+	ticks in a furnace (ten coal). Zombies break none of them.
+
+	  * knowledge: mining an ore again gives Minecraft's ore experience in points (coal 0-2: 1,
+	    diamond and emerald 3-7: 5; iron and gold give theirs in the furnace there, a little here
+	    too: 2 and 3).
+	  * miner: the Metal Miner copies an ore at these numbers (Machines/MinerRules): ticks an item,
+	    J a tick, and the least J an item costs (`floor`: a coal at least 400 kJ, more than it
+	    burns for, so coal is never energy-positive). Iron 400 ticks at 200 J, gold 800 at 300,
+	    emerald 3600 and diamond 4800 at 800.
+	  * age: iron and gold blocks are the Iron Age's (with the metals' tools), diamond and emerald
+	    blocks the Industrial Age's (Progression/Ages).
 ]]
 
 local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
@@ -21,6 +31,10 @@ return {
 		tool = "pickaxe",
 		toolLevel = 0,
 		drops = "Coal" :: string,
+		texture = { All = "coal ore" },
+		lore = "Stone veined with coal: fuel for furnaces, torches and generators.",
+		knowledge = { mine = 1 },
+		miner = { ticks = 600, joules = 800, floor = 400000 },
 	},
 	{
 		name = "IronOre",
@@ -30,6 +44,10 @@ return {
 		tool = "pickaxe",
 		toolLevel = 1,
 		drops = "RawIron" :: string,
+		texture = { All = "iron ore" },
+		lore = "Gives Raw Iron. Smelting iron opens the way to the Iron Age.",
+		knowledge = { mine = 2 },
+		miner = { ticks = 400, joules = 200 },
 	},
 	{
 		name = "GoldOre",
@@ -39,6 +57,10 @@ return {
 		tool = "pickaxe",
 		toolLevel = 2,
 		drops = "RawGold" :: string,
+		texture = { All = "gold ore" },
+		lore = "Gives Raw Gold, for golden tools and Mekanism's alloys.",
+		knowledge = { mine = 3 },
+		miner = { ticks = 800, joules = 300 },
 	},
 	{
 		name = "DiamondOre",
@@ -48,6 +70,10 @@ return {
 		tool = "pickaxe",
 		toolLevel = 2,
 		drops = "Diamond" :: string,
+		texture = { All = "diamond ore" },
+		lore = "Deep and rare. Gives a Diamond.",
+		knowledge = { mine = 5 },
+		miner = { ticks = 4800, joules = 800 },
 	},
 	{
 		name = "EmeraldOre",
@@ -57,6 +83,10 @@ return {
 		tool = "pickaxe",
 		toolLevel = 2,
 		drops = "Emerald" :: string,
+		texture = { All = "emerald ore" },
+		lore = "Gives an Emerald, for staffs, anklets and elite gear.",
+		knowledge = { mine = 5 },
+		miner = { ticks = 3600, joules = 800 },
 	},
 	{
 		name = "CoalBlock",
@@ -68,6 +98,9 @@ return {
 		tool = "pickaxe",
 		toolLevel = 0,
 		flammable = { ignite = 5, burn = 5 },
+		texture = { All = "coal block" },
+		lore = "Nine coal in one block. Burns ten times as long.",
+		fuel = 16000,
 	},
 	{
 		name = "IronBlock",
@@ -78,6 +111,9 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 1,
+		texture = { All = "iron block" },
+		lore = "Nine iron ingots in one solid block.",
+		age = "iron",
 	},
 	{
 		name = "GoldBlock",
@@ -88,6 +124,9 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 2,
+		texture = { All = "gold block" },
+		lore = "Nine gold ingots in one gleaming block.",
+		age = "iron",
 	},
 	{
 		name = "DiamondBlock",
@@ -98,6 +137,9 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 2,
+		texture = { All = "diamond block" },
+		lore = "Nine diamonds in one block.",
+		age = "industrial",
 	},
 	{
 		name = "EmeraldBlock",
@@ -108,6 +150,9 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 2,
+		texture = { All = "emerald block" },
+		lore = "Nine emeralds in one block.",
+		age = "industrial",
 	},
 	{
 		name = "RawIronBlock",
@@ -118,6 +163,9 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 1,
+		texture = { All = "raw iron block" },
+		lore = "Nine Raw Iron, kept compact.",
+		age = "iron",
 	},
 	{
 		name = "RawGoldBlock",
@@ -128,5 +176,8 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 2,
+		texture = { All = "raw gold block" },
+		lore = "Nine Raw Gold, kept compact.",
+		age = "iron",
 	},
 } :: { BlockSpec }

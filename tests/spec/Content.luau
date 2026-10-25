@@ -986,16 +986,11 @@ return function(t, shared, require, _server, _client)
 	local STONE = "pack Minecraft (patched by Clash), blocks/terrain, block Stone"
 
 	t.test("content: a value both on an entry and in a registry's side table is an error", function()
-		clash(
-			{ blocks = { { name = "Stone", override = true, lore = "Rock." } } },
-			{ "Items", "LoreList" },
-			{ `LoreList: {STONE} has a lore line, and so has LoreList's side table` }
-		)
-		clash(
-			{ blocks = { { name = "Stone", override = true, texture = { All = "stone" } } } },
-			{ "TexturePack" },
-			{ `TexturePack: {STONE} has its texture both on its entry and in LEGACY_BLOCKS` }
-		)
+		-- (The Minecraft pack's blocks carry their own lore, faces, Ages, skills, knowledge, miner
+		-- numbers and loot now, and those side tables are their modules' own, so no clash of a
+		-- Minecraft block with them can be set up here: Stone's lore and texture, TNT's skill,
+		-- Coal Ore's knowledge, Iron Ore's miner numbers and Gravel's loot were the examples. The
+		-- side tables, and their checks, go once every pack's entries carry their values.)
 		-- (An item LEGACY_ICONS still names: one with an icon its entry doesn't give. It was the
 		-- Hermes Boots until the Terraria pack's items carried their own icons; the packs move
 		-- theirs onto their entries, so the side table empties, and the check goes with it.)
@@ -1014,32 +1009,10 @@ return function(t, shared, require, _server, _client)
 				`item {legacy} has its icon both on its entry and in LEGACY_ICONS`,
 			})
 		end
-		-- (The Block of Iron: a block the side lists still name. The Shears and then the Canteen named
-		-- their Ages there until their packs took them onto their entries.)
-		clash({ blocks = { { name = "IronBlock", override = true, age = "iron" } } }, { "Progression", "Ages" }, {
-			"Ages: pack Minecraft (patched by Clash), blocks/ores, block IronBlock names its Age, and the side lists name one for it too (iron)",
-		})
-		clash({ blocks = { { name = "Tnt", override = true, skill = "demolition" } } }, { "Progression", "Skills" }, {
-			"Skills: pack Minecraft (patched by Clash), blocks/fire, block Tnt names its skill, and demolition's recipes name it too",
-		})
 		clash(
 			{ blocks = { { name = "Stone", override = true, skill = "juggling" } } },
 			{ "Progression", "Skills" },
 			{ `Skills: {STONE} names an unknown skill juggling` }
-		)
-		clash(
-			{ blocks = { { name = "CoalOre", override = true, knowledge = { mine = 9 } } } },
-			{ "Progression", "Knowledge" },
-			{
-				"Knowledge: pack Minecraft (patched by Clash), blocks/ores, block CoalOre has its mine points, and Knowledge.ORES too",
-			}
-		)
-		clash(
-			{ blocks = { { name = "IronOre", override = true, miner = { ticks = 1, joules = 1 } } } },
-			{ "Machines", "MinerRules" },
-			{
-				"MinerRules: pack Minecraft (patched by Clash), blocks/ores, block IronOre has its miner numbers, and MinerRules' side list names it too",
-			}
 		)
 		clash(
 			{ blocks = { { name = "Stone", override = true, radiation = 2 } } },
@@ -1049,13 +1022,12 @@ return function(t, shared, require, _server, _client)
 				env.require(root.Config).Radiation.Sources.Stone = 1
 			end
 		)
-		clash(
-			{ blocks = { { name = "Fire", override = true, sounds = { ["break"] = "block.fire.extinguish" } } } },
-			{ "Sounds" },
-			{
-				"Sounds: pack Minecraft (patched by Clash), blocks/fire, block Fire has its sounds, and SoundList.BLOCK_SOUNDS too",
-			}
-		)
+		-- (Fire's own sounds are on its entry: a side table naming it too, as a pack's old data.)
+		clash({}, { "Sounds" }, {
+			"Sounds: pack Minecraft, blocks/fire, block Fire has its sounds, and SoundList.BLOCK_SOUNDS too",
+		}, function(env, root)
+			env.require(root.Sounds.SoundList).BLOCK_SOUNDS.Fire = { ["break"] = "block.fire.extinguish" }
+		end)
 		clash(
 			{ blocks = { { name = "Stone", override = true, sounds = { ["break"] = "block.stone.shatter" } } } },
 			{ "Sounds" },
@@ -1067,22 +1039,14 @@ return function(t, shared, require, _server, _client)
 			{ `Sounds: {STONE} has unknown action smash` }
 		)
 		-- (SoundList.ARMOR names no prefix any more: every armor piece names its own `equipSound`.)
-		clash({ blocks = { { name = "Ice", override = true, cools = true } } }, { "ToughAsNails", "Temperature" }, {
-			"Temperature: pack Minecraft (patched by Clash), blocks/terrain, block Ice cools, and Config.ToughAsNails.CoolingBlocks too",
-		})
+		-- (Ice cools on its entry: Config naming it too.)
+		clash({}, { "ToughAsNails", "Temperature" }, {
+			"Temperature: pack Minecraft, blocks/terrain, block Ice cools, and Config.ToughAsNails.CoolingBlocks too",
+		}, function(env, root)
+			table.insert(env.require(root.Config).ToughAsNails.CoolingBlocks, "Ice")
+		end)
 		clash({ blocks = { { name = "Planks", override = true, fuel = 300 } } }, { "Crafting", "Recipes" }, {
 			"Recipes: pack Minecraft (patched by Clash), blocks/wood, block Planks has its fuel both on its entry and in LEGACY_FUEL (#planks)",
-		})
-		clash({
-			blocks = {
-				{
-					name = "Gravel",
-					override = true,
-					loot = { { rolls = { 1, 1 }, entries = { { "Flint", 1, 1, 1 } } } },
-				},
-			},
-		}, { "Items" }, {
-			"Items: pack Minecraft (patched by Clash), blocks/terrain, block Gravel has loot, and a side rule (leafDrop, randomDrop, STRAW_CHANCE) drops for it too",
 		})
 	end)
 end

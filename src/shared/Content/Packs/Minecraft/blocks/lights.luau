@@ -3,7 +3,9 @@
 	The Minecraft pack's light sources: the torch and wall torch, the Glow Block, the lantern and
 	glow lichen. Torches and lanterns are shaped (pixels from the cell's centre; Content/Define's
 	`torch`, `wallTorch` and `lantern`) and need a block to hang on; the light is a PointLight on
-	the `glow` box (client Rendering/PartPool).
+	the `glow` box (client Rendering/PartPool). Torches, lanterns and the Glow Block are never
+	textured (boxes standing in their cell; Neon takes no MaterialVariant). The lantern is the
+	Iron Age's (`age`).
 
 	  * Wall torches face away from the wall they hang on (Minecraft's wall_torch `facing`): placed
 	    by the Torch item, they drop a Torch. The mineshafts hang their cave twins
@@ -57,6 +59,7 @@ return function(define: Define.Context): { BlockSpec }
 			support = "Down",
 			brokenByFluid = true,
 			behaviour = "Attached",
+			lore = "Lights the dark. Place it on the ground or a wall.",
 		},
 	}
 
@@ -100,6 +103,7 @@ return function(define: Define.Context): { BlockSpec }
 			lightColor = { 150, 200, 255 },
 			drops = "GlowDust" :: string,
 			dropCount = 4,
+			lore = "A block of glowing dust: a bright, steady light.",
 		},
 		{
 			name = "Lantern",
@@ -118,6 +122,8 @@ return function(define: Define.Context): { BlockSpec }
 			obstructs = true,
 			support = "Down",
 			behaviour = "Attached",
+			lore = "A torch in iron: stands on the ground or hangs from a ceiling.",
+			age = "iron",
 		},
 		{
 			name = "HangingLantern",
@@ -172,6 +178,9 @@ return function(define: Define.Context): { BlockSpec }
 				behaviour = "Attached",
 				caveTwin = if cave then twin else nil,
 				flammable = { ignite = 15, burn = 100 },
+				-- (The item's; its picture covers the six and their twins.)
+				texture = if item then { Front = "glow lichen" } else nil,
+				lore = if item then "A faintly glowing cave growth. Gives Glow Dust." else nil,
 			})
 		end
 	end

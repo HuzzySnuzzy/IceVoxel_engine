@@ -15,7 +15,8 @@
 	Each wood's upper half is a frame around its windows (oak two, birch four, jungle two small
 	ones, acacia one, spruce none: Minecraft's door pictures' windows, see-through here too), made
 	of `doorPiece` boxes; the texture pack's door pictures go on the door's plate, both sides
-	(TexturePack Blocks OakDoor / OakDoorTop `Front`: blank, so the boxes show).
+	(each wood's `texture` and `topTexture` Front, the lower and upper halves': blank, so the boxes
+	show).
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -23,12 +24,17 @@ local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
 
 return function(define: Define.Context): { Schema.BlockSpec }
 	local piece, darker = define.doorPiece, define.darker
-	-- Each wood: its planks' colour and the frame around its upper half's windows (left and right
+	-- Each wood: its planks' colour, the door's own fields (its halves' pictures, its lore, its
+	-- burn ticks: the item's) and the frame around its upper half's windows (left and right
 	-- stiles, rails and mullions; the windows are what they leave open).
 	local woods: { Define.DoorWood } = {
 		{
 			wood = "Oak",
 			color = { 170, 134, 84 },
+			texture = { Front = "oak door bottom" },
+			topTexture = { Front = "oak door top" },
+			lore = "Right click to open. Two side by side open together.",
+			fuel = 200,
 			upper = function(_c)
 				return {
 					piece(-8, -5, -8, 8),
@@ -42,6 +48,10 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		{
 			wood = "Spruce",
 			color = { 114, 84, 48 },
+			texture = { Front = "spruce door bottom" },
+			topTexture = { Front = "spruce door top" },
+			lore = "A solid spruce door. Two side by side open together.",
+			fuel = 200,
 			upper = function(c)
 				return { piece(-8, 8, -8, 8), piece(-5, 5, -5, 5, 4, darker(c, 0.85)) }
 			end,
@@ -49,6 +59,10 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		{
 			wood = "Birch",
 			color = { 196, 178, 123 },
+			texture = { Front = "birch door bottom" },
+			topTexture = { Front = "birch door top" },
+			lore = "A birch door with four little windows. Opens with a right click.",
+			fuel = 200,
 			upper = function(_c)
 				return {
 					piece(-8, -5, -8, 8),
@@ -63,6 +77,10 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		{
 			wood = "Jungle",
 			color = { 160, 115, 80 },
+			texture = { Front = "jungle door bottom" },
+			topTexture = { Front = "jungle door top" },
+			lore = "A jungle wood door with small windows. Opens with a right click.",
+			fuel = 200,
 			upper = function(_c)
 				return {
 					piece(-8, -5, -8, 8),
@@ -76,6 +94,10 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		{
 			wood = "Acacia",
 			color = { 168, 90, 50 },
+			texture = { Front = "acacia door bottom" },
+			topTexture = { Front = "acacia door top" },
+			lore = "An acacia door with one window. Opens with a right click.",
+			fuel = 200,
 			upper = function(_c)
 				return {
 					piece(-8, -4, -8, 8),

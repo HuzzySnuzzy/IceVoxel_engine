@@ -71,20 +71,8 @@ Recipes.smelting = smelting
 -- Burn time (ticks) of furnace fuel (Minecraft's AbstractFurnaceBlockEntity.getFuel), by item name
 -- or "#tag": the side table, for what has no `fuel` on its entry yet.
 local LEGACY_FUEL: { [string]: number } = {
-	CoalBlock = 16000,
 	["#logs"] = 300,
 	["#planks"] = 300,
-	CraftingTable = 300,
-	Chest = 300,
-	WhiteWool = 100,
-	Ladder = 300,
-	OakFence = 300,
-	-- (Minecraft's ItemTags.WOODEN_DOORS.)
-	OakDoor = 200,
-	SpruceDoor = 200,
-	BirchDoor = 200,
-	JungleDoor = 200,
-	AcaciaDoor = 200,
 }
 
 -- Every fuel: the side table's, and every entry's `fuel` (an entry the side table burns, by name or

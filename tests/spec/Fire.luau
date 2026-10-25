@@ -427,11 +427,12 @@ return function(t, shared, require, server)
 		t.eq(Items.get(I.FlintAndSteel).durability, 64)
 		t.eq(Items.maxStack(I.FlintAndSteel), 1)
 		t.eq(Items.displayName(I.FlintAndSteel), "Flint and Steel")
-		-- Gravel gives flint one time in 10.
-		local flint = Items.randomDrop(B.Gravel, cycle({ 0.05 }))
+		-- Gravel gives flint one time in 10. (Its entry's `loot` now, Items.lootDrop: Items'
+		-- randomDrop rule is gone.)
+		local flint = Items.lootDrop(B.Gravel, cycle({ 0.05 }))
 		t.ok(flint ~= nil and flint.item == I.Flint and flint.count == 1)
-		t.eq(Items.randomDrop(B.Gravel, cycle({ 0.5 })), nil)
-		t.eq(Items.randomDrop(STONE, cycle({ 0 })), nil, "only gravel")
+		t.eq(Items.lootDrop(B.Gravel, cycle({ 0.5 })), nil)
+		t.eq(Items.lootDrop(STONE, cycle({ 0 })), nil, "only gravel")
 		local flints = 0
 		math.randomseed(3)
 		for _ = 1, 2000 do

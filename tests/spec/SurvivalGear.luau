@@ -329,8 +329,10 @@ return function(t, shared, require, server)
 	--[[ Straw ]]
 
 	t.test("straw: grass broken without Shears gives Straw now and then; Shears the grass", function()
+		-- (The grass's entries carry their Straw as `loot`, Items.lootDrop: Items' STRAW_CHANCE rule
+		-- is gone.)
 		local function strawOf(block: number, roll: number): number?
-			local stack = Items.strawDrop(block, rolls({ roll }))
+			local stack = Items.lootDrop(block, rolls({ roll }))
 			return if stack then stack.item else nil
 		end
 		t.eq(strawOf(B.ShortGrass, 0.49), I.Straw, "short grass: half the time")
@@ -338,7 +340,7 @@ return function(t, shared, require, server)
 		t.eq(strawOf(B.TallGrass, 0.999), I.Straw, "tall grass: always")
 		t.eq(strawOf(B.Fern, 0), nil, "not ferns")
 		t.eq(strawOf(B.Stone, 0), nil)
-		t.eq((Items.strawDrop(B.TallGrass, rolls({ 0 })) :: Items.Stack).count, 1, "one")
+		t.eq((Items.lootDrop(B.TallGrass, rolls({ 0 })) :: Items.Stack).count, 1, "one")
 		-- What a survival player breaking them gets (EditRules.drops).
 		local byHand = EditRules.drops(B.TallGrass, false, nil)
 		t.eq(byHand and byHand.item, I.Straw, "tall grass by hand")

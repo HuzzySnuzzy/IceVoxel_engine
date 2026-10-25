@@ -61,13 +61,7 @@ MinerRules.STATE = table.freeze({ MINING = 0, NO_POWER = 1, OUTPUT_FULL = 2, NO_
 local MAX_CODE = MinerRules.STATE.IDLE
 
 -- The side list: the ores whose entries carry no `miner` yet, at Config.Miner.Ores' numbers.
-local NAMES = {
-	"CoalOre",
-	"IronOre",
-	"GoldOre",
-	"EmeraldOre",
-	"DiamondOre",
-}
+local NAMES = {}
 -- (Config.Miner.Ores by name.)
 local ORE_NUMBERS: { [string]: { ticks: number, joules: number, floor: number? } } = Config.Miner.Ores :: any
 

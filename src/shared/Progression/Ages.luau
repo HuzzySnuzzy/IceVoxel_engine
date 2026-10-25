@@ -92,12 +92,6 @@ local Content = require(script.Parent.Parent.Content)
 local iron: { string } = {}
 for _, name in
 	{
-		"IronBlock",
-		"RawIronBlock",
-		"GoldBlock",
-		"RawGoldBlock",
-		"Lantern",
-		"Rail",
 		-- (The new ores' lead, zinc and brass and the Hazmat suit are too: their entries say so,
 		-- in the Ores pack.)
 	}
@@ -108,9 +102,6 @@ end
 local industrial: { string } = {}
 for _, name in
 	{
-		"DiamondBlock",
-		"EmeraldBlock",
-		"Tnt",
 		-- (And uranium smelting, on its ingot's entry: a smelting result is never of an Age after
 		-- the transporters', which feed furnaces with no window and so no gate.)
 	}
@@ -121,7 +112,6 @@ end
 local electric: { string } = {}
 
 local atomic: { string } = {
-	"Nuke",
 	-- (And uranium's nugget and blocks, on their entries; the ore and Raw Uranium are mined in any
 	-- Age, and the ingot smelted from the Industrial Age.)
 }

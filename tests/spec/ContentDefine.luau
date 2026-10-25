@@ -25,15 +25,23 @@ return function(t, shared, require)
 	end
 
 	t.test("define: a fluid's nine blocks, `flowing` on its flows only; cave twins", function()
-		local fluid = Define.fluid("Goo", { name = "Goo", color = { 1, 2, 3 }, material = "Glass" }, 7, {
-			flammable = { ignite = 1, burn = 2 },
-		})
+		local fluid = Define.fluid(
+			"Goo",
+			{ name = "Goo", color = { 1, 2, 3 }, material = "Glass", lore = "Sticky.", heats = true },
+			7,
+			{
+				flammable = { ignite = 1, burn = 2 },
+			}
+		)
 		t.eq(names(fluid), "Goo GooFlow1 GooFlow2 GooFlow3 GooFlow4 GooFlow5 GooFlow6 GooFlow7 GooFalling")
 		for level, entry in fluid do
 			t.eq(entry.fluid.level, level - 1)
 			t.eq(entry.fluid.tickDelay, 7)
 			t.eq(entry.placeable, level == 1, "only the source is an item")
 			t.eq(entry.flammable ~= nil, level > 1, "flowing fields on the flows")
+			-- (The fluid's own fields, its item's lore and its warmth, are the source's alone.)
+			t.eq(entry.lore, if level == 1 then "Sticky." else nil, "lore on the source")
+			t.eq(entry.heats, if level == 1 then true else nil, "heats on the source")
 		end
 		valid("blocks", fluid)
 		local twin = Define.caveFluid(fluid[1])
@@ -42,16 +50,33 @@ return function(t, shared, require)
 		t.eq(twin.item, "Goo")
 		t.eq(twin.displayName, "Goo", "shown by the source's name")
 		t.eq(twin.placeable, false)
-		local vine = Define.caveTwin({ name = "VineNorth", item = "Vine" }, { seasonless = true })
+		t.eq(twin.lore, nil, "a twin is no item")
+		t.eq(twin.heats, nil, "the fluid's name warms its twin")
+		local vine = Define.caveTwin({
+			name = "VineNorth",
+			item = "Vine",
+			lore = "Green.",
+			texture = { Front = "vine" },
+			flammable = {
+				ignite = 15,
+				burn = 100,
+			},
+		}, { seasonless = true })
 		t.eq(vine.name, "CaveVineNorth")
 		t.eq(vine.item, "Vine", "a variant's twin names the variant's item")
 		t.eq(vine.seasonless, true, "the extra fields")
+		t.ok(vine.lore == nil and vine.texture == nil, "none of its item's own fields")
+		t.eq(vine.flammable and vine.flammable.ignite, 15, "and the rest of its twin's")
 	end)
 
 	t.test("define: a door's 32 halves, a fence's 16 variants, a layered block's 8 heights", function()
 		local door = Define.door({
 			wood = "Test",
 			color = { 100, 100, 100 },
+			texture = { Front = "test door bottom" },
+			topTexture = { Front = "test door top" },
+			lore = "A test door.",
+			fuel = 200,
 			upper = function(_c)
 				return { Define.doorPiece(-8, 8, -8, 8) }
 			end,
@@ -64,20 +89,34 @@ return function(t, shared, require)
 			if half.placeable then
 				items += 1
 				t.eq(half.name, "TestDoor", "the lower half facing North, hinged left, closed is the item")
+				t.ok(half.lore == "A test door." and half.fuel == 200, "the door's own fields on its item")
+				t.eq(half.texture and half.texture.Front, "test door bottom", "the lower halves' picture")
 			else
 				t.eq(half.item, "TestDoor")
+				t.ok(half.lore == nil and half.fuel == nil, `{half.name}: none on the other halves`)
+				local top = if half.name == "TestDoorTop" then "test door top" else nil
+				t.eq(half.texture and half.texture.Front, top, `{half.name}: the upper halves' picture on one`)
 			end
 			t.eq(half.insulation, if half.door.open then nil else 0.1, "closed, a wall face")
 		end
 		t.eq(items, 1)
 		t.ok(seen.TestDoorEastRightOpenTop, "named by facing, hinge, open and half")
 		valid("blocks", door)
-		local fence = Define.fence({ name = "TestFence", hardness = 2, flammable = { ignite = 5, burn = 20 } })
+		local fence = Define.fence({
+			name = "TestFence",
+			hardness = 2,
+			flammable = { ignite = 5, burn = 20 },
+			lore = "A test fence.",
+			fuel = 300,
+		})
 		t.eq(#fence, 16)
 		for mask, variant in fence do
 			t.eq(variant.fence, mask - 1)
 			t.eq(variant.placeable, mask == 1)
-			t.eq(variant.hardness, 2, "the fence's own fields on every variant")
+			t.eq(variant.hardness, 2, "the fence's fields on every variant")
+			-- (Its item's own, lore and fuel, on the lone post alone.)
+			t.eq(variant.lore, if mask == 1 then "A test fence." else nil)
+			t.eq(variant.fuel, if mask == 1 then 300 else nil)
 			local arms = 0
 			for bit = 0, 3 do
 				arms += bit32.extract(mask - 1, bit)
@@ -98,15 +137,18 @@ return function(t, shared, require)
 	end)
 
 	t.test("define: what a door's, a layered block's, an armor set's and a herb's entries say of themselves", function()
-		-- A door's item and its upper half facing North take the wood's `item` and `top`.
+		-- A door's item takes the wood's own fields (lore, Age, its `texture`), and its upper half
+		-- facing North its `topTexture`.
 		local door = Define.door({
 			wood = "Felt",
 			color = { 100, 100, 100 },
 			upper = function(_c)
 				return { Define.doorPiece(-8, 8, -8, 8) }
 			end,
-			item = { lore = "Soft.", age = "iron", texture = { Front = "felt door bottom" } },
-			top = { texture = { Front = "felt door top" } },
+			lore = "Soft.",
+			age = "iron",
+			texture = { Front = "felt door bottom" },
+			topTexture = { Front = "felt door top" },
 		})
 		for _, half in door do
 			local own = half.name == "FeltDoor" or half.name == "FeltDoorTop"
@@ -161,18 +203,33 @@ return function(t, shared, require)
 	end)
 
 	t.test("define: plants, tall plants and flowers; transmitters, cables, tanks, machines", function()
-		local tall = Define.tallFlower("Bloom", { 1, 2, 3 }, { Define.stem(6) }, { Define.stem(4) }, {})
+		-- (The flower generators take the entry itself, so its lore and texture sit with it.)
+		local tall = Define.tallFlower({
+			name = "Bloom",
+			color = { 1, 2, 3 },
+			shape = { Define.stem(6) },
+			lore = "A test bloom.",
+			texture = { Sprite = "bloom bottom" },
+		}, { shape = { Define.stem(4) }, texture = { Sprite = "bloom top" } }, {})
 		t.eq(names(tall), "Bloom BloomTop")
 		t.eq(tall[1].plant.top, "BloomTop")
 		t.eq(tall[2].plant.bottom, "Bloom")
 		t.eq(tall[2].item, "Bloom", "the upper half is the lower's")
 		t.eq(tall[2].drops, false)
+		t.eq(tall[2].displayName, "Bloom", "shown as the lower half")
 		t.eq(tall[1].support, "Down")
 		t.eq(tall[1].flammable.ignite, 60, "flowers burn")
-		local tulip = Define.tulip("TestTulip", { 200, 0, 0 })
+		t.eq(tall[1].lore, "A test bloom.", "the entry's own fields")
+		t.eq(tall[2].lore, nil, "the upper half is no item")
+		t.eq(tall[2].texture and tall[2].texture.Sprite, "bloom top", "each half its own picture")
+		local tulip = Define.tulip({ name = "TestTulip", color = { 200, 0, 0 }, lore = "A test tulip." })
 		t.eq(#tulip.shape, 4)
 		t.eq(tulip.bounds, Define.FLOWER_BOUNDS)
-		t.eq(Define.sapling("TestSapling", { 0, 100, 0 }, "Test Sapling").flammable, nil, "saplings don't burn")
+		t.eq(tulip.lore, "A test tulip.")
+		local sapling = Define.sapling({ name = "TestSapling", displayName = "Test Sapling", color = { 0, 100, 0 } })
+		t.eq(sapling.flammable, nil, "saplings don't burn")
+		t.eq(sapling.behaviour, "Sapling")
+		valid("blocks", { tulip, sapling })
 		t.ok(
 			not pcall(Define.plant, { name = "Bush", plant = { soil = "dirt" }, shape = table.create(5, {}) }),
 			"at most 4 boxes"

@@ -29,6 +29,10 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		tool = "axe",
 		flammable = { ignite = 5, burn = 20 },
 		zombieBreak = 300,
+		-- (The lone post's, the item: its picture covers every variant and the twin.)
+		texture = { All = "planks" },
+		lore = "A wooden fence post.",
+		fuel = 300,
 	})
 	table.insert(fence, define.caveTwin(fence[1]))
 	return fence

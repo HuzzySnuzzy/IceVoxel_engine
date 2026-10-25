@@ -9,14 +9,14 @@
 	    ones, spreads, burns out and lights what it touches (server Behaviours/Fire, rules in
 	    Shared/Fire). No item: lit by flint and steel, lava and burning fuel. Light 15, no
 	    collision, replaceable (a block placed into it puts it out), broken at once with no drop
-	    (punching it out sounds like block.fire.extinguish: SoundList.BLOCK_SOUNDS), washed away by
-	    water. Its one shape box is only the carrier of its light: an invisible speck (Neon,
-	    see-through), sparse like glow lichen's (GreedyMesher: one PointLight per 8 x 8 x 8 blocks),
-	    so a forest fire is not hundreds of lights. The flames are drawn by client Rendering/
-	    FireRenderer: the user's animated sheet on Minecraft's fire_floor and fire_side planes,
-	    which depend on the neighbours (Fire.sides). Its outline is Minecraft's: a pixel thick slab
-	    on the floor (BaseFireBlock.DOWN_AABB); the client aims at a fire clinging to walls by the
-	    slabs on those walls instead (Fire.outlineAt).
+	    (punching it out sounds like block.fire.extinguish: its `sounds`), washed away by water, and
+	    warms a player near it (`heats`, Tough As Nails). Its one shape box is only the carrier of
+	    its light: an invisible speck (Neon, see-through), sparse like glow lichen's (GreedyMesher:
+	    one PointLight per 8 x 8 x 8 blocks), so a forest fire is not hundreds of lights. The flames
+	    are drawn by client Rendering/FireRenderer: the user's animated sheet on Minecraft's
+	    fire_floor and fire_side planes, which depend on the neighbours (Fire.sides). Its outline
+	    is Minecraft's: a pixel thick slab on the floor (BaseFireBlock.DOWN_AABB); the client aims
+	    at a fire clinging to walls by the slabs on those walls instead (Fire.outlineAt).
 	  * TNT (Minecraft 1.20.1's TntBlock): breaks at once, no blast resistance, flammable 15 / 100
 	    (FireBlock.bootStrap), red with a white band (BlockDecor "Tnt"; texture pack "tnt side",
 	    "tnt top", "tnt bottom", blank until made). Flint and steel, fire burning it (lava lights the
@@ -24,10 +24,11 @@
 	    block (server Behaviours/Tnt): it falls while its 80 tick fuse burns, then explodes with
 	    power 4. Lit TNT glows and flashes (client Rendering/FuseView), can't be broken (an entity
 	    in Minecraft) and drops nothing; blasts leave it be. Its `item` is TNT (WAILA's icon, pick
-	    block).
+	    block). Crafting it is the Industrial Age's, with the Demolition skill (`age`, `skill`).
 	  * The Nuke: a dark steel casing with hazard stripes and the radiation sign (BlockDecor "Nuke";
 	    "nuke side", "nuke top", blank), lit the same ways. Lit, it glows red, flashes and wails for
-	    10 s, then digs a crater (server World/Nuke; Config.Nuke).
+	    10 s, then digs a crater (server World/Nuke; Config.Nuke). Crafting it is the Atomic Age's,
+	    with the Fission skill.
 ]]
 
 local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
@@ -49,6 +50,9 @@ return {
 		bounds = { min = { 0, 0, 0 }, max = { 16, 1, 16 } },
 		brokenByFluid = true,
 		behaviour = "Fire",
+		-- (Punching it out is Minecraft's level event 1009, the extinguish hiss: not wool's break.)
+		sounds = { ["break"] = "block.fire.extinguish" },
+		heats = true,
 	},
 	{
 		name = "Tnt",
@@ -59,6 +63,10 @@ return {
 		hardness = 0,
 		decor = "Tnt",
 		flammable = { ignite = 15, burn = 100 },
+		texture = { Top = "tnt top", Sides = "tnt side", Bottom = "tnt bottom" },
+		lore = "Light it with Flint and Steel, then run.",
+		age = "industrial",
+		skill = "demolition",
 	},
 	{
 		name = "LitTnt",
@@ -85,6 +93,10 @@ return {
 		hardness = 0,
 		decor = "Nuke",
 		flammable = { ignite = 15, burn = 100 },
+		texture = { Top = "nuke top", Sides = "nuke side", Bottom = "nuke top" },
+		lore = "Wails for ten seconds, then leaves a crater. Stand well back.",
+		age = "atomic",
+		skill = "fission",
 	},
 	{
 		name = "LitNuke",

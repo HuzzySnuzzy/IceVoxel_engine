@@ -87,13 +87,7 @@ end
 -- Points for mining an ore again (Minecraft's ore experience: coal 0-2, diamond and emerald 3-7;
 -- iron and gold give theirs in the furnace there, a little here too). (The new ores' are on their
 -- entries: the metals as iron and osmium, the powders as coal, uranium as gold.)
-Knowledge.ORES = merged({
-	CoalOre = 1,
-	IronOre = 2,
-	GoldOre = 3,
-	DiamondOre = 5,
-	EmeraldOre = 5,
-}, "mine", "Knowledge.ORES")
+Knowledge.ORES = merged({}, "mine", "Knowledge.ORES")
 
 -- Points for chopping a log (blocks whose name ends in "Log").
 Knowledge.LOG = 0.25
@@ -101,11 +95,7 @@ Knowledge.LOG = 0.25
 -- Points per item smelted (Minecraft's furnace recipe experience), by result; others SMELT_DEFAULT.
 -- (The new ores' are on their entries: Minecraft's copper ingot gives 0.7, lead and zinc as it,
 -- uranium as gold, the powders 0.1.)
-Knowledge.SMELTED = merged({
-	Glass = 0.1,
-	Stone = 0.1,
-	SmoothStone = 0.1,
-}, "smelt", "Knowledge.SMELTED")
+Knowledge.SMELTED = merged({}, "smelt", "Knowledge.SMELTED")
 Knowledge.SMELT_DEFAULT = 0.1
 
 -- Points per craft (a result taken; a shift click's every round).

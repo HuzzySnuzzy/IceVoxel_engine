@@ -527,10 +527,11 @@ function Items.drops(block: number, tool: number?): Stack?
 end
 
 --[[
-	What leaves drop by themselves: when they decay (server Behaviours/Leaves) or a player breaks
-	them without Shears. Minecraft's leaves loot table: its sapling one time in 20 (jungle: 40),
-	else 1 or 2 sticks one time in 50; nothing otherwise. `random` rolls in [0, 1). nil for
-	blocks that aren't leaves with a sapling.
+	What a block drops by itself now and then: when leaves decay (server Behaviours/Leaves), a
+	blast takes it (World/Explosions) or a player breaks leaves without Shears. Its `loot`
+	(Items.lootDrop: the leaves' entries carry Minecraft's leaves loot table, their sapling one time
+	in 20, jungle 40, else 1 or 2 sticks one time in 50). `random` rolls in [0, 1). nil: nothing
+	rolled, or it has no loot.
 ]]
 function Items.leafDrop(block: number, random: () -> number): Stack?
 	if not Blocks.isValid(block) then
@@ -540,48 +541,26 @@ function Items.leafDrop(block: number, random: () -> number): Stack?
 	if Items.hasLoot(block) then
 		return Items.lootDrop(block, random)
 	end
-	local name = Blocks.get(block).name
-	if string.sub(name, -6) ~= "Leaves" then
-		return nil
-	end
-	local sapling = rawget(ids :: any, string.sub(name, 1, -7) .. "Sapling")
-	local chance = if name == "JungleLeaves" then 1 / 40 else 1 / 20
-	if sapling and random() < chance then
-		return { item = sapling, count = 1 }
-	end
-	if random() < 1 / 50 then
-		return { item = ids.Stick, count = if random() < 0.5 then 1 else 2 }
-	end
 	return nil
 end
 
 --[[
-	What a block drops now and then in place of its usual drop when a player breaks it (`random`
-	rolls in [0, 1)): Gravel gives Flint one time in 10 (Minecraft's gravel loot table without
-	Fortune; there is no Silk Touch). nil: the usual drop (Items.drops). Gravel that falls onto a
-	torch drops itself, as Minecraft's falling block does.
+	The side rule for a block's drop now and then in place of its usual one when a player breaks it
+	(`random` rolls in [0, 1)), for blocks with no `loot` yet: none is left (Gravel's Flint, one
+	time in 10, is its entry's `loot` now). nil: the usual drop (Items.drops).
 ]]
-function Items.randomDrop(block: number, random: () -> number): Stack?
-	if block == Blocks.id.Gravel and random() < 0.1 then
-		return { item = ids.Flint, count = 1 }
-	end
+function Items.randomDrop(_block: number, _random: () -> number): Stack?
 	return nil
 end
 
--- The chance (0..1) that grass broken without Shears gives Straw (`strawDrop`), by block.
-Items.STRAW_CHANCE = table.freeze({
-	[Blocks.id.ShortGrass] = 0.5,
-	[Blocks.id.TallGrass] = 1,
-} :: { [number]: number })
+-- The chance (0..1) that grass broken without Shears gives Straw (`strawDrop`), by block: the side
+-- table for grass whose entry has no `loot` yet.
+Items.STRAW_CHANCE = table.freeze({} :: { [number]: number })
 
 --[[
-	What grass gives when a player breaks it without Shears (`random` rolls in [0, 1)): one Straw
-	(Tough As Nails' warm armor is made of it) half the time from Short Grass, always from Tall
-	Grass (a player breaking either half breaks its lower half: server Network/EditRules), where
-	Minecraft's grass drops wheat seeds one time in 8 (this game has no wheat, and 24 straw make
-	a set of armor). nil: nothing (ferns, everything else, an unlucky roll). Shears harvest the
-	grass itself instead (Items.drops), and grass broken by itself (washed away, burnt, blown up)
-	gives nothing.
+	What grass with a STRAW_CHANCE gives when a player breaks it without Shears (`random` rolls in
+	[0, 1)): one Straw at that chance. nil: nothing (the rest, an unlucky roll). (Short and tall
+	grass carry their Straw as `loot` now: the Minecraft pack's blocks/plants.)
 ]]
 function Items.strawDrop(block: number, random: () -> number): Stack?
 	local chance = Items.STRAW_CHANCE[block]
@@ -602,9 +581,9 @@ end
 	rolls (nil: none did, the usual drop stands): a pool rolls rolls[1]..rolls[2] times (a draw only
 	when they differ), each roll an entry by weight (the first whose running sum passes random() x
 	the total), `min`..`max` of its item (a draw only when they differ). So { { "Flint", 1, 1, 1 },
-	{ false, 9, 0, 0 } } gives Flint when random() < 0.1, exactly as `randomDrop`'s gravel rule;
-	leaves' sapling-then-sticks rule is two pools, grass's Straw one. A block with `loot` may not be
-	one the side rules (`leafDrop`'s leaves, `randomDrop`'s gravel, STRAW_CHANCE) cover too.
+	{ false, 9, 0, 0 } } gives Flint when random() < 0.1 (Gravel's); leaves' sapling-then-sticks
+	loot is two pools, grass's Straw one. A block with `loot` may not be one the side rule
+	(STRAW_CHANCE) covers too.
 ]]
 local lootOf: { [number]: { Schema.Pool } } = {}
 do
@@ -614,12 +593,9 @@ do
 		local loot = spec and spec.loot
 		if loot then
 			local where = content.where("block", spec.name)
-			local name = spec.name
-			local sapling = string.sub(name, -6) == "Leaves"
-				and rawget(ids :: any, string.sub(name, 1, -7) .. "Sapling")
 			assert(
-				not sapling and id ~= Blocks.find("Gravel") and Items.STRAW_CHANCE[id] == nil,
-				`Items: {where} has loot, and a side rule (leafDrop, randomDrop, STRAW_CHANCE) drops for it too`
+				Items.STRAW_CHANCE[id] == nil,
+				`Items: {where} has loot, and a side rule (STRAW_CHANCE) drops for it too`
 			)
 			local pools: { Schema.Pool } = if type(loot) == "string" then content.loot[loot] else loot :: any
 			for _, pool in pools do

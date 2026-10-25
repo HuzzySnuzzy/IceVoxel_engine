@@ -40,6 +40,9 @@ return function(t, shared, require, server, client)
 	local MINER = B.MetalMiner
 	local ENERGY, ACTIVE = Machines.ENERGY, Machines.ACTIVE
 	local STATE = MinerRules.STATE
+	-- (Diamond Ore's place in ORES, as packed states carry it: looked up, never pinned, since the
+	-- list's order is the packs' and moved when the Minecraft ores took their own `miner`.)
+	local DIAMOND = (MinerRules.ore(B.DiamondOre) :: MinerRules.Ore).index
 	local CAPACITY = Config.Miner.Capacity
 	local QUANTUM = Machines.QUANTUM
 	-- Slots.
@@ -664,8 +667,7 @@ return function(t, shared, require, server, client)
 		-- (Its first tick had no energy yet: diamonds at 481, 961 and 1441, pushed at 1450.)
 		s.step(480 * 3)
 		t.eq(s.count(1, Y, 0, I.Diamond), 3, "three diamonds while the ore was out of sight")
-		-- (Diamond Ore's place by name, not 6: Osmium Ore's moving onto its Mekanism entry moved it.)
-		t.eq(s.record(0, Y, 0).state, MinerRules.packState(STATE.MINING, oreIndex("DiamondOre")))
+		t.eq(s.record(0, Y, 0).state, MinerRules.packState(STATE.MINING, DIAMOND))
 		-- An edit there is always known: mined out, it stops.
 		s.unload(0, Y - 1, 0, false)
 		s.set(0, Y - 1, 0, AIR)
@@ -683,8 +685,7 @@ return function(t, shared, require, server, client)
 		tick(container, cell, 20)
 		t.eq(Machines.energy(container), before, "nothing used")
 		t.eq(field(container, "progress"), 10, "the progress waits")
-		-- (Diamond Ore's place by name, not 6: Osmium Ore's moving onto its Mekanism entry moved it.)
-		t.eq(Machines.view(container).state, MinerRules.packState(STATE.OUTPUT_FULL, oreIndex("DiamondOre")))
+		t.eq(Machines.view(container).state, MinerRules.packState(STATE.OUTPUT_FULL, DIAMOND))
 		t.eq(status(container), "Output full")
 		t.eq(field(container, "rate"), 0)
 		-- Something else in the output (coal from the ore it mined before): full too.
@@ -712,8 +713,7 @@ return function(t, shared, require, server, client)
 		tick(container, cell, 5)
 		t.eq(field(container, "progress"), 2, "two ticks of 800 J")
 		t.eq(Machines.energy(container), 400, "the rest waits: all or nothing")
-		-- (Diamond Ore's place by name, not 6: Osmium Ore's moving onto its Mekanism entry moved it.)
-		t.eq(Machines.view(container).state, MinerRules.packState(STATE.NO_POWER, oreIndex("DiamondOre")))
+		t.eq(Machines.view(container).state, MinerRules.packState(STATE.NO_POWER, DIAMOND))
 		t.eq(status(container), "No power")
 		t.eq(#MenuLayout.lineTexts(container), 2, "it still says what it makes")
 		container.data[ENERGY] = 800

@@ -31,6 +31,7 @@ type ShapeBox = Schema.ShapeBox
 type Bounds = Schema.Bounds
 type PlantSpec = Schema.PlantSpec
 type FlammableSpec = Schema.FlammableSpec
+type Faces = Schema.Faces
 
 local Plants = {}
 
@@ -178,87 +179,76 @@ function Plants.tallPlant(lower: BlockSpec, upper: BlockSpec): { BlockSpec }
 end
 
 --[[
-	A tall flower `name` (its upper half "<name>Top") in `colour`: the lower half's boxes `lower`,
-	the upper's `upper`, its item the lower half and then `extra`. Burns as flowers do.
+	The generators below take the entry itself (`spec`: its name, colour, display name, boxes and
+	its own fields, lore and texture...) and fill in what their kind of plant shares, so an entry
+	reads as data with everything about it there.
+]]
+
+--[[
+	A tall flower: `lower` (its name, colour, display name, boxes and own fields) and `upper` (the
+	upper half's boxes and texture), the upper half named "<name>Top", shown and coloured as the
+	lower; its item the lower half's boxes and then `extra`. Burns as flowers do. Returns { lower,
+	upper }.
 ]]
 function Plants.tallFlower(
-	name: string,
-	colour: { number },
-	lower: { ShapeBox },
-	upper: { ShapeBox },
-	extra: { ShapeBox },
-	displayName: string?
+	lower: BlockSpec,
+	upper: { shape: { ShapeBox }, texture: Faces? },
+	extra: { ShapeBox }
 ): { BlockSpec }
-	return Plants.tallPlant({
-		name = name,
-		displayName = displayName,
-		color = colour,
-		shape = lower,
-		icon = Plants.tallIcon(lower, extra),
-		flammable = FLOWER_FIRE,
-	}, {
-		name = name .. "Top",
-		displayName = displayName or name,
-		color = colour,
-		shape = upper,
+	lower.icon = Plants.tallIcon(lower.shape :: { ShapeBox }, extra)
+	lower.flammable = FLOWER_FIRE
+	return Plants.tallPlant(lower, {
+		name = lower.name .. "Top",
+		displayName = lower.displayName or lower.name,
+		color = lower.color,
+		shape = upper.shape,
+		texture = upper.texture,
 		flammable = FLOWER_FIRE,
 	})
 end
 
--- A flower on dirt (Minecraft's 5..11 outline) in `colour`, drawn with `shape`; burns.
-function Plants.flower(name: string, colour: { number }, shape: { ShapeBox }, displayName: string?): BlockSpec
-	return plant({
-		name = name,
-		displayName = displayName,
-		color = colour,
-		plant = { soil = "dirt" },
-		shape = shape,
-		bounds = Plants.FLOWER_BOUNDS,
-		flammable = FLOWER_FIRE,
-	})
+-- A flower on dirt (Minecraft's 5..11 outline): `spec` (its name, colour, boxes...); burns.
+function Plants.flower(spec: BlockSpec): BlockSpec
+	spec.plant = { soil = "dirt" }
+	spec.bounds = Plants.FLOWER_BOUNDS
+	spec.flammable = FLOWER_FIRE
+	return plant(spec)
 end
 
--- A tulip: a cup of `colour` on a stem between two long leaves.
-function Plants.tulip(name: string, colour: { number }): BlockSpec
-	return Plants.flower(name, colour, {
+-- A tulip: a cup of `spec`'s colour on a stem between two long leaves.
+function Plants.tulip(spec: BlockSpec): BlockSpec
+	spec.shape = {
 		stem(6),
 		leaf({ 0, GROUND, 0 }, { 1.6, 5, 0.4 }, 22, 45, LEAF),
 		leaf({ 0, GROUND, 0 }, { 1.6, 4.4, 0.4 }, 26, 225, LEAF_LIGHT),
-		plantBox({ 2.6, 3.4, 2.6 }, { 0, -0.6, 0 }, colour, { 0, 45, 0 }),
-	})
+		plantBox({ 2.6, 3.4, 2.6 }, { 0, -0.6, 0 }, spec.color :: { number }, { 0, 45, 0 }),
+	}
+	return Plants.flower(spec)
 end
 
--- A mushroom (Minecraft's MushroomBlock soil set, `plant.soil` "mushroom") drawn with `shape`.
-function Plants.mushroom(name: string, colour: { number }, shape: { ShapeBox }, displayName: string): BlockSpec
-	return plant({
-		name = name,
-		displayName = displayName,
-		color = colour,
-		plant = { soil = "mushroom" },
-		shape = shape,
-		bounds = Plants.MUSHROOM_BOUNDS,
-	})
+-- A mushroom (Minecraft's MushroomBlock soil set, `plant.soil` "mushroom"): `spec` (its boxes...).
+function Plants.mushroom(spec: BlockSpec): BlockSpec
+	spec.plant = { soil = "mushroom" }
+	spec.bounds = Plants.MUSHROOM_BOUNDS
+	return plant(spec)
 end
 
 --[[
 	A sapling (Minecraft's SaplingBlock) on dirt-type soil, grown into its tree by a random tick
 	under the open sky (server Behaviours/Sapling): drawn as its texture pack sprite, else as a stem
-	with two leaf lumps of `colour`. Minecraft's outline: 2..14 across, 12 high.
+	with two leaf lumps of `spec`'s colour. Minecraft's outline: 2..14 across, 12 high.
 ]]
-function Plants.sapling(name: string, colour: { number }, displayName: string): BlockSpec
-	return plant({
-		name = name,
-		displayName = displayName,
-		color = colour,
-		behaviour = "Sapling",
-		plant = { soil = "dirt" },
-		shape = {
-			stem(6),
-			plantBox({ 4.5, 3, 4.5 }, { 0, -2.5, 0 }, colour),
-			plantBox({ 3, 2.5, 3 }, { 0, -0.5, 0 }, colour, { 0, 45, 0 }),
-		},
-		bounds = Plants.SAPLING_BOUNDS,
-	})
+function Plants.sapling(spec: BlockSpec): BlockSpec
+	local colour = spec.color :: { number }
+	spec.behaviour = "Sapling"
+	spec.plant = { soil = "dirt" }
+	spec.shape = {
+		stem(6),
+		plantBox({ 4.5, 3, 4.5 }, { 0, -2.5, 0 }, colour),
+		plantBox({ 3, 2.5, 3 }, { 0, -0.5, 0 }, colour, { 0, 45, 0 }),
+	}
+	spec.bounds = Plants.SAPLING_BOUNDS
+	return plant(spec)
 end
 
 --[[

@@ -19,5 +19,8 @@ return {
 		hardness = 0.8,
 		flammable = { ignite = 30, burn = 60 },
 		zombieBreak = 120,
+		texture = { All = "white wool" },
+		lore = "Soft wool, from sheep or four String.",
+		fuel = 100,
 	},
 } :: { Schema.BlockSpec }

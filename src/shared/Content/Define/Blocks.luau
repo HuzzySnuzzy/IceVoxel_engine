@@ -13,8 +13,18 @@ local Schema = require(script.Parent.Parent.Schema)
 type BlockSpec = Schema.BlockSpec
 type ShapeBox = Schema.ShapeBox
 type Bounds = Schema.Bounds
+type Faces = Schema.Faces
 
 local Blocks = {}
+
+--[[
+	A block's own fields of Content/Schema's per-entry ones, which only the block that is the item
+	carries: its lore, its texture pack faces, the Age and skill that open its recipes, its fuel
+	and its tags. A generator's other blocks (a fluid's flows, a door's other halves, a fence's
+	arms) and cave twins never copy them: they are no items, and they take their item's or twin's
+	faces (Blocks: a variant group's entry, a twin's twin's).
+]]
+local OWN_FIELDS = { "lore", "texture", "age", "skill", "fuel", "tags" }
 
 --[[ Directions and walls ]]
 
@@ -74,12 +84,17 @@ local wallBounds = Blocks.wallBounds
 	("<Group>Falling"), sharing one look so the mesher merges them: `spec`'s colour, material,
 	transparency, reflectance, light and blast resistance; not solid, replaceable, hardness 100, no
 	drop, server Behaviours/Fluid, ticking every `tickDelay`. `flowing`: fields of the flowing and
-	falling levels only (flowing fuel burns like a fuse, its source explodes). Every group is a
-	fluid of Shared/Fluids (FluidList: its id, bucket, colour and light; checked at load), and its
-	flow rules are Behaviours/Fluid's RULES.
+	falling levels only (flowing fuel burns like a fuse, its source explodes). `spec`'s own fields
+	(OWN_FIELDS: its lore...) and `heats` / `cools` are the source's alone: the source is the
+	fluid's item, and a fluid's name warms or cools at every level (ToughAsNails/Temperature).
+	Every group is a fluid of Shared/Fluids (FluidList: its id, bucket, colour and light; checked
+	at load), and its flow rules are Behaviours/Fluid's RULES.
 ]]
 function Blocks.fluid(group: string, spec: BlockSpec, tickDelay: number, flowing: { [string]: any }?): { BlockSpec }
 	local list: { BlockSpec } = {}
+	local source = table.clone(OWN_FIELDS)
+	table.insert(source, "heats")
+	table.insert(source, "cools")
 	for level = 0, 8 do
 		local name = if level == 0 then group elseif level == 8 then group .. "Falling" else group .. "Flow" .. level
 		local entry: BlockSpec = {
@@ -105,6 +120,11 @@ function Blocks.fluid(group: string, spec: BlockSpec, tickDelay: number, flowing
 				(entry :: any)[field] = value
 			end
 		end
+		if level == 0 then
+			for _, field in source do
+				(entry :: any)[field] = (spec :: any)[field]
+			end
+		end
 		table.insert(list, entry)
 	end
 	return list
@@ -113,8 +133,9 @@ end
 --[[
 	The cave twin of `spec` (Schema's `caveTwin`): a copy named "Cave<Name>" that generation places
 	in caves, which looks, drops and behaves exactly like it but counts as cave air while caves are
-	hidden; nothing places it, and its item is its twin's. `extra`: fields put over the copy (the
-	mineshafts' vines are `seasonless`).
+	hidden; nothing places it, and its item is its twin's (so it has none of `spec`'s own fields,
+	OWN_FIELDS: lore, faces, Age...). `extra`: fields put over the copy (the mineshafts' vines are
+	`seasonless`).
 ]]
 function Blocks.caveTwin(spec: BlockSpec, extra: { [string]: any }?): BlockSpec
 	local twin = table.clone(spec)
@@ -122,6 +143,9 @@ function Blocks.caveTwin(spec: BlockSpec, extra: { [string]: any }?): BlockSpec
 	twin.placeable = false
 	twin.item = spec.item or spec.name
 	twin.caveTwin = spec.name
+	for _, field in OWN_FIELDS do
+		(twin :: any)[field] = nil
+	end
 	if extra then
 		for field, value in extra do
 			(twin :: any)[field] = value
@@ -131,9 +155,11 @@ function Blocks.caveTwin(spec: BlockSpec, extra: { [string]: any }?): BlockSpec
 end
 
 -- A fluid source's cave twin (CaveLava, CaveOil): `caveTwin`, shown by the source's name ("Lava").
+-- (Without `heats` / `cools`: the fluid's name warms or cools its cave twin too, Temperature.)
 function Blocks.caveFluid(source: BlockSpec): BlockSpec
 	local twin = Blocks.caveTwin(source)
 	twin.displayName = source.displayName or source.name
+	twin.heats, twin.cools = nil, nil
 	return twin
 end
 
@@ -394,18 +420,21 @@ end
 	A door's wood (`door`): its name ("Oak": the door is "OakDoor"), its planks' colour, its upper
 	half's frame around the windows (`upper`, from the colour: the boxes the windows leave open,
 	made with `doorPiece`) and, closed, its insulation (Blocks `insulation`; default a wooden door's
-	0.1).
+	0.1); and the door's own fields (OWN_FIELDS: its lore, Age, fuel...), which its item carries:
+	`texture` is its lower halves' faces, `topTexture` its upper halves' ("<Wood>DoorTop"'s).
 ]]
 export type DoorWood = {
 	wood: string,
 	color: { number },
 	upper: (c: { number }) -> { ShapeBox },
 	insulation: number?,
-	-- Fields put over (or added to) its item, the lower half facing North ("<Wood>Door": its lore,
-	-- Age, fuel, and its `texture`, which every lower half takes), and over the upper half facing
-	-- North ("<Wood>DoorTop": its `texture`, every upper half's).
-	item: { [string]: any }?,
-	top: { [string]: any }?,
+	lore: string?,
+	texture: Faces?,
+	topTexture: Faces?,
+	age: string?,
+	skill: string?,
+	fuel: number?,
+	tags: { string }?,
 }
 
 --[[
@@ -454,9 +483,10 @@ end
 
 	Drawn from boxes: the lower half a panel with a raised middle and an iron handle on the side
 	away from the hinge, the upper half the wood's frame (`upper`). Its first box is a see-through
-	plate the texture pack's door pictures go on (TexturePack Blocks <Wood>Door / <Wood>DoorTop
-	`Front`), in place of the other boxes. The design is drawn for a left hinge and mirrored for a
-	right one. The item is the whole door at half size, upright, as Minecraft's door item.
+	plate the texture pack's door pictures go on (the `Front` of the wood's `texture` and
+	`topTexture`, <Wood>Door's and <Wood>DoorTop's faces), in place of the other boxes. The design
+	is drawn for a left hinge and mirrored for a right one. The item is the whole door at half
+	size, upright, as Minecraft's door item.
 ]]
 function Blocks.door(wood: DoorWood): { BlockSpec }
 	local list: { BlockSpec } = {}
@@ -520,7 +550,13 @@ function Blocks.door(wood: DoorWood): { BlockSpec }
 						-- (Closed, a room's wall face; open, its air flows through.)
 						insulation = if open then nil else wood.insulation or 0.1,
 					}
+					if name == base .. "Top" then
+						spec.texture = wood.topTexture
+					end
 					if item then
+						for _, field in OWN_FIELDS do
+							(spec :: any)[field] = (wood :: any)[field]
+						end
 						-- (The item: the whole door at half size, upright, as Minecraft's door item
 						-- is drawn; ItemModels centres it on the panel's bounds.)
 						local icon: { ShapeBox } = {}
@@ -534,16 +570,6 @@ function Blocks.door(wood: DoorWood): { BlockSpec }
 							end
 						end
 						spec.icon = icon
-					end
-					-- (The wood's own fields for its item and its upper half facing North.)
-					local own: { [string]: any }? = if item
-						then wood.item
-						elseif name == base .. "Top" then wood.top
-						else nil
-					if own then
-						for field, value in own do
-							(spec :: any)[field] = value
-						end
 					end
 					table.insert(list, spec)
 				end
@@ -593,10 +619,11 @@ end
 	A fence's 16 variants (`fence`, the arms' bits: 1 North, 2 South, 4 West, 8 East), each `base`
 	(the fence's own fields: its name, look, strength, fire odds...) with its post and arms: a
 	4 x 4 pixel post, and two rails (2 pixels wide, 3 tall, at 6..9 and 12..15) out to every side
-	of its mask. The lone post (mask 0) is `base.name` and the item; the others are named after
-	their sides ("OakFenceNorthEast") and name it as their `item`. Solid, but colliding only with
-	its post and arms (`collision`), 1.5 blocks high, as Minecraft's; its outline the post and arms
-	4 pixels wide; server Behaviours/Fence picks the variant (Blocks.fenceConnections).
+	of its mask. The lone post (mask 0) is `base.name` and the item, and the only one with `base`'s
+	own fields (OWN_FIELDS: its lore, faces, fuel...); the others are named after their sides
+	("OakFenceNorthEast") and name it as their `item`. Solid, but colliding only with its post and
+	arms (`collision`), 1.5 blocks high, as Minecraft's; its outline the post and arms 4 pixels
+	wide; server Behaviours/Fence picks the variant (Blocks.fenceConnections).
 ]]
 function Blocks.fence(base: BlockSpec): { BlockSpec }
 	local list: { BlockSpec } = {}
@@ -606,6 +633,11 @@ function Blocks.fence(base: BlockSpec): { BlockSpec }
 		for _, entry in FENCE_SIDES do
 			if bit32.band(mask, entry.bit) ~= 0 then
 				spec.name ..= entry.side
+			end
+		end
+		if mask ~= 0 then
+			for _, field in OWN_FIELDS do
+				(spec :: any)[field] = nil
 			end
 		end
 		spec.solid = true

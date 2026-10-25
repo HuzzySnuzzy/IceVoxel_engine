@@ -1601,9 +1601,9 @@ local Config = {
 		-- with a warning, so a block may be listed here before it exists. Lit furnaces and working
 		-- Heat and Combustion Generators warm too (server Players/ToughAsNails registers them).
 		-- Within 2 blocks of one, cold sources no longer cool (a fire beats the snow around it).
-		HeatingBlocks = { "Lava", "Fire" },
+		HeatingBlocks = {},
 		-- Blocks that cool the player by 3 steps within ProximityRadius.
-		CoolingBlocks = { "Ice", "PackedIce", "BlueIce", "Snow" },
+		CoolingBlocks = {},
 		-- The picture as the extremes build (client Rendering/TemperatureGrade): its Saturation
 		-- goes by Freezing at full hypothermia (colour draining out as the player freezes to
 		-- death) and by Overheating at full hyperthermia (too vivid as they cook), in proportion
@@ -2619,13 +2619,7 @@ local Config = {
 		-- Per ore, by block name: the side table, for ores whose content pack entries carry no
 		-- `miner` yet (Machines/MinerRules; the Ores pack's carry theirs: the metals as iron, the
 		-- powders between iron and gold, uranium as rare as emerald).
-		Ores = {
-			CoalOre = { ticks = 600, joules = 800, floor = 400000 },
-			IronOre = { ticks = 400, joules = 200 },
-			GoldOre = { ticks = 800, joules = 300 },
-			EmeraldOre = { ticks = 3600, joules = 800 },
-			DiamondOre = { ticks = 4800, joules = 800 },
-		},
+		Ores = {},
 	},
 
 	--[[

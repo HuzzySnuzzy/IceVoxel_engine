@@ -4,6 +4,8 @@
 	bricks and their cracked form, smooth stone, the polished stones, cut and smooth sandstone, and
 	blue ice (nine packed ice).
 
+	  * Blue ice chills a player near it (`cools`, Tough As Nails).
+	  * knowledge: smelting glass or smooth stone gives Minecraft's furnace experience, 0.1.
 	  * blastResistance: Minecraft 1.20.1's where it differs from the hardness (the stone family
 	    and bricks 6: a TNT blast barely scratches them); the rest keep their hardness.
 	  * zombieBreak: glass shatters at once (60 ticks), stone and brick take two minutes (2400).
@@ -24,6 +26,8 @@ return {
 		toolLevel = 0,
 		displayName = "Bricks",
 		zombieBreak = 2400,
+		texture = { All = "bricks" },
+		lore = "Sturdy fired bricks.",
 	},
 	{
 		name = "Glass",
@@ -34,6 +38,9 @@ return {
 		hardness = 0.3,
 		drops = false,
 		zombieBreak = 60,
+		texture = { All = "glass" },
+		lore = "Clear as air. Breaks into nothing.",
+		knowledge = { smelt = 0.1 },
 	},
 	{
 		name = "StoneBricks",
@@ -44,6 +51,8 @@ return {
 		tool = "pickaxe",
 		toolLevel = 0,
 		zombieBreak = 2400,
+		texture = { All = "stone bricks" },
+		lore = "Neatly cut stone for walls and halls.",
 	},
 	{
 		name = "CrackedStoneBricks",
@@ -54,6 +63,8 @@ return {
 		tool = "pickaxe",
 		toolLevel = 0,
 		zombieBreak = 2400,
+		texture = { All = "cracked stone bricks" },
+		lore = "Stone bricks cracked by a furnace's heat.",
 	},
 	{
 		name = "SmoothStone",
@@ -64,6 +75,9 @@ return {
 		tool = "pickaxe",
 		toolLevel = 0,
 		zombieBreak = 2400,
+		texture = { All = "smooth stone" },
+		lore = "Stone smelted smooth.",
+		knowledge = { smelt = 0.1 },
 	},
 	{
 		name = "PolishedAndesite",
@@ -73,6 +87,8 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 0,
+		texture = { All = "polished andesite" },
+		lore = "Polished andesite tiles.",
 	},
 	{
 		name = "PolishedDiorite",
@@ -82,6 +98,8 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 0,
+		texture = { All = "polished diorite" },
+		lore = "Polished diorite tiles.",
 	},
 	{
 		name = "PolishedGranite",
@@ -91,6 +109,8 @@ return {
 		blastResistance = 6,
 		tool = "pickaxe",
 		toolLevel = 0,
+		texture = { All = "polished granite" },
+		lore = "Polished granite tiles.",
 	},
 	{
 		name = "CutSandstone",
@@ -100,6 +120,8 @@ return {
 		tool = "pickaxe",
 		toolLevel = 0,
 		zombieBreak = 2400,
+		texture = { Top = "sandstone top", Sides = "cut sandstone" },
+		lore = "Sandstone cut into a clean face.",
 	},
 	{
 		name = "SmoothSandstone",
@@ -110,6 +132,9 @@ return {
 		tool = "pickaxe",
 		toolLevel = 0,
 		zombieBreak = 2400,
+		-- (Minecraft's smooth sandstone is the sandstone top on every face.)
+		texture = { All = "sandstone top" },
+		lore = "Sandstone smelted smooth.",
 	},
 	{
 		name = "BlueIce",
@@ -119,5 +144,8 @@ return {
 		hardness = 2.8,
 		tool = "pickaxe",
 		drops = false,
+		texture = { All = "blue ice" },
+		lore = "The slipperiest ice there is.",
+		cools = true,
 	},
 } :: { BlockSpec }

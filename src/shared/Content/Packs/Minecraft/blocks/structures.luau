@@ -61,6 +61,7 @@ for _, mode in { "Save", "Load", "Corner", "Data" } do
 		menu = "StructureBlock",
 		decor = `StructureBlock{mode}`,
 		structureMode = string.lower(mode),
+		lore = if item then "Saves and loads structures. Creative only." else nil,
 	})
 end
 
@@ -78,6 +79,7 @@ table.insert(list, {
 	drops = false,
 	shape = { { size = { 6, 6, 6 }, offset = { 0, 0, 0 } } },
 	bounds = { min = { 5, 5, 5 }, max = { 11, 11, 11 } },
+	lore = "Marks cells a structure leaves as they are. Creative only.",
 })
 
 for index, orientation in JIGSAW_ORIENTATIONS do
@@ -96,6 +98,7 @@ for index, orientation in JIGSAW_ORIENTATIONS do
 		menu = "Jigsaw",
 		decor = `Jigsaw{front}{top}`,
 		jigsaw = { front = front, top = top },
+		lore = if item then "Joins structure pieces together. Creative only." else nil,
 	})
 end
 
