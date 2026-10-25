@@ -94,7 +94,7 @@ for _, name in
 	{
 		-- (The new ores' lead, zinc and brass and the Hazmat suit are too: their entries say so,
 		-- in the Ores pack.)
-	}
+	} :: { string }
 do
 	table.insert(iron, name)
 end
@@ -104,7 +104,7 @@ for _, name in
 	{
 		-- (And uranium smelting, on its ingot's entry: a smelting result is never of an Age after
 		-- the transporters', which feed furnaces with no window and so no gate.)
-	}
+	} :: { string }
 do
 	table.insert(industrial, name)
 end
