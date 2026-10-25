@@ -262,7 +262,9 @@ return function(t, shared, require, server)
 
 	t.test("medical: bottled water and soda (Shared/ToughAsNails/Drinks)", function()
 		local water, soda = Drinks.of(I.BottledWater), Drinks.of(I.SodaCan)
-		t.eq(water, Drinks.PURIFIED, "bottled water is purified water")
+		-- (Purified water: the Purified Water Bottle's drink, its entry's, in place of the old
+		-- Drinks.PURIFIED; alike drinks are one.)
+		t.eq(water, Drinks.of(I.PurifiedWaterBottle), "bottled water is purified water")
 		t.eq(Drinks.emptyOf(I.BottledWater), I.GlassBottle, "the bottle is kept")
 		t.ok(not Drinks.isPotion(water), "drunk while thirsty")
 		t.ok(Drinks.drinkable(water, true, true, true) and not Drinks.drinkable(water, false, true, true))

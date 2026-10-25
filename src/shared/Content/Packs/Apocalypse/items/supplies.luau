@@ -16,9 +16,42 @@
 	Weapons: a Baseball Bat and its Spiked Bat (no tool, but they wear: a hit costs 1,
 	Shared/Entities/Combat.wear), a Machete (a sword), a Crowbar (a pickaxe) and a Fire Axe (an
 	axe), modelled upright and tilted like Minecraft's tools.
+
+	What using one does is its `food` (Shared/Items/Foods) or `drink` (Shared/ToughAsNails/Drinks).
+	The ruins' food, each held its `useTicks` (nutrition in points of the 20; saturation the
+	modifier, in brackets what it adds; heals in half hearts with hunger off), and the Minecraft
+	food it is worth:
+
+	  Food              nutrition  saturation  heals  ticks  effect                      worth
+	  Canned Beans      6          0.6 (7.2)   6      32     -                           a baked potato
+	  Canned Peaches    4          0.3 (2.4)   4      32     -                           an apple
+	  Crackers          2          0.1 (0.4)   2      24     30%: Thirst for 30 s        a cookie
+	  Chocolate Bar     3          0.3 (1.8)   3      24     Speed for 10 s; any time    (a golden apple's rule)
+	  Military Ration   8          0.8 (12.8)  8      48     -                           a steak
+
+	Crackers are dry: their risk is Tough As Nails' Thirst effect, hunger on or off. The Chocolate
+	Bar's Speed makes it a treat eaten any time (Minecraft's canAlwaysEat). The medical supplies
+	(server Apocalypse/Infection and /Survival) heal whether hunger is on or not, with their own
+	sound and no burp (`burp = false`):
+
+	  Item              heals   ticks  cures       effects                  used when
+	  Bandage           2       40     Bleeding    -                        hurt or bleeding
+	  Medkit            8       80     Bleeding    Regeneration for 10 s    hurt or bleeding
+	  Antibiotics       0       32     Infection   Weakness for a minute    infected
+	                                               after a cure from stage
+	                                               III on (`aftermath`)
+	  Herbal Poultice   0       40     -           an infection goes back   infected
+	                                               a stage (`setback`)
+	  Painkillers       2       24     -           Regeneration for 8 s     hurt
+
+	The ruins' drinks: Bottled Water is purified water (the Survival pack's Purified Water
+	Bottle's drink, thirst 6 and hydration 0.4) whose Glass Bottle is kept; Soda is a little water
+	(thirst 4, hydration 0.2) and Speed for 20 s, which makes it drunk any time as a potion is
+	(thirsty or not, thirst on or off), its can not kept.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
+local Infection = require(script.Parent.Parent.Parent.Parent.Parent.Apocalypse.Infection)
 local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
 local models = require(script.Parent.Parent._models)
 
@@ -82,6 +115,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Stops bleeding and closes small wounds.",
+			food = { heal = 2, useTicks = 40, cures = { "Bleeding" }, sound = "item.bandage.apply", burp = false },
 		},
 		{
 			name = "Medkit",
@@ -97,6 +131,14 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Stops bleeding, heals a lot and keeps healing for a while.",
+			food = {
+				heal = 8,
+				useTicks = 80,
+				cures = { "Bleeding" },
+				effects = { { effect = "Regeneration", ticks = 200 } },
+				sound = "item.medkit.use",
+				burp = false,
+			},
 		},
 		{
 			name = "Antibiotics",
@@ -110,6 +152,19 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Cures a bite's infection, if you take it in time.",
+			food = {
+				heal = 0,
+				useTicks = 32,
+				cures = { "Infection" },
+				-- (The infection's rule: a minute of Weakness after a cure from stage III on.)
+				aftermath = {
+					effect = "Weakness",
+					ticks = Infection.AFTERMATH_TICKS,
+					stage = Infection.AFTERMATH_STAGE,
+				},
+				sound = "item.pills.swallow",
+				burp = false,
+			},
 		},
 		{
 			name = "Painkillers",
@@ -119,6 +174,13 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = blister,
 			icon = "",
 			lore = "Takes the edge off: a little health now, more over time.",
+			food = {
+				heal = 2,
+				useTicks = 24,
+				effects = { { effect = "Regeneration", ticks = 160 } },
+				sound = "item.pills.swallow",
+				burp = false,
+			},
 		},
 		{
 			name = "Rag",
@@ -181,6 +243,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = can({ 170, 60, 40 }),
 			icon = "",
 			lore = "Beans in a dented can. Still good, mostly.",
+			food = { heal = 6, nutrition = 6, saturation = 0.6, useTicks = 32 },
 		},
 		{
 			name = "CannedPeaches",
@@ -190,6 +253,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = can({ 230, 150, 60 }),
 			icon = "",
 			lore = "Sweet peaches in syrup. A rare treat in the ruins.",
+			food = { heal = 4, nutrition = 4, saturation = 0.3, useTicks = 32 },
 		},
 		{
 			name = "Crackers",
@@ -204,6 +268,13 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Dry and filling. You will want water after.",
+			food = {
+				heal = 2,
+				nutrition = 2,
+				saturation = 0.1,
+				useTicks = 24,
+				effect = { kind = "thirst", chance = 0.3, ticks = 600 },
+			},
 		},
 		{
 			name = "ChocolateBar",
@@ -217,6 +288,13 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Quick energy for a quick escape.",
+			food = {
+				heal = 3,
+				nutrition = 3,
+				saturation = 0.3,
+				useTicks = 24,
+				effects = { { effect = "Speed", ticks = 200 } },
+			},
 		},
 		{
 			name = "MilitaryRation",
@@ -230,6 +308,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "A sealed meal for one long day. Bunkers keep them.",
+			food = { heal = 8, nutrition = 8, saturation = 0.8, useTicks = 48 },
 		},
 		{
 			name = "BottledWater",
@@ -254,6 +333,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Clean water in a sealed bottle. The bottle is kept.",
+			drink = { thirst = 6, hydration = 0.4, empty = "GlassBottle" },
 		},
 		{
 			name = "SodaCan",
@@ -268,6 +348,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Warm, flat and sugary. Puts a spring in your step.",
+			drink = { thirst = 4, hydration = 0.2, effects = { { effect = "Speed", ticks = 400 } } },
 		},
 		{
 			name = "BaseballBat",
@@ -360,6 +441,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Mint and ginger in a rag: slows a bite's infection. Only pills cure it.",
+			food = { heal = 0, useTicks = 40, setback = true, sound = "item.bandage.apply", burp = false },
 		},
 	}
 end

@@ -20,8 +20,26 @@
 	    drink's top over its rim (murky, clear blue, the teas' pale green, amber and gold), with a
 	    leaf or a slice of root floating on a tea (the pack's _models). An empty bowl burns 100
 	    ticks as furnace fuel (Minecraft's).
-	What each one gives when drunk is ToughAsNails/Drinks' (its tooltip's "When drunk:" lines);
-	their icons are blank, so each look is one id to paste.
+	Their icons are blank, so each look is one id to paste.
+
+	What drinking each gives is its `drink` (ToughAsNails/Drinks, and the tooltip's "When drunk:"
+	lines): thirst points and the hydration modifier (Thirst.drink adds thirst x modifier x 2),
+	dirty water's chance of TAN's Thirst effect and its ticks, a tea's Internal Warmth or Chill
+	(ticks), and the empty container it leaves (`empty`; `sips` for a canteen):
+
+	  Drink                 thirst  hydration  Thirst effect  warmth / chill
+	  dirty water             4       0.25     50%, 15 s        -            bottle, canteen sip
+	  purified water          6       0.4        -              -            bottle, canteen sip
+	  dirty water bowl        4       0.3      50%, 15 s        -            a bowl holds more
+	  purified water bowl     7       0.45       -              -
+	  mint tea                7       0.6        -          chill 2 min      a mint leaf brewed
+	  ginger tea              7       0.6        -          warmth 2 min     a ginger root
+	  herbal tea              8       0.65       -          both 1 min       both herbs
+	A bowl is cheap (three planks make four) and holds a little more than a bottle; a tea keeps
+	its water's thirst, adds hydration and its effect, so brewing never wastes water: ginger tea
+	keeps a cold biome's chill off (Internal Warmth), mint tea a hot one's heat (Internal Chill),
+	herbal tea both, for half as long. A canteen's sip is a bottle's drink (alike, so
+	ToughAsNails/Drinks makes them one Drink), three to a canteen.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -59,6 +77,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bottle(DIRTY_WATER),
 			icon = "",
 			lore = "Unsafe to drink. Purify it in a furnace, on a campfire or with mint.",
+			drink = { thirst = 4, hydration = 0.25, chance = 0.5, effectTicks = 300, empty = "GlassBottle" },
 		},
 		{
 			name = "PurifiedWaterBottle",
@@ -68,6 +87,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bottle(PURIFIED_WATER),
 			icon = "",
 			lore = "Clean water. Also the base of every potion.",
+			drink = { thirst = 6, hydration = 0.4, empty = "GlassBottle" },
 		},
 		{
 			name = "Canteen",
@@ -87,6 +107,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = canteen(DIRTY_WATER),
 			icon = "",
 			lore = "Unsafe to drink. Purify it, or top it up at water.",
+			drink = { thirst = 4, hydration = 0.25, chance = 0.5, effectTicks = 300, empty = "Canteen", sips = true },
 		},
 		{
 			name = "PurifiedWaterCanteen",
@@ -96,6 +117,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = canteen(PURIFIED_WATER),
 			icon = "",
 			lore = "Clean water, a few sips at a time.",
+			drink = { thirst = 6, hydration = 0.4, empty = "Canteen", sips = true },
 		},
 		{
 			name = "Bowl",
@@ -114,6 +136,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bowl(DIRTY_WATER),
 			icon = "",
 			lore = "Unsafe to drink. Purify it in a furnace, on a campfire or with mint.",
+			drink = { thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300, empty = "Bowl" },
 		},
 		{
 			name = "PurifiedWaterBowl",
@@ -123,6 +146,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bowl(PURIFIED_WATER),
 			icon = "",
 			lore = "Clean water. Brew a herb into it for tea.",
+			drink = { thirst = 7, hydration = 0.45, empty = "Bowl" },
 		},
 		{
 			name = "MintTea",
@@ -132,6 +156,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bowl(MINT_TEA, { MINT_FLOAT }),
 			icon = "",
 			lore = "A cooling brew for hot places.",
+			drink = { thirst = 7, hydration = 0.6, chill = 2400, empty = "Bowl" },
 		},
 		{
 			name = "GingerTea",
@@ -141,6 +166,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bowl(GINGER_TEA, { GINGER_FLOAT }),
 			icon = "",
 			lore = "A warming brew for cold places.",
+			drink = { thirst = 7, hydration = 0.6, warmth = 2400, empty = "Bowl" },
 		},
 		{
 			name = "HerbalTea",
@@ -150,6 +176,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bowl(HERBAL_TEA, { MINT_FLOAT, GINGER_FLOAT }),
 			icon = "",
 			lore = "Mint and ginger together: steadies you in heat and cold.",
+			drink = { thirst = 8, hydration = 0.65, warmth = 1200, chill = 1200, empty = "Bowl" },
 		},
 	}
 end

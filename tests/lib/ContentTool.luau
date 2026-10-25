@@ -60,6 +60,9 @@
 	  craft(grid, width)   Crafting.match by names: what a grid of names makes, and how many
 	  world, drops(block), places, found, converts   how survival gets items (ContentGame's header)
 	  itemId(name)     the item's id
+	  food(name), drink(name)   what eating and drinking it does, as Items/Foods and
+	                   ToughAsNails/Drinks give it (effects by name, the empty container's name,
+	                   a canteen's sips; nil: none), for `show`
 
 	Where an entry comes from is read off the packs' own data (`view.packs`, in load order): the
 	first pack giving the name made it, later ones with `override = true` patched it; recipes,
@@ -1095,6 +1098,103 @@ local function facesText(view: any, spec: any): string
 	return if texturable(spec) then "none" else "none (never textured)"
 end
 
+-- `value` to three places ("12.8", not 12.800000000000001), and a share as a percentage.
+local function rounded(value: number): string
+	return number(math.round(value * 1000) / 1000)
+end
+local function percent(share: number): string
+	return `{rounded(share * 100)}%`
+end
+
+-- " II" for amplifier 1 (an effect's level, Minecraft's numerals), "" for 0.
+local function level(amplifier: number?): string
+	local numerals = { "II", "III", "IV", "V" }
+	local at = amplifier or 0
+	return if at <= 0 then "" else ` {numerals[at] or `{at + 1}`}`
+end
+
+-- "Speed II for 400 ticks" for each effect given.
+local function givenTexts(list: { any }?): { string }
+	local texts = {}
+	for _, given in list or {} do
+		table.insert(texts, `gives {given.effect}{level(given.amplifier)} for {number(given.ticks)} ticks`)
+	end
+	return texts
+end
+
+-- What eating an item does as Items/Foods gives it (the View's `food`), in pieces.
+local function foodTexts(food: any): { string }
+	local texts = {}
+	if food.medical then
+		table.insert(texts, "medicine")
+	end
+	table.insert(texts, `heals {number(food.heal)}{if food.nutrition then " (hunger off)" else ""}`)
+	if food.nutrition then
+		local adds = food.nutrition * food.saturation * 2
+		table.insert(texts, `nutrition {number(food.nutrition)}`)
+		table.insert(texts, `saturation {number(food.saturation)} (+{rounded(adds)})`)
+	end
+	table.insert(texts, `held {number(food.useTicks)} ticks`)
+	local risk = food.effect
+	if risk then
+		local effect = if risk.kind == "hunger" then "Hunger (Thirst with hunger off)" else "Thirst"
+		table.insert(texts, `{percent(risk.chance)} {effect} for {number(risk.ticks)} ticks`)
+	end
+	if food.cures and #food.cures > 0 then
+		table.insert(texts, `cures {table.concat(food.cures, " and ")}`)
+	end
+	for _, text in givenTexts(food.effects) do
+		table.insert(texts, text)
+	end
+	local aftermath = food.aftermath
+	if aftermath then
+		table.insert(texts, `after a cure from stage {number(aftermath.stage)} {givenTexts({ aftermath })[1]}`)
+	end
+	if food.setback then
+		table.insert(texts, "sets an infection back a stage")
+	end
+	if food.sound then
+		table.insert(texts, `sound {food.sound}`)
+	end
+	if food.burp == false then
+		table.insert(texts, "no burp")
+	end
+	return texts
+end
+
+-- What drinking an item does as ToughAsNails/Drinks gives it (the View's `drink`), in pieces.
+local function drinkTexts(drink: any): { string }
+	local texts = {}
+	if drink.potion then
+		table.insert(texts, "a potion (drunk any time)")
+	end
+	if drink.thirst > 0 then
+		local adds = drink.thirst * drink.hydration * 2
+		table.insert(texts, `thirst {number(drink.thirst)}`)
+		table.insert(texts, `hydration {number(drink.hydration)} (+{rounded(adds)})`)
+	end
+	if drink.chance > 0 then
+		table.insert(texts, `{percent(drink.chance)} Thirst for {number(drink.effectTicks)} ticks`)
+	end
+	if drink.warmth then
+		table.insert(texts, `warmth {number(drink.warmth)} ticks`)
+	end
+	if drink.chill then
+		table.insert(texts, `chill {number(drink.chill)} ticks`)
+	end
+	for _, text in givenTexts(drink.effects) do
+		table.insert(texts, text)
+	end
+	if drink.mana then
+		table.insert(texts, `mana {number(drink.mana)}`)
+	end
+	if drink.sips then
+		table.insert(texts, `{number(drink.sips)} sips`)
+	end
+	table.insert(texts, if drink.empty then `leaves {drink.empty}` else "used up")
+	return texts
+end
+
 -- The derived lines of a block or an item.
 local function derivedLines(view: any, entry: any, isBlock: boolean): { string }
 	local content = view.content
@@ -1122,6 +1222,19 @@ local function derivedLines(view: any, entry: any, isBlock: boolean): { string }
 			lines,
 			`    icon: {if icon == nil then "none" elseif icon == "" then '"" (blank: still to make)' else quote(icon)}`
 		)
+		-- (A spec's own View may leave food and drink out.)
+		local food = if view.food then view.food(name) else nil
+		if food then
+			for _, line in wrap("    food: ", foodTexts(food)) do
+				table.insert(lines, line)
+			end
+		end
+		local drink = if view.drink then view.drink(name) else nil
+		if drink then
+			for _, line in wrap("    drink: ", drinkTexts(drink)) do
+				table.insert(lines, line)
+			end
+		end
 	end
 	local ages = content.ages
 	if #ages > 0 then

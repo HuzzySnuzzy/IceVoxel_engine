@@ -51,6 +51,16 @@
 	  loot             block        a loot table's name, or its pools: now and then what it gives
 	                                in place of its usual drop (Items.lootDrop; Items' leafDrop,
 	                                randomDrop and strawDrop)
+	  food             item         what eating it does, Minecraft's food component: { heal,
+	                                nutrition?, saturation?, effect?, useTicks?, cures?, effects?,
+	                                aftermath?, setback?, sound?, burp? } (Items/Foods.ITEMS, whose
+	                                header says what each does); effects and cures by their
+	                                Shared/Effects names
+	  drink            item         what drinking it does: { thirst?, hydration?, chance?,
+	                                effectTicks?, warmth?, chill?, effects?, mana?, empty?, sips? }
+	                                (ToughAsNails/Drinks.ITEMS, whose header says what each does;
+	                                numbers left out are 0); `empty` the container it leaves, by
+	                                name
 	  override         block, item, texture  patches the entry of that name an earlier pack made
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
@@ -135,6 +145,39 @@ export type Pool = { rolls: { number }, entries: { LootEntry } }
 export type KnowledgeSpec = { mine: number?, smelt: number? }
 -- The Metal Miner's numbers for an ore (`miner`): ticks an item, J a tick, the least J an item.
 export type MinerSpec = { ticks: number, joules: number, floor: number? }
+-- A status effect a food or a drink gives (`effects`): its Shared/Effects name, ticks and
+-- amplifier (nil: 0, level I).
+export type GivenSpec = { effect: string, ticks: number, amplifier: number? }
+-- What eating an item does (`food`; Items/Foods says what each field does): its risk (`effect`:
+-- kind "hunger" or "thirst"), and medicine's `aftermath` (an effect after curing an infection
+-- that had reached `stage`).
+export type FoodSpec = {
+	heal: number,
+	nutrition: number?,
+	saturation: number?,
+	effect: { kind: string, chance: number, ticks: number }?,
+	useTicks: number?,
+	cures: { string }?,
+	effects: { GivenSpec }?,
+	aftermath: { effect: string, ticks: number, amplifier: number?, stage: number }?,
+	setback: boolean?,
+	sound: string?,
+	burp: boolean?,
+}
+-- What drinking an item does (`drink`; ToughAsNails/Drinks says what each field does), and the
+-- empty container it leaves (an item name; nil: nothing).
+export type DrinkSpec = {
+	thirst: number?,
+	hydration: number?,
+	chance: number?,
+	effectTicks: number?,
+	warmth: number?,
+	chill: number?,
+	effects: { GivenSpec }?,
+	mana: number?,
+	empty: string?,
+	sips: boolean?,
+}
 
 export type BlockSpec = {
 	name: string,
@@ -285,6 +328,8 @@ export type ItemSpec = {
 	fuel: number?,
 	tags: { string }?,
 	equipSound: string?,
+	food: FoodSpec?,
+	drink: DrinkSpec?,
 	override: boolean?,
 }
 
@@ -1054,6 +1099,39 @@ local MODEL_BOX = record({
 	shape = enum({ "Ball", "Cylinder" }),
 }, { "size", "offset" })
 local ARMOR_SLOT = enum({ "Head", "Chest", "Legs", "Feet" })
+-- (`food` and `drink`: FoodSpec and DrinkSpec above.)
+local GIVEN = listOf(record({ effect = STRING, ticks = NUMBER, amplifier = NUMBER }, { "effect", "ticks" }))
+local FOOD = record({
+	heal = NUMBER,
+	nutrition = NUMBER,
+	saturation = NUMBER,
+	effect = record(
+		{ kind = enum({ "hunger", "thirst" }), chance = NUMBER, ticks = NUMBER },
+		{ "kind", "chance", "ticks" }
+	),
+	useTicks = NUMBER,
+	cures = STRINGS,
+	effects = GIVEN,
+	aftermath = record(
+		{ effect = STRING, ticks = NUMBER, amplifier = NUMBER, stage = NUMBER },
+		{ "effect", "ticks", "stage" }
+	),
+	setback = BOOLEAN,
+	sound = STRING,
+	burp = BOOLEAN,
+}, { "heal" })
+local DRINK = record({
+	thirst = NUMBER,
+	hydration = NUMBER,
+	chance = NUMBER,
+	effectTicks = NUMBER,
+	warmth = NUMBER,
+	chill = NUMBER,
+	effects = GIVEN,
+	mana = NUMBER,
+	empty = STRING,
+	sips = BOOLEAN,
+})
 Schema.ITEM_FIELDS = {
 	name = STRING,
 	displayName = STRING,
@@ -1103,6 +1181,8 @@ Schema.ITEM_FIELDS = {
 	fuel = NUMBER,
 	tags = STRINGS,
 	equipSound = STRING,
+	food = FOOD,
+	drink = DRINK,
 	override = BOOLEAN,
 } :: { [string]: Check }
 

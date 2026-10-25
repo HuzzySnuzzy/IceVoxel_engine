@@ -328,6 +328,10 @@ return function(t, shared, require, server)
 	--[[ Drinks ]]
 
 	t.test("drinks: hand, dirty and purified water with their chances (injected random)", function()
+		-- (The water's numbers are on its items' entries now, the Survival pack's `drink`s: the
+		-- bottles' drinks in place of the old Drinks.DIRTY and Drinks.PURIFIED.)
+		local dirty = Drinks.of(I.DirtyWaterBottle) :: Drinks.Drink
+		local purified = Drinks.of(I.PurifiedWaterBottle) :: Drinks.Drink
 		local state = Thirst.new()
 		state.thirst, state.hydration = 10, 0
 		t.ok(Drinks.apply(state, Drinks.HAND, rolls({ 0.49 })), "0.49 < 0.5: Thirst effect")
@@ -335,13 +339,13 @@ return function(t, shared, require, server)
 		t.near(state.hydration, 0.2, 1e-9)
 		t.eq(state.effect, 300, "15 s")
 		state.effect = 0
-		t.ok(not Drinks.apply(state, Drinks.DIRTY, rolls({ 0.5 })), "0.5: none")
+		t.ok(not Drinks.apply(state, dirty, rolls({ 0.5 })), "0.5: none")
 		t.eq(state.thirst, 15)
 		t.eq(state.effect, 0)
-		t.ok(not Drinks.apply(state, Drinks.PURIFIED, rolls({})), "purified never rolls")
+		t.ok(not Drinks.apply(state, purified, rolls({})), "purified never rolls")
 		t.eq(state.thirst, 20)
-		t.eq(Drinks.of(I.DirtyWaterBottle), Drinks.DIRTY)
-		t.eq(Drinks.of(I.PurifiedWaterCanteen), Drinks.PURIFIED)
+		t.eq(Drinks.of(I.DirtyWaterCanteen), dirty, "a canteen's sip is a bottle's drink")
+		t.eq(Drinks.of(I.PurifiedWaterCanteen), purified)
 		t.eq(Drinks.of(I.GlassBottle), nil)
 		t.eq(Drinks.of(nil), nil)
 	end)
@@ -364,7 +368,8 @@ return function(t, shared, require, server)
 		Drinks.apply(alone, tea, rolls({}))
 		t.eq(alone.thirst, 12, "without a temperature state: just a drink")
 		local plain = Temperature.new()
-		Drinks.apply(Thirst.new(), Drinks.PURIFIED, rolls({}), plain)
+		-- (Purified water: the bottle's drink, its entry's, in place of the old Drinks.PURIFIED.)
+		Drinks.apply(Thirst.new(), Drinks.of(I.PurifiedWaterBottle) :: Drinks.Drink, rolls({}), plain)
 		t.eq(plain.warmth + plain.chill, 0, "water gives neither")
 	end)
 
@@ -897,6 +902,8 @@ return function(t, shared, require, server)
 		runs dry). Returns the ticks it took.
 	]]
 	local function timeToDeath(where, withThirst: boolean, clemency: number?, drinking: boolean?): number
+		-- (The bowl's drink, its entry's, in place of the old Drinks.PURIFIED_BOWL.)
+		local bowl = Drinks.of(I.PurifiedWaterBowl) :: Drinks.Drink
 		local body, thirst = Temperature.new(clemency), Thirst.new()
 		local health = 20
 		for tick = 1, 20 * 60 * 30 do
@@ -918,7 +925,7 @@ return function(t, shared, require, server)
 				damage += lost
 				health = math.min(20, health + gained)
 				if drinking and thirst.thirst < Thirst.REGEN_THIRST then
-					Drinks.apply(thirst, Drinks.PURIFIED_BOWL, rolls({}))
+					Drinks.apply(thirst, bowl, rolls({}))
 				end
 			end
 			health -= damage

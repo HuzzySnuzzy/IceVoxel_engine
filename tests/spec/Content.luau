@@ -500,6 +500,46 @@ return function(t, shared, require, _server, _client)
 		t.ok(table.find(Temperature.COOLING_BLOCKS, "FixtureFrost") ~= nil, "cools")
 		local Climate = need({ "Players", "Climate" }, serverRoot)
 		t.ok(Climate.isHeating(B.FixtureOre) and Climate.isCooling(B.FixtureFrost), "the climate's sources")
+		-- Food and drink, effects by name.
+		local Effects = need({ "Effects" })
+		local Foods = need({ "Items", "Foods" })
+		local snack = Foods.of(I.FixtureSnack)
+		t.ok(snack ~= nil and Foods.ITEMS[I.FixtureSnack] == snack, "food -> Foods.ITEMS, by id")
+		t.eq(snack.heal, 2)
+		t.eq(snack.nutrition, 3)
+		t.eq(snack.saturation, 0.5)
+		t.eq(Foods.useTicks(snack), 20)
+		t.eq(snack.effect.chance, 0.25, "its risk")
+		t.eq(Foods.riskEffect(snack, true), Effects.id.Thirst, "a thirst risk")
+		t.eq(snack.effects[1].effect, Effects.id.Speed, "an effect by name")
+		t.eq(snack.effects[1].ticks, 60)
+		t.eq(snack.effects[1].amplifier, 1)
+		local salve = Foods.of(I.FixtureSalve)
+		t.ok(Foods.isMedical(salve) and not Foods.nourishes(salve), "medicine")
+		t.ok(Foods.cures(salve, "Bleeding") and Foods.cures(salve, "Infection"), "cures")
+		t.eq(salve.aftermath.effect, Effects.id.Weakness, "aftermath")
+		t.eq(salve.aftermath.amplifier, 0, "amplifier 0 when left out")
+		t.eq(salve.aftermath.stage, 2)
+		t.ok(salve.setback and salve.sound == "item.bandage.apply", "setback, sound")
+		t.ok(table.isfrozen(snack) and table.isfrozen(snack.effects) and table.isfrozen(salve.cures), "frozen")
+		local Drinks = need({ "ToughAsNails", "Drinks" })
+		local tonic = Drinks.of(I.FixtureTonic)
+		t.ok(tonic ~= nil and Drinks.ITEMS[I.FixtureTonic].drink == tonic, "drink -> Drinks.ITEMS, by id")
+		t.eq(tonic.thirst, 3)
+		t.eq(tonic.hydration, 0.5)
+		t.eq(tonic.chance, 0.25)
+		t.eq(tonic.effectTicks, 100)
+		t.ok(tonic.warmth == 60 and tonic.chill == 30, "warmth and chill")
+		t.eq(tonic.effects[1].effect, Effects.id.Speed, "an effect by name")
+		t.eq(tonic.effects[1].amplifier, 0)
+		t.eq(Drinks.manaOf(tonic), 5)
+		t.eq(Drinks.emptyOf(I.FixtureTonic), I.GlassBottle, "the container it leaves, by name")
+		local flask = Drinks.entry(I.FixtureFlask)
+		t.ok(flask and flask.sips == true, "sips")
+		t.eq(Drinks.emptyOf(I.FixtureFlask), I.FixtureGem)
+		t.eq(Drinks.sips({ item = I.FixtureFlask, count = 1 }), 2, "its durability")
+		t.eq(flask and flask.drink.chance, 0, "numbers left out are 0")
+		t.eq(flask and flask.drink, Drinks.of(I.PurifiedWaterBottle), "an alike drink is the same Drink")
 	end)
 
 	--[[ Checks: Content.build ]]
@@ -984,6 +1024,69 @@ return function(t, shared, require, _server, _client)
 		t.ok(has(message, parts), `{table.concat(path, ".")}: {message}`)
 	end
 	local STONE = "pack Minecraft (patched by Clash), blocks/terrain, block Stone"
+
+	t.test("content: food and drink: their schema, unknown effects and containers, ones that do nothing", function()
+		fails(
+			{ pack("P", { items = { { name = "I", model = MODEL, food = { nutrition = 2, saturation = 0.1 } } } }) },
+			{ "pack P, item I: food.heal is missing" },
+			"a food's heal"
+		)
+		fails(
+			{ pack("P", { items = { { name = "I", model = MODEL, food = { heal = 1, effect = { kind = "rot" } } } } }) },
+			{ "pack P, item I: food.effect.kind must be one of hunger, thirst" },
+			"a risk's kind"
+		)
+		fails(
+			{ pack("P", { items = { { name = "I", model = MODEL, drink = { thirst = 1, emtpy = "Bowl" } } } }) },
+			{ "pack P, item I: drink.emtpy is no field it may have (did you mean empty?)" },
+			"a drink's field"
+		)
+		local SNACK = "pack Clash, item ClashSnack"
+		local function item(fields: { [string]: any }): { [string]: any }
+			local entry: { [string]: any } = { name = "ClashSnack", model = MODEL }
+			for key, value in fields do
+				entry[key] = value
+			end
+			return { items = { entry } }
+		end
+		clash(
+			item({ food = { heal = 1, effects = { { effect = "Sped", ticks = 20 } } } }),
+			{ "Items", "Foods" },
+			{ `Foods: {SNACK} gives an unknown effect Sped` }
+		)
+		clash(
+			item({ food = { heal = 1, cures = { "Bleding" } } }),
+			{ "Items", "Foods" },
+			{ `Foods: {SNACK} cures an unknown effect Bleding` }
+		)
+		clash(
+			item({ food = { heal = 0, aftermath = { effect = "Weakness", ticks = 20, stage = 1 } } }),
+			{ "Items", "Foods" },
+			{ `Foods: {SNACK}'s aftermath needs an infection cure` }
+		)
+		clash(item({ food = { heal = 0 } }), { "Items", "Foods" }, { `Foods: {SNACK} does nothing` })
+		clash(
+			item({ food = { heal = 1, nutrition = 30, saturation = 0.1 } }),
+			{ "Items", "Foods" },
+			{ `Foods: {SNACK} has bad nutrition` }
+		)
+		clash(
+			item({ drink = { effects = { { effect = "Sped", ticks = 20 } } } }),
+			{ "ToughAsNails", "Drinks" },
+			{ `Drinks: {SNACK} gives an unknown effect Sped` }
+		)
+		clash(
+			item({ drink = { thirst = 2, empty = "GlassBotle" } }),
+			{ "ToughAsNails", "Drinks" },
+			{ `Drinks: {SNACK}'s empty container GlassBotle is no item` }
+		)
+		clash(
+			item({ drink = { thirst = 2, sips = true } }),
+			{ "ToughAsNails", "Drinks" },
+			{ `Drinks: {SNACK} is drunk in sips but has no durability` }
+		)
+		clash(item({ drink = { hydration = 0.5 } }), { "ToughAsNails", "Drinks" }, { `Drinks: {SNACK} does nothing` })
+	end)
 
 	t.test("content: a value both on an entry and in a registry's side table is an error", function()
 		-- (The Minecraft pack's blocks carry their own lore, faces, Ages, skills, knowledge, miner

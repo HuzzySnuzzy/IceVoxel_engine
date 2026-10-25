@@ -3708,17 +3708,32 @@ Mobs.playerHit:Connect(function(player: Player, kind: string, damage: number, fr
 end)
 ```
 
-**Food and medicine.** `src/shared/Items/Foods.luau` lists what using an item does:
-`[Items.id.CookedBeef] = { heal = 4, nutrition = 8, saturation = 0.8 }` (Minecraft's
-FoodProperties: food points and the saturation modifier, what it does with hunger on; `heal` in half
-hearts with it off, and medicine's, which has no nutrition) with an optional `effect = { kind =
-"hunger", chance, ticks }` (Minecraft's Hunger; Tough As Nails' Thirst with hunger off, or always
-with kind "thirst"), and for the apocalypse's tins and medicine `useTicks` (the hold, 32 by default),
-`cures` (effect names: Bleeding, the Infection), `effects` (given when it finishes), `aftermath`
-(an effect after curing an infection that had reached a stage: Antibiotics' Weakness), `setback`
-(the Herbal Poultice), `sound` and `burp`. Any item in the table is used with its hold and no other
-change; `Foods.canUse` decides when (a food bar under 20 for food, hurt for medicine and for food
-with hunger off, or something it cures, or any time for a food with effects).
+**Food and medicine.** An item's `food`, on its entry, is what using it does (Minecraft 1.20.5's
+food component; `src/shared/Items/Foods.luau` reads every pack's): `food = { heal = 4, nutrition =
+8, saturation = 0.8 }` (Minecraft's FoodProperties: food points and the saturation modifier, what it
+does with hunger on; `heal` in half hearts with it off, and medicine's, which has no nutrition) with
+an optional `effect = { kind = "hunger", chance = 0.3, ticks = 600 }` (Minecraft's Hunger; Tough As
+Nails' Thirst with hunger off, or always with kind "thirst"), and for the apocalypse's tins and
+medicine `useTicks` (the hold, 32 by default), `cures` (effect names: Bleeding, Infection),
+`effects` (`{ effect = "Regeneration", ticks = 200, amplifier = 0 }`, given when it finishes;
+amplifier 0 by default), `aftermath` (an effect after curing an infection that had reached a
+`stage`: Antibiotics' Weakness), `setback` (the Herbal Poultice), `sound` and `burp`:
+
+```lua
+-- The Apocalypse pack's items/supplies
+{
+	name = "Bandage",
+	-- ... its model, lore and icon
+	food = { heal = 2, useTicks = 40, cures = { "Bleeding" }, sound = "item.bandage.apply", burp = false },
+},
+```
+
+Any item with a `food` is used with its hold and no other change; `Foods.canUse` decides when (a
+food bar under 20 for food, hurt for medicine and for food with hunger off, or something it cures,
+or any time for a food with effects). The game refuses to load a food naming an unknown effect, one
+with nutrition out of 1..20 and one that does nothing, naming the pack and the entry. The Minecraft
+pack's `items/mobs` (the meat, Minecraft's numbers) and the Apocalypse pack's `items/supplies` (the
+tins and medicine) list theirs in their headers.
 
 **Ages, skills and knowledge.** A new result belongs to the Stone Age (open to everyone) unless
 an Age names it: add its name to that Age's `recipes` in `src/shared/Progression/Ages.luau` (a
@@ -4211,16 +4226,19 @@ second, and warms 3 steps (5 when one is within 2 blocks, and then cold sources 
 cools 3, however many there are. A name no block has yet is skipped with a warning, so a block
 can go into `HeatingBlocks` before it exists (the Campfire's entry says `heats = true` instead).
 
-**Drinks and containers (Tough As Nails).** `Shared/ToughAsNails/Drinks` reads three tables:
-`ITEMS` (a full item: its drink, the empty container it leaves, `sips` for a canteen), `FILLS` (an
-empty container and the dirty water it fills with at a water source) and `PURIFIED_OF` (dirty
-water and its purified twin). A new container is four entries there and its recipes, as the
-bowls are:
+**Drinks and containers (Tough As Nails).** An item's `drink`, on its entry, is what drinking it
+gives (`Shared/ToughAsNails/Drinks` reads every pack's): `thirst` points and the `hydration`
+modifier, dirty water's `chance` of TAN's Thirst effect for `effectTicks`, `warmth` / `chill`
+ticks, `effects` (by name, as a food's), `mana`, the `empty` container it leaves (an item name;
+none: it is used up) and `sips` for a canteen (its `durability` is its sips). Numbers left out are
+0. Two tables in Drinks tie the containers together: `FILLS` (an empty container and the dirty
+water it fills with at a water source) and `PURIFIED_OF` (dirty water and its purified twin). A
+new container is two entries' `drink`, a line in each table and its recipes, as the bowls are:
 
 ```lua
--- Drinks.ITEMS
-[I.DirtyWaterBowl] = table.freeze({ drink = Drinks.DIRTY_BOWL, empty = I.Bowl }),
-[I.PurifiedWaterBowl] = table.freeze({ drink = Drinks.PURIFIED_BOWL, empty = I.Bowl }),
+-- The Survival pack's items/drinks
+{ name = "DirtyWaterBowl", --[[ ... ]] drink = { thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300, empty = "Bowl" } },
+{ name = "PurifiedWaterBowl", --[[ ... ]] drink = { thirst = 7, hydration = 0.45, empty = "Bowl" } },
 -- Drinks.FILLS
 [I.Bowl] = I.DirtyWaterBowl,
 -- Drinks.PURIFIED_OF
@@ -4230,12 +4248,14 @@ define.smelting("DirtyWaterBowl", "PurifiedWaterBowl")
 define.shapeless({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl")
 ```
 
-A drink of its own (the teas, a juice) is an `ITEMS` entry with a `Drink` and the container it
-leaves (`[I.MintTea] = table.freeze({ drink = Drinks.MINT_TEA, empty = I.Bowl })`); `warmth` /
+A drink of its own (the teas, a juice) is only an entry's `drink` with the container it leaves
+(Mint Tea's is `{ thirst = 7, hydration = 0.6, chill = 2400, empty = "Bowl" }`); `warmth` /
 `chill` ticks give TAN's Internal Warmth / Internal Chill, which move the temperature target 5
-steps towards neutral without pushing it past neutral (`Drinks.MINT_TEA` has `chill = 2400`).
-Every `PURIFIED_OF` pair also boils clean on a Campfire (`ToughAsNails/Boiling`) and shows in
-JEI's Campfire tab, with nothing more to add.
+steps towards neutral without pushing it past neutral. Status effects or mana make a drink a
+potion, drunk any time (the Apocalypse pack's Soda, the Terraria pack's mana potions). Drinks
+with the same numbers are one drink, so bottled water is purified water (the tooltip's "Water"
+pill too). Every `PURIFIED_OF` pair also boils clean on a Campfire (`ToughAsNails/Boiling`) and
+shows in JEI's Campfire tab, with nothing more to add.
 
 **Insulating armor (Tough As Nails).** An armor piece's `tan = { warmth = n, cooling = n,
 freezeImmune = true }` on its entry: `warmth` steps pull a cold target up towards 0, `cooling`
@@ -4272,8 +4292,8 @@ levels. An effect kept elsewhere (Tough As Nails' four) is `external = true` and
 end): `{ name = "Swiftness", ingredient = "MintLeaves", effect = "Speed", seconds = 180, strong =
 90, long = 480 }` makes the items (`PotionOfSwiftness`, `StrongPotionOfSwiftness` "Potion of
 Swiftness II", `LongPotionOfSwiftness`), their recipes (a Purified Water Bottle with the
-ingredient; the potion with Glow Dust or a coal) and the drinks (`Drinks.ITEMS` with `effects`:
-the effect given when the 32 tick drink finishes, the Glass Bottle back), with nothing else to
+ingredient; the potion with Glow Dust or a coal) and the drinks (each item's `drink`: the effect
+given when the 32 tick drink finishes, the Glass Bottle back), with nothing else to
 add. Leave `seconds` out for an instant effect (`strong = true` for its II).
 
 **A fluid's effects.** A fluid's `effects` in FluidList lists what touching it gives: `{ effect =

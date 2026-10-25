@@ -1,10 +1,11 @@
 --!strict
 --[[
 	The potions (Minecraft 1.20.1's Potions, brewed here in a crafting grid: the game has no
-	brewing stand). Pure data that requires nothing, read by the Minecraft content pack (the potion
-	items, in this order, and their brewing recipes) and ToughAsNails/Drinks (drinking them: the 32
-	tick hold, the effects given when it finishes, the Glass Bottle back). A potion added here gets
-	its items and recipes with the others (item ids are given at load, Shared/Content).
+	brewing stand). Pure data that requires nothing, read by the Minecraft content pack: the potion
+	items, in this order, each with its `drink` (ToughAsNails/Drinks: the 32 tick hold, the effect
+	given when it finishes, the Glass Bottle back), and their brewing recipes. A potion added here
+	gets its items, drinks and recipes with the others (item ids are given at load,
+	Shared/Content).
 
 	A potion is a Purified Water Bottle brewed with its `ingredient` (shapeless, any grid; an item
 	or block name, or a recipe "#tag"), giving `effect` (an EffectList name) for `seconds` (nil:

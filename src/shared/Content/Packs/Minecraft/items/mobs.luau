@@ -11,6 +11,23 @@
 	thread, as Minecraft's icons (the meat's are the pack's _models). Each carries its lore and a
 	blank icon; cooked meat gives 0.35 knowledge a piece out of a furnace (Minecraft's cooked food
 	experience).
+
+	What eating the meat does is its `food`, Minecraft's numbers (Shared/Items/Foods: nutrition in
+	points of the 20; saturation the modifier, in brackets what it adds; heals in half hearts with
+	hunger off, about half the nutrition; each held the 32 ticks):
+
+	  Food              nutrition  saturation  heals  risk (`effect`)
+	  Steak             8          0.8 (12.8)  4      -
+	  Cooked Porkchop   8          0.8 (12.8)  4      -
+	  Cooked Mutton     6          0.8 (9.6)   3      -
+	  Cooked Chicken    6          0.6 (7.2)   3      -
+	  Raw Beef          3          0.3 (1.8)   2      -
+	  Raw Porkchop      3          0.3 (1.8)   2      -
+	  Raw Mutton        2          0.3 (1.2)   1      -
+	  Raw Chicken       2          0.3 (1.2)   1      30%: Hunger for 30 s
+	  Rotten Flesh      4          0.1 (0.8)   2      80%: Hunger for 30 s
+	(Minecraft's Hunger effect with hunger on, as Minecraft's raw chicken and rotten flesh bring;
+	Tough As Nails' Thirst effect with it off.)
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -51,7 +68,14 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			icon = "",
 			lore = "Cow hide for armor, an Aglet and the Tuxedo.",
 		},
-		{ name = "RawBeef", color = RAW_BEEF, model = slab(RAW_BEEF, FAT, false), icon = "", lore = "Better cooked." },
+		{
+			name = "RawBeef",
+			color = RAW_BEEF,
+			model = slab(RAW_BEEF, FAT, false),
+			icon = "",
+			lore = "Better cooked.",
+			food = { heal = 2, nutrition = 3, saturation = 0.3 },
+		},
 		{
 			name = "CookedBeef",
 			displayName = "Steak",
@@ -60,6 +84,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			icon = "",
 			lore = "A hearty meal.",
 			knowledge = { smelt = 0.35 },
+			food = { heal = 4, nutrition = 8, saturation = 0.8 },
 		},
 		{
 			name = "RawMutton",
@@ -67,6 +92,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = slab(RAW_MUTTON, FAT, true),
 			icon = "",
 			lore = "Better cooked.",
+			food = { heal = 1, nutrition = 2, saturation = 0.3 },
 		},
 		{
 			name = "CookedMutton",
@@ -75,6 +101,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			icon = "",
 			lore = "A filling meal.",
 			knowledge = { smelt = 0.35 },
+			food = { heal = 3, nutrition = 6, saturation = 0.8 },
 		},
 		{
 			name = "RawPorkchop",
@@ -82,6 +109,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = slab(RAW_PORKCHOP, FAT, false),
 			icon = "",
 			lore = "Better cooked.",
+			food = { heal = 2, nutrition = 3, saturation = 0.3 },
 		},
 		{
 			name = "CookedPorkchop",
@@ -90,6 +118,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			icon = "",
 			lore = "A hearty meal.",
 			knowledge = { smelt = 0.35 },
+			food = { heal = 4, nutrition = 8, saturation = 0.8 },
 		},
 		{
 			name = "RawChicken",
@@ -97,6 +126,13 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = drumstick(RAW_CHICKEN),
 			icon = "",
 			lore = "Eating it raw is a gamble. Cook it first.",
+			-- (Minecraft's 30% chance of Hunger for 30 s.)
+			food = {
+				heal = 1,
+				nutrition = 2,
+				saturation = 0.3,
+				effect = { kind = "hunger", chance = 0.3, ticks = 600 },
+			},
 		},
 		{
 			name = "CookedChicken",
@@ -105,6 +141,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			icon = "",
 			lore = "A filling meal.",
 			knowledge = { smelt = 0.35 },
+			food = { heal = 3, nutrition = 6, saturation = 0.6 },
 		},
 		{
 			name = "Feather",
@@ -131,6 +168,13 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			},
 			icon = "",
 			lore = "Zombie meat. Eat it only if you must.",
+			-- (Minecraft's 80% chance of Hunger for 30 s.)
+			food = {
+				heal = 2,
+				nutrition = 4,
+				saturation = 0.1,
+				effect = { kind = "hunger", chance = 0.8, ticks = 600 },
+			},
 		},
 		{
 			name = "Bone",

@@ -87,7 +87,8 @@ Infection.NAUSEA_TICKS = 200
 Infection.NAUSEA_EVERY = 1200
 -- Stage II on: extra exhaustion of Tough As Nails' thirst a tick.
 Infection.THIRST_EXHAUSTION = 0.005
--- Weakness after a cure from this stage on, for this many ticks (Items/Foods' Antibiotics).
+-- Weakness after a cure from this stage on, for this many ticks (the Antibiotics' `aftermath`,
+-- their entry's in the Apocalypse pack's items/supplies; Items/Foods).
 Infection.AFTERMATH_STAGE = 3
 Infection.AFTERMATH_TICKS = 1200
 -- From this stage natural regeneration stops.

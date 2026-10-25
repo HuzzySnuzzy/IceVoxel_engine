@@ -559,13 +559,14 @@ function Theme.tooltipColour(name: string): string
 	return TOOLTIP_COLOURS[name] or "Text"
 end
 
--- The water drinks (the liquid they hold is water; a dirty one's is dirty water).
-local WATER: { [any]: boolean } = {
-	[Drinks.DIRTY] = true,
-	[Drinks.PURIFIED] = true,
-	[Drinks.DIRTY_BOWL] = true,
-	[Drinks.PURIFIED_BOWL] = true,
-}
+-- The water drinks (the liquid they hold is water; a dirty one's is dirty water): dirty water's
+-- and its purified twin's (Drinks.PURIFIED_OF), which every alike drink shares (bottled water's:
+-- Drinks makes alike drinks one).
+local WATER: { [any]: boolean } = {}
+for dirty, purified in Drinks.PURIFIED_OF do
+	WATER[Drinks.of(dirty) :: any] = true
+	WATER[Drinks.of(purified) :: any] = true
+end
 
 --[[
 	The liquid an item holds, for the tooltip's pill: a full bucket's fluid ("Lava"), "Dirty Water"

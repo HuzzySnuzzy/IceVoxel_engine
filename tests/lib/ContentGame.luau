@@ -219,6 +219,21 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		local def = if id then Items.get(id) else nil
 		return if def then def.name else nil
 	end
+	-- (A food's or a drink's effects with their Shared/Effects names, for `show`.)
+	local Effects = require(shared.Effects)
+	local function effectNames(list: { any }?): { any }?
+		if list == nil then
+			return nil
+		end
+		local named = {}
+		for _, given in list do
+			local shown = table.clone(given)
+			local effect = Effects.get(given.effect)
+			shown.effect = if effect then effect.name else tostring(given.effect)
+			table.insert(named, shown)
+		end
+		return named
+	end
 
 	local isItem: { [string]: boolean } = {}
 	local creativeOnly: { [string]: boolean } = {}
@@ -420,6 +435,31 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		creativeOnly = creativeOnly,
 		itemId = function(name: string): number?
 			return Items.find(name)
+		end,
+		food = function(name: string): any?
+			local food = Foods.of(Items.find(name))
+			if food == nil then
+				return nil
+			end
+			local shown = table.clone(food) :: any
+			shown.useTicks = Foods.useTicks(food)
+			shown.medical = Foods.isMedical(food)
+			shown.effects = effectNames(food.effects)
+			shown.aftermath = if food.aftermath then effectNames({ food.aftermath })[1] else nil
+			return shown
+		end,
+		drink = function(name: string): any?
+			local id = Items.find(name)
+			local entry = Drinks.entry(id)
+			if entry == nil then
+				return nil
+			end
+			local shown = table.clone(entry.drink) :: any
+			shown.effects = effectNames(entry.drink.effects)
+			shown.potion = Drinks.isPotion(entry.drink)
+			shown.empty = nameOf(entry.empty)
+			shown.sips = if entry.sips then (Items.get(id :: number) :: any).durability else nil
+			return shown
 		end,
 	}
 end

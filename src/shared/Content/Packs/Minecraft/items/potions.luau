@@ -5,7 +5,8 @@
 	Bottle with the liquid in its effect's colour, Minecraft's potion colour being its effect's),
 	stacking to 1 as Minecraft's potions do, the strong and long variants after each base potion,
 	in PotionList's order. Drinking one (held 32 ticks: ToughAsNails/Drinks) gives its effect, and
-	the Glass Bottle comes back.
+	the Glass Bottle comes back: each one's `drink`, its variant's effect, ticks and level, no water
+	and PotionList's EMPTY bottle.
 
 	PotionList makes the items; what each says of itself is here, by its item name (POTIONS: its
 	lore line and icon, blank), and its Age by its variant: brewing a base potion is the Iron Age's
@@ -70,6 +71,10 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				lore = own.lore,
 				icon = own.icon,
 				age = if variant.from == PotionList.BASE then "iron" else "industrial",
+				drink = {
+					effects = { { effect = variant.effect, ticks = variant.ticks, amplifier = variant.amplifier } },
+					empty = PotionList.EMPTY,
+				},
 			})
 		)
 		made[variant.item] = true

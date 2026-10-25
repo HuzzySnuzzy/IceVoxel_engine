@@ -475,10 +475,13 @@ return function(t, shared, require, server, client)
 		local after, back = Drinks.afterDrinking({ item = I.PurifiedWaterBowl, count = 3 }, false)
 		t.eq((after :: Items.Stack).count, 2)
 		t.eq((back :: Items.Stack).item, I.Bowl, "the bowl into the inventory")
-		-- A bowl holds a little more than a bottle.
+		-- A bowl holds a little more than a bottle. (The bottles' drinks, their entries', in place
+		-- of the old Drinks.DIRTY and Drinks.PURIFIED.)
 		local dirty, purified = Drinks.of(I.DirtyWaterBowl) :: any, Drinks.of(I.PurifiedWaterBowl) :: any
-		t.ok(dirty.thirst >= Drinks.DIRTY.thirst and dirty.hydration > Drinks.DIRTY.hydration)
-		t.ok(purified.thirst > Drinks.PURIFIED.thirst and purified.hydration > Drinks.PURIFIED.hydration)
+		local dirtyBottle, purifiedBottle =
+			Drinks.of(I.DirtyWaterBottle) :: any, Drinks.of(I.PurifiedWaterBottle) :: any
+		t.ok(dirty.thirst >= dirtyBottle.thirst and dirty.hydration > dirtyBottle.hydration)
+		t.ok(purified.thirst > purifiedBottle.thirst and purified.hydration > purifiedBottle.hydration)
 		t.eq(dirty.chance, 0.5, "dirty water's risk")
 		t.eq(purified.chance, 0)
 		local state = Thirst.new()
@@ -555,12 +558,15 @@ return function(t, shared, require, server, client)
 			I.PotionOfSwiftness,
 			"a tea is a bowl's (a bottle brews a potion: Shared/Effects/PotionList)"
 		)
+		-- (Its water: the Purified Water Bowl's drink, its entry's, in place of the old
+		-- Drinks.PURIFIED_BOWL.)
+		local water = Drinks.of(I.PurifiedWaterBowl) :: any
 		for _, tea in { I.MintTea, I.GingerTea, I.HerbalTea } do
 			t.eq(Items.maxStack(tea), 1, `{Items.displayName(tea)} stacks to 1, like a stew`)
 			local drink = Drinks.of(tea) :: any
 			t.eq(drink.chance, 0, "no Thirst effect")
-			t.ok(drink.thirst >= Drinks.PURIFIED_BOWL.thirst, "never less than its water")
-			t.ok(drink.hydration > Drinks.PURIFIED_BOWL.hydration, "more hydration")
+			t.ok(drink.thirst >= water.thirst, "never less than its water")
+			t.ok(drink.hydration > water.hydration, "more hydration")
 		end
 		-- Drinking them: Internal Chill / Warmth for the body (2 minutes; herbal tea 1 of each).
 		local function drink(tea: number): (any, any)
@@ -615,7 +621,11 @@ return function(t, shared, require, server, client)
 		local warmOnly = Temperature.new()
 		t.ok(not Drinks.apply(nil, Drinks.of(I.GingerTea) :: any, rolls({ 0 }), warmOnly))
 		t.eq(warmOnly.warmth, 2400, "warmth without thirst")
-		t.ok(not Drinks.apply(nil, Drinks.DIRTY, rolls({ 0 })), "no Thirst effect without thirst")
+		-- (Dirty water: the bottle's drink, in place of the old Drinks.DIRTY.)
+		t.ok(
+			not Drinks.apply(nil, Drinks.of(I.DirtyWaterBottle) :: any, rolls({ 0 })),
+			"no Thirst effect without thirst"
+		)
 	end)
 
 	--[[ What the screens show ]]

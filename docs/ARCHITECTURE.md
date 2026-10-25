@@ -39,6 +39,7 @@ Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePa
                 ─► Radiation                            ─► Generation/Ores (features)
                 ─► Generation/ScavengeLoot, Mineshafts  ─► Sounds (block sounds, equip sounds)
                 ─► ToughAsNails/Temperature (heating, cooling) ─► server Players/Climate, Tooltip
+                ─► Items/Foods, ToughAsNails/Drinks (food, drink) ─► eating, drinking, Tooltip
 ```
 
 **A pack** is a folder holding `pack`, its manifest (`{ order, description, requires? }`), and
@@ -110,6 +111,8 @@ before (`tests/spec/Content` checks each one end to end):
 | `equipSound` | armor item | Sounds.armorEquip (SoundList.ARMOR's prefixes) |
 | `loot` (a loot table's name or pools) | block | Items.lootDrop (Items' leafDrop, randomDrop and STRAW_CHANCE rules) |
 | `blastResistance`, `zombieBreak`, `flammable` | block | (already fields; each entry gives its own now: BlockList's old BLAST_RESISTANCE, ZOMBIE_BREAK and fire odds by name suffix are gone) |
+| `food = { heal, nutrition?, saturation?, effect?, useTicks?, cures?, effects?, aftermath?, setback?, sound?, burp? }` | item | Items/Foods.ITEMS (the table Foods wrote out by id; effects and cures by name) |
+| `drink = { thirst?, hydration?, chance?, effectTicks?, warmth?, chill?, effects?, mana?, empty?, sips? }` | item | ToughAsNails/Drinks.ITEMS (the table and the named `Drink`s Drinks wrote out; effects and `empty` by name) |
 
 A block's `loot` is Minecraft's block loot table in short: when a player breaks it by hand or
 with a tool that harvests it (not Shears; server Network/EditRules) and when it drops by itself
@@ -5266,15 +5269,20 @@ running stays):
 
 A `Drink` may also carry `warmth` / `chill` ticks: `Drinks.apply(thirst, drink, random,
 temperature?)` gives TAN's Internal Warmth / Internal Chill to the temperature state it is handed
-(the server hands it while temperature is on). Containers are data, three frozen tables in the
-module that both sides read: `ITEMS` (full item -> `{ drink, empty?, sips? }`: what it gives, the
-empty container drinking it leaves, `sips` for a canteen whose `durability` is its sips), `FILLS`
-(empty container -> the dirty water it becomes at a water source; a dirty `sips` item of its own
-container is topped up there while it has sips missing) and `PURIFIED_OF` (dirty -> purified;
-`purifiedOf`, `isDirty`). A new container is two `ITEMS` entries, a `FILLS` entry, a
+(the server hands it while temperature is on). Each drink is its item's entry's `drink` (the
+numbers above, the `empty` container by name, `sips`; numbers left out are 0), and the module
+that both sides read makes three frozen tables: `ITEMS` (full item -> `{ drink, empty?, sips? }`,
+from the entries as it loads: what it gives, the empty container drinking it leaves, `sips` for a
+canteen whose `durability` is its sips; alike drinks are one `Drink`, so the bottle's and the
+canteen's dirty water, and purified and bottled water, are the same, which the tooltip's "Water"
+pill goes by), and two of its own, `FILLS` (empty container -> the dirty water it becomes at a
+water source; a dirty `sips` item of its own container is topped up there while it has sips
+missing) and `PURIFIED_OF` (dirty -> purified; `purifiedOf`, `isDirty`). `HAND` (the empty hand's
+sip) is the one `Drink` no item gives. A new container is two entries' `drink`, a `FILLS` entry, a
 `PURIFIED_OF` entry and its recipes, as the wooden bowls are; a drink that is no water (the teas)
-is an `ITEMS` entry with a `Drink` of its own and the container it leaves; load-time asserts catch
-entries that name no item or no drink.
+is an entry's `drink` of its own with the container it leaves; load-time checks name the pack and
+the entry of an unknown effect or container, sips without durability and a drink that does
+nothing, and catch table entries that name no drink.
 
 Items (the Survival pack's `items/drinks`): Glass Bottle (Minecraft's; three glass in a V make
 three), Dirty and Purified Water Bottle (stack 16), Canteen (TAN's leather canteen in iron: a nugget
@@ -5558,8 +5566,8 @@ Players/Operators) and Minecraft's answers ("Applied effect Speed to Steve", "Re
 with an ingredient in a crafting grid, with a strong (Glow Dust: level II) and a long (a coal or
 charcoal) variant where Minecraft has them; 29 items (the Minecraft pack's `items/potions`, stack
 1, the effect's colour in a bottle), 29 shapeless recipes (its `recipes/potions`; the `tulips` tag),
-both made from PotionList in a loop, and 29 `Drinks.ITEMS` entries
-whose `Drink` carries `effects` (no water; `Drinks.isPotion`: drinkable any time, Tough As Nails on
+both made from PotionList in a loop, and each item's `drink` its variant's effect, so 29
+`Drinks.ITEMS` entries whose `Drink` carries `effects` (no water; `Drinks.isPotion`: drinkable any time, Tough As Nails on
 or off, so Players/ToughAsNails keeps its Drink listener and records with both switches off,
 without ticking, and bottles fill at water then too). The inventory tooltip lists the effect, its
 level and time (blue, harmful red).
@@ -7153,8 +7161,8 @@ survivor record).
 (swords 4-7 at 1.6 a second, axes 7-9 at 0.8-1, pickaxes 2-5, shovels 2.5-5.5, hoes 1, the hand 1
 at 4; the apocalypse's bats, machete, crowbar and Fire Axe), `strength`
 (Player.getAttackStrengthScale(0.5)), `damage` (x (0.2 + s² x 0.8)), `reach` (3, creative 6,
-spectators 0), `knockback` (LivingEntity.knockback), `wear`. Foods: Minecraft's `nutrition` and
-`saturation` modifier (cooked beef and porkchop 8 / 0.8, mutton 6 / 0.8, chicken 6 / 0.6, raw beef
+spectators 0), `knockback` (LivingEntity.knockback), `wear`. Foods (each item's entry's `food`,
+`Foods.ITEMS` by id made from them): Minecraft's `nutrition` and `saturation` modifier (cooked beef and porkchop 8 / 0.8, mutton 6 / 0.8, chicken 6 / 0.6, raw beef
 and porkchop 3 / 0.3, raw mutton and chicken 2 / 0.3, rotten flesh 4 / 0.1; the ruins' tins and
 ration 2-8: see Hunger), `heal` for hunger off (cooked beef and porkchop 4, mutton and chicken 3,
 raw 1-2, rotten flesh 2; the ruins' tins 2-8) and an optional risk (raw chicken 30% and rotten
@@ -7379,7 +7387,7 @@ medicine and the rising on a real world server).
   EffectRules' `current > 1` rule stops it at the last half heart; amplifier 1 halves the
   interval. Every hurt the survival rules deal goes through `Characters.magicHurt` or EffectRules,
   so Resistance applies and the hurt cooldown holds.
-- **Medicine** reuses eating (Protocol Eat): `Items/Foods` entries carry `useTicks`, `cures`
+- **Medicine** reuses eating (Protocol Eat): the medical items' `food` (`Items/Foods`) carries `useTicks`, `cures`
   (Shared/Effects names), `effects`, `aftermath` (Antibiotics' Weakness, given when the infection
   the cure ended had reached its `stage`, read through the `infectionStage` hook before the cure),
   `setback`, `sound` and `burp`; `Foods.canUse` is who may use one, `Foods.finish(food, hooks)`
@@ -7387,8 +7395,8 @@ medicine and the rising on a real world server).
   goes to its owner), `Infection.setBack`, `Infection.stage`, `Effects.give`, TAN's Thirst effect),
   so the specs play the whole rule out with fakes. The client predicts `canUse` with
   `Player/EffectState` and plays medicine's sound as the use starts (no bites, no burp); the server
-  plays it to everyone else. Bottled Water and Soda are `ToughAsNails/Drinks` entries (Soda's Speed
-  makes it a "potion": drunk any time).
+  plays it to everyone else. Bottled Water and Soda carry a `drink` (`ToughAsNails/Drinks`; Soda's
+  Speed makes it a "potion": drunk any time).
 
 ## Blood moon and the day counter (`Apocalypse/BloodMoon`, client `Rendering/BloodMoonSky`, `Ui/SurvivorHud`)
 
@@ -9312,8 +9320,8 @@ Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
   the client's prediction back, only the first blinks the stars), a potion, a
   crystal or a restore. A respawn starts full; the first character since joining keeps the mana it
   has (a restored character's). `export` / `restore` are what `Players/CharacterStore` saves.
-- **Potions and Mana Sickness**: the Lesser Mana Potion (50) and Mana Potion (100) are
-  `ToughAsNails/Drinks` entries with a `mana` field. They count as potions: drunk any time with the
+- **Potions and Mana Sickness**: the Lesser Mana Potion (50) and Mana Potion (100) carry a
+  `drink` with `mana` (`ToughAsNails/Drinks`). They count as potions: drunk any time with the
   32-tick hold, Tough As Nails on or off, and they give a Glass Bottle back. When one finishes,
   `Players/ToughAsNails` calls `Players/Mana.potion`, which adds the mana and Mana Sickness
   (effect 25 through `Players/Effects`: 5 s more each time, 10 s at most). While Mana Sickness

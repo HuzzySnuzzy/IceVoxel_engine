@@ -1,43 +1,37 @@
 --!strict
 --[[
 	What there is to drink and how containers fill (Tough As Nails), pure (no Roblox APIs, so the
-	tests run it). The items are ItemList's (Glass Bottle, Dirty / Purified Water Bottle, Canteen,
-	Dirty / Purified Water Canteen, Bowl, Dirty / Purified Water Bowl, Mint / Ginger / Herbal Tea);
-	dirty water is purified in a furnace or with a mint leaf in a crafting grid, and a purified
-	water bowl brews a tea with a herb (Crafting/Recipes).
+	tests run it). The drinks are content pack items, each saying what drinking it gives on its
+	entry, its `drink` (Content/Schema): the Survival pack's water and teas (items/drinks: the
+	Glass Bottle, Dirty / Purified Water Bottle, Canteen, Dirty / Purified Water Canteen, Bowl,
+	Dirty / Purified Water Bowl, Mint / Ginger / Herbal Tea, with a table of their numbers), the
+	Apocalypse pack's Bottled Water and Soda (items/supplies), the Terraria pack's mana potions
+	and the Minecraft pack's potions (items/potions, Shared/Effects/PotionList's). Dirty water is
+	purified in a furnace or with a mint leaf in a crafting grid, and a purified water bowl brews
+	a tea with a herb (the Survival pack's recipes).
 
-	  Drink                 thirst  hydration  Thirst effect  warmth / chill
-	  a water source, hand    1       0.1      50%, 15 s        -            TAN's hand drinking
-	                                                                         (Config.ToughAsNails
-	                                                                         .HandDrinking)
-	  dirty water             4       0.25     50%, 15 s        -            bottle, canteen sip
-	  purified water          6       0.4        -              -            bottle, canteen sip
-	  dirty water bowl        4       0.3      50%, 15 s        -            a bowl holds more
-	  purified water bowl     7       0.45       -              -
-	  mint tea                7       0.6        -          chill 2 min      a mint leaf brewed
-	  ginger tea              7       0.6        -          warmth 2 min     a ginger root
-	  herbal tea              8       0.65       -          both 1 min       both herbs
-	  bottled water           6       0.4        -              -            the ruins': a Glass
-	                                                                         Bottle back
-	  soda                    4       0.2        -              -            Speed for 20 s; drunk
-	                                                                         any time, no can back
-	(hydration is the modifier: Thirst.drink adds thirst x modifier x 2; the Thirst effect costs
-	0.015 exhaustion a tick, so 15 s of it is 4.5 exhaustion, about a point of hydration or
-	thirst; a longer one already running stays, so sips in a row cost one effect. TAN's own 75%
-	and 30 s at 0.025 were too harsh for this game.) A drink may also give TAN's Internal Warmth
-	or Internal Chill (`warmth` / `chill` ticks, Temperature.giveWarmth / giveChill): `apply`
-	gives them when it is handed the temperature state. A bowl is cheap (three planks make four)
-	and holds a little more than a bottle; a tea keeps its water's thirst, adds hydration and its
-	effect, so brewing never wastes water: ginger tea keeps a cold biome's chill off (Internal
-	Warmth: the target 5 steps warmer, though not past NEUTRAL's top by it), mint tea a hot one's
-	heat (Internal Chill), herbal tea both, for half as long.
+	A drink (Drink) gives `thirst` points and the `hydration` modifier (Thirst.drink adds thirst x
+	modifier x 2), and rolls TAN's Thirst effect at `chance` for `effectTicks` (dirty water: 50%,
+	15 s). The Thirst effect costs 0.015 exhaustion a tick, so 15 s of it is 4.5 exhaustion, about
+	a point of hydration or thirst; a longer one already running stays, so sips in a row cost one
+	effect. (TAN's own 75% and 30 s at 0.025 were too harsh for this game.) A sip from a water
+	source with an empty hand is HAND: thirst 1, hydration 0.1, 50%, 15 s (TAN's hand drinking,
+	Config.ToughAsNails.HandDrinking). A drink may also give TAN's Internal Warmth or Internal
+	Chill (`warmth` / `chill` ticks, Temperature.giveWarmth / giveChill: the target 5 steps
+	warmer or cooler, though not past NEUTRAL by it): `apply` gives them when it is handed the
+	temperature state. Status effects (`effects`) or mana (`mana`) make it a potion (below). An
+	entry leaves out the numbers it hasn't: they are 0.
 
-	The items are data, three tables below, and everything here reads them:
-	  ITEMS        a full item -> { drink, empty?, sips? }: what drinking it gives, the empty
-	               container drinking it leaves (nil: nothing, it is used up), and `sips`: true for
-	               a canteen (the item's `durability` is its sips; each wears it, the last leaves
-	               `empty`), else one item is one drink (a bottle: the stack shrinks by one and
-	               `empty` comes back);
+	The items are data, the entries' (ITEMS) and two tables of this module's, and everything here
+	reads them:
+	  ITEMS        a full item -> { drink, empty?, sips? }, each entry's `drink` as this loads:
+	               what drinking it gives, the empty container drinking it leaves (`empty`, an item
+	               name on the entry; nil: nothing, it is used up), and `sips`: true for a canteen
+	               (the item's `durability` is its sips; each wears it, the last leaves `empty`),
+	               else one item is one drink (a bottle: the stack shrinks by one and `empty` comes
+	               back). Entries whose drinks are alike share one Drink: a bottle's and a
+	               canteen's dirty water, purified water and the ruins' bottled water (client
+	               Ui/Theme's "Water" pill goes by that);
 	  FILLS        an empty container -> the full item it becomes at a water source (its dirty
 	               water). A `sips` item that is the dirty water of its own container (the Dirty
 	               Water Canteen) is topped up at water while it has sips missing; a purified one
@@ -45,20 +39,23 @@
 	  PURIFIED_OF  dirty water -> its purified twin (`purifiedOf`; `isDirty` is being a key here).
 	               Purifying itself is a recipe's (Crafting/Recipes: smelting, or anything else
 	               that turns one into the other).
-	Both sides read this module, so entries go into the tables here (they are frozen), never at
-	run time. A new container is four entries and its recipes, as the wooden bowls (ItemList Bowl,
-	DirtyWaterBowl, PurifiedWaterBowl) are:
-	    ITEMS        [I.DirtyWaterBowl] = { drink = Drinks.DIRTY_BOWL, empty = I.Bowl },
-	                 [I.PurifiedWaterBowl] = { drink = Drinks.PURIFIED_BOWL, empty = I.Bowl },
+	Both sides read this module, so drinks go on the entries and into the tables here (they are
+	frozen), never at run time. A new container is two entries' `drink`, two lines here and its
+	recipes, as the wooden bowls (the Survival pack's Bowl, DirtyWaterBowl, PurifiedWaterBowl)
+	are:
+	    entries      DirtyWaterBowl     drink = { thirst = 4, hydration = 0.3, chance = 0.5,
+	                                              effectTicks = 300, empty = "Bowl" }
+	                 PurifiedWaterBowl  drink = { thirst = 7, hydration = 0.45, empty = "Bowl" }
 	    FILLS        [I.Bowl] = I.DirtyWaterBowl,
 	    PURIFIED_OF  [I.DirtyWaterBowl] = I.PurifiedWaterBowl,
-	    Recipes      smelt("DirtyWaterBowl", "PurifiedWaterBowl") and the mint cure
-	                 (mix({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl"))
+	    recipes      smelting("DirtyWaterBowl", "PurifiedWaterBowl") and the mint cure
+	                 (shapeless({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl"))
 	and a bowl then fills at water, is drunk by holding the use button, gives its Bowl back, and
 	purifies in a furnace or with mint, as a bottle does. A drink that is no water (the teas) is
-	an ITEMS entry with a Drink of its own and the container it leaves: Mint Tea is { drink =
-	Drinks.MINT_TEA, empty = I.Bowl }, MINT_TEA carrying `chill = 2400`. The load checks below
-	assert that every named item is a drink where it must be one.
+	an entry's `drink` of its own with the container it leaves: Mint Tea's is { thirst = 7,
+	hydration = 0.6, chill = 2400, empty = "Bowl" }. The load checks below name the pack and the
+	entry of an unknown effect or container, sips without a durability and a drink that does
+	nothing, and assert that every item the tables name is a drink where it must be one.
 
 	Using an item (`action`, right click; Minecraft's Item.use after a block's own use):
 	  an empty container (FILLS)   at a water source: fill (BottleItem: a ray that stops at
@@ -88,10 +85,11 @@
 	keep the empty one and get a full one only when they have none.
 ]]
 
+local Content = require(script.Parent.Parent.Content)
 local Effects = require(script.Parent.Parent.Effects)
 local Fluids = require(script.Parent.Parent.Fluids)
 local Items = require(script.Parent.Parent.Items)
-local PotionList = require(script.Parent.Parent.Effects.PotionList)
+local Schema = require(script.Parent.Parent.Content.Schema)
 local Thirst = require(script.Parent.Thirst)
 local Temperature = require(script.Parent.Temperature)
 
@@ -108,7 +106,7 @@ export type Drink = {
 	-- giveChill; nil: none).
 	warmth: number?,
 	chill: number?,
-	-- Status effects it gives (Shared/Effects ids; a potion's: PotionList; nil: none).
+	-- Status effects it gives (Shared/Effects ids; nil: none).
 	effects: { PotionEffect }?,
 	-- Mana it restores (Terraria's mana potions, Shared/Mana; nil: none). The server gives it with
 	-- Mana Sickness when the drink finishes (Players/ToughAsNails through Players/Mana.potion).
@@ -132,35 +130,8 @@ export type Action = "fill" | "drink" | "hand"
 
 local Drinks = {}
 
+-- A sip from a water source with an empty hand (see the header; no item gives it).
 Drinks.HAND = table.freeze({ thirst = 1, hydration = 0.1, chance = 0.5, effectTicks = 300 }) :: Drink
-Drinks.DIRTY = table.freeze({ thirst = 4, hydration = 0.25, chance = 0.5, effectTicks = 300 }) :: Drink
-Drinks.PURIFIED = table.freeze({ thirst = 6, hydration = 0.4, chance = 0, effectTicks = 0 }) :: Drink
-Drinks.DIRTY_BOWL = table.freeze({ thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300 }) :: Drink
-Drinks.PURIFIED_BOWL = table.freeze({ thirst = 7, hydration = 0.45, chance = 0, effectTicks = 0 }) :: Drink
--- The teas (a purified water bowl brewed with a herb): Internal Chill, Internal Warmth or both.
-Drinks.MINT_TEA = table.freeze({ thirst = 7, hydration = 0.6, chance = 0, effectTicks = 0, chill = 2400 }) :: Drink
-Drinks.GINGER_TEA = table.freeze({ thirst = 7, hydration = 0.6, chance = 0, effectTicks = 0, warmth = 2400 }) :: Drink
-Drinks.HERBAL_TEA = table.freeze({
-	thirst = 8,
-	hydration = 0.65,
-	chance = 0,
-	effectTicks = 0,
-	warmth = 1200,
-	chill = 1200,
-}) :: Drink
--- The ruins' soda (the zombie apocalypse, Generation/ScavengeLoot): a little water, little
--- hydration and Speed for 20 s; its can is not kept. (Its effects make it drunk any time, as a
--- potion: thirsty or not, thirst on or off.)
-Drinks.SODA = table.freeze({
-	thirst = 4,
-	hydration = 0.2,
-	chance = 0,
-	effectTicks = 0,
-	effects = table.freeze({ table.freeze({ effect = Effects.id.Speed, ticks = 400, amplifier = 0 }) }),
-}) :: Drink
--- Terraria's mana potions (no water): 50 and 100 mana, each with Mana Sickness (Shared/Mana).
-Drinks.LESSER_MANA = table.freeze({ thirst = 0, hydration = 0, chance = 0, effectTicks = 0, mana = 50 }) :: Drink
-Drinks.MANA = table.freeze({ thirst = 0, hydration = 0, chance = 0, effectTicks = 0, mana = 100 }) :: Drink
 
 -- Ticks of holding the use button to drink an item (Minecraft's potions and TAN's drinks).
 Drinks.USE_TICKS = 32
@@ -175,37 +146,88 @@ Drinks.CANTEEN = I.Canteen
 Drinks.DIRTY_CANTEEN = I.DirtyWaterCanteen
 Drinks.PURIFIED_CANTEEN = I.PurifiedWaterCanteen
 
--- The full items (see the header), the potions (PotionList) after the water.
-local ITEMS: { [number]: DrinkItem } = {
-	[I.DirtyWaterBottle] = table.freeze({ drink = Drinks.DIRTY, empty = I.GlassBottle }),
-	[I.PurifiedWaterBottle] = table.freeze({ drink = Drinks.PURIFIED, empty = I.GlassBottle }),
-	[I.DirtyWaterCanteen] = table.freeze({ drink = Drinks.DIRTY, empty = I.Canteen, sips = true }),
-	[I.PurifiedWaterCanteen] = table.freeze({ drink = Drinks.PURIFIED, empty = I.Canteen, sips = true }),
-	[I.DirtyWaterBowl] = table.freeze({ drink = Drinks.DIRTY_BOWL, empty = I.Bowl }),
-	[I.PurifiedWaterBowl] = table.freeze({ drink = Drinks.PURIFIED_BOWL, empty = I.Bowl }),
-	[I.MintTea] = table.freeze({ drink = Drinks.MINT_TEA, empty = I.Bowl }),
-	[I.GingerTea] = table.freeze({ drink = Drinks.GINGER_TEA, empty = I.Bowl }),
-	[I.HerbalTea] = table.freeze({ drink = Drinks.HERBAL_TEA, empty = I.Bowl }),
-	[I.LesserManaPotion] = table.freeze({ drink = Drinks.LESSER_MANA, empty = I.GlassBottle }),
-	[I.ManaPotion] = table.freeze({ drink = Drinks.MANA, empty = I.GlassBottle }),
-	-- The ruins' drinks (the zombie apocalypse): bottled water is purified water whose bottle is
-	-- kept; a soda's can is not.
-	[I.BottledWater] = table.freeze({ drink = Drinks.PURIFIED, empty = I.GlassBottle }),
-	[I.SodaCan] = table.freeze({ drink = Drinks.SODA }),
-}
-for _, variant in PotionList.all() do
-	local effect = Effects.id[variant.effect]
-	assert(effect, `Potion {variant.item} gives an unknown effect {variant.effect}`)
-	local potion: Drink = {
-		thirst = 0,
-		hydration = 0,
-		chance = 0,
-		effectTicks = 0,
-		effects = table.freeze({
-			table.freeze({ effect = effect, ticks = variant.ticks, amplifier = variant.amplifier }),
-		}),
+-- (For drinks without effects.)
+local NO_EFFECTS: { PotionEffect } = table.freeze({})
+
+-- (A Drink's effects as one string, to tell alike drinks.)
+local function effectsKey(effects: { PotionEffect }?): string
+	local parts = {}
+	for _, effect in effects or NO_EFFECTS do
+		table.insert(parts, `{effect.effect}:{effect.ticks}:{effect.amplifier}`)
+	end
+	return table.concat(parts, ",")
+end
+
+-- Alike drinks share one Drink (see the header): a drink's numbers -> its Drink.
+local alike: { [string]: Drink } = {}
+
+-- `where`'s `drink` (an entry's, Content/Schema) as a Drink: numbers left out are 0, effect names
+-- become ids; an alike one made before is that one.
+local function fromEntry(spec: Schema.DrinkSpec, where: string): Drink
+	local effects: { PotionEffect }? = nil
+	if spec.effects then
+		local list: { PotionEffect } = {}
+		for _, given in spec.effects do
+			local id = Effects.id[given.effect]
+			assert(id, `Drinks: {where} gives an unknown effect {given.effect}`)
+			table.insert(list, table.freeze({ effect = id, ticks = given.ticks, amplifier = given.amplifier or 0 }))
+		end
+		effects = table.freeze(list)
+	end
+	local drink: Drink = {
+		thirst = spec.thirst or 0,
+		hydration = spec.hydration or 0,
+		chance = spec.chance or 0,
+		effectTicks = spec.effectTicks or 0,
+		warmth = spec.warmth,
+		chill = spec.chill,
+		effects = effects,
+		mana = spec.mana,
 	}
-	ITEMS[Items.id[variant.item]] = table.freeze({ drink = table.freeze(potion), empty = Items.id[PotionList.EMPTY] })
+	local key = string.format(
+		"%.17g %.17g %.17g %.17g %s %s %s %s",
+		drink.thirst,
+		drink.hydration,
+		drink.chance,
+		drink.effectTicks,
+		tostring(drink.warmth),
+		tostring(drink.chill),
+		tostring(drink.mana),
+		effectsKey(effects)
+	)
+	local made = alike[key]
+	if made == nil then
+		made = table.freeze(drink)
+		alike[key] = made
+	end
+	return made
+end
+
+-- The full items (see the header): every content pack item's `drink`. (Mistakes would only show
+-- as items that do nothing: catch them at load.)
+local content = Content.default
+local ITEMS: { [number]: DrinkItem } = {}
+for _, spec in content.items do
+	local own = spec.drink
+	if own then
+		local where = content.where("item", spec.name)
+		local empty: number? = nil
+		if own.empty then
+			empty = Items.find(own.empty)
+			assert(empty, `Drinks: {where}'s empty container {own.empty} is no item`)
+		end
+		assert(not own.sips or spec.durability, `Drinks: {where} is drunk in sips but has no durability`)
+		local drink = fromEntry(own, where)
+		assert(
+			drink.thirst > 0
+				or (drink.warmth or 0) > 0
+				or (drink.chill or 0) > 0
+				or #(drink.effects or NO_EFFECTS) > 0
+				or (drink.mana or 0) > 0,
+			`Drinks: {where} does nothing (no thirst, warmth, chill, effects or mana)`
+		)
+		ITEMS[Items.id[spec.name]] = table.freeze({ drink = drink, empty = empty, sips = own.sips })
+	end
 end
 Drinks.ITEMS = table.freeze(ITEMS)
 
@@ -227,12 +249,6 @@ Drinks.PURIFIED_OF = table.freeze({
 local function itemName(item: number): string
 	local def = Items.get(item)
 	return if def then def.name else tostring(item)
-end
-for item, entry in Drinks.ITEMS do
-	assert(Items.get(item), `Drinks.ITEMS has an unknown item {item}`)
-	assert(entry.empty == nil or Items.get(entry.empty), `{itemName(item)}'s empty container is no item`)
-	local def = Items.get(item)
-	assert(not entry.sips or (def and def.durability), `{itemName(item)} is drunk in sips but has no durability`)
 end
 for empty, full in Drinks.FILLS do
 	assert(Items.get(empty), `Drinks.FILLS has an unknown item {empty}`)

@@ -18,8 +18,8 @@
 	  * Mana (Shared/Mana): the Fallen Star, which falls at night and glows (server
 	    Players/FallenStars); five make a Mana Crystal, which raises max mana by 20 for good (nine
 	    at most: Config.Mana); and Terraria's Lesser Mana Potion (50 mana) and Mana Potion (100),
-	    drunk like the potions (ToughAsNails/Drinks), each giving Mana Sickness. They stack to 16,
-	    as the filled bottles.
+	    drunk like the potions (their `drink`: its `mana`, no water; ToughAsNails/Drinks), each
+	    giving Mana Sickness and a Glass Bottle back. They stack to 16, as the filled bottles.
 	  * Magic weapons (`magic`; server Players/Magic, Shared/Magic): Terraria's Wand of Sparking (a
 	    stick with a glowing ember, found in mineshafts), an Emerald Staff (Terraria's gem staves:
 	    an emerald on a long staff, crafted) and Water Bolt (a blue spell book whose bolt bounces,
@@ -304,6 +304,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = define.bottle(LESSER_MANA),
 			icon = "",
 			lore = "Restores a little mana, with a moment of Mana Sickness.",
+			drink = { mana = 50, empty = "GlassBottle" },
 		},
 		{
 			name = "ManaPotion",
@@ -314,6 +315,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			icon = "",
 			lore = "Restores mana, with a moment of Mana Sickness.",
 			age = "iron",
+			drink = { mana = 100, empty = "GlassBottle" },
 		},
 
 		--[[ Magic weapons ]]

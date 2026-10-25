@@ -8,49 +8,28 @@
 	with Minecraft's nutrition and saturation modifier (FoodProperties: FoodData.eat adds the
 	nutrition to the food bar and nutrition x modifier x 2 to its saturation); with hunger off it
 	heals at once what its hunger would have brought back (`heal`, about half the nutrition: the
-	game before the food bar):
+	game before the food bar). Each item says what it does on its content pack entry, its `food`
+	(Content/Schema; Minecraft 1.20.5 made food a component of the item the same way): the
+	Minecraft pack's meat (items/mobs: Minecraft's numbers) and the Apocalypse pack's tins and
+	medical supplies (items/supplies), each file's header with a table of them. `nutrition` is in
+	points of the 20 and `saturation` the modifier (FoodData.eat adds nutrition x modifier x 2);
+	`heal` is in half hearts, with hunger off.
 
-	  Food              nutrition  saturation  heals  ticks  effect                      Minecraft
-	  Steak             8          0.8 (12.8)  4      32     -                           8 / 0.8
-	  Cooked Porkchop   8          0.8 (12.8)  4      32     -                           8 / 0.8
-	  Cooked Mutton     6          0.8 (9.6)   3      32     -                           6 / 0.8
-	  Cooked Chicken    6          0.6 (7.2)   3      32     -                           6 / 0.6
-	  Raw Beef          3          0.3 (1.8)   2      32     -                           3 / 0.3
-	  Raw Porkchop      3          0.3 (1.8)   2      32     -                           3 / 0.3
-	  Raw Mutton        2          0.3 (1.2)   1      32     -                           2 / 0.3
-	  Raw Chicken       2          0.3 (1.2)   1      32     30%: Hunger for 30 s        2 / 0.3
-	  Rotten Flesh      4          0.1 (0.8)   2      32     80%: Hunger for 30 s        4 / 0.1
-	  Canned Beans      6          0.6 (7.2)   6      32     -                           (baked potato)
-	  Canned Peaches    4          0.3 (2.4)   4      32     -                           (apple)
-	  Crackers          2          0.1 (0.4)   2      24     30%: Thirst for 30 s        (cookie)
-	  Chocolate Bar     3          0.3 (1.8)   3      24     Speed for 10 s; any time    (golden apple's rule)
-	  Military Ration   8          0.8 (12.8)  8      48     -                           (steak's worth)
-
-	(nutrition in points of the 20, saturation the modifier and in brackets what it adds; heals in
-	half hearts, with hunger off.) Minecraft's Hunger effect (Shared/Effects: the food bar drains
-	faster; the HUD's FOOD icon shows falling arrows and a Hunger badge) is what raw chicken and
-	rotten flesh may bring, as in Minecraft; with hunger off they bring Tough As Nails' Thirst
-	effect instead (Shared/ToughAsNails/Thirst: extra exhaustion of the thirst bar, the THIRST
-	icon's arrows fall and a Thirst badge shows; nothing at all with thirst off too), as before the
-	food bar. Crackers are dry: their risk is the Thirst effect either way.
-	Rolled once a food (`effect`, LivingEntity.addEatEffect). Cooking is the furnace's
-	(Crafting/Recipes); a mob that dies burning drops its meat cooked (`COOKED`, Minecraft's
-	furnace_smelt loot function).
+	Minecraft's Hunger effect (Shared/Effects: the food bar drains faster; the HUD's FOOD icon
+	shows falling arrows and a Hunger badge) is what raw chicken and rotten flesh may bring, as in
+	Minecraft; with hunger off they bring Tough As Nails' Thirst effect instead
+	(Shared/ToughAsNails/Thirst: extra exhaustion of the thirst bar, the THIRST icon's arrows fall
+	and a Thirst badge shows; nothing at all with thirst off too), as before the food bar. Crackers
+	are dry: their risk is the Thirst effect either way. Rolled once a food (`effect`,
+	LivingEntity.addEatEffect). Cooking is the furnace's (Crafting/Recipes); a mob that dies
+	burning drops its meat cooked (`COOKED`, Minecraft's furnace_smelt loot function).
 
 	The medical supplies (the zombie apocalypse, server Apocalypse/Infection and /Survival) are
 	used the same way, with their own sound (`sound`: the user's client plays it as the use
 	starts, the server to everyone else as it finishes) and no burp (`burp` false). They heal
-	health whether hunger is on or not (no nutrition):
-
-	  Item              heals   ticks  cures       effects                  used when
-	  Bandage           2       40     Bleeding    -                        hurt or bleeding
-	  Medkit            8       80     Bleeding    Regeneration for 10 s    hurt or bleeding
-	  Antibiotics       0       32     Infection   Weakness for a minute    infected
-	                                               after a cure from stage
-	                                               III on (`aftermath`)
-	  Herbal Poultice   0       40     -           an infection goes back   infected
-	                                               a stage (`setback`)
-	  Painkillers       2       24     -           Regeneration for 8 s     hurt
+	health whether hunger is on or not (no nutrition), and may cure effects (`cures`), give some
+	(`effects`), give one after curing an infection that had reached a stage (`aftermath`:
+	Antibiotics' Weakness) or set an infection back a stage (`setback`: the Herbal Poultice).
 
 	Who may use one (`canUse`, with the player's food level `foodLevel` while hunger is on, nil
 	while it is off): never a spectator; anyone whose game mode can't be hurt (creative eats
@@ -71,17 +50,24 @@
 	its risk (`effect`: Minecraft's Hunger with hunger on, else the Thirst effect, for kind
 	"hunger"; the Thirst effect for kind "thirst").
 
-	The table is data: a new food is an entry in ITEMS (`heal`, `nutrition` and `saturation`,
-	optional `effect = { kind, chance, ticks }` with `kind` "hunger" or "thirst", `useTicks`,
-	`cures`, `effects`, `aftermath`, `setback`, `sound`, `burp`), checked as this loads (effects
-	and cures must be real effects, sounds real events are the Sounds spec's to check).
+	ITEMS (item id -> Food) is made from the entries' `food` as this loads, their effects' and
+	aftermaths' names turned into Shared/Effects ids, and checked, each message naming the pack and
+	the entry (a mistake would only show as a food that does nothing): an unknown effect or cure,
+	a negative heal, nutrition without saturation or out of 1..20, bad `useTicks`, medicine with
+	nutrition, an aftermath without an Infection cure, and a food that does nothing at all. A new
+	food is a `food` on its item's entry: `food = { heal = 4, nutrition = 8, saturation = 0.8 }`,
+	with optional `effect = { kind, chance, ticks }` (kind "hunger" or "thirst"), `useTicks`,
+	`cures` (effect names), `effects` ({ effect = name, ticks, amplifier? }), `aftermath` ({
+	effect = name, ticks, amplifier?, stage }), `setback`, `sound` and `burp` (sound events are the
+	Sounds spec's to check).
 ]]
 
+local Content = require(script.Parent.Parent.Content)
 local Effects = require(script.Parent.Parent.Effects)
 local GameMode = require(script.Parent.Parent.GameMode)
 local Hunger = require(script.Parent.Parent.Hunger)
-local Infection = require(script.Parent.Parent.Apocalypse.Infection)
 local Items = require(script.Parent)
+local Schema = require(script.Parent.Parent.Content.Schema)
 
 -- A risk rolled once a food: `kind` "hunger" (Minecraft's Hunger effect; Tough As Nails' Thirst
 -- effect with hunger off) or "thirst" (the Thirst effect), its chance and ticks.
@@ -147,89 +133,106 @@ Foods.USE_TICKS = 32
 Foods.EAT = "entity.generic.eat"
 Foods.BURP = "entity.player.burp"
 
-local I = Items.id
-
--- Rotten flesh's and raw chicken's chance of Minecraft's Hunger (FoodProperties' effect, 30 s),
--- and the dry crackers' of Tough As Nails' Thirst.
-local FLESH_RISK = table.freeze({ kind = "hunger", chance = 0.8, ticks = 600 }) :: Effect
-local CHICKEN_RISK = table.freeze({ kind = "hunger", chance = 0.3, ticks = 600 }) :: Effect
-local DRY_RISK = table.freeze({ kind = "thirst", chance = 0.3, ticks = 600 }) :: Effect
+-- The kinds of risk (`riskEffect` says which effect each brings).
 local RISKS: { [string]: boolean } = { hunger = true, thirst = true }
 
--- A status effect a food gives, by its Shared/Effects name.
-local function given(name: string, ticks: number, amplifier: number): Given
+-- The effect named `name` (Shared/Effects), or a load error naming `where`'s entry.
+local function effectId(name: string, where: string): number
 	local id = Effects.id[name]
-	assert(id, `Foods: no effect {name}`)
-	return table.freeze({ effect = id, ticks = ticks, amplifier = amplifier })
+	assert(id, `Foods: {where} gives an unknown effect {name}`)
+	return id
 end
 
--- Item id -> what eating it does.
-Foods.ITEMS = table.freeze({
-	[I.CookedBeef] = table.freeze({ heal = 4, nutrition = 8, saturation = 0.8 }),
-	[I.CookedPorkchop] = table.freeze({ heal = 4, nutrition = 8, saturation = 0.8 }),
-	[I.CookedMutton] = table.freeze({ heal = 3, nutrition = 6, saturation = 0.8 }),
-	[I.CookedChicken] = table.freeze({ heal = 3, nutrition = 6, saturation = 0.6 }),
-	[I.RawBeef] = table.freeze({ heal = 2, nutrition = 3, saturation = 0.3 }),
-	[I.RawPorkchop] = table.freeze({ heal = 2, nutrition = 3, saturation = 0.3 }),
-	[I.RawMutton] = table.freeze({ heal = 1, nutrition = 2, saturation = 0.3 }),
-	[I.RawChicken] = table.freeze({ heal = 1, nutrition = 2, saturation = 0.3, effect = CHICKEN_RISK }),
-	[I.RottenFlesh] = table.freeze({ heal = 2, nutrition = 4, saturation = 0.1, effect = FLESH_RISK }),
-	-- The ruins' food (Generation/ScavengeLoot).
-	[I.CannedBeans] = table.freeze({ heal = 6, nutrition = 6, saturation = 0.6, useTicks = 32 }),
-	[I.CannedPeaches] = table.freeze({ heal = 4, nutrition = 4, saturation = 0.3, useTicks = 32 }),
-	[I.Crackers] = table.freeze({ heal = 2, nutrition = 2, saturation = 0.1, useTicks = 24, effect = DRY_RISK }),
-	[I.ChocolateBar] = table.freeze({
-		heal = 3,
-		nutrition = 3,
-		saturation = 0.3,
-		useTicks = 24,
-		effects = table.freeze({ given("Speed", 200, 0) }),
-	}),
-	[I.MilitaryRation] = table.freeze({ heal = 8, nutrition = 8, saturation = 0.8, useTicks = 48 }),
-	-- The medical supplies (see the header).
-	[I.Bandage] = table.freeze({
-		heal = 2,
-		useTicks = 40,
-		cures = table.freeze({ "Bleeding" }),
-		sound = "item.bandage.apply",
-		burp = false,
-	}),
-	[I.Medkit] = table.freeze({
-		heal = 8,
-		useTicks = 80,
-		cures = table.freeze({ "Bleeding" }),
-		effects = table.freeze({ given("Regeneration", 200, 0) }),
-		sound = "item.medkit.use",
-		burp = false,
-	}),
-	[I.Antibiotics] = table.freeze({
-		heal = 0,
-		useTicks = 32,
-		cures = table.freeze({ "Infection" }),
-		aftermath = table.freeze({
-			effect = Effects.id.Weakness,
-			ticks = Infection.AFTERMATH_TICKS,
-			amplifier = 0,
-			stage = Infection.AFTERMATH_STAGE,
-		}),
-		sound = "item.pills.swallow",
-		burp = false,
-	}),
-	[I.HerbalPoultice] = table.freeze({
-		heal = 0,
-		useTicks = 40,
-		setback = true,
-		sound = "item.bandage.apply",
-		burp = false,
-	}),
-	[I.Painkillers] = table.freeze({
-		heal = 2,
-		useTicks = 24,
-		effects = table.freeze({ given("Regeneration", 160, 0) }),
-		sound = "item.pills.swallow",
-		burp = false,
-	}),
-} :: { [number]: Food })
+-- `where`'s `food` (an entry's, Content/Schema) as a Food: effect names become ids, lists frozen.
+local function fromEntry(spec: Schema.FoodSpec, where: string): Food
+	local food: Food = {
+		heal = spec.heal,
+		nutrition = spec.nutrition,
+		saturation = spec.saturation,
+		useTicks = spec.useTicks,
+		setback = spec.setback,
+		sound = spec.sound,
+		burp = spec.burp,
+	}
+	local risk = spec.effect
+	if risk then
+		food.effect = table.freeze({ kind = risk.kind, chance = risk.chance, ticks = risk.ticks })
+	end
+	if spec.cures then
+		for _, name in spec.cures do
+			assert(Effects.id[name], `Foods: {where} cures an unknown effect {name}`)
+		end
+		food.cures = table.freeze(table.clone(spec.cures))
+	end
+	if spec.effects then
+		local effects: { Given } = {}
+		for _, given in spec.effects do
+			table.insert(
+				effects,
+				table.freeze({
+					effect = effectId(given.effect, where),
+					ticks = given.ticks,
+					amplifier = given.amplifier or 0,
+				})
+			)
+		end
+		food.effects = table.freeze(effects)
+	end
+	local aftermath = spec.aftermath
+	if aftermath then
+		food.aftermath = table.freeze({
+			effect = effectId(aftermath.effect, where),
+			ticks = aftermath.ticks,
+			amplifier = aftermath.amplifier or 0,
+			stage = aftermath.stage,
+		})
+	end
+	return table.freeze(food)
+end
+
+-- (Mistakes would only show as foods that do nothing: catch them at load.)
+local function check(food: Food, where: string)
+	assert(food.heal >= 0, `Foods: {where} heals a negative amount`)
+	local nutrition, saturation = food.nutrition, food.saturation
+	assert((nutrition == nil) == (saturation == nil), `Foods: {where} needs both nutrition and saturation`)
+	assert(
+		nutrition == nil or (nutrition >= 1 and nutrition == math.floor(nutrition) and nutrition <= Hunger.MAX),
+		`Foods: {where} has bad nutrition`
+	)
+	assert(saturation == nil or saturation >= 0, `Foods: {where} has a negative saturation`)
+	assert(nutrition == nil or food.burp ~= false, `Foods: {where} is medicine with nutrition`)
+	assert(food.effect == nil or RISKS[food.effect.kind], `Foods: {where} has an unknown risk`)
+	local ticks = food.useTicks
+	assert(ticks == nil or (ticks >= 1 and ticks == math.floor(ticks)), `Foods: {where} has bad useTicks`)
+	local aftermath = food.aftermath
+	assert(
+		aftermath == nil or table.find(food.cures or NO_NAMES, "Infection") ~= nil,
+		`Foods: {where}'s aftermath needs an infection cure`
+	)
+	assert(
+		nutrition ~= nil
+			or food.heal > 0
+			or #(food.cures or NO_NAMES) > 0
+			or #(food.effects or NO_EFFECTS) > 0
+			or food.setback == true,
+		`Foods: {where} does nothing (no nutrition, heal, cures, effects or setback)`
+	)
+end
+
+-- Item id -> what eating it does: every content pack item's `food`.
+local content = Content.default
+local ITEMS: { [number]: Food } = {}
+for _, spec in content.items do
+	if spec.food then
+		local where = content.where("item", spec.name)
+		local food = fromEntry(spec.food, where)
+		check(food, where)
+		ITEMS[Items.id[spec.name]] = food
+	end
+end
+Foods.ITEMS = table.freeze(ITEMS)
+
+local I = Items.id
 
 -- Raw meat -> its cooked twin (a burning mob's drop; the furnace has the same pairs).
 Foods.COOKED = table.freeze({
@@ -238,32 +241,6 @@ Foods.COOKED = table.freeze({
 	[I.RawMutton] = I.CookedMutton,
 	[I.RawChicken] = I.CookedChicken,
 } :: { [number]: number })
-
--- (Mistakes in the table would only show as foods that do nothing: catch them at load.)
-for item, food in Foods.ITEMS do
-	assert(Items.get(item), `Foods.ITEMS has an unknown item {item}`)
-	assert(food.heal >= 0, `Food {item} heals a negative amount`)
-	local nutrition, saturation = food.nutrition, food.saturation
-	assert((nutrition == nil) == (saturation == nil), `Food {item} needs both nutrition and saturation`)
-	assert(
-		nutrition == nil or (nutrition >= 1 and nutrition == math.floor(nutrition) and nutrition <= Hunger.MAX),
-		`Food {item} has bad nutrition`
-	)
-	assert(saturation == nil or saturation >= 0, `Food {item} has a negative saturation`)
-	assert(nutrition == nil or food.burp ~= false, `Food {item} is medicine with nutrition`)
-	assert(food.effect == nil or RISKS[food.effect.kind], `Food {item} has an unknown risk`)
-	local ticks = food.useTicks
-	assert(ticks == nil or (ticks >= 1 and ticks == math.floor(ticks)), `Food {item} has bad useTicks`)
-	for _, name in food.cures or NO_NAMES do
-		assert(Effects.id[name], `Food {item} cures an unknown effect {name}`)
-	end
-	local aftermath = food.aftermath
-	assert(aftermath == nil or Effects.get(aftermath.effect), `Food {item} has an unknown aftermath`)
-	assert(
-		aftermath == nil or table.find(food.cures or NO_NAMES, "Infection") ~= nil,
-		`Food {item}'s aftermath needs an infection cure`
-	)
-end
 
 -- What eating `item` does (nil: not food).
 function Foods.of(item: number?): Food?

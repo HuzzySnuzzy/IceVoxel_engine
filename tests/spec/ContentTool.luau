@@ -341,6 +341,19 @@ return function(t, shared, require, _server, _client)
 		t.ok(has(page, { "pack Lint, recipe #1: smelting LintClean -> LintNoIcon" }), "a recipe using it")
 		local item = assert(ContentTool.show(view, "LintPart"))
 		t.ok(has(item, { "icon:", "blank" }))
+		t.ok(
+			has(item, { "food:", "heals 2 (hunger off)", "nutrition 4", "saturation 0.25 (+2)", "held 32 ticks" }),
+			"what eating it does (Items/Foods)"
+		)
+		t.ok(has(item, { "50% Hunger (Thirst with hunger off) for 100 ticks" }), "its risk")
+		local drink = assert(ContentTool.show(view, "LintLate"))
+		t.ok(
+			has(
+				drink,
+				{ "drink:", "a potion", "thirst 3", "hydration 0.5 (+3)", "Speed II for 40 ticks", "leaves LintPart" }
+			),
+			"what drinking it does (ToughAsNails/Drinks)"
+		)
 		t.ok(has(item, { "Age: Iron Age" }))
 		t.ok(has(item, { "made by:" }) and has(item, { "shapeless LintPart" }))
 		local texture = assert(ContentTool.show(view, "lint clean"))
