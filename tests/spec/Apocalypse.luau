@@ -9,10 +9,11 @@
 	(Shared/Net/Protocol); the blood moon's schedule (Apocalypse/BloodMoon); which sounds zombies
 	hear (Apocalypse/NoiseRules) and the server's noise bus (Apocalypse/NoiseBus), which hears a
 	sound played at a player's feet with the game's audio off (Audio/Sounds); the ruins' and
-	bunkers' loot (Generation/ScavengeLoot); bats wearing (Entities/Combat); the new recipes,
-	smelting and their Ages; the monsters' old drops still found; the /locate kinds and POI
-	types; the no-op cities and bunkers the generator runs with until they come; and the Ruins
-	world setting with old worlds' rule (Save/WorldMeta).
+	bunkers' loot (Generation/ScavengeLoot), which holds what nothing makes (every chainmail
+	piece, and each found gun's magazine in its gun's pool); bats wearing (Entities/Combat); the
+	new recipes, smelting and their Ages; the monsters' old drops still found; the /locate kinds
+	and POI types; the no-op cities and bunkers the generator runs with until they come; and the
+	Ruins world setting with old worlds' rule (Save/WorldMeta).
 ]]
 
 local roblox = require("@lune/roblox")
@@ -35,6 +36,7 @@ return function(t, shared, require, server)
 	local NoiseRules = require(shared.Apocalypse.NoiseRules)
 	local Toggles = require(shared.Blocks.Toggles)
 	local ScavengeLoot = require(shared.Generation.ScavengeLoot)
+	local WeaponList = require(shared.Weapons.WeaponList)
 	local Locate = require(shared.Generation.Locate)
 	local Relief = require(shared.Generation.Relief)
 	local Cities = require(shared.Generation.Cities)
@@ -640,6 +642,37 @@ return function(t, shared, require, server)
 			found += #ScavengeLoot.roll("pharmacy", 5, i, 0, 0)
 		end
 		t.ok(found >= 20, `pharmacies are stocked ({found} stacks in 20)`)
+	end)
+
+	t.test("apocalypse: loot holds what nothing makes: every chainmail piece, a found gun's magazine", function()
+		-- Where each item is: "<table> pool <n>" for each pool holding it.
+		local pools: { [string]: { string } } = {}
+		for name, list in ScavengeLoot.TABLES do
+			for p, pool in list do
+				for _, entry in pool.entries do
+					local item = entry[1]
+					if item then
+						pools[item] = pools[item] or {}
+						table.insert(pools[item], `{name} pool {p}`)
+					end
+				end
+			end
+		end
+		-- No recipe makes chainmail (furnaces only melt it down): the police keep all four pieces.
+		for _, piece in { "Helmet", "Chestplate", "Leggings", "Boots" } do
+			t.ok(pools[`Chainmail{piece}`] ~= nil, `Chainmail{piece} is in a loot table`)
+		end
+		-- No recipe makes a magazine either: a gun found in a pool has its magazine in that pool too.
+		t.ok(pools.SmallBoreMagazine ~= nil, "the Small Bore Magazine is in a loot table")
+		for gun, spec in WeaponList.firearms do
+			local magazine = spec.magazine
+			for _, where in (if magazine then pools[gun] else nil) or {} do
+				t.ok(
+					table.find(pools[magazine :: string] or {}, where) ~= nil,
+					`{gun}'s {magazine} is in {where} with it`
+				)
+			end
+		end
 	end)
 
 	t.test("apocalypse: bats wear, blades and tools cut, the new recipes craft and smelt", function()

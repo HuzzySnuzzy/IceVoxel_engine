@@ -7,11 +7,14 @@
 
 	Antibiotics are in the pharmacy, the medicine cabinet and (rarely) houses; Gunpowder, String,
 	Bone and Feral Claws (the Terraria pack's), which the removed monsters once dropped, are here
-	too. Weapons (in the manner of DayZ): firearms are rare (the police's own pool, and a few
-	hunting and home-defence guns in houses) and come worn, ammunition and magazines are commoner
-	(houses, cars, police), melee weapons common (houses, groceries, hardware, fire stations, cars).
-	Guns and magazines come empty (no item data): no magazine in, no rounds. Nothing makes a gun or
-	a round but the crossbow's bolts.
+	too. The police keep armor: an Iron Helmet, and chainmail, which nothing makes (its four pieces
+	share the weight the chestplate once had alone, so any piece of it is as likely as the
+	helmet). Weapons (in the manner of DayZ): firearms are rare (the police's own pool, and a few
+	hunting and home-defence guns in houses) and come worn, ammunition is commoner (houses, cars,
+	police), and each magazine is in its gun's pool, commoner than the gun (a rifle's twice as
+	likely, as the bunkers' armory has it); melee weapons are common (houses, groceries, hardware,
+	fire stations, cars). Guns and magazines come empty (no item data): no magazine in, no rounds.
+	Nothing makes a gun or a round but the crossbow's bolts.
 ]]
 
 local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
@@ -64,9 +67,12 @@ return {
 				{ "HuntingKnife", 1, 1, 1 },
 				{ "DoubleBarrelShotgun", 1, 1, 1, { 0.2, 0.7 } },
 				{ "SmallBoreRifle", 1, 1, 1, { 0.2, 0.7 } },
+				-- (Its magazine twice as likely, as a rifle's is in the armory; the 2 come from
+				-- nothing, so the rest are as likely as they were.)
+				{ "SmallBoreMagazine", 2, 1, 1 },
 				{ "Revolver", 1, 1, 1, { 0.2, 0.7 } },
 				{ "Crossbow", 1, 1, 1, { 0.1, 0.6 } },
-				{ false, 40, 0, 0 },
+				{ false, 38, 0, 0 },
 			},
 		},
 	},
@@ -143,19 +149,24 @@ return {
 	police = {
 		{
 			rolls = { 1, 3 },
+			-- (Weights at four times the other pools' scale, so the four chainmail pieces share the 1
+			-- the Chainmail Chestplate had alone: chainmail, and the rest, as likely as they were.)
 			entries = {
-				{ "BaseballBat", 4, 1, 1 },
-				{ "Crowbar", 3, 1, 1 },
-				{ "Machete", 2, 1, 1 },
-				{ "Gunpowder", 6, 1, 4 },
-				{ "IronIngot", 4, 1, 3 },
-				{ "Bandage", 6, 1, 2 },
-				{ "Medkit", 2, 1, 1 },
-				{ "IronHelmet", 1, 1, 1 },
+				{ "BaseballBat", 16, 1, 1 },
+				{ "Crowbar", 12, 1, 1 },
+				{ "Machete", 8, 1, 1 },
+				{ "Gunpowder", 24, 1, 4 },
+				{ "IronIngot", 16, 1, 3 },
+				{ "Bandage", 24, 1, 2 },
+				{ "Medkit", 8, 1, 1 },
+				{ "IronHelmet", 4, 1, 1 },
+				{ "ChainmailHelmet", 1, 1, 1 },
 				{ "ChainmailChestplate", 1, 1, 1 },
-				{ "CobaltShield", 1, 1, 1 },
-				{ "FeralClaws", 1, 1, 1 },
-				{ false, 10, 0, 0 },
+				{ "ChainmailLeggings", 1, 1, 1 },
+				{ "ChainmailBoots", 1, 1, 1 },
+				{ "CobaltShield", 4, 1, 1 },
+				{ "FeralClaws", 4, 1, 1 },
+				{ false, 40, 0, 0 },
 			},
 		},
 		{
