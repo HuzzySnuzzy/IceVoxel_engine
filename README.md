@@ -2704,7 +2704,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview, structure (structure data on the
              command line), build_structures (the example outpost's builder), build_textures (the
-             texture pack -> src/textures; logic in lib/TextureBuild)
+             texture pack -> src/textures; logic in lib/TextureBuild), content (the content packs'
+             checker, lists, pages and new packs; logic in lib/ContentTool and lib/ContentGame)
 tools/probes Studio probes, never in the place: RebaseProbe (what a floating-origin move costs),
              UnionProbe (CSG unions of real terrain sections), ZombieRigProbe (what posing and
              moving the zombies' rigs costs on a device); how to run them in their README
@@ -3357,6 +3358,8 @@ in pack order, so content may be added anywhere; `override = true` patches anoth
 What BlockList, ItemList and Recipes held is the Base pack (`Content/Packs/Base/blocks.luau`,
 `items.luau`, `recipes.luau`...), where the examples below still apply; `Content/Packs/Ores` is a
 whole feature (the new ores, the Hazmat suit) in a pack of its own, the worked example.
+`lune run tests/content new <Pack>` starts a pack with an example of each kind, and
+`lune run tests/content` says what a pack is missing (the content tool, under Development).
 
 **A block.** Add an entry to a pack's blocks: the Base pack's `src/shared/Content/Packs/Base/
 blocks.luau`, or a pack of your own (above; ids are given at load, so it may go anywhere):
@@ -4294,7 +4297,12 @@ lune run tests/structure decode <file | IVS1:... | -> [--lua t.luau]   # structu
 lune run tests/structure encode t.luau [--out file] [--module]        # an edited table to IVS1
 lune run tests/build_structures [--check] [--print]   # rebuild (or check) the example outpost
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
+lune run tests/content [check] [--strict]     # the content packs: each pack, then what it lacks
+lune run tests/content list [kind] [pack]     # entries with their ids and packs
+lune run tests/content show <name>            # an entry, its pack and patches, what it became
+lune run tests/content new <Pack> [--order n] # a new pack, an example of each kind in it
 ```
+
 
 `lune run tests/run` runs the whole suite: 2,420 tests, all passing (the zombie apocalypse has
 Apocalypse (its registries and shared rules), Zombies (the server's zombies, the director, tracking
@@ -4311,6 +4319,21 @@ PositionStore, MoveCheck, Interest, RemoteMotion and LocalPosition; the server's
 ServerGeneration; `/locate` has Locate, LocateCommand and LocatePoi; the DayZ camera has
 CameraRules, FirstPerson, BodyRules, TargetRules, CameraFade, TouchButtons and, where they meet,
 CameraIntegration).
+
+**Content tool.** `lune run tests/content` loads the content packs as the game does (the
+registries too: a load error names its pack, kind and entry, and exits 1), prints each pack's
+order and what it holds, then a line per finding, pack by pack, and the counts. Warnings: a block
+or item without a lore line, a block that can carry a texture without texture-pack faces, an item
+without an icon entry (a blank `""` counts), a texture no block uses, a result no Age names that
+survival can only make in a later Age (a result no Age names is the Stone Age's, which is fine
+alone), a crafting recipe whose own grid an earlier recipe takes. Info: items survival never gives
+(no recipe, chest, drop, mob, structure or fill reaches them). `--strict` fails on a warning.
+`show <name>` gives an entry's merged fields, id, pack, the packs that patched it, its lore,
+faces or icon, Age, how survival gets it and the recipes making and using it; `new <Pack>` writes
+`src/shared/Content/Packs/<Pack>/` (never over a folder) with a commented block, item, shaped and
+smelting recipe, texture and loot table that load and pass the check as written. The workings are
+`tests/lib/ContentTool` (`tests/spec/ContentTool` runs them on `tests/fixtures/content/tool`) and
+`tests/lib/ContentGame` (what the game makes of the packs).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune

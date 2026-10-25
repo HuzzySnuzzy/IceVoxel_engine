@@ -11,7 +11,8 @@
 	as in Roblox. `game:GetService(name)` returns the fake service folders mounted with `mount`.
 	Specs may add to a mounted tree before requiring from it: a folder from elsewhere (`graft`: a
 	fixture content pack into Content/Packs), or folders and modules made in memory (`folder`,
-	`module`: a module whose require gives a value).
+	`module`: a module whose require gives a value; `source`: a Luau module from its text, run as
+	a file's would be, as the content tool's new pack is before it is written).
 ]]
 
 local fs = require("@lune/fs")
@@ -24,7 +25,8 @@ export type Node = {
 	Parent: Node?,
 	ClassName: string,
 	__path: string?,
-	-- "json" for a JSON module (requiring it gives the decoded file), nil for a Luau one.
+	-- "json" for a JSON module (requiring it gives the decoded file), "value" for one made in
+	-- memory (`module`), "source" for Luau text made in memory (`source`), nil for a Luau file.
 	__kind: string?,
 	__children: { [string]: Node },
 }
@@ -142,6 +144,9 @@ export type Environment = {
 	-- specs build fixture packs in memory with them.
 	folder: (parent: Node, name: string) -> Node,
 	module: (parent: Node, name: string, value: any) -> Node,
+	-- A Luau module named `name` in `parent` whose source is `text` (its `script` and `require`
+	-- work as a file's; errors name it `<memory>/name`).
+	source: (parent: Node, name: string, text: string) -> Node,
 	require: (Node) -> any,
 }
 
@@ -178,7 +183,10 @@ function Loader.new(): Environment
 		end
 		loading[node] = true
 
-		local chunk = luau.load(withArguments(fs.readFile(path)), {
+		local text = if rawget(node :: any, "__kind") == "source"
+			then rawget(node :: any, "__source")
+			else fs.readFile(path)
+		local chunk = luau.load(withArguments(text), {
 			debugName = path,
 			-- Set NOCODEGEN=1 to measure interpreter-only speed (Roblox clients may not use native code).
 			codegenEnabled = process.env.NOCODEGEN == nil,
@@ -206,6 +214,11 @@ function Loader.new(): Environment
 		module = function(parent: Node, name: string, value: any): Node
 			local node = newNode(name, parent, `<memory>/{name}`, "value");
 			(node :: any).__value = value
+			return node
+		end,
+		source = function(parent: Node, name: string, text: string): Node
+			local node = newNode(name, parent, `<memory>/{name}`, "source");
+			(node :: any).__source = text
 			return node
 		end,
 		require = requireNode,

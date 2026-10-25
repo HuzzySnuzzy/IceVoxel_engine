@@ -166,6 +166,22 @@ Gamma, order 20 after Alpha by name, overriding both), grafts `tests/fixtures/co
 memory for every check (`Content.build`, and the Lune loader's `folder` / `module` / `graft`), and
 pins no id or total.
 
+**The content tool** (`tests/content`: `check`, `list`, `show`, `new`; README, Development) sees
+what the game sees: `tests/lib/ContentGame` mounts `src/shared` with the Lune loader, requires
+Content and every registry built from it (their load-time checks are the game's), and gathers a
+View: the merged content, each pack's own modules read again in load order (what each pack made
+and patched, which the merged content keeps no list of; a kind may be a module or a folder of
+modules), and what the registries made of each entry (LoreList, TexturePack's faces and icons,
+Blocks' resolved faces, the Ages' names, Crafting.match, Items' drops) and of the world (the
+blocks the generators' sources name, the ore features' and structure templates' blocks, the
+chests' loot tables, mobs' drops, buckets and fills). `tests/lib/ContentTool` is pure over a View:
+the checks (lore, faces, icons, unused textures, Ages, recipes Crafting.match never reaches, and
+survival's reach: the least fixed point of the earliest Age each item can be had in, through
+drops, recipes, placing and fills), the summary, lists, pages and a new pack's text.
+`tests/spec/ContentTool` runs it on `tests/fixtures/content/tool` (Lint, one of each finding;
+LintPatch, a JSON override) grafted into a fresh game, and on a new pack built in memory (the
+loader's `source`) before any file is written.
+
 ## Chunks
 
 A chunk is a full-height column (`Config.ChunkSize` = 16 wide, `Config.WorldHeight` = 1024 tall) stored
