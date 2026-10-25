@@ -283,6 +283,17 @@ return function(t, shared, require, _server, _client)
 		t.ok(has(biomes, { "1", "BetaDunes", "Lowland", "Beta (patched by Gamma)" }), "a biome: index, bands, packs")
 		t.ok(has(biomes, { "GammaGlade", "Forest", "Gamma" }))
 		t.ok(has(assert(ContentTool.list(view, "biomes", "Gamma")), { "BetaDunes" }), "what a pack patched")
+		-- The structure kinds: Gamma patches Alpha's pool and structure.
+		t.ok(has(assert(ContentTool.list(view, "pools")), { "alpha/huts", "Alpha (patched by Gamma)", "3 elements" }))
+		t.ok(
+			has(
+				assert(ContentTool.list(view, "structures")),
+				{ "alpha_village", "alpha/huts", "Alpha (patched by Gamma)" }
+			)
+		)
+		local gamma = assert(ContentTool.list(view, "templates", "Gamma"))
+		t.ok(has(gamma, { "gamma/hut", "Gamma" }), "a pack's template")
+		t.ok(not has(gamma, { "alpha/huts/hut" }), "only that pack's")
 	end)
 
 	t.test("content tool: a kind folder's recipe is named by its file, as the loader names it", function()
@@ -370,6 +381,28 @@ return function(t, shared, require, _server, _client)
 		t.ok(has(tag, { "biome tag #is_forest" }) and has(tag, { "BirchForest" }), "a biome tag")
 		local _, nearBiome = ContentTool.show(view, "Taigaa")
 		t.eq((nearBiome :: any)[1], "Taiga", "a biome's name is near too")
+
+		-- The structure kinds: the game's example outpost, the Minecraft pack's.
+		t.ok(has(assert(ContentTool.list(view, "templates", "Minecraft")), { "outpost/houses/hut", "Minecraft" }))
+		t.ok(has(assert(ContentTool.list(view, "pools")), { "outpost/houses", "Minecraft", "5 elements" }))
+		t.ok(has(assert(ContentTool.list(view, "structures")), { "outpost", "outpost/centres", "Minecraft" }))
+		local hut = assert(ContentTool.show(view, "outpost/houses/hut"))
+		t.ok(has(hut, { "template outpost/houses/hut", "pack Minecraft" }), hut[1])
+		t.ok(has(hut, { "size 5 x 7 x 6" }) and has(hut, { "palette: ", "Cobblestone" }), "its size and palette")
+		t.ok(has(hut, { "in pools: outpost/houses" }), "its pool")
+		local houses = assert(ContentTool.show(view, "outpost/houses"))
+		t.ok(has(houses, { "pool outpost/houses", "pack Minecraft" }), houses[1])
+		t.ok(has(houses, { "outpost/houses/hut", "weight 3" }) and has(houses, { "(empty)", "weight 2" }), "elements")
+		local centres = assert(ContentTool.show(view, "outpost/centres"))
+		t.ok(has(centres, { "pool outpost/centres: the templates named outpost/centres/..." }), centres[1])
+		t.ok(has(centres, { "templates: ", "outpost/centres/ruin" }) and has(centres, { "starts: outpost" }))
+		local outpost = assert(ContentTool.show(view, "outpost"))
+		t.ok(
+			has(outpost, { "structure outpost", "pack Minecraft" }) and has(outpost, { "spacing = 56" }),
+			"a structure"
+		)
+		local _, nearPool = ContentTool.show(view, "outpost/huoses")
+		t.eq((nearPool :: any)[1], "outpost/houses", "the nearest pool")
 	end)
 
 	t.test(

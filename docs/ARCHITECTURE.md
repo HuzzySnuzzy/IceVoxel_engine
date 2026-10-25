@@ -20,14 +20,14 @@ thousands of parts from the server is slow. IceVoxel never does either:
 ## Content packs (`Content/`, `Content/Schema`, `Content/Define`, `Content/Packs/`)
 
 Every block, item, recipe, item tag, texture, loot table, ore feature, Age, lore line, fuel tag,
-biome, status effect and potion comes from a content pack, a folder under `Content/Packs` the game
-finds as it loads (Minecraft's data packs). The registries build themselves from what
-`Shared/Content` loads; none keeps a list of content of its own, nor any value about an entry by
-its name:
+biome, status effect, potion, structure template, template pool and generated structure comes from
+a content pack, a folder under `Content/Packs` the game finds as it loads (Minecraft's data packs).
+The registries build themselves from what `Shared/Content` loads; none keeps a list of content of
+its own, nor any value about an entry by its name:
 
 ```
 Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, skills,
-   │                   lore, fuel, biomes, effects, potions
+   │                   lore, fuel, biomes, effects, potions, templates, pools, structures
    │                   (each a .luau module, its data or function(define) -> data, or a .json
    │                   file; or a kind folder of them: Minecraft/blocks/terrain, .../plants...)
    │  Content.load: find the packs, sort by (order, name), require each kind (a kind folder's
@@ -44,6 +44,8 @@ Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePa
                 ─► Items/Foods, ToughAsNails/Drinks (food, drink) ─► eating, drinking, Tooltip
                 ─► Biomes (the generator's biomes) ─► Generation/Structures (features), Locate (tags)
                 ─► Effects (status effects)             ─► Effects/PotionList (potions' variants)
+                ─► Structures/Library (templates, pools, structures) ─► Generation/StructureGen,
+                   /locate, structure blocks' LOAD and jigsaws' Generate
 ```
 
 **A pack** is a folder holding `pack`, its manifest (`{ order, description, requires? }`), and
@@ -52,9 +54,10 @@ any of the kinds: `blocks` and `items` (entries, Schema's BlockSpec and ItemSpec
 -> Texture), `loot` (table name -> pools, ScavengeLoot's format), `ores` (ore features, the block
 by name), `ages` (the Age records), `skills` (the skill tree's nodes, by id), `lore` (name ->
 line), `fuel` (tag -> burn ticks: Core's logs and planks), `biomes` (Schema's BiomeSpec: bands,
-climate, weather, ground, trees, plants, tags), `effects` (status effects, Schema's EffectSpec)
-and `potions` (Schema's PotionSpec, each brewed into its items and their recipes). Each is a
-module of the kind's name:
+climate, weather, ground, trees, plants, tags), `effects` (status effects, Schema's EffectSpec),
+`potions` (Schema's PotionSpec, each brewed into its items and their recipes), `templates` (name
+-> IVS1 text: a structure block's SAVE), `pools` (name -> template pool) and `structures` (the
+jigsaw structures generation places; Structures below). Each is a module of the kind's name:
 a Luau module returning its data, or a function the loader calls with `Content/Define` (the shared
 helpers and Config, for packs that build entries or read switches), or a `.json` file (Rojo 7
 makes one a ModuleScript returning its table; the Lune loader does the same and skips Rojo's
@@ -67,10 +70,10 @@ Minecraft's data packs keep a file per recipe or loot table: each module in it (
 of `define`, or JSON) holds part of the kind, and they merge in their names' order, a folder
 inside it (`blocks/plants/`) in its place among them, depth first. A list kind's files append to
 each other (so a pack's blocks are its files' in name order); a named kind's (textures, loot,
-lore, fuel) may not name one thing twice; tags join as across packs. Every message names the file:
-"pack Minecraft, blocks/plants, block Poppy" (`content.where` too). A pack has a kind as a module
-or as a folder, not both, and a kind folder holds only modules and folders: helpers (`_`) stay at
-the pack's top. The big packs use them, a file a feature (Minecraft's `blocks/terrain`,
+lore, fuel, templates, pools) may not name one thing twice; tags join as across packs. Every
+message names the file: "pack Minecraft, blocks/plants, block Poppy" (`content.where` too). A
+pack has a kind as a module or as a folder, not both, and a kind folder holds only modules and
+folders: helpers (`_`) stay at the pack's top. The big packs use them, a file a feature (Minecraft's `blocks/terrain`,
 `blocks/wood`, `items/tools`, `recipes/smelting`, `textures/ores`...), so adding content may be
 adding a file.
 
@@ -95,14 +98,19 @@ error naming both packs, and so is an override of nothing. Textures merge the sa
 override patches a texture's fields: a resource pack's new picture). Tags are a union: each pack's
 lists in load order, then every entry's `tags`, each name once (an entry's `tags = { "coals" }`
 joins Core's tag). Recipes, ore features (each named once) and Ages (each id once) append in load
-order; loot tables, lore lines and fuel tags are named once. Skills merge by id as blocks do by
-name: `{ id = "forager", override = true, cost = 2 }` patches a node, keeping its place (each
-node's place among every pack's is its position, what the protocol sends as a u8). Biomes merge
-by name like blocks, keeping their place, but an override patches a table of fields (`weather`,
-`patches`, `foliage` and its `flowers` and `herbs`) field by field in turn, and replaces a list
-(`bands`, `features`, `plants`, `species`, `tags`) whole; the patched biome is checked whole again. Effects and potions
-merge by name as blocks and items do (each kind's names its own: the potion Strength gives the
-effect Strength). Once every pack has merged, each potion is brewed (`Content/Define`'s `brew`,
+order; loot tables, lore lines, fuel tags and structure templates are named once. Skills merge
+by id as blocks do by name: `{ id = "forager", override = true, cost = 2 }` patches a node,
+keeping its place (each node's place among every pack's is its position, what the protocol sends
+as a u8). Biomes merge by name like blocks, keeping their place, but an override patches a table
+of fields (`weather`, `patches`, `foliage` and its `flowers` and `herbs`) field by field in turn,
+and replaces a list (`bands`, `features`, `plants`, `species`, `tags`) whole; the patched biome is
+checked whole again. Template pools and structures merge by name with `override = true` as
+blocks do (structures keep their load order), and an override's list field replaces the earlier
+list whole, as every kind's does: a block's `tags` or `shape`, a pool's `elements`, a structure's
+`biomes` (Minecraft's data packs replace a template_pool file whole too); to add an element to a
+pool, an override lists the pool's own elements and the new one. Effects and potions merge by name
+as blocks and items do (each kind's names its own: the potion Strength gives the effect
+Strength). Once every pack has merged, each potion is brewed (`Content/Define`'s `brew`,
 Minecraft's brewing in a grid) into its items, a Purified Water Bottle with its ingredient, the
 potion with Glow Dust (level II) and with a coal or charcoal (long), in its effect's colour with
 its own lore lines, icons and Ages and each one's `drink` (its effect, the Glass Bottle back), and
@@ -112,10 +120,10 @@ tooltip included, with one entry, and patches a potion's items by patching the p
 `content.where(kind, name)` says where a thing came from ("pack Minecraft (patched by Patch),
 blocks/terrain, block Stone") for every message, and `content.origin(kind, name)` gives it as
 data: the pack and kind folder file that made it, the packs that patched it in load order (a
-skill's, a biome's, an effect's and a potion's overrides too; a tag's: the first pack putting
-names in it and the packs adding to it; a brewed item's or recipe's: its potion's pack, its file
-`potion <Name>`), a recipe's (`name` its place in `content.recipes`) pack, file and place in that
-file's list (the content tool reads where things came from this way).
+skill's, a biome's, an effect's, a potion's, a pool's and a structure's overrides too; a tag's:
+the first pack putting names in it and the packs adding to it; a brewed item's or recipe's: its
+potion's pack, its file `potion <Name>`), a recipe's (`name` its place in `content.recipes`) pack,
+file and place in that file's list (the content tool reads where things came from this way).
 
 **Per-entry fields.** Every value about an entry is on the entry, and each registry reads it
 from there (`tests/spec/Content` follows each one end to end):
@@ -183,14 +191,21 @@ pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `
   or seconds as the effect takes, no lore line or icon for a variant it has not), and its items'
   names; a skill's Age and icon, its `requires` (known nodes, of its Age or an earlier one, never
   in a loop: "its requires go round in a loop (s, t, s)"), one node to an Age's row (the skill
-  tree screen's cell), and every entry's `skill`. Unknown names come with a hint too (`Stnoe` ->
-  Stone).
+  tree screen's cell), and every entry's `skill`; a template's text (IVS1 that reads, under the
+  name inside it) and its palette's blocks; the templates a pool's elements give, a pool's
+  fallback and a structure's start pool (a pool, a template or the templates named under it); a
+  structure's biomes, by their exact names (at least one; left out, every biome). Unknown names
+  come with a hint too (`Stnoe` -> Stone).
 - In the registries, as they load (with `where`): what only a registry knows of an entry's
   value: a skill's row on the screen (1..6), its icon being an item, its perk's knowledge sources
   and tool tiers, at most 255 nodes for the protocol's u8 (Skills), a sound event or action
   (Sounds), the miner's numbers (MinerRules), a radiation or shielding number (Radiation), a
   fuel's ticks (Recipes), a biome's bands and that every band has one (Biomes), its tree builders
-  (Generation/Structures), two effects `/effect` would find by one word (Effects).
+  (Generation/Structures), two effects `/effect` would find by one word (Effects); the structure
+  library (Structures/Library) builds the packs' part alone first and makes everything it would
+  warn about an error naming the pack: a number out of range (a weight, a depth, a spacing and
+  its separation), a start jigsaw no start piece has, a jigsaw's pool with no templates or its
+  unknown final state, an unknown item in a chest.
 
 **The packs.** Each manifest's header says what the pack adds, file by file, where the code
 for it lives, and the calls made placing things (what went where when a feature's things are
@@ -206,7 +221,8 @@ another's too); every feature is behind the same switches as before.
   lights (torches, lanterns, glow lichen, the Glow Block and Glow Dust), the chest, crafting table
   and furnace, fire, TNT and the Nuke (whose uranium core is the Ores pack's recipe) with the
   skills that unlock them (`skills`: Demolition and Fission), wool, doors, fences, the
-  mineshafts' blocks and loot table, structure blocks and jigsaws, tools, armor,
+  mineshafts' blocks and loot table, structure blocks and jigsaws with the example outpost (its
+  templates, built by `tests/build_structures`, pools and structure), tools, armor,
   buckets, mob drops, Minecraft's status effects (`effects`: the eighteen the game has, then
   Hunger, which came with the food bar) and its potions (`potions`, with this game's Haste and
   Resistance: each entry brewed into its items, drinks and recipes, which follow the pack's own),
@@ -244,6 +260,25 @@ another's too); every feature is behind the same switches as before.
 and ItemList re-export Schema's types); no content lives in them. A pack's textures are the ones
 its blocks use (the hand-edited sheets are the Minecraft pack's `textures/` and the Apocalypse
 pack's), and its loot tables the ones its features roll.
+
+**Structures** (the `templates`, `pools` and `structures` kinds; Content/Schema's header has
+every field): a pack ships a whole jigsaw structure. `templates` maps a name to its IVS1 text, a
+structure block's SAVE (`["outpost/houses/hut"] = "IVS1:..."`), under the name inside the text; a
+name with slashes is in a pool with no entry (`outpost/houses` is every template named
+`outpost/houses/...`). `pools` adds weights, empty elements, a fallback or terrain matching to the
+pool of its name. `structures` lists what generation places: a start pool, its jigsaw depth and
+distance, its biomes (the packs' `biomes`, by their exact names as every other name: a typo
+fails the load with a "did you mean", and an empty list, which would grow nowhere, too; left out,
+every biome), Minecraft's random_spread spacing and separation, a salt and the start's height
+rules. Content reads each template's head with
+`Structures/TemplateText` (the IVS1 bytes and frame, needing no registry, since Blocks builds
+itself from the packs), so a palette naming a block no pack makes fails the load, naming the pack,
+the file and the template. That is the packs' rule only: a template a player saved, pasted or put
+in the place's `IceVoxelStructures` folder keeps the decode's tolerance (an unknown block becomes
+air, an unknown item is left out, with a warning), so saves from older versions still load, and
+`Blocks.RENAMED` keeps old names working there (a pack's template must use today's names). The
+library (Structures/Library) is built from `content.templates`, `.pools` and `.structures`, then
+the place's folder, whose templates and structures replace the packs' of the same name.
 
 **Define** (`Content/Define`, what a function-form module gets, and what any pack module may
 require; pure): a folder whose `init` gives every helper as `define.<name>` and whose header lists
@@ -321,7 +356,9 @@ View: the checks (lore, faces, icons, unused textures, Ages, recipes Crafting.ma
 reaches, and survival's reach: the least fixed point of the earliest Age each item can be had in,
 through drops, recipes, placing and fills; the creative tier's machines, a machine kind with
 `creative` such as the Creative Energy Cube, are by design never made, so left out), the
-summary, lists, pages and a new pack's text.
+summary, lists, pages (a structure template's size and palette, read with
+`Structures/TemplateText.head`, and the pools holding it; a pool's elements, or the templates its
+name gathers, and the structures starting from it) and a new pack's text.
 `tests/spec/ContentTool` runs it on `tests/fixtures/content/tool` (Lint, one of each finding;
 LintPatch, a JSON override) grafted into a fresh game, and on a new pack built in memory (the
 loader's `source`) before any file is written.
@@ -6721,13 +6758,13 @@ layouts frozen.
 records and the item follow from their roles. Tests bind test-only kinds to spare blocks
 (`Machines.bind`).
 
-## Structure blocks and jigsaw structures (`Structures/`, `StructureLibrary/`, server `Structures/`)
+## Structure blocks and jigsaw structures (`Structures/`, the packs' structure kinds, server `Structures/`)
 
 Minecraft 1.20.1's structure blocks, structure voids and jigsaw blocks, and the jigsaw structures
 the terrain generator places from the structure library (see Library structures under
 Generation). The shared modules are pure; the server and client parts are below.
 
-### Structure data (`Structures/Template`, `Structures/Settings`)
+### Structure data (`Structures/Template`, `Structures/TemplateText`, `Structures/Settings`)
 
 **In memory** a template is `{ name, size, palette, cells, jigsaws, markers, containers }`: a
 Minecraft-style name (1..128 letters, digits and `_ . / : -`, slashes for pools:
@@ -6757,6 +6794,12 @@ duplicates. A 7 × 5 × 7 hut is ~250 characters, a 16 × 10 × 16 house ~1,150,
 interpreted); any 48³ structure stays under ~150,000, inside `Config.Structures.MaxDataChars`
 (200,000, what a StringValue holds).
 
+`Structures/TemplateText` holds the bytes below the blocks: base64url, CRC-32, the varint and
+string readers, `open` (the prefix, version, length and checksum round the body) and `head` (the
+name, size and palette's block names). It requires nothing, so Content reads the packs' templates'
+palettes with it while the packs load, before Blocks exists; `Template.encode` and `decode` build
+on it (`Template.crc32`, `base64` and `unbase64` are its).
+
 `Template.capture` builds a template from the world with Minecraft's SAVE rules: air is air (it
 clears the world where the structure is placed), a structure void is "keep", a DATA structure
 block becomes a marker with its string and air, other structure blocks air, jigsaws keep their
@@ -6765,8 +6808,9 @@ and cave twins are saved as their surface forms (`Blocks.surfaceForm`), so a str
 cave has nothing the mesher hides with caves. `toTable` / `fromTable` convert to and from an
 editable table of ASCII layers (one character per palette entry, "." air, " " keep), which
 `tests/structure.luau` uses: `decode` prints every IVS1 text in a file, a pasted chat message, a
-library module or standard input (`tests/lib/StructureText` finds them and decodes data with
-chat words after it), `--lua` writes the table, `encode` turns one back into text or a module.
+pack's templates module or standard input (`tests/lib/StructureText` finds them and decodes data
+with chat words after it), `--lua` writes the table, `encode` turns one back into text or a
+pack's templates module (`--module`: `return { ["<name>"] = "IVS1:..." }`).
 
 `Structures/Settings` holds the screens' fields, their defaults and ranges, and their wire format. A
 structure block has a mode, a name, an offset (-48..48, default 0, 1, 0), a size (0..48, default 5
@@ -6835,32 +6879,37 @@ so every client and the server assemble the same structure:
 
 Templates are cached by table identity: never change one after it was assembled.
 
-### The library (`Structures/Library`, `StructureLibrary/`)
+### The library (`Structures/Library`, the packs' `templates`, `pools` and `structures`)
 
 `Library.load()` reads, once per Luau VM (the server, each client, each worker actor):
-1. the repo's `StructureLibrary/`: `Templates/` (ModuleScripts at any depth returning an IVS1
-   string or a list, or StringValues; `Outpost.luau` is the example, written by
-   `tests/build_structures.luau`), `Pools.luau` (explicit pools: a fallback, a projection and
-   elements, each a template or empty with a weight of 1..150 and maybe its own projection) and
-   `Structures.luau` (the generated structures);
+1. the content packs' structure kinds (Content packs, above): `templates` (name -> IVS1 text; the
+   Minecraft pack's `templates/outpost` is the example, written by `tests/build_structures.luau`),
+   `pools` (explicit pools: a fallback, a projection and elements, each a template or empty with
+   a weight of 1..150 and maybe its own projection) and `structures` (the generated structures),
+   merged, their names and palettes checked as the packs loaded;
 2. the place's optional `ReplicatedStorage.IceVoxelStructures` folder: StringValues at any depth
    holding one or more IVS1 strings. Attributes make a StringValue's first template a generated
    structure with no code (`Generate`, `Biomes`, `Spacing`, `Separation`, `Size`, `Foundation`,
    `OnLand`, `StartHeight`, `MaxDistance`), and `TerrainMatching` makes its templates terrain
-   matching in implicit pools. The folder's templates and structures replace the repo's of the
+   matching in implicit pools. The folder's templates and structures replace the packs' of the
    same name.
 
-Both are read in path order (then class, data and attributes), so every machine resolves a
-template defined twice alike, whatever order the children replicated in. Every machine must load
-the same library, so the server never writes into the folder at runtime (saves go to
-ServerStorage). `Library.new` (pure, what tests use) validates everything and never errors: bad
-entries are warned (`[Structures] ...`, and `library.warnings`) and skipped.
+The packs' part is built alone first (`Library.new` over it), strictly: whatever the library
+would warn about there is the packs' doing and an error naming the pack (`content.where`). The
+folder is read in path order (then data and attributes), so every machine resolves a template
+defined twice alike, whatever order the children replicated in. Every machine must load the same
+library, so the server never writes into the folder at runtime (saves go to ServerStorage).
+`Library.new` (pure, what tests use) validates everything and never errors: bad entries are
+warned (`warn(message, kind, name)`: what the warning is about; `[Structures] ...` in the output,
+and `library.warnings`) and skipped.
 
 A pool name resolves (`library.pool`, cached) to an explicit pool, else the template with exactly
 that name alone, else the implicit pool: every template named "<pool>/..." (sorted, weight 1, rigid
 unless marked terrain matching). A structure has a name, a startPool, maybe a startJigsawName, a
 size (jigsaw depth, default 7), a maxDistance (80), biomes (default all; matched with
-Jigsaw.nameKey, an unknown one warned with the list of valid ones), a spacing and separation (34 and
+Jigsaw.nameKey, so the place's `Biomes` attribute may say "plains" or "minecraft:plains", an
+unknown one warned with the list of valid ones; a pack's are exact names, which Content checks),
+a spacing and separation (34 and
 8, Minecraft's villages), a salt (default a hash of the name), a startHeight (0) and the flags
 projectToHeightmap, onLand and foundation (true), plus the computed `reach`: every block of it lies
 within ± reach blocks of its start (the start piece's widest side, plus maxDistance when it has
@@ -10114,12 +10163,13 @@ Saving worlds).
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.
 - The structure library is part of world generation: the server, every client and every worker
-  must load the same one (StructureLibrary modules plus ReplicatedStorage.IceVoxelStructures as
-  published, read once, in path order). Never write into that folder at runtime; saves go to
+  must load the same one (the content packs' structure kinds plus
+  ReplicatedStorage.IceVoxelStructures as published, read once, in path order). Never write into that folder at runtime; saves go to
   ServerStorage. Templates are immutable once loaded (Jigsaw caches by table identity), and
   structure placement (StructureGen) must stay stateless and written in its fixed order.
 - IVS1 text is what users keep: palettes name blocks, so renaming a block turns it into air in
-  every saved structure (add, don't rename), and a format change needs a new version number
+  every saved structure unless `Blocks.RENAMED` keeps the old name (add, don't rename), and fails
+  the load of a pack's template still naming it (rebuild or re-save it), and a format change needs a new version number
   (`Template.VERSION`; decode refuses newer ones) and must keep reading version 1.
 - Cave twins must look, drop and behave exactly like their twin (Blocks checks it at load; a fluid
   twin is a source of its group, and `Blocks.fluidId` never answers one), and glow lichen

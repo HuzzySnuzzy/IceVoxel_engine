@@ -9,11 +9,14 @@
 	    lune run tests/content list [kind] [pack]    entries (id, name, pack), of one kind (blocks,
 	                                                 items, recipes, tags, textures, loot, ores,
 	                                                 ages, skills, lore, fuel, biomes, effects,
-	                                                 potions), of one pack
+	                                                 potions, templates, pools, structures), of one
+	                                                 pack
 	    lune run tests/content show <name>           an entry's merged fields, its id and pack, the
 	                                                 packs that patched it, and what the registries
 	                                                 made of it (lore, faces or icon, Age, recipes;
-	                                                 a skill's cell and the recipes it gates)
+	                                                 a skill's cell and the recipes it gates;
+	                                                 a template's size and palette, a pool's
+	                                                 elements, what starts from it)
 	    lune run tests/content new <Pack> [--order n]
 	                                                 a new pack, src/shared/Content/Packs/<Pack>/,
 	                                                 an example of each kind in it (never over a

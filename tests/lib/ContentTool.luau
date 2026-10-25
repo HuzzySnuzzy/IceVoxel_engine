@@ -38,11 +38,12 @@
 	  summary(view)             a line per pack: its order and how much of each kind it holds
 	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack
 	  show(view, name)          lines about everything named `name` (a block, item, texture, loot
-	                            table, tag, ore feature, Age, skill, biome, effect or potion): its
-	                            merged fields, id, pack and the packs that patched it, and what the
-	                            registries made of it (a skill's cell, the nodes needing it, the
-	                            entries it gates and their recipes; a potion's brewed items); nil and
-	                            the nearest names when nothing has the name
+	                            table, tag, ore feature, Age, skill, biome, effect, potion,
+	                            structure template, pool or structure): its merged fields, id,
+	                            pack and the packs that patched it, and what the registries made of
+	                            it (a skill's cell, the nodes needing it, the entries it gates and
+	                            their recipes; a potion's brewed items; a template's size and
+	                            palette); nil and the nearest names when nothing has the name
 	  reach(view)               when survival play first gives each item (an Age index) and how
 	  scaffold(name, order)     a new pack's modules, { { path, text } }: one block, one item, a
 	                            shaped and a smelting recipe, a texture and a loot table, each field
@@ -68,6 +69,8 @@
 	                   ToughAsNails/Drinks give it (effects by name, the empty container's name,
 	                   a canteen's sips; nil: none), for `show`
 	  variants(potion) a potion's items (Effects/PotionList.variants)
+	  templateHead(text)   a structure template's name, size and palette (Structures/TemplateText
+	                   .head; optional)
 
 	Where an entry comes from is the loader's own record (content.origin): the pack and file that
 	made it, the packs whose overrides patched it, a recipe's place in its file, the packs that
@@ -749,6 +752,7 @@ local function namesOf(content: any, kind: string): { any }
 		or kind == "biomes"
 		or kind == "effects"
 		or kind == "potions"
+		or kind == "structures"
 	then
 		for _, entry in content[kind] do
 			table.insert(names, entry.name)
@@ -938,6 +942,12 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 					table.insert(rows, { ore.name, ore.block, packOf(view, each, ore.name) })
 				end
 			end
+		elseif each == "structures" then
+			for _, structure in content.structures do
+				if listed(view, each, structure.name, pack) then
+					table.insert(rows, { structure.name, structure.startPool, madeText(view, each, structure.name) })
+				end
+			end
 		elseif each == "ages" then
 			right[1] = true
 			for index, age in content.ages do
@@ -1002,7 +1012,10 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 			local map = content[each]
 			for _, name in sortedKeys(map) do
 				if listed(view, each, name, pack) then
-					local note = if each == "textures" and map[name].Color == "" then "blank" else ""
+					local note = if each == "textures" and map[name].Color == ""
+						then "blank"
+						elseif each == "pools" then `{#map[name].elements} elements`
+						else ""
 					table.insert(rows, { name, madeText(view, each, name), note })
 				end
 			end
@@ -1250,6 +1263,125 @@ local function derivedLines(view: any, entry: any, isBlock: boolean): { string }
 end
 
 --[[
+	The structure kinds' lines for `name`: each thing's head line (no indent), then its own lines
+	(indented). A template (its size and palette, the pools holding it), a pool (its fields and
+	elements, or the templates under its name when it has no entry, and the structures starting
+	from it), a structure (its fields).
+]]
+local function structureLines(view: any, name: string): { string }
+	local content = view.content
+	local lines = {}
+	local function patches(kind: string)
+		local by = patchedBy(view, kind, name)
+		if #by > 0 then
+			table.insert(lines, `  patched by: {table.concat(by, ", ")}`)
+		end
+	end
+	-- The templates a pool draws from (an explicit one's elements, else the templates under it).
+	local function members(pool: string): { string }
+		local list = {}
+		local entry = content.pools[pool]
+		if entry then
+			for _, element in entry.elements do
+				if element.template and not table.find(list, element.template) then
+					table.insert(list, element.template)
+				end
+			end
+		elseif content.templates[pool] then
+			table.insert(list, pool)
+		else
+			for _, template in sortedKeys(content.templates) do
+				if string.sub(template, 1, #pool + 1) == pool .. "/" then
+					table.insert(list, template)
+				end
+			end
+		end
+		return list
+	end
+	-- The structures whose start pool is `pool`.
+	local function starting(pool: string): { string }
+		local list = {}
+		for _, structure in content.structures do
+			if structure.startPool == pool then
+				table.insert(list, structure.name)
+			end
+		end
+		return list
+	end
+	local text = content.templates[name]
+	if text then
+		table.insert(lines, `template {name}: pack {packOf(view, "templates", name)}`)
+		local head = if view.templateHead then view.templateHead(text) else nil
+		if head then
+			table.insert(lines, `  size {head.size[1]} x {head.size[2]} x {head.size[3]}, {#text} characters of text`)
+			for _, line in wrap("  palette: ", head.blocks) do
+				table.insert(lines, line)
+			end
+		end
+		-- (The explicit pools naming it, and the pool its name puts it in when that has no entry.)
+		local pools = {}
+		for _, pool in sortedKeys(content.pools) do
+			if table.find(members(pool), name) then
+				table.insert(pools, pool)
+			end
+		end
+		local parent = string.match(name, "^(.+)/[^/]+$")
+		if parent and content.pools[parent] == nil and content.templates[parent] == nil then
+			table.insert(pools, parent)
+		end
+		for _, line in wrap("  in pools: ", if #pools > 0 then pools else { "none (its own name's alone)" }) do
+			table.insert(lines, line)
+		end
+	end
+	local pool = content.pools[name]
+	local implicit = pool == nil and content.templates[name] == nil and #members(name) > 0
+	if pool then
+		table.insert(lines, `pool {name}: pack {packOf(view, "pools", name)}`)
+		patches("pools")
+		table.insert(lines, "  fields:")
+		for _, line in fieldLines(pool, { elements = true }) do
+			table.insert(lines, line)
+		end
+		local rows = {}
+		for _, element in pool.elements do
+			table.insert(rows, {
+				element.template or "(empty)",
+				`weight {element.weight or 1}`,
+				element.projection or "",
+			})
+		end
+		table.insert(lines, "    elements:")
+		for _, line in columns(rows, "      ") do
+			table.insert(lines, (string.gsub(line, "%s+$", "")))
+		end
+	elseif implicit then
+		table.insert(lines, `pool {name}: the templates named {name}/... (no entry of its own)`)
+		for _, line in wrap("  templates: ", members(name)) do
+			table.insert(lines, line)
+		end
+	end
+	if pool or implicit or text then
+		local users = starting(name)
+		if #users > 0 then
+			for _, line in wrap("  starts: ", users) do
+				table.insert(lines, line)
+			end
+		end
+	end
+	for _, structure in content.structures do
+		if structure.name == name then
+			table.insert(lines, `structure {name}: pack {packOf(view, "structures", name)}`)
+			patches("structures")
+			table.insert(lines, "  fields:")
+			for _, line in fieldLines(structure, { name = true }) do
+				table.insert(lines, line)
+			end
+		end
+	end
+	return lines
+end
+
+--[[
 	Lines about everything named `name`: its kind, id and pack, the packs that patched it, its
 	merged fields, and for blocks and items what the registries made of it. nil and the nearest
 	names when nothing has the name.
@@ -1368,6 +1500,13 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 			for _, line in fieldLines(ore, { name = true }) do
 				table.insert(lines, line)
 			end
+		end
+	end
+	for _, line in structureLines(view, name) do
+		if line == "" or string.sub(line, 1, 1) ~= " " then
+			section(line)
+		else
+			table.insert(lines, line)
 		end
 	end
 	for index, age in content.ages do
@@ -1509,13 +1648,15 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	for _, entry in content.entries do
 		names[entry.name] = true
 	end
-	for _, map in { content.textures, content.loot, content.tags } do
+	for _, map in { content.textures, content.loot, content.tags, content.templates, content.pools } do
 		for key in map do
 			names[key] = true
 		end
 	end
-	for _, ore in content.ores do
-		names[ore.name] = true
+	for _, list in { content.ores, content.structures } do
+		for _, each in list do
+			names[each.name] = true
+		end
 	end
 	for _, age in content.ages do
 		names[age.id] = true

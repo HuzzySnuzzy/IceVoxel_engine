@@ -1,16 +1,24 @@
 --[[
-	Structures/Library and the StructureLibrary folder: implicit pools by name prefix (and a
-	template's own name), explicit pools (weights, empty elements, fallbacks, projections),
-	structures and their defaults, validation warnings (never an error on bad data), assembling
-	through a library, `Library.load` from the repo's modules (which must load without warnings)
-	and from a place's ReplicatedStorage.IceVoxelStructures folder with its attributes.
+	Structures/Library: implicit pools by name prefix (and a template's own name), explicit pools
+	(weights, empty elements, fallbacks, projections), structures and their defaults, validation
+	warnings (never an error on bad data in Library.new), assembling through a library,
+	`Library.load` from the content packs (the game's, which must load without warnings, and packs
+	built here: their templates, pools and structures, a place's template replacing a pack's, and
+	every problem only the library sees as an error naming the pack) and from a place's
+	ReplicatedStorage.IceVoxelStructures folder with its attributes.
 ]]
 return function(t, shared, require)
 	local Blocks = require(shared.Blocks)
 	local Biomes = require(shared.Biomes)
+	local Content = require(shared.Content)
+	local Schema = require(shared.Content.Schema)
 	local Hash = require(shared.Util.Hash)
 	local Jigsaw = require(shared.Structures.Jigsaw)
 	local Library = require(shared.Structures.Library)
+	local Template = require(shared.Structures.Template)
+
+	-- No packs at all: a place's folder alone.
+	local NO_PACKS = Content.build({})
 
 	local id = Blocks.id
 	local STONE = id.Stone
@@ -440,11 +448,11 @@ return function(t, shared, require)
 		t.eq(names[2], "c")
 	end)
 
-	t.test("Library.load: the repo's StructureLibrary loads without warnings (cached)", function()
+	t.test("Library.load: the game's packs' structures load without warnings (cached)", function()
 		local lib = Library.load()
 		t.eq(#lib.warnings, 0, table.concat(lib.warnings, "; "))
 		t.eq(Library.load(), lib, "cached")
-		print(`    repo library: {#lib.names} templates, {#lib.structures} structures`)
+		print(`    the packs' library: {#lib.names} templates, {#lib.structures} structures`)
 		for _, s in lib.structures do
 			-- Every shipped structure must assemble.
 			local pieces = Jigsaw.assemble({
@@ -510,7 +518,6 @@ return function(t, shared, require)
 	end
 
 	t.test("Library.load: the place's IceVoxelStructures folder and its attributes", function()
-		local Template = require(shared.Structures.Template)
 		local function encoded(tp: any): string
 			return Template.encode(tp)
 		end
@@ -541,7 +548,7 @@ return function(t, shared, require)
 			stringValue("Empty", "hello"),
 		})
 		local lib = Library.load({
-			modules = folder("StructureLibrary", {}),
+			content = NO_PACKS,
 			folder = place,
 			warn = function(message)
 				table.insert(warnings, message)
@@ -592,7 +599,7 @@ return function(t, shared, require)
 				children = { children[2], children[1] }
 			end
 			return Library.load({
-				modules = folder("StructureLibrary", {}),
+				content = NO_PACKS,
 				folder = folder("F", children),
 				warn = function() end,
 			})
@@ -600,38 +607,186 @@ return function(t, shared, require)
 		local a, b = twins(false), twins(true)
 		t.eq((a.template("user/twin") :: any).size[1], (b.template("user/twin") :: any).size[1], "same template")
 		t.eq((a.structure("user/twin") :: any).spacing, (b.structure("user/twin") :: any).spacing, "same structure")
-		-- The same for StructureLibrary/Templates: values sharing a name (Studio's default
-		-- "Value", or two copies of a save) holding versions of one template.
+		-- The same for values sharing a name (Studio's default "Value", or two copies of a save)
+		-- holding versions of one template. (The packs' templates are each named once: Content.)
 		local function versions(order: { number }): number
 			local children = {}
 			for _, width in order do
 				table.insert(children, stringValue("Value", encoded(template("user/shed", width, 2, 2, STONE))))
 			end
 			local loaded = Library.load({
-				modules = folder("StructureLibrary", { folder("Templates", children) }),
-				folder = folder("F", {}),
+				content = NO_PACKS,
+				folder = folder("F", children),
 				warn = function() end,
 			})
 			return (loaded.template("user/shed") :: any).size[1]
 		end
 		local forward = versions({ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 })
-		t.eq(versions({ 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 }), forward, "Templates: order does not matter")
-		t.eq(versions({ 5, 12, 1, 9, 3, 11, 2, 8, 4, 10, 6, 7 }), forward, "Templates: any order")
-		-- Loose biome names in the Biomes attribute.
+		t.eq(versions({ 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 }), forward, "values: order does not matter")
+		t.eq(versions({ 5, 12, 1, 9, 3, 11, 2, 8, 4, 10, 6, 7 }), forward, "values: any order")
+		-- Loose biome names in the Biomes attribute, and an unknown one warned (the place's: a
+		-- pack's structure gives exact names, which Content checks).
 		local shed = template("user/shed", 3, 2, 3, STONE)
+		local biomeWarnings = {}
 		local loose = Library.load({
-			modules = folder("StructureLibrary", {}),
+			content = NO_PACKS,
 			folder = folder(
 				"F",
-				{ stringValue("Shed", encoded(shed), { Generate = true, Biomes = "plains, forest" }) }
+				{ stringValue("Shed", encoded(shed), { Generate = true, Biomes = "plains, forest, Atlantis" }) }
 			),
-			warn = function() end,
+			warn = function(message)
+				table.insert(biomeWarnings, message)
+			end,
 		})
 		t.eq(table.concat((loose.structure("user/shed") :: any).biomes, ","), "Plains,Forest", "plains, forest")
+		t.ok(has(biomeWarnings, "Structure 'user/shed': unknown biome 'Atlantis'"), "an unknown biome warned")
 		-- A decoded template holds the same cells.
 		local decoded = lib.template("user/hut") :: any
 		t.eq(decoded.size[1] * decoded.size[2] * decoded.size[3], 125)
 		local p = buffer.readu16(decoded.cells, 0)
 		t.eq(decoded.palette[p], STONE, "cells survive the round trip")
+	end)
+	--[[ The packs' part ]]
+
+	-- Content of one pack "P" holding `kinds` (its `templates` given as templates, encoded here),
+	-- with a block for each name the templates' palettes use (Content checks them).
+	local function packContent(kinds: { [string]: any }): any
+		local data = table.clone(kinds)
+		local texts: { [string]: string } = {}
+		local blocks, seen = {}, {}
+		local names = {}
+		for name in kinds.templates or {} do
+			table.insert(names, name)
+		end
+		table.sort(names)
+		for _, name in names do
+			local tp = kinds.templates[name]
+			texts[name] = Template.encode(tp)
+			for _, id in tp.palette do
+				local blockName = Blocks.get(id).name
+				if not seen[blockName] then
+					seen[blockName] = true
+					table.insert(blocks, { name = blockName })
+				end
+			end
+		end
+		data.templates = texts
+		data.blocks = blocks
+		return Content.build({ { name = "P", manifest = { order = 10 }, kinds = data } })
+	end
+
+	t.test("Library.load: a pack's templates, pools and structures; what only it sees errs, naming the pack", function()
+		local start = template("p/start", 7, 4, 7, STONE, { { 3, 1, 0, "North", "Up", "door", "door", "p/rooms" } })
+		local room = template("p/rooms/a", 5, 4, 5, COBBLE, { { 2, 1, 0, "North", "Up", "door", "door", "empty" } })
+		-- A good pack's kinds, `changes` put over them.
+		local function kinds(changes: { [string]: any }?): { [string]: any }
+			local all: { [string]: any } = {
+				templates = { ["p/start"] = start, ["p/rooms/a"] = room },
+				pools = { ["p/rooms"] = { elements = { { template = "p/rooms/a", weight = 3 }, { empty = true } } } },
+				structures = {
+					-- (No biomes: every biome. A pack's biome names are Content's to check, against
+					-- its packs' biomes; these packs have none.)
+					{ name = "keep", startPool = "p/start", spacing = 12, separation = 3 },
+				},
+			}
+			for key, value in changes or {} do
+				all[key] = value
+			end
+			return all
+		end
+		local function load(content: any, children: { any }?, warnings: { string }?): any
+			return Library.load({
+				content = content,
+				folder = folder("F", children or {}),
+				warn = function(message)
+					table.insert(warnings or {}, message)
+				end,
+			})
+		end
+		local lib = load(packContent(kinds()))
+		t.eq(#lib.warnings, 0, table.concat(lib.warnings, "; "))
+		t.eq(table.concat(lib.names, ","), "p/rooms/a,p/start")
+		t.eq(poolNames(lib.pool("p/rooms")), "p/rooms/a:3:rigid <empty>:1:rigid", "the pack's pool")
+		local keep = lib.structure("keep") :: any
+		t.eq(#keep.biomes, Biomes.count, "every biome")
+		t.eq(keep.spacing, 12)
+		t.eq(keep.separation, 3)
+		t.eq(keep.salt, Hash.string("keep"), "defaults filled in")
+		-- A place's template replaces a pack's, and its Generate value adds a structure: the place's
+		-- doing, warned and never an error.
+		local bigger = template("p/rooms/a", 6, 4, 6, COBBLE, { { 2, 1, 0, "North", "Up", "door", "door", "empty" } })
+		local warnings = {}
+		local placed = load(packContent(kinds()), {
+			stringValue("Room", Template.encode(bigger), { Generate = true, Spacing = 9 }),
+		}, warnings)
+		t.eq((placed.template("p/rooms/a") :: any).size[1], 6, "the place's template")
+		t.ok(has(warnings, "Template 'p/rooms/a' is defined twice"), "warned")
+		t.eq(#placed.structures, 2, "the pack's structure and the place's")
+
+		-- Everything only the library sees, in a pack: an error naming the pack and the entry.
+		local function refused(changes: { [string]: any }, parts: { string }, what: string)
+			local ok, err = pcall(load, packContent(kinds(changes)))
+			local message = if ok then "(it loaded)" else tostring(err)
+			local all = true
+			for _, part in parts do
+				all = all and string.find(message, part, 1, true) ~= nil
+			end
+			t.ok(all, `{what}: {message}`)
+		end
+		refused(
+			{ structures = { { name = "keep", startPool = "p/start", size = 9 } } },
+			{ "Structures: pack P, structure keep: ", "size must be 0..7" },
+			"a number's range"
+		)
+		refused(
+			{ structures = { { name = "keep", startPool = "p/start", spacing = 4, separation = 4 } } },
+			{ "pack P, structure keep: ", "separation must be 0..3" },
+			"separation under spacing"
+		)
+		refused(
+			{ structures = { { name = "keep", startPool = "p/start", startJigsawName = "nope" } } },
+			{ "pack P, structure keep: ", "has a jigsaw named 'nope'" },
+			"a start jigsaw"
+		)
+		refused(
+			{ pools = { ["p/rooms"] = { elements = { { template = "p/rooms/a", weight = 500 } } } } },
+			{ "pack P, pool p/rooms: ", "weight must be 1..150" },
+			"a weight"
+		)
+		local lost = template("p/start", 7, 4, 7, STONE, { { 3, 1, 0, "North", "Up", "door", "door", "p/nowhere" } })
+		refused(
+			{ templates = { ["p/start"] = lost, ["p/rooms/a"] = room } },
+			{ "pack P, template p/start: ", "Pool 'p/nowhere' (used by p/start) has no templates" },
+			"a jigsaw's pool"
+		)
+		local odd = template(
+			"p/start",
+			7,
+			4,
+			7,
+			STONE,
+			{ { 3, 1, 0, "North", "Up", "door", "door", "p/rooms", "minecraft:not_a_block" } }
+		)
+		refused(
+			{ templates = { ["p/start"] = odd, ["p/rooms/a"] = room } },
+			{ "pack P, template p/start: ", "unknown final state 'minecraft:not_a_block'" },
+			"a final state"
+		)
+		local chest = template("p/rooms/a", 5, 4, 5, COBBLE, { { 2, 1, 0, "North", "Up", "door", "door", "empty" } })
+		chest.containers = { { x = 1, y = 1, z = 1, items = { { slot = 1, item = "Ghost", count = 1, damage = 0 } } } }
+		refused(
+			{ templates = { ["p/start"] = start, ["p/rooms/a"] = chest } },
+			{ "pack P, template p/rooms/a: ", "Unknown item 'Ghost'" },
+			"an item in a chest"
+		)
+	end)
+
+	t.test("Content's empty pool names are the jigsaw's", function()
+		for name in Jigsaw.EMPTY_POOLS do
+			t.ok(Schema.EMPTY_POOLS[name], `{name} in Schema.EMPTY_POOLS`)
+		end
+		for name in Schema.EMPTY_POOLS do
+			t.ok(Jigsaw.EMPTY_POOLS[name], `{name} in Jigsaw.EMPTY_POOLS`)
+		end
 	end)
 end

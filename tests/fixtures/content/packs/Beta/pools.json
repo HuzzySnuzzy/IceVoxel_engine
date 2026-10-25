@@ -1,0 +1,6 @@
+{
+	"beta/wells": {
+		"fallback": "minecraft:empty",
+		"elements": [{ "template": "beta/well", "weight": 2 }, { "empty": true }]
+	}
+}

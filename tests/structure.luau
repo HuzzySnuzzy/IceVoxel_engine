@@ -10,8 +10,9 @@
 
 	    lune run tests/structure encode <table.luau>  [--out <file>] [--module]
 	        Reads a table file (what --lua writes, edited or written by hand) and prints its IVS1
-	        text, or writes it to <file>; --module writes it as a library module
-	        (`return "IVS1:..."`, for src/shared/StructureLibrary/Templates).
+	        text, or writes it to <file>; --module writes it as a content pack's templates module
+	        (`return { ["<name>"] = "IVS1:..." }`: a pack's `templates.luau`, or a file of its
+	        templates/ folder, src/shared/Content/Packs/<Pack>/templates/<file>.luau).
 
 	The table format (Template.toTable / fromTable): `layers[1]` is y = 0 (the bottom); each layer
 	is a list of rows from north (z = 0) to south, each row a string of one character per block
@@ -261,7 +262,7 @@ elseif command == "encode" then
 	local out = option(args, "--out")
 	local _, module = option(args, "--module")
 	local content = if module
-		then `-- {t.name} ({t.size[1]} x {t.size[2]} x {t.size[3]}), made with tests/structure encode.\nreturn "{text}"\n`
+		then `-- A content pack's templates (Content/Schema), made with tests/structure encode.\nreturn \{\n\t-- {t.size[1]} x {t.size[2]} x {t.size[3]}\n\t["{t.name}"] = "{text}",\n\}\n`
 		else text .. "\n"
 	if out then
 		fs.writeFile(out, content)

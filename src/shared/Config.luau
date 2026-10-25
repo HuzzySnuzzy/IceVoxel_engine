@@ -1646,10 +1646,11 @@ local Config = {
 
 	--[[
 		Structure blocks and jigsaw blocks (Minecraft's, creative only) and the structures generated
-		in the world from the structure library (Shared/Structures, StructureLibrary). A structure
-		block saves a region as compact text ("IVS1:...", Structures/Template) that can be pasted
-		into the library, into a StringValue of the place's ReplicatedStorage.IceVoxelStructures
-		folder, or back into a structure block in LOAD mode.
+		in the world from the structure library (Shared/Structures: the content packs' templates,
+		pools and structures). A structure block saves a region as compact text ("IVS1:...",
+		Structures/Template) that can be pasted into a content pack's `templates`, into a
+		StringValue of the place's ReplicatedStorage.IceVoxelStructures folder, or back into a
+		structure block in LOAD mode.
 	]]
 	Structures = {
 		-- Who may use structure blocks and jigsaw blocks (creative players only; Minecraft's
@@ -1675,7 +1676,7 @@ local Config = {
 		-- second per client among all remotes; pieces keep each message small.
 		DataPieceChars = 16000,
 		DataPiecesPerSecond = 20,
-		-- Library structures generate in the world (StructureLibrary/Structures and the
+		-- Library structures generate in the world (the content packs' `structures` and the
 		-- IceVoxelStructures folder's `Generate` attributes). false: none do.
 		Generate = true,
 	},

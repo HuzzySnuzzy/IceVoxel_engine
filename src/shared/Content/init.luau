@@ -1,21 +1,22 @@
 --!strict
 --[[
 	Content packs (Minecraft's data packs): every block, item, recipe, tag, texture, loot table, ore
-	feature, Age, lore line, fuel tag, biome, status effect and potion of the game comes from a
-	pack, a folder under Content/Packs, and every value about an entry is on the entry. The
-	registries (Blocks, Items, TexturePack, Crafting, Progression, the Metal Miner, Radiation,
-	generation, biomes, loot, sounds, Tough As Nails, Effects and PotionList) build themselves from
-	what this module loads; adding content is adding entries to a pack, or a pack.
+	feature, Age, lore line, fuel tag, biome, status effect, potion, structure template, template
+	pool and generated structure of the game comes from a pack, a folder under Content/Packs, and
+	every value about an entry is on the entry. The registries (Blocks, Items, TexturePack,
+	Crafting, Progression, the Metal Miner, Radiation, generation, biomes, loot, sounds, Tough As
+	Nails, Effects, PotionList and the structure library) build themselves from what this module
+	loads; adding content is adding entries to a pack, or a pack.
 
 	A pack
 	  A folder holding `pack`, its manifest ({ order = n, description = "...", requires = { pack
 	  names }? }), and any of the kinds Content/Schema lists (blocks, items, recipes, tags, textures,
-	  loot, ores, ages, skills, lore, fuel, biomes, effects, potions), each a module of the kind's
-	  name: a Luau module returning its data, or `function(define) -> data` (define:
-	  Content/Define, the shared helpers and Config, for packs that build entries or read
-	  switches), or a `.json` file holding it (Rojo makes a JSON file a ModuleScript returning its
-	  table, and so does the Lune loader). Any other module in a pack is an error (a misspelt kind
-	  would be ignored otherwise) unless its name starts with "_": the pack's own helpers, which
+	  loot, ores, ages, skills, lore, fuel, biomes, effects, potions, templates, pools, structures),
+	  each a module of the kind's name: a Luau module returning its data, or `function(define) ->
+	  data` (define: Content/Define, the shared helpers and Config, for packs that build entries or
+	  read switches), or a `.json` file holding it (Rojo makes a JSON file a ModuleScript returning
+	  its table, and so does the Lune loader). Any other module in a pack is an error (a misspelt
+	  kind would be ignored otherwise) unless its name starts with "_": the pack's own helpers, which
 	  its kind modules require (at the pack's top only).
 
 	Kind folders
@@ -25,10 +26,10 @@
 	  folders inside it in their place among them (`blocks/plants/flowers` after `blocks/ores`).
 	  So a big pack splits into files (`blocks/terrain`, `blocks/plants`...), and adding content
 	  may be adding a file. A list kind's files are appended to each other; a named kind's
-	  (textures, loot, lore, fuel) may not name one thing twice, and tags join as across packs.
-	  Messages name the file: "pack Minecraft, blocks/plants, block Poppy". A pack has a kind as a
-	  module or as a folder, not both; a kind folder holds only modules and folders (no "_"
-	  helpers).
+	  (textures, loot, lore, fuel, templates, pools) may not name one thing twice, and tags join as
+	  across packs. Messages name the file: "pack Minecraft, blocks/plants, block Poppy". A pack has
+	  a kind as a module or as a folder, not both; a kind folder holds only modules and folders (no
+	  "_" helpers).
 
 	Order and ids
 	  Packs load sorted by (`order`, name), and a pack's entries keep their order. A block's id is
@@ -61,7 +62,12 @@
 	  recipes        appended in load order; so are ore features (each with a name of its own)
 	                 and Ages (each id once).
 	  loot, lore     by name, each once; so is fuel (by tag: every item in the tag burns that
-	                 long, unless its entry gives its own `fuel`, Crafting/Recipes).
+	                 long, unless its entry gives its own `fuel`, Crafting/Recipes), and so are
+	                 structure templates.
+	  pools, structures  by name, as textures and blocks are: a template pool (a structure) with
+	                 `override = true` patches the earlier one's fields, a list field (a pool's
+	                 `elements`, a structure's `biomes`) replaced whole as any override's is;
+	                 structures keep their load order.
 	  effects, potions  by name, as blocks and items are (each kind's names its own: the potion
 	                 Strength gives the effect Strength). Once every pack has merged, each potion
 	                 is brewed (Content/Define's `brew`: Minecraft's brewing in a grid) from its
@@ -82,14 +88,19 @@
 	    the Ages' milestones' items, every lore line's item, a lore line both on an entry and in a
 	    pack's `lore`, the blocks a biome names (its ground, and its plants: single plants or lower
 	    halves), and a potion's effect, its ingredient and its variants (Schema.checkVariants: an
-	    instant effect's potion has no seconds and no long variant...);
+	    instant effect's potion has no seconds and no long variant...); a template's text (IVS1
+	    that reads, under the name it holds) and its palette's blocks, the templates pools'
+	    elements give, pools' fallbacks and structures' start pools (each a pool, a template, or
+	    the templates named under it: Structures/Library's lookup), and a structure's biomes (by
+	    their exact names, at least one);
 	  * the skills: each node's Age and icon, its `requires` (known nodes, of its Age or an earlier
 	    one, never in a loop), one node to an Age's row, and every entry's `skill`.
 	  The registries check what only they know of an entry's value as they load, naming the pack
 	  too (`where`): a skill's row, icon item and perk numbers, a sound event or action, a machine
 	  kind, the miner's numbers, a radiation or shielding number, a fuel's ticks, a biome's bands
 	  (Biomes) and tree builders (Generation/Structures), two effects /effect would find by one
-	  word (Effects).
+	  word (Effects), a structure's numbers, start jigsaw and its templates' jigsaws and chests
+	  (Structures/Library).
 
 	API
 	  Content.default             the packs under Content/Packs, loaded once: what the game uses
@@ -103,6 +114,8 @@
 	                              place is its index in Shared/Biomes)
 	  content.effects, .potions   the effects in id order, the potions in load order (their items
 	                              and recipes are among .items and .recipes)
+	  content.templates, .pools   template name -> IVS1 text, pool name -> pool
+	  content.structures          the structures, in load order
 	  content.packs               the packs, in load order
 	  content.blockId, .itemId    name -> id (items: those that are no blocks)
 	  content.effectId            name -> effect id (Shared/Effects')
@@ -121,6 +134,7 @@
 
 local Define = require(script.Define)
 local Schema = require(script.Schema)
+local TemplateText = require(script.Parent.Structures.TemplateText)
 
 type BlockSpec = Schema.BlockSpec
 type ItemSpec = Schema.ItemSpec
@@ -134,6 +148,8 @@ type BiomeSpec = Schema.BiomeSpec
 type EffectSpec = Schema.EffectSpec
 type PotionSpec = Schema.PotionSpec
 type SkillRecord = Schema.SkillRecord
+type TemplatePool = Schema.TemplatePool
+type StructureSpec = Schema.StructureSpec
 
 -- A pack, as loaded: its folder's name, its manifest's numbers.
 export type PackInfo = { name: string, order: number, description: string, requires: { string } }
@@ -170,6 +186,9 @@ export type Content = {
 	biomes: { BiomeSpec },
 	effects: { EffectSpec },
 	potions: { PotionSpec },
+	templates: { [string]: string },
+	pools: { [string]: TemplatePool },
+	structures: { StructureSpec },
 	blockId: { [string]: number },
 	itemId: { [string]: number },
 	effectId: { [string]: number },
@@ -314,9 +333,14 @@ function Content.build(input: { PackData }): Content
 	local biomeAt: { [string]: number } = {}
 	local effects: { EffectSpec } = {}
 	local potions: { PotionSpec } = {}
+	local templates: { [string]: string } = {}
+	local templatePools: { [string]: TemplatePool } = {}
+	local structures: { StructureSpec } = {}
 	-- The kinds merged by name (`mergeEntry`): each one's entries, and name -> place among them.
-	local lists: { [string]: { any } } = { blocks = blocks, items = items, effects = effects, potions = potions }
-	local places: { [string]: { [string]: number } } = { blocks = blockAt, items = itemAt, effects = {}, potions = {} }
+	local lists: { [string]: { any } } =
+		{ blocks = blocks, items = items, effects = effects, potions = potions, structures = structures }
+	local places: { [string]: { [string]: number } } =
+		{ blocks = blockAt, items = itemAt, effects = {}, potions = {}, structures = {} }
 	-- Where each pack's own items and recipes end (its potions' go after them).
 	local ends: { [string]: { items: number, recipes: number } } = {}
 	local skills: { SkillRecord } = {}
@@ -340,9 +364,9 @@ function Content.build(input: { PackData }): Content
 	end
 
 	-- The kind and pack that took a name of `kind`'s, or nil: blocks and items share their names,
-	-- effects and potions have names of their own.
+	-- effects, potions and structures have names of their own.
 	local function takenBy(kind: string, name: string): string?
-		if kind == "effects" or kind == "potions" then
+		if kind == "effects" or kind == "potions" or kind == "structures" then
 			return if made[kind][name] then whereOf(kind, name) else nil
 		elseif made.blocks[name] then
 			return whereOf("blocks", name)
@@ -371,8 +395,9 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
-	-- An entry of a kind merged by name (`lists`: a block, an item, an effect, a potion) of `pack`
-	-- (checked; `file`: its kind folder's file): appended, or patched onto the earlier one.
+	-- An entry of a kind merged by name (`lists`: a block, an item, an effect, a potion, a
+	-- structure) of `pack` (checked; `file`: its kind folder's file): appended, or patched onto the
+	-- earlier one.
 	local function mergeEntry(kind: string, pack: string, file: string?, entry: any)
 		local name = entry.name :: string
 		local list = lists[kind]
@@ -409,7 +434,8 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
-	-- A named kind's entry (textures, loot, lore): once, or a texture's override.
+	-- A named kind's entry (textures, loot, lore, fuel, templates, pools): once, or a texture's or
+	-- a pool's override.
 	local function mergeNamed(
 		kind: string,
 		pack: string,
@@ -420,9 +446,9 @@ function Content.build(input: { PackData }): Content
 	)
 		local here = `{placeOf(pack, file)}, {SINGULAR[kind]} {name}`
 		local before = made[kind][name]
-		if kind == "textures" and value.override then
+		if (kind == "textures" or kind == "pools") and value.override then
 			if before == nil then
-				fail(`{here} overrides a texture no earlier pack makes{hint(name, into)}`)
+				fail(`{here} overrides a {SINGULAR[kind]} no earlier pack makes{hint(name, into)}`)
 			end
 			local target = table.clone(into[name])
 			for field, v in value do
@@ -605,6 +631,8 @@ function Content.build(input: { PackData }): Content
 								then textures
 								elseif kind == "loot" then loot
 								elseif kind == "fuel" then fuel
+								elseif kind == "templates" then templates
+								elseif kind == "pools" then templatePools
 								else lore
 							mergeNamed(kind, pack, file, into, name, value[name])
 						end
@@ -971,6 +999,81 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
+	-- Structures: each template's text (it reads, under the name it holds) and its palette's
+	-- blocks; the templates pools give, their fallbacks; the structures' start pools and biomes.
+	local templateNames: { string } = {}
+	for name in templates do
+		table.insert(templateNames, name)
+	end
+	table.sort(templateNames)
+	-- Is `name` a pool: an explicit one, a template's name, or the templates named "<name>/..."
+	-- (Structures/Library's lookup)?
+	local function isPool(name: string): boolean
+		if templatePools[name] or templates[name] then
+			return true
+		end
+		local prefix = name .. "/"
+		for _, template in templateNames do
+			if string.sub(template, 1, #prefix) == prefix then
+				return true
+			end
+		end
+		return false
+	end
+	for _, name in templateNames do
+		local here = whereOf("templates", name)
+		local head, problem = TemplateText.head(templates[name])
+		if head == nil then
+			fail(`{here}: {problem}`)
+		else
+			if head.name ~= name then
+				fail(`{here}: its text is the template {head.name} (a template goes under the name its text holds)`)
+			end
+			for _, block in head.blocks do
+				needName(here, "palette", block, true)
+			end
+		end
+	end
+	local poolNames: { string } = {}
+	for name in templatePools do
+		table.insert(poolNames, name)
+	end
+	table.sort(poolNames)
+	for _, name in poolNames do
+		local here = whereOf("pools", name)
+		local pool = templatePools[name]
+		for index, element in pool.elements do
+			local template = element.template
+			if template and templates[template] == nil then
+				fail(`{here}: element {index} names unknown template {template}{hint(template, templates)}`)
+			end
+		end
+		local fallback = pool.fallback
+		if fallback and not Schema.EMPTY_POOLS[fallback] and not isPool(fallback) then
+			fail(`{here}: fallback names unknown pool {fallback}{hint(fallback, templatePools)}`)
+		end
+	end
+	for _, structure in structures do
+		local here = whereOf("structures", structure.name)
+		local start = structure.startPool
+		if not isPool(start) then
+			local near = hint(start, templatePools)
+			fail(
+				`{here}: startPool names unknown pool {start} (no pool, template or templates named {start}/...){near}`
+			)
+		end
+		-- (By their exact names, as every other name; left out: every biome.)
+		local grows = structure.biomes
+		if grows and #grows == 0 then
+			fail(`{here}: biomes is empty, so it would grow nowhere (leave biomes out for every biome)`)
+		end
+		for _, biome in (grows or {}) :: { string } do
+			if biomeAt[biome] == nil then
+				fail(`{here}: biomes names unknown biome {biome}{hint(biome, biomeAt)}`)
+			end
+		end
+	end
+
 	local content = {
 		packs = packs,
 		blocks = blocks,
@@ -988,6 +1091,9 @@ function Content.build(input: { PackData }): Content
 		biomes = biomes,
 		effects = effects,
 		potions = potions,
+		templates = templates,
+		pools = templatePools,
+		structures = structures,
 		blockId = blockId,
 		itemId = itemId,
 		effectId = effectId,

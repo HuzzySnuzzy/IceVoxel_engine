@@ -3,11 +3,12 @@
 	random_spread placement, biomes and dry land, every piece written whole across chunk seams
 	(rotations, final states, keep cells, terrain matching paths, foundations), padding equal to the
 	neighbouring cores, LOD point sampling, emptyAbove / solidBelow, trees keeping clear, generated
-	chest contents, determinism (cold and warm caches, any chunk order) and the cost. The repo's
-	example outpost (StructureLibrary, tests/build_structures.luau) is what generates.
+	chest contents, determinism (cold and warm caches, any chunk order) and the cost. The example
+	outpost (the Minecraft content pack's, built by tests/build_structures.luau) is what generates.
 ]]
 return function(t, shared, require)
 	local Config = require(shared.Config)
+	local Content = require(shared.Content)
 	local Blocks = require(shared.Blocks)
 	local Biomes = require(shared.Biomes)
 	local ChunkLayout = require(shared.World.ChunkLayout)
@@ -558,7 +559,8 @@ return function(t, shared, require)
 		for _, name in library.names do
 			table.insert(templates, library.templates[name])
 		end
-		local Pools = require(shared.StructureLibrary.Pools)
+		-- (The packs' pools: the library's explicit ones.)
+		local Pools = Content.default.pools
 		local specs = {}
 		for i = 1, 30 do
 			table.insert(specs, { name = `copy{i}`, startPool = "outpost/centres", size = 1, onLand = false })
@@ -642,14 +644,20 @@ return function(t, shared, require)
 
 	-- (Silence the unused helper warning for Template: the outpost's data decodes through it.)
 	t.test("structures: the outpost's templates decode and re-encode alike", function()
-		local Outpost = require(shared.StructureLibrary.Templates.Outpost)
-		t.ok(#Outpost >= 8, "outpost templates")
-		for _, text in Outpost do
+		-- (The packs' templates, name -> text: the outpost's are the Minecraft pack's.)
+		local count = 0
+		for name, text in Content.default.templates do
+			if string.sub(name, 1, 8) ~= "outpost/" then
+				continue
+			end
+			count += 1
 			local template, err = Template.decode(text)
 			t.ok(template ~= nil, err)
 			if template then
+				t.eq(template.name, name, "under its own name")
 				t.eq(Template.encode(template), text, `{template.name} re-encodes alike`)
 			end
 		end
+		t.ok(count >= 8, "outpost templates")
 	end)
 end

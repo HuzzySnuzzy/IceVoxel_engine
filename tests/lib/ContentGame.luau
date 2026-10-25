@@ -101,6 +101,7 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 	local Drinks = require(shared.ToughAsNails.Drinks)
 	local PotionList = require(shared.Effects.PotionList)
 	local Library = require(shared.Structures.Library)
+	local TemplateText = require(shared.Structures.TemplateText)
 	local ScavengeLoot = require(shared.Generation.ScavengeLoot)
 	local Mineshafts = require(shared.Generation.Mineshafts)
 	local Machines = require(shared.Machines)
@@ -394,6 +395,7 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 			shown.sips = if entry.sips then (Items.get(id :: number) :: any).durability else nil
 			return shown
 		end,
+		templateHead = TemplateText.head,
 	}
 end
 

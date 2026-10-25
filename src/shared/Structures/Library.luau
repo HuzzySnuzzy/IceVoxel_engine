@@ -3,37 +3,47 @@
 	The structure library: every template, template pool and generated structure the world knows.
 
 	Sources (`Library.load`, read once per Luau VM: the server, each client and each worker actor):
-	  1. the repo's `StructureLibrary/` modules:
-	       Templates/  ModuleScripts (any depth) each returning one IVS1 string or a list of them,
-	                   and StringValues holding IVS1 data (Rojo makes .txt files StringValues);
-	                   a template's name is inside its data ("outpost/houses/hut_1");
-	       Pools       explicit template pools: { [poolName] = { fallback?, projection?, elements } };
-	       Structures  generated structures: a list of structure specs (fields below);
+	  1. the content packs (Shared/Content; Content/Schema has the fields): their `templates`
+	     (name -> IVS1 text, as a structure block's SAVE gives it; the name is the one inside),
+	     `pools` (explicit template pools: { [poolName] = { fallback?, projection?, elements } })
+	     and `structures` (generated structures: a list of structure specs, fields below), merged
+	     and their names checked as the packs load (a structure's biomes too, by their exact
+	     names);
 	  2. the place's optional `ReplicatedStorage.IceVoxelStructures` folder (any depth of Folders):
 	     StringValues holding IVS1 data (one or more strings each). Attributes on a StringValue
 	     make its (first) template generate with no code: Generate (bool), Biomes (comma list),
 	     Spacing, Separation, Size (jigsaw depth), Foundation (bool), OnLand (bool), StartHeight,
 	     MaxDistance; TerrainMatching (bool) is the projection of all its templates in implicit
-	     pools. The folder's templates and structures replace repo ones with the same name.
-	Biome names are matched loosely, like final states ("plains", "minecraft:plains", "Plains").
-	Bad entries are reported (Roblox `warn`, and `library.warnings`) and skipped; nothing errors.
-	Entries are read in path order (then class and data), so every machine resolves a template
-	defined twice (the later one wins) alike, whatever order the children replicate in.
+	     pools. The folder's templates and structures replace the packs' with the same name.
+	Biome names are matched loosely here, like final states ("plains", "minecraft:plains",
+	"Plains"), against Shared/Biomes (the packs' biomes): the place's Biomes attribute is typed by
+	hand in Studio, and an unknown one is warned.
+	The packs' part is built alone first, and strictly: anything this module would warn about in
+	it (a number out of range, a start jigsaw no start piece has, a jigsaw's pool with no
+	templates or its unknown final state, an unknown item in a chest) is an error
+	naming the pack, the file and the entry, as Content's own checks are (`Content.where`). The
+	place's folder is Studio's to fill: its bad entries are reported (Roblox `warn`, and
+	`library.warnings`) and skipped; nothing errors. Its values are read in path order (then data
+	and attributes), so every machine resolves a template defined twice (the later one wins)
+	alike, whatever order the children replicate in.
 	Clients generate terrain too, so every machine must load the same library: the server never
 	writes into the folder at runtime (saves go to ServerStorage.IceVoxelSavedStructures).
 
 	Pools (`library.pool(name)`):
-	  - an explicit pool from Pools.luau;
+	  - an explicit pool (a pack's `pools`);
 	  - else the template with exactly that name, alone (so a structure or a jigsaw can name one
 	    template);
 	  - else the implicit pool: every template whose name starts with "<name>/", sorted by name,
 	    weight 1, rigid unless the template is marked terrain matching. So pieces named
 	    "mything/houses/a" and "mything/houses/b" make the pool "mything/houses" with no code.
 
-	`Library.new` is pure (tests build libraries from in-memory templates with it).
+	`Library.new` is pure (tests build libraries from in-memory templates with it). Its warnings
+	name what they are about (`warn(message, kind, name)`: "template", "pool" or "structure" and
+	its name), which is how `load` names the pack.
 ]]
 
 local Biomes = require(script.Parent.Parent.Biomes)
+local Content = require(script.Parent.Parent.Content)
 local Hash = require(script.Parent.Parent.Util.Hash)
 local Jigsaw = require(script.Parent.Jigsaw)
 
@@ -61,7 +71,7 @@ export type Structure = {
 	startJigsawName: string?,
 	size: number, -- jigsaw depth 0..7
 	maxDistance: number, -- 1..128
-	biomes: { string }, -- BiomeList names
+	biomes: { string }, -- biome names (Shared/Biomes, the packs' biomes)
 	biomeSet: { [number]: boolean }, -- the same, by biome index
 	spacing: number, -- region size in chunks
 	separation: number, -- 0..spacing - 1
@@ -76,11 +86,13 @@ export type Structure = {
 
 export type Spec = {
 	templates: { Template }?, -- later ones replace earlier ones with the same name
-	pools: { [string]: any }?, -- the Pools.luau format
-	structures: { any }?, -- the Structures.luau format
+	pools: { [string]: any }?, -- the `pools` kind's format (Content/Schema)
+	structures: { any }?, -- the `structures` kind's format (Content/Schema)
 	-- Template name -> projection it has in implicit pools (default rigid).
 	projections: { [string]: string }?,
-	warn: ((message: string) -> ())?,
+	-- Each warning, and what it is about: "template", "pool" or "structure" and its name (nil
+	-- for an entry with no name).
+	warn: ((message: string, kind: string?, name: string?) -> ())?,
 }
 
 export type Library = {
@@ -95,9 +107,9 @@ export type Library = {
 }
 
 export type LoadOptions = {
-	modules: Instance?, -- default: the StructureLibrary folder next to this module's folder
+	content: Content.Content?, -- default: Content.default, the game's packs
 	folder: Instance?, -- default: ReplicatedStorage.IceVoxelStructures, when there is one
-	warn: ((message: string) -> ())?, -- default: Roblox warn
+	warn: ((message: string) -> ())?, -- default: Roblox warn (the folder's problems)
 }
 
 local Library = {}
@@ -239,10 +251,10 @@ end
 
 function Library.new(spec: Spec): Library
 	local warnings: { string } = {}
-	local function warn(message: string)
+	local function warn(message: string, kind: string?, name: string?)
 		table.insert(warnings, message)
 		if spec.warn then
-			spec.warn(message)
+			spec.warn(message, kind, name)
 		end
 	end
 
@@ -255,7 +267,7 @@ function Library.new(spec: Spec): Library
 			warn(`Template #{i} {problem}; skipped`)
 		else
 			if templates[t.name] then
-				warn(`Template '{t.name}' is defined twice; the later one is used`)
+				warn(`Template '{t.name}' is defined twice; the later one is used`, "template", t.name)
 			end
 			templates[t.name] = t
 		end
@@ -269,20 +281,24 @@ function Library.new(spec: Spec): Library
 	for _, poolName in sortedKeys(rawPools) do
 		local raw = rawPools[poolName]
 		if type(raw) ~= "table" or type(raw.elements) ~= "table" then
-			warn(`Pool '{poolName}' has no elements list; skipped`)
+			warn(`Pool '{poolName}' has no elements list; skipped`, "pool", poolName)
 			continue
 		end
 		local default = Jigsaw.RIGID
 		if raw.projection ~= nil then
 			default = projectionOf(raw.projection) or default
 			if projectionOf(raw.projection) == nil then
-				warn(`Pool '{poolName}': unknown projection '{tostring(raw.projection)}' (rigid used)`)
+				warn(
+					`Pool '{poolName}': unknown projection '{tostring(raw.projection)}' (rigid used)`,
+					"pool",
+					poolName
+				)
 			end
 		end
 		local elements: { Element } = {}
 		for i, e in raw.elements do
 			if type(e) ~= "table" then
-				warn(`Pool '{poolName}' element #{i} is not a table; skipped`)
+				warn(`Pool '{poolName}' element #{i} is not a table; skipped`, "pool", poolName)
 				continue
 			end
 			local weight = e.weight
@@ -292,7 +308,11 @@ function Library.new(spec: Spec): Library
 				local fixed = if type(weight) == "number" and weight == weight
 					then math.clamp(floor(weight), 1, Library.MAX_WEIGHT)
 					else 1
-				warn(`Pool '{poolName}' element #{i}: weight must be 1..{Library.MAX_WEIGHT} ({fixed} used)`)
+				warn(
+					`Pool '{poolName}' element #{i}: weight must be 1..{Library.MAX_WEIGHT} ({fixed} used)`,
+					"pool",
+					poolName
+				)
 				weight = fixed
 			end
 			local projection = default
@@ -301,27 +321,31 @@ function Library.new(spec: Spec): Library
 				if p then
 					projection = p
 				else
-					warn(`Pool '{poolName}' element #{i}: unknown projection '{tostring(e.projection)}'`)
+					warn(
+						`Pool '{poolName}' element #{i}: unknown projection '{tostring(e.projection)}'`,
+						"pool",
+						poolName
+					)
 				end
 			end
 			local name = e.template
 			if name == nil or e.empty == true then
 				table.insert(elements, { template = nil, weight = weight, projection = projection })
 			elseif type(name) ~= "string" then
-				warn(`Pool '{poolName}' element #{i}: template must be a name; skipped`)
+				warn(`Pool '{poolName}' element #{i}: template must be a name; skipped`, "pool", poolName)
 			elseif templates[name] == nil then
-				warn(`Pool '{poolName}': no template '{name}'; skipped`)
+				warn(`Pool '{poolName}': no template '{name}'; skipped`, "pool", poolName)
 			else
 				table.insert(elements, { template = name, weight = weight, projection = projection })
 			end
 		end
 		local fallback = raw.fallback
 		if fallback ~= nil and type(fallback) ~= "string" then
-			warn(`Pool '{poolName}': fallback must be a pool name; ignored`)
+			warn(`Pool '{poolName}': fallback must be a pool name; ignored`, "pool", poolName)
 			fallback = nil
 		end
 		if #elements == 0 then
-			warn(`Pool '{poolName}' has no usable elements`)
+			warn(`Pool '{poolName}' has no usable elements`, "pool", poolName)
 		end
 		pools[poolName] = { name = poolName, fallback = fallback, elements = elements }
 	end
@@ -364,7 +388,7 @@ function Library.new(spec: Spec): Library
 	for _, poolName in sortedKeys(pools) do
 		local fallback = pools[poolName].fallback
 		if fallback and not Jigsaw.EMPTY_POOLS[fallback] and pool(fallback) == nil then
-			warn(`Pool '{poolName}': fallback pool '{fallback}' has no templates`)
+			warn(`Pool '{poolName}': fallback pool '{fallback}' has no templates`, "pool", poolName)
 		end
 	end
 	local missingPools: { [string]: { string } } = {}
@@ -373,28 +397,28 @@ function Library.new(spec: Spec): Library
 		local size = t.size
 		for _, j in t.jigsaws do
 			if type(j) ~= "table" or not (isInteger(j.x) and isInteger(j.y) and isInteger(j.z)) then
-				warn(`Template '{name}': a jigsaw has no position`)
+				warn(`Template '{name}': a jigsaw has no position`, "template", name)
 				continue
 			end
 			local at = `Template '{name}': jigsaw at {j.x} {j.y} {j.z}`
 			if type(j.name) ~= "string" or type(j.target) ~= "string" or type(j.pool) ~= "string" then
-				warn(`{at} has no name, target or pool`)
+				warn(`{at} has no name, target or pool`, "template", name)
 				continue
 			end
 			if j.x < 0 or j.y < 0 or j.z < 0 or j.x >= size[1] or j.y >= size[2] or j.z >= size[3] then
-				warn(`{at} is outside the template`)
+				warn(`{at} is outside the template`, "template", name)
 			end
 			local tops = VALID_FRONT_TOP[j.front]
 			if tops == nil or not tops[j.top] then
-				warn(`{at} has a bad orientation ({tostring(j.front)} / {tostring(j.top)})`)
+				warn(`{at} has a bad orientation ({tostring(j.front)} / {tostring(j.top)})`, "template", name)
 			end
 			if j.joint ~= "rollable" and j.joint ~= "aligned" then
-				warn(`{at} has an unknown joint '{tostring(j.joint)}' (the default is used)`)
+				warn(`{at} has an unknown joint '{tostring(j.joint)}' (the default is used)`, "template", name)
 			end
 			if type(j.finalState) == "string" and j.finalState ~= "" then
 				local final = Jigsaw.finalStateBlock(j.finalState)
 				if final == 0 and string.lower(j.finalState) ~= "air" and j.finalState ~= "minecraft:air" then
-					warn(`{at}: unknown final state '{j.finalState}' (air used)`)
+					warn(`{at}: unknown final state '{j.finalState}' (air used)`, "template", name)
 				end
 			end
 			if type(j.pool) == "string" and not Jigsaw.EMPTY_POOLS[j.pool] and pool(j.pool) == nil then
@@ -410,12 +434,16 @@ function Library.new(spec: Spec): Library
 		end
 	end
 	for _, poolName in sortedKeys(missingPools) do
-		warn(`Pool '{poolName}' (used by {table.concat(missingPools[poolName], ", ")}) has no templates`)
+		local users = missingPools[poolName]
+		-- (About the first template using it.)
+		warn(`Pool '{poolName}' (used by {table.concat(users, ", ")}) has no templates`, "template", users[1])
 	end
 	for _, name in names do
 		if pools[name] == nil and #withPrefix(names, name .. "/") > 0 then
 			warn(
-				`'{name}' is a template's name, so pool '{name}' is that template alone, not the templates under '{name}/'`
+				`'{name}' is a template's name, so pool '{name}' is that template alone, not the templates under '{name}/'`,
+				"template",
+				name
 			)
 		end
 	end
@@ -446,12 +474,12 @@ function Library.new(spec: Spec): Library
 				return default
 			end
 			if not isInteger(v) then
-				warn(`Structure '{name}': {field} must be a whole number ({default} used)`)
+				warn(`Structure '{name}': {field} must be a whole number ({default} used)`, "structure", name)
 				return default
 			end
 			if v < min or v > max then
 				local fixed = math.clamp(v, min, max)
-				warn(`Structure '{name}': {field} must be {min}..{max} ({fixed} used)`)
+				warn(`Structure '{name}': {field} must be {min}..{max} ({fixed} used)`, "structure", name)
 				return fixed
 			end
 			return v
@@ -462,7 +490,7 @@ function Library.new(spec: Spec): Library
 				return default
 			end
 			if type(v) ~= "boolean" then
-				warn(`Structure '{name}': {field} must be true or false ({default} used)`)
+				warn(`Structure '{name}': {field} must be true or false ({default} used)`, "structure", name)
 				return default
 			end
 			return v
@@ -470,18 +498,18 @@ function Library.new(spec: Spec): Library
 
 		local startPool = raw.startPool
 		if type(startPool) ~= "string" then
-			warn(`Structure '{name}' has no startPool; skipped`)
+			warn(`Structure '{name}' has no startPool; skipped`, "structure", name)
 			continue
 		end
 		local start = pool(startPool)
 		if start == nil or #start.elements == 0 then
-			warn(`Structure '{name}': start pool '{startPool}' has no templates; skipped`)
+			warn(`Structure '{name}': start pool '{startPool}' has no templates; skipped`, "structure", name)
 			continue
 		end
 		local startJigsawName = raw.startJigsawName
 		if startJigsawName ~= nil then
 			if type(startJigsawName) ~= "string" then
-				warn(`Structure '{name}': startJigsawName must be a name; skipped`)
+				warn(`Structure '{name}': startJigsawName must be a name; skipped`, "structure", name)
 				continue
 			end
 			local found = false
@@ -496,7 +524,11 @@ function Library.new(spec: Spec): Library
 				end
 			end
 			if not found then
-				warn(`Structure '{name}': no template in '{startPool}' has a jigsaw named '{startJigsawName}'; skipped`)
+				warn(
+					`Structure '{name}': no template in '{startPool}' has a jigsaw named '{startJigsawName}'; skipped`,
+					"structure",
+					name
+				)
 				continue
 			end
 		end
@@ -508,20 +540,24 @@ function Library.new(spec: Spec): Library
 			rawBiomes = Library.splitList(rawBiomes)
 		end
 		if rawBiomes ~= nil and type(rawBiomes) ~= "table" then
-			warn(`Structure '{name}': biomes must be a list of names (every biome used)`)
+			warn(`Structure '{name}': biomes must be a list of names (every biome used)`, "structure", name)
 			rawBiomes = nil
 		end
 		for _, biomeName in (rawBiomes or allBiomes) :: { any } do
 			local biome = if type(biomeName) == "string" then biomeByKey[Jigsaw.nameKey(biomeName)] else nil
 			if biome == nil then
-				warn(`Structure '{name}': unknown biome '{tostring(biomeName)}' (biomes: {knownBiomes})`)
+				warn(
+					`Structure '{name}': unknown biome '{tostring(biomeName)}' (biomes: {knownBiomes})`,
+					"structure",
+					name
+				)
 			elseif not biomeSet[biome.index] then
 				biomeSet[biome.index] = true
 				table.insert(biomeNames, biome.name)
 			end
 		end
 		if #biomeNames == 0 then
-			warn(`Structure '{name}' can grow in no biome; skipped`)
+			warn(`Structure '{name}' can grow in no biome; skipped`, "structure", name)
 			continue
 		end
 
@@ -533,7 +569,7 @@ function Library.new(spec: Spec): Library
 		if salt == nil then
 			salt = Hash.string(name)
 		elseif not isInteger(salt) then
-			warn(`Structure '{name}': salt must be a whole number (one from the name used)`)
+			warn(`Structure '{name}': salt must be a whole number (one from the name used)`, "structure", name)
 			salt = Hash.string(name)
 		end
 
@@ -565,7 +601,7 @@ function Library.new(spec: Spec): Library
 		}
 		local old = byName[name]
 		if old then
-			warn(`Structure '{name}' is defined twice; the later one is used`)
+			warn(`Structure '{name}' is defined twice; the later one is used`, "structure", name)
 			structures[table.find(structures, old) :: number] = structure
 		else
 			table.insert(structures, structure)
@@ -587,7 +623,7 @@ function Library.new(spec: Spec): Library
 	}
 end
 
---[[ Loading from the place ]]
+--[[ Loading from the packs and the place ]]
 
 -- The IVS1 strings in a text: a StringValue may hold several, separated by anything that is not
 -- base64url (spaces, new lines, quotes, commas), which is trimmed off each one's end.
@@ -609,22 +645,12 @@ function Library.splitData(text: string): { string }
 	return list
 end
 
-local function sortedChildren(instance: Instance): { Instance }
-	local children = instance:GetChildren()
-	table.sort(children, function(a, b)
-		if a.Name ~= b.Name then
-			return a.Name < b.Name
-		end
-		return a.ClassName < b.ClassName
-	end)
-	return children
-end
-
 local cached: Library? = nil
 
 --[[
-	Loads the library from the StructureLibrary modules and the IceVoxelStructures folder. Without
-	options the result is cached: later calls return the same library.
+	Loads the library from the content packs and the IceVoxelStructures folder. Without options the
+	result is cached: later calls return the same library. Errors, naming the pack, for anything
+	wrong with the packs' templates, pools and structures (the header).
 ]]
 function Library.load(options: LoadOptions?): Library
 	if options == nil and cached ~= nil then
@@ -636,11 +662,11 @@ function Library.load(options: LoadOptions?): Library
 	end
 	-- (Required here so this module loads, and Library.new works, without the codec.)
 	local Template = require(script.Parent.Template)
+	local content: Content.Content = opts.content or Content.default
 
 	local templates: { Template } = {}
 	local projections: { [string]: string } = {}
 	local structures: { any } = {}
-	local pools: { [string]: any } = {}
 
 	local function decode(text: string, where: string): { Template }
 		local list = {}
@@ -663,99 +689,37 @@ function Library.load(options: LoadOptions?): Library
 		return list
 	end
 
-	local function requireModule(module: Instance, where: string): any
-		local ok, result = pcall(require, module :: ModuleScript)
-		if not ok then
-			report(`{where}: {tostring(result)}`)
-			return nil
-		end
-		return result
+	--[[ The packs' ]]
+	local function packError(kind: string, name: string, message: string): never
+		error(`Structures: {content.where(kind, name)}: {message}`, 0)
 	end
-
-	--[[ Repo modules ]]
-	local modules = opts.modules
-	if modules == nil then
-		modules = script.Parent.Parent:FindFirstChild("StructureLibrary")
+	for _, name in sortedKeys(content.templates) do
+		local t, err, notes = Template.decode(content.templates[name])
+		if t == nil then
+			packError("template", name, err or "bad data")
+		end
+		-- (An unknown item in a chest, a jigsaw not in its cell: left out by the decode.)
+		local noted: { string } = notes or {}
+		if #noted > 0 then
+			packError("template", name, table.concat(noted, "; "))
+		end
+		table.insert(templates, t :: Template)
 	end
-	if modules then
-		local folder = modules:FindFirstChild("Templates")
-		-- Every StringValue and ModuleScript (any depth), sorted by path, then class, then data:
-		-- clients may receive the children in another order than the server has them, and two
-		-- entries at the same path defining the same template (the later one wins) must resolve
-		-- alike everywhere.
-		type Source = { where: string, class: string, texts: { string }, key: string }
-		local sources: { Source } = {}
-		local function collect(instance: Instance, path: string)
-			for _, child in sortedChildren(instance) do
-				local where = `{path}/{child.Name}`
-				if child:IsA("StringValue") then
-					-- (Rojo makes .txt files StringValues; Studio users may drop them here too.)
-					local value = (child :: StringValue).Value
-					table.insert(sources, { where = where, class = "StringValue", texts = { value }, key = value })
-				elseif child:IsA("ModuleScript") then
-					local value = requireModule(child, where)
-					local texts = if type(value) == "string" then { value } else value
-					if type(texts) ~= "table" then
-						report(`{where} must return an IVS1 string or a list of them`)
-					else
-						local list: { string } = {}
-						for _, text in texts do
-							if type(text) == "string" then
-								table.insert(list, text)
-							else
-								report(`{where}: an entry is not a string`)
-							end
-						end
-						table.insert(sources, {
-							where = where,
-							class = "ModuleScript",
-							texts = list,
-							key = table.concat(list, "\n"),
-						})
-					end
-				end
-				collect(child, where)
-			end
-		end
-		if folder then
-			collect(folder, "StructureLibrary/Templates")
-		end
-		table.sort(sources, function(a: Source, b: Source): boolean
-			if a.where ~= b.where then
-				return a.where < b.where
-			elseif a.class ~= b.class then
-				return a.class < b.class
-			end
-			return a.key < b.key
-		end)
-		for _, source in sources do
-			for _, text in source.texts do
-				for _, t in decode(text, source.where) do
-					table.insert(templates, t)
-				end
-			end
-		end
-		local poolsModule = modules:FindFirstChild("Pools")
-		if poolsModule then
-			local value = requireModule(poolsModule, "StructureLibrary/Pools")
-			if type(value) == "table" then
-				pools = value
-			elseif value ~= nil then
-				report("StructureLibrary/Pools must return a table")
-			end
-		end
-		local structuresModule = modules:FindFirstChild("Structures")
-		if structuresModule then
-			local value = requireModule(structuresModule, "StructureLibrary/Structures")
-			if type(value) == "table" then
-				for _, s in value do
-					table.insert(structures, s)
-				end
-			elseif value ~= nil then
-				report("StructureLibrary/Structures must return a list")
-			end
-		end
+	for _, structure in content.structures do
+		table.insert(structures, structure)
 	end
+	-- (Alone, so whatever it would warn about is the packs' doing.)
+	Library.new({
+		templates = templates,
+		pools = content.pools,
+		structures = structures,
+		warn = function(message: string, kind: string?, name: string?)
+			if kind and name then
+				packError(kind, name, message)
+			end
+			error(`Structures: the packs' structures: {message}`, 0)
+		end,
+	})
 
 	--[[ The place's folder ]]
 	local folder = opts.folder
@@ -835,10 +799,12 @@ function Library.load(options: LoadOptions?): Library
 
 	local library = Library.new({
 		templates = templates,
-		pools = pools,
+		pools = content.pools,
 		structures = structures,
 		projections = projections,
-		warn = report,
+		warn = function(message: string)
+			report(message)
+		end,
 	})
 	if options == nil then
 		cached = library

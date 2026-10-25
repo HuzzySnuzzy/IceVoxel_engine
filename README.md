@@ -1068,8 +1068,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   Pools need no code: pieces named `mything/houses/a` and `mything/houses/b` make the pool
   `mything/houses`. Data made to waste time stops with "the structure is too big". WAILA names a
   jigsaw's name, target and pool.
-- **Generated structures.** Templates in the structure library (`src/shared/StructureLibrary/`, or
-  StringValues in the place's `ReplicatedStorage.IceVoxelStructures` folder) generate in the world
+- **Generated structures.** Templates in the structure library (content packs' `templates`, `pools`
+  and `structures`, or StringValues in the place's `ReplicatedStorage.IceVoxelStructures` folder)
+  generate in the world
   as Minecraft's jigsaw structures do: one start per region of `spacing` × `spacing` chunks, at
   least `separation` apart (random_spread), kept when the start piece's centre is in one of the
   structure's biomes and on dry land that is not bare rock, then assembled from its pools: the start
@@ -2180,7 +2181,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             (the helpers packs share: models, tools and armor, fluids, plants,
                             doors, recipes, metal(), brewing), Packs/ (Core, Minecraft, Mekanism,
                             Survival, Terraria, Apocalypse, Turrets, Ores: every block, item,
-                            recipe, texture, loot table, biome, status effect and potion)
+                            recipe, texture, loot table, biome, status effect, potion and
+                            structure; the example outpost is Minecraft's templates/outpost,
+                            pools and structures)
   Blocks/  BlockList        the block registry (BlockList: the packs' blocks, merged) -> ids,
                             appearances, lookup tables (hardness, tools, drops, menus, how long
                             zombies take to break them), plants (soil sets, tall halves, foliage
@@ -2224,12 +2227,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             and hide bits), Menu (Minecraft's inventory clicks and the equipment
                             slots' rules, used by the server and for client prediction)
   Structures/               structure blocks' data and jigsaw structures: Template (the IVS1
-                            text, SAVE's capture, ASCII tables), Settings (structure block and
+                            text, SAVE's capture, ASCII tables), TemplateText (IVS1's bytes,
+                            frame and head, needing no registry), Settings (structure block and
                             jigsaw fields, ranges, wire format), Transform (rotation and mirror),
                             Jigsaw (Minecraft's JigsawPlacement), Library (templates, pools and
-                            generated structures from the modules below and the place)
-  StructureLibrary/         the structure library: Templates/ (IVS1 modules; Outpost, the
-                            example), Pools (explicit template pools), Structures (what generates)
+                            generated structures from the content packs and the place)
   Entities/ItemPhysics      dropped item movement (server and client; floating in water and fuel,
                             in lava and oil)
   Entities/MobList          mob kinds: the farm animals and the ten zombie kinds (Minecraft's
@@ -2813,7 +2815,7 @@ for performance:
 | `Structures.LoadBlocksPerFrame` | 2000 | Blocks LOAD and Generate place per frame (and at most 6 ms of it). |
 | `Structures.MaxDataChars` | 200000  | Longest structure text saved or pasted (what a StringValue holds).  |
 | `Structures.DataPieceChars` | 16000 | Structure text travels in pieces of this many characters, `DataPiecesPerSecond` (20) a second. |
-| `Structures.Generate`     | true    | Library structures generate in the world; false: none do.          |
+| `Structures.Generate`     | true    | Library structures (the packs' `structures`, the place's `Generate` values) generate in the world; false: none do. |
 | `Locate.BudgetMs` / `TimeoutSeconds` / `Queue` | 3 / 20 / 8 | `/locate`'s searches: milliseconds of each server frame, how long one may run before answering not found, how many may wait. |
 | `Locate.StructureRings` / `Radius` | 100 / per kind | How far structures are searched: rings of placement regions (Minecraft's 100), and blocks for the built-in kinds (`mineshaft` 4096, `oil` 16384, `lake` 4096, `cave` 3072, `ravine` 6144, `city` 24576, `bunker` 6144). |
 | `Locate.BiomeRadius` / `BiomeStep` | 6400 / 32 | Minecraft's biome search (times the world's climate scale, at most 2: Large Biomes). |
@@ -3352,11 +3354,13 @@ screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"voi
 ## Extending
 
 **Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages, the
-skill tree's nodes, lore lines, biomes, status effects and potions come from content packs, folders
+skill tree's nodes, lore lines, biomes, status effects, potions and jigsaw structures come
+from content packs, folders
 under `src/shared/Content/Packs/` that the game finds and checks as it loads, like Minecraft's data
 packs (docs/ARCHITECTURE.md, "Content packs"). A pack is a `pack` manifest
 (`{ order = 300, description = "..." }`) and any of `blocks`, `items`, `recipes`, `tags`,
-`textures`, `loot`, `ores`, `ages`, `skills`, `lore`, `biomes`, `effects` and `potions`, each a Luau
+`textures`, `loot`, `ores`, `ages`, `skills`, `lore`, `fuel`, `biomes`, `effects`, `potions`,
+`templates`, `pools` and `structures`, each a Luau
 module (its data, or a function of `define`, the helpers in `Content/Define`) or a `.json` file. An
 entry carries what other registries used to keep in tables of their own: `lore`, `texture`, `icon`,
 `age`, `skill`, `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`...
@@ -4200,19 +4204,29 @@ user id in `Config.Structures.Permission`.
    (`Cmd` + `C`). Long data comes in parts of 16,000 characters ("part 2 of 9"): copy every part in
    order and put them together.
 4. **Keep it**, any of these ways:
-   - **Send it to Claude** in a chat message (words around it are fine): it goes into
-     `src/shared/StructureLibrary/Templates/` as a module.
-   - **Put it in the repo yourself**: a ModuleScript (any name, any folder depth) in
-     `src/shared/StructureLibrary/Templates/` returning the text, or a list of texts:
+   - **Send it to Claude** in a chat message (words around it are fine): it goes into a content
+     pack's `templates`.
+   - **Put it in a pack yourself**: a pack's `templates` maps each template's name to its text
+     (`src/shared/Content/Packs/<Pack>/templates.luau`, or a file of its `templates/` folder, one
+     per structure: the outpost's is `Minecraft/templates/outpost.luau`):
      ```lua
-     return "IVS1:..."
+     return {
+         ["mything/houses/hut"] = "IVS1:...",
+         ["mything/houses/shed"] = "IVS1:...",
+     }
      ```
-     A `.txt` file holding the text works too (Rojo makes it a StringValue). The name inside the
-     data counts, not the module's.
+     The key must be the name inside the text (the load says so when it isn't), and every block
+     its palette names must be one some pack makes, by today's name: a template naming one no pack
+     makes stops the load, naming the pack, the file and the template (saves and pastes are
+     kinder: there an unknown block becomes air). In Studio, the text is also in a StringValue named
+     after the structure in `ServerStorage.IceVoxelSavedStructures` during the playtest: copy its
+     Value. `lune run tests/structure encode <table.luau> --module --out <file>` writes such a
+     module from an edited table (step 8).
    - **Keep it in the place**: during a Studio playtest every save is a StringValue named after the
      structure in `ServerStorage.IceVoxelSavedStructures`. Copy it, stop the playtest and paste it
      into a Folder named `IceVoxelStructures` in ReplicatedStorage (make it; Folders inside are
-     fine). Saves only last for the session: nothing is written anywhere else.
+     fine). Saves only last for the session: nothing is written anywhere else. A template there
+     replaces a pack's of the same name.
 
    To place it again by hand, use a Structure Block in Load mode with its name (this session's
    saves and the library), or paste the data into Paste Data: a LOAD whose size differs from the
@@ -4232,21 +4246,49 @@ user id in `Config.Structures.Permission`.
      source's joint is rollable. Each child must fit beside what is already there.
    - Try it at once: a jigsaw's Generate builds from its pool right there, Levels deep, and this
      session's saves are already in their pools (Keep Jigsaws leaves the jigsaws to look at).
-   - `src/shared/StructureLibrary/Pools.luau` adds weights (1..150), empty elements (a plot left
-     empty), a fallback pool (tried after the elements, and alone at the last level: end caps) and
-     terrain matching pieces, which follow the ground column by column (paths). In the place, the
-     attribute `TerrainMatching = true` on a StringValue makes its templates terrain matching in
-     the pools made from their names.
-6. **Make it generate.** In the repo, add an entry to `src/shared/StructureLibrary/Structures.luau`
-   (its header lists the fields: `name`, `startPool`, `size` (jigsaw depth 0..7), `maxDistance`,
-   `biomes`, `spacing` / `separation`, `salt`, `startHeight`, `projectToHeightmap`, `onLand`,
-   `foundation`). In the place, set the attribute `Generate = true` on the StringValue whose
+   - A pack's `pools` adds weights (1..150), empty elements (a plot left empty), a fallback pool
+     (tried after the elements, and alone at the last level: end caps) and terrain matching
+     pieces, which follow the ground column by column (paths); `Content/Schema` lists the fields:
+     ```lua
+     return {
+         ["mything/streets"] = {
+             projection = "terrain_matching",
+             fallback = "mything/street_ends",
+             elements = {
+                 { template = "mything/streets/straight", weight = 4 },
+                 { template = "mything/streets/crossing" },
+                 { empty = true, weight = 2 },
+             },
+         },
+     }
+     ```
+     In the place, the attribute `TerrainMatching = true` on a StringValue makes its templates
+     terrain matching in the pools made from their names.
+6. **Make it generate.** In a pack, add an entry to its `structures` (`Content/Schema` lists the
+   fields: `name`, `startPool`, `size` (jigsaw depth 0..7), `maxDistance`, `biomes`, `spacing` /
+   `separation`, `salt`, `startHeight`, `projectToHeightmap`, `onLand`, `foundation`):
+   ```lua
+   return {
+       {
+           name = "mything",
+           startPool = "mything/centres",
+           size = 4,
+           biomes = { "Plains", "Forest" },
+           spacing = 40,
+           separation = 10,
+       },
+   }
+   ```
+   `biomes` names the packs' biomes exactly (`lune run tests/content list biomes`), at least one;
+   leave it out for every biome. An unknown biome, a number out of its range, a pool with no
+   templates or a block a template names that no pack makes stops the load, naming the pack and
+   the entry. In the place, set the attribute `Generate = true` on the StringValue whose
    (first) template is the start, and optionally `Biomes` (`"plains, forest"`: biome names;
    case, spaces, underscores and `minecraft:` are ignored), `Spacing` and `Separation` (one start
    per Spacing × Spacing chunks, at least Separation apart; default 34 / 8, Minecraft's villages),
-   `Size`, `Foundation`, `OnLand`, `StartHeight` and `MaxDistance`. Problems (an unknown pool,
-   biome or block, a bad attribute) are warned in the output as `[Structures] ...` and skipped;
-   nothing errors.
+   `Size`, `Foundation`, `OnLand`, `StartHeight` and `MaxDistance`. The place's problems (an
+   unknown pool, biome or block, a bad attribute) are warned in the output as `[Structures] ...`
+   and skipped; nothing there errors.
 7. **See it.** Structures generate in terrain nobody has edited, wherever a start lands: while
    testing, a small spacing (`Spacing = 4`: one start per 64 × 64 blocks) finds one quickly. From a
    server script, every generated structure with a piece in a rectangle:
@@ -4261,13 +4303,57 @@ user id in `Config.Structures.Permission`.
    `lune run tests/structure decode <file | IVS1:... | ->` prints every structure in a file (a
    pasted chat message, a library module) or the text given: name, size, palette, every y layer as
    ASCII, jigsaws, data markers, containers. `--lua hut.luau` writes an editable table ("." air,
-   " " keep), and `lune run tests/structure encode hut.luau --module` turns it back into a library
-   module.
+   " " keep), and `lune run tests/structure encode hut.luau --module` turns it back into a pack's
+   templates module. `lune run tests/content list templates` (or `pools`, `structures`) lists the
+   packs' ones, and `lune run tests/content show mything/houses` a pool's elements (or the
+   templates its name gathers) and what starts from it.
 
-The example outpost is a complete jigsaw structure to copy: its pieces are built in code by
-`tests/build_structures.luau` into `Templates/Outpost.luau` (`lune run tests/build_structures`;
-`--check` tells whether that file is up to date, `--print` shows every piece), its pools are in
-`Pools.luau` and its entry in `Structures.luau`.
+The example outpost is a complete jigsaw structure to copy, the Minecraft pack's (it came with the
+structure blocks): its pieces are built in code by `tests/build_structures.luau` into
+`Minecraft/templates/outpost.luau` (`lune run tests/build_structures`; `--check` tells whether
+that file is up to date, `--print` shows every piece), its pools are `Minecraft/pools.luau` and
+its entry `Minecraft/structures.luau`.
+
+**A structure's pool, changed by another pack.** A later pack overrides a pool by name, as blocks
+are: `override = true` patches the pool's fields, and its `elements` replace the earlier list
+whole (every override's list field does: a block's `tags`, a structure's `biomes`; Minecraft's
+data packs replace a template_pool the same way), so to add a piece it lists the pool's own
+elements and the new one. A pack giving the outpost a well among its houses:
+
+```lua
+-- MyPack/templates.luau
+return { ["mypack/well"] = "IVS1:..." }
+
+-- MyPack/pools.luau
+return {
+    ["outpost/houses"] = {
+        override = true,
+        elements = {
+            { template = "outpost/houses/hut", weight = 3 },
+            { template = "outpost/houses/storehouse", weight = 2 },
+            { template = "outpost/houses/forge", weight = 2 },
+            { template = "outpost/houses/woodpile", weight = 1 },
+            { template = "mypack/well", weight = 2 },
+            { empty = true, weight = 2 },
+        },
+    },
+}
+
+-- MyPack/structures.luau: the outpost in deserts too, and more often
+return {
+    {
+        name = "outpost",
+        override = true,
+        biomes = { "Plains", "Savanna", "Meadow", "Forest", "Desert" },
+        spacing = 40,
+    },
+}
+```
+
+The well needs a jigsaw named `outpost:house` facing out of its door side, as the houses have
+(`lune run tests/structure decode src/shared/Content/Packs/Minecraft/templates/outpost.luau`
+shows theirs). A pool no pack has an entry for (`outpost/centres`, the templates under that name)
+takes a new piece by its name alone: a template named `outpost/centres/castle` is in it.
 
 **A block behaviour.** Create a module in `src/server/Behaviours/` (see `Grass.luau`) with
 `onTick(world, ticker, x, y, z, block)` (scheduled after a neighbour changes, `tickDelay` ticks

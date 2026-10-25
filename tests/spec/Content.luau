@@ -3,7 +3,8 @@
 	feature packs, Ores last) and the ids they give; discovery of Luau and JSON packs through
 	Content.load (the fixture packs in tests/fixtures/content/packs: Beta, JSON, order 10; Alpha,
 	Luau, order 20, a "_" helper and Define's metal; Gamma, order 20 after Alpha by name,
-	overriding both), their order, ids, overrides and merged tags; kind folders
+	overriding both), their order, ids, overrides, merged tags and structures (templates, pools
+	and structures: a pool's and a structure's overrides); kind folders
 	(tests/fixtures/content/folders: Delta, Luau, a folder inside a kind folder; Epsilon, JSON),
 	their modules' order and the files every message names; every per-entry field reaching its
 	registry (the Fields fixture pack grafted into a fresh game); where each thing came from
@@ -40,6 +41,7 @@ return function(t, shared, require, _server, _client)
 	local Blocks = require(shared.Blocks)
 	local Items = require(shared.Items)
 	local Config = require(shared.Config)
+	local TemplateText = require(shared.Structures.TemplateText)
 
 	-- Does `text` contain every one of `parts` (plain)?
 	local function has(text: string, parts: { string }): boolean
@@ -536,6 +538,59 @@ return function(t, shared, require, _server, _client)
 		t.eq(content.tags.is_fixture, nil)
 	end)
 
+	t.test("content: templates by name; pools and structures too, an override patching fields", function()
+		local content = fixtures()
+		local templates = {}
+		for name in content.templates do
+			table.insert(templates, name)
+		end
+		table.sort(templates)
+		t.eq(table.concat(templates, " "), "alpha/huts/hut alpha/huts/shed beta/well gamma/hut")
+		t.eq(string.sub(content.templates["beta/well"], 1, 5), "IVS1:", "a JSON pack's text")
+		t.eq(content.where("template", "beta/well"), "pack Beta, template beta/well")
+		-- Gamma's override: its elements replace Alpha's whole, the rest of the pool is kept.
+		local huts = content.pools["alpha/huts"] :: any
+		t.eq(#huts.elements, 3, "the elements replaced whole")
+		t.eq(huts.elements[3].template, "gamma/hut")
+		t.eq(huts.elements[3].weight, 2)
+		t.eq(huts.projection, "terrain_matching", "the projection kept")
+		t.eq(huts.override, nil, "no override field left")
+		t.eq(content.where("pool", "alpha/huts"), "pack Alpha (patched by Gamma), pool alpha/huts")
+		local wells = content.pools["beta/wells"] :: any
+		t.eq(wells.elements[2].empty, true, "JSON: the empty element")
+		t.eq(wells.fallback, "minecraft:empty")
+		-- Structures in load order, Gamma's override patching Alpha's.
+		t.eq(names(content.structures), "beta_well alpha_village")
+		local village = content.structures[2] :: any
+		t.eq(village.spacing, 50, "patched")
+		t.eq(table.concat(village.biomes, ","), "GammaGlade", "a list replaced whole")
+		t.eq(village.size, 2, "the rest kept")
+		t.eq(village.startPool, "alpha/huts")
+		t.eq(village.override, nil)
+		t.eq(content.where("structure", "alpha_village"), "pack Alpha (patched by Gamma), structure alpha_village")
+		t.eq((content.structures[1] :: any).onLand, false, "JSON: false")
+		-- Their origins: the maker, its file and the packs that patched it, overrides too.
+		local function origin(kind: string, name: string): string
+			local found = content.origin(kind, name) :: any
+			if found == nil then
+				return "none"
+			end
+			return `{found.pack} {found.file or "-"} {table.concat(found.patched, ",")}`
+		end
+		t.eq(origin("template", "beta/well"), "Beta - ", "a JSON pack's template")
+		t.eq(origin("templates", "gamma/hut"), "Gamma - ")
+		t.eq(origin("pool", "alpha/huts"), "Alpha - Gamma", "a pool and its override")
+		t.eq(origin("pools", "beta/wells"), "Beta - ")
+		t.eq(origin("structure", "alpha_village"), "Alpha - Gamma", "a structure and its override")
+		t.eq(origin("structure", "beta_well"), "Beta - ")
+		t.eq(origin("structure", "nowhere"), "none")
+		t.eq(origin("pool", "alpha"), "none", "an implicit pool is no entry")
+		-- A kind folder's file: the game's outpost.
+		local outpost = Content.default.origin("template", "outpost/houses/hut") :: any
+		t.eq(outpost.pack, "Minecraft")
+		t.eq(outpost.file, "templates/outpost", "a kind folder's file")
+	end)
+
 	--[[ Kind folders (the fixture packs in tests/fixtures/content/folders) ]]
 
 	-- The kind folder fixture packs (Delta, Luau, order 10; Epsilon, JSON, order 20), through
@@ -966,6 +1021,53 @@ return function(t, shared, require, _server, _client)
 		local message = failure(packs)
 		t.ok(has(message, parts), `{what}: {message}`)
 	end
+	-- The IVS1 text of a template named `name` whose palette is `blocks`: a row of cells along x,
+	-- one of each, and nothing else (Template.encode names the game's blocks only).
+	local function ivs1(name: string, blocks: { string }): string
+		local body: { number } = {}
+		local function varint(v: number)
+			while v >= 128 do
+				table.insert(body, v % 128 + 128)
+				v = v // 128
+			end
+			table.insert(body, v)
+		end
+		local function str(text: string)
+			varint(#text)
+			for i = 1, #text do
+				table.insert(body, string.byte(text, i))
+			end
+		end
+		str(name)
+		for _, n in { #blocks, 1, 1, #blocks } do
+			varint(n)
+		end
+		for _, block in blocks do
+			str(block)
+		end
+		varint(0)
+		for p = 1, #blocks do
+			varint(p)
+			varint(1)
+		end
+		for _ = 1, 3 do
+			varint(0)
+		end
+		local inner = body
+		body = {}
+		varint(TemplateText.VERSION)
+		varint(#inner)
+		local b = buffer.create(#body + #inner + 4)
+		for i, byte in body do
+			buffer.writeu8(b, i - 1, byte)
+		end
+		for i, byte in inner do
+			buffer.writeu8(b, #body + i - 1, byte)
+		end
+		local n = #body + #inner
+		buffer.writeu32(b, n, TemplateText.crc32(b, 0, n))
+		return TemplateText.PREFIX .. TemplateText.base64(b)
+	end
 
 	t.test("content: the schema's checks: unknown fields, wrong types, missing fields", function()
 		fails(
@@ -1100,6 +1202,32 @@ return function(t, shared, require, _server, _client)
 			{ "pack P, potion X: effect is missing" },
 			"an effect"
 		)
+		fails(
+			{ pack("P", { templates = { ["t/a"] = "hello" } }) },
+			{ 'pack P, template t/a: it must be a structure\'s text ("IVS1:..."), not text starting "hello"' },
+			"a template's text"
+		)
+		fails(
+			{ pack("P", { pools = { p = { elements = { { weight = 2 } } } } }) },
+			{ "pack P, pool p: elements[1] needs a template or empty = true" },
+			"a pool's element"
+		)
+		fails(
+			{ pack("P", { pools = { p = { projection = "sideways", elements = {} } } }) },
+			{ "pack P, pool p: projection must be one of rigid, terrain_matching" },
+			"a projection"
+		)
+		fails({ pack("P", { pools = { p = {} } }) }, { "pack P, pool p: elements is missing" }, "a pool's elements")
+		fails(
+			{ pack("P", { structures = { { name = "s", startPool = "t", spacng = 3 } } }) },
+			{ "pack P, structure s: spacng is no field it may have (did you mean spacing?)" },
+			"a structure's field"
+		)
+		fails(
+			{ pack("P", { structures = { { name = "s" } } }) },
+			{ "pack P, structure s: startPool is missing" },
+			"a structure's start"
+		)
 	end)
 
 	t.test("content: packs: manifests, names, order, requires, kinds", function()
@@ -1194,6 +1322,31 @@ return function(t, shared, require, _server, _client)
 			{ pack("P", { ages = { age, age } }) },
 			{ "pack P, Age a: pack P has an Age with that id" },
 			"an Age twice"
+		)
+		fails({
+			pack("P1", { templates = { ["t/a"] = "IVS1:x" } }),
+			pack("P2", { templates = { ["t/a"] = "IVS1:y" } }, { order = 20 }),
+		}, { "pack P2, template t/a: pack P1 has one by that name already" }, "a template twice")
+		local pool = { elements = { { empty = true } } }
+		fails(
+			{ pack("P1", { pools = { p = pool } }), pack("P2", { pools = { p = pool } }, { order = 20 }) },
+			{ "pack P2, pool p: pack P1 has one by that name already" },
+			"a pool twice"
+		)
+		fails(
+			{ pack("P", { pools = { p = { override = true, fallback = "q" } } }) },
+			{ "pack P, pool p overrides a pool no earlier pack makes" },
+			"a pool override of nothing"
+		)
+		local structure = { name = "s", startPool = "t" }
+		fails({
+			pack("P1", { structures = { structure } }),
+			pack("P2", { structures = { structure } }, { order = 20 }),
+		}, { "pack P2, structure s: the name is taken by pack P1, structure s" }, "a structure twice")
+		fails(
+			{ pack("P", { structures = { { name = "s", override = true, spacing = 9 } } }) },
+			{ "pack P, structure s overrides a structure no earlier pack makes" },
+			"a structure override of nothing"
 		)
 		local many = {}
 		for i = 1, Content.ITEM_BASE do
@@ -1449,6 +1602,89 @@ return function(t, shared, require, _server, _client)
 			"a fuel tag's ticks"
 		)
 		fails(with({ fuel = { t = "long" } }), { "pack P, fuel tag t: it must be a number" }, "a fuel tag's type")
+		-- Structures: a template's text and palette, the templates and pools named.
+		local hut = ivs1("t/hut", { "Stone" })
+		fails(
+			with({ templates = { ["t/hut"] = ivs1("t/hut", { "Stone", "Stnoe" }) } }),
+			{ "pack P, template t/hut: palette names unknown block Stnoe (did you mean Stone?)" },
+			"a palette's block"
+		)
+		fails(
+			with({ templates = { ["t/shed"] = hut } }),
+			{ "pack P, template t/shed: its text is the template t/hut" },
+			"a template under another name"
+		)
+		fails(
+			with({ templates = { ["t/hut"] = string.sub(hut, 1, 20) } }),
+			{ "pack P, template t/hut: The structure data is cut off" },
+			"a cut text"
+		)
+		fails(
+			with({ templates = { ["t/hut"] = hut }, pools = { p = { elements = { { template = "t/hot" } } } } }),
+			{ "pack P, pool p: element 1 names unknown template t/hot (did you mean t/hut?)" },
+			"a pool's template"
+		)
+		fails(
+			with({
+				templates = { ["t/hut"] = hut },
+				pools = { p = { fallback = "q", elements = { { template = "t/hut" } } } },
+			}),
+			{ "pack P, pool p: fallback names unknown pool q" },
+			"a fallback"
+		)
+		fails(
+			with({ templates = { ["t/hut"] = hut }, structures = { { name = "s", startPool = "u" } } }),
+			{ "pack P, structure s: startPool names unknown pool u" },
+			"a start pool"
+		)
+		-- A structure's biomes: by their exact names (as every other name), at least one.
+		local plains = {
+			name = "Plains",
+			bands = { "Lowland" },
+			temperature = 0,
+			humidity = 0,
+			vegetation = 0.1,
+			top = "Stone",
+			filler = "Stone",
+			fillerDepth = 3,
+			underwater = "Stone",
+			beach = "Stone",
+			features = {},
+		}
+		local function grows(list: { any }): { Content.PackData }
+			return with({ templates = { ["t/hut"] = hut }, biomes = { plains }, structures = list })
+		end
+		fails(
+			grows({ { name = "s", startPool = "t/hut", biomes = { "plains" } } }),
+			{ "pack P, structure s: biomes names unknown biome plains (did you mean Plains?)" },
+			"a biome, by its exact name"
+		)
+		fails(
+			grows({ { name = "s", startPool = "t/hut", biomes = {} } }),
+			{ "pack P, structure s: biomes is empty, so it would grow nowhere" },
+			"no biome at all"
+		)
+		fails(
+			grows({ { name = "s", startPool = "t/hut" }, { name = "s", override = true, biomes = {} } }),
+			{ "pack P (patched by P), structure s: biomes is empty" },
+			"an override leaving it none"
+		)
+		t.ok(pcall(Content.build, grows({ { name = "s", startPool = "t/hut", biomes = { "Plains" } } })), "a biome")
+		t.ok(pcall(Content.build, grows({ { name = "s", startPool = "t/hut" } })), "every biome")
+		-- A pool is an explicit one, a template's name or the templates named under it.
+		for _, start in { "t/hut", "t", "p" } do
+			t.ok(
+				pcall(
+					Content.build,
+					with({
+						templates = { ["t/hut"] = hut },
+						pools = { p = { fallback = "empty", elements = { { template = "t/hut" }, { empty = true } } } },
+						structures = { { name = "s", startPool = start } },
+					})
+				),
+				`start pool {start}`
+			)
+		end
 		t.ok(
 			pcall(Content.build, with({ recipes = { { type = "smelting", input = "Stone", result = "Stone" } } })),
 			"a good pack loads"
@@ -1809,6 +2045,12 @@ return function(t, shared, require, _server, _client)
 			{ "pack P, tags/a: tag t names unknown item Ghost" },
 			"a tag's member"
 		)
+		fails({
+			filed("P", {
+				blocks = { stone },
+				templates = { file("templates/huts", { ["t/a"] = ivs1("t/a", { "Ghost" }) }) },
+			}),
+		}, { "pack P, templates/huts, template t/a: palette names unknown block Ghost" }, "a template's palette")
 		fails(
 			{ filed("P", { blocks = { stone } }, { blocks = {} }) },
 			{ "pack P has its blocks both as a module and as a folder" },

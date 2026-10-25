@@ -32,7 +32,8 @@
 	  Saves        each SAVE's text is kept for the session by name, and in a StringValue (named
 	               after the structure, at most 100 characters) in ServerStorage.
 	               IceVoxelSavedStructures, which a Studio user can copy during a playtest and paste
-	               into ReplicatedStorage.IceVoxelStructures to generate it. A save the session
+	               into ReplicatedStorage.IceVoxelStructures to generate it, or whose text goes into
+	               a content pack's `templates` (`["<name>"] = "IVS1:..."`). A save the session
 	               drops (StructureServer.MAX_SAVED / MAX_SAVED_BYTES) loses its StringValue too.
 	               The text goes to the player in StructureData pieces, at most
 	               DataPiecesPerSecond.

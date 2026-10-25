@@ -1,0 +1,10 @@
+[
+	{
+		"name": "beta_well",
+		"startPool": "beta/wells",
+		"biomes": ["BetaDunes"],
+		"spacing": 40,
+		"separation": 10,
+		"onLand": false
+	}
+]

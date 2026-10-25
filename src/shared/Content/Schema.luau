@@ -25,6 +25,13 @@
 	  effects   { EffectSpec }: status effects (Shared/Effects; EFFECT_FIELDS), ids in load order
 	  potions   { PotionSpec }: potions (Effects/PotionList; POTION_FIELDS), each made into its
 	            items and their recipes as packs load
+	  templates   { [name]: IVS1 text }: structure templates as a structure block's SAVE gives
+	              them, each under the name its text holds (Structures/Template)
+	  pools       { [name]: TemplatePool }: template pools (Minecraft's template_pool: weighted
+	              elements, a fallback, terrain matching)
+	  structures  { StructureSpec }: the structures generation places (Minecraft's jigsaw
+	              structures and their random_spread placement)
+	(The last three's fields are in "Structures" below, by POOL_FIELDS and STRUCTURE_FIELDS.)
 	A pack's `pack` module is its manifest (MANIFEST_FIELDS): { order, description, requires? }.
 
 	Per-entry fields that feed other registries (each registry reads them off the entries; see
@@ -64,8 +71,8 @@
 	                                (ToughAsNails/Drinks.ITEMS, whose header says what each does;
 	                                numbers left out are 0); `empty` the container it leaves, by
 	                                name
-	  override         block, item, texture, biome, effect, potion  patches the entry of that name
-	                   an earlier pack made
+	  override         block, item, texture, biome, effect, potion, pool, structure  patches the
+	                   entry of that name an earlier pack made
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
 	gone: each entry says its own).
@@ -504,6 +511,36 @@ export type SkillRecord = {
 	cost: number,
 	requires: { string }?,
 	perk: SkillPerk,
+	override: boolean?,
+}
+
+-- One element of a template pool (`pools`): a template by name, or the empty element (the jigsaw
+-- stays unused), drawn by weight.
+export type PoolElement = { template: string?, empty: boolean?, weight: number?, projection: string? }
+
+-- A template pool (the `pools` kind; Structures/Library): Minecraft's template_pool.
+export type TemplatePool = {
+	elements: { PoolElement },
+	fallback: string?,
+	projection: string?,
+	override: boolean?,
+}
+
+-- A structure generation places (the `structures` kind; Structures/Library fills in the rest).
+export type StructureSpec = {
+	name: string,
+	startPool: string,
+	startJigsawName: string?,
+	size: number?,
+	maxDistance: number?,
+	biomes: { string }?,
+	spacing: number?,
+	separation: number?,
+	salt: number?,
+	startHeight: number?,
+	projectToHeightmap: boolean?,
+	onLand: boolean?,
+	foundation: boolean?,
 	override: boolean?,
 }
 
@@ -1770,6 +1807,101 @@ Schema.SKILL_FIELDS = {
 	override = BOOLEAN,
 } :: { [string]: Check }
 
+--[[
+	Structures: the `templates`, `pools` and `structures` kinds. Structures/Library makes the
+	structure library of them (with the place's ReplicatedStorage.IceVoxelStructures folder),
+	Structures/Jigsaw assembles a structure from its pools and Generation/StructureGen places it.
+
+	A template is a structure block's SAVE, under the name inside its text:
+	`["outpost/houses/hut"] = "IVS1:..."`. A name with slashes is in a pool that needs no entry:
+	the pool "outpost/houses" is every template named "outpost/houses/..." (sorted, weight 1,
+	rigid), and a pool named like one template is that template alone.
+
+	Pool fields (a `pools` entry is the pool of its name, in place of the templates under it):
+	  elements      { { template = "<name>", weight?, projection? } or { empty = true, weight? } }:
+	                tried in a weighted random order (weight 1..150, default 1); the empty element
+	                leaves the jigsaw unused
+	  fallback      a pool tried after the elements, and alone at the last level (end caps); none
+	                by default ("empty" or "minecraft:empty": none either)
+	  projection    "rigid" (as built, the default) or "terrain_matching" (each column follows the
+	                ground: paths), for each element without its own
+	  override      patches the pool of that name an earlier pack made, field by field: its
+	                `elements` replace the earlier list whole, as every list field of an override
+	                does (and as a data pack's template_pool replaces Minecraft's): to add an
+	                element, list the earlier ones too
+
+	Structure fields (`name` and `startPool` needed):
+	  name              unique
+	  startPool         a pool or a template's name: where the start piece comes from
+	  startJigsawName   a jigsaw of the start piece to put on the start position (default: the
+	                    piece's corner)
+	  size              jigsaw depth 0..7 (default 7; 0 = the start piece only)
+	  maxDistance       pieces stay within this many blocks of the start piece's centre (1..128,
+	                    default 80)
+	  biomes            the biomes it grows in, by their exact names (the packs' `biomes`; at least
+	                    one); left out: every biome
+	  spacing, separation  one start per spacing x spacing chunks (1..4096, default 34), starts at
+	                    least separation chunks apart (0..spacing - 1, default 8): Minecraft's
+	                    random_spread, villages' numbers
+	  salt              the placement's seed salt, a whole number (default: a hash of the name)
+	  startHeight       added to the ground height (or the y when not projected), default 0
+	  projectToHeightmap  start on the ground at the start piece's centre (default true)
+	  onLand            no start below sea level or on bare rock (default true)
+	  foundation        fill the air under rigid pieces' solid bottom cells down to the terrain
+	                    (up to ~12 blocks; default true)
+	  override          patches the structure of that name an earlier pack made, field by field
+	                    (`biomes` replaced whole)
+	Content checks the names: a template's text (its name, its palette's blocks), the pools'
+	templates and fallbacks, the start pools, the biomes. What only the library knows, it checks
+	as it loads, and for the packs' data it is an error naming the pack too: the numbers' ranges,
+	a start jigsaw's name, the jigsaws' pools and final states, the items in a template's chests.
+]]
+-- IVS1 text: "IVS1:" and the rest (Structures/TemplateText reads it as packs load).
+local function TEMPLATE_TEXT(value: any): string?
+	if type(value) ~= "string" or string.sub(value, 1, 5) ~= "IVS1:" then
+		local shown = if type(value) == "string" then `text starting "{string.sub(value, 1, 8)}"` else describe(value)
+		return ` must be a structure's text ("IVS1:..."), not {shown}`
+	end
+	return nil
+end
+local PROJECTION = enum({ "rigid", "terrain_matching" })
+local ELEMENT_FIELDS = record({ template = STRING, empty = TRUE_ONLY, weight = NUMBER, projection = PROJECTION })
+-- A pool's element: a template's or the empty one, never both.
+local function POOL_ELEMENT(value: any): string?
+	local problem = ELEMENT_FIELDS(value)
+	if problem then
+		return problem
+	end
+	if (value.template == nil) == (value.empty == nil) then
+		return " needs a template or empty = true (one of them)"
+	end
+	return nil
+end
+Schema.POOL_FIELDS = {
+	elements = listOf(POOL_ELEMENT),
+	fallback = STRING,
+	projection = PROJECTION,
+	override = BOOLEAN,
+} :: { [string]: Check }
+Schema.STRUCTURE_FIELDS = {
+	name = STRING,
+	startPool = STRING,
+	startJigsawName = STRING,
+	size = NUMBER,
+	maxDistance = NUMBER,
+	biomes = STRINGS,
+	spacing = NUMBER,
+	separation = NUMBER,
+	salt = NUMBER,
+	startHeight = NUMBER,
+	projectToHeightmap = BOOLEAN,
+	onLand = BOOLEAN,
+	foundation = BOOLEAN,
+	override = BOOLEAN,
+} :: { [string]: Check }
+-- Pool names that mean no pool (a fallback's or a jigsaw's: Structures/Jigsaw.EMPTY_POOLS).
+Schema.EMPTY_POOLS = table.freeze({ [""] = true, empty = true, ["minecraft:empty"] = true }) :: { [string]: boolean }
+
 Schema.MANIFEST_FIELDS = {
 	order = NUMBER,
 	description = STRING,
@@ -1794,6 +1926,9 @@ Schema.KINDS = table.freeze({
 	"biomes",
 	"effects",
 	"potions",
+	"templates",
+	"pools",
+	"structures",
 })
 -- Each kind's entries' name in messages.
 Schema.SINGULAR = table.freeze({
@@ -1811,6 +1946,9 @@ Schema.SINGULAR = table.freeze({
 	biomes = "biome",
 	effects = "effect",
 	potions = "potion",
+	templates = "template",
+	pools = "pool",
+	structures = "structure",
 }) :: { [string]: string }
 -- The kinds that are lists of entries (the rest are tables of names).
 Schema.LISTS = table.freeze({
@@ -1823,6 +1961,7 @@ Schema.LISTS = table.freeze({
 	biomes = true,
 	effects = true,
 	potions = true,
+	structures = true,
 }) :: { [string]: boolean }
 
 -- Each kind's entry check, for the kinds whose entries are records.
@@ -1837,6 +1976,8 @@ local ENTRY_FIELDS: { [string]: { [string]: Check } } = {
 	biomes = Schema.BIOME_FIELDS,
 	effects = Schema.EFFECT_FIELDS,
 	potions = Schema.POTION_FIELDS,
+	pools = Schema.POOL_FIELDS,
+	structures = Schema.STRUCTURE_FIELDS,
 }
 -- What the other kinds' values must be.
 local VALUE_CHECKS: { [string]: Check } = {
@@ -1844,6 +1985,7 @@ local VALUE_CHECKS: { [string]: Check } = {
 	loot = LOOT_TABLE,
 	lore = STRING,
 	fuel = NUMBER,
+	templates = TEMPLATE_TEXT,
 }
 
 --[[
@@ -1892,6 +2034,8 @@ function Schema.check(kind: string, entry: any): string?
 			then { "name" }
 			else { "name", "command", "color", "category", "icon" })
 		elseif kind == "potions" then (if override then { "name" } else { "name", "ingredient", "effect" })
+		elseif kind == "pools" then (if override then {} else { "elements" })
+		elseif kind == "structures" then (if override then { "name" } else { "name", "startPool" })
 		else {}
 	if kind == "recipes" then
 		local rule = Schema.RECIPE_TYPES[entry.type]
