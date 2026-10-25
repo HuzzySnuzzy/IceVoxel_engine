@@ -1,8 +1,9 @@
 --!strict
 --[[
-	The bytes of saved worlds (World/WorldSave, Save/RegionCodec, Save/PlayerCodec): a growing
-	byte writer and a bounds-checked reader, the numbers they use, item stacks, and the text the
-	bytes are kept as in a DataStore. Pure, so the specs run it.
+	The bytes of saved worlds and characters (World/WorldSave, Save/RegionCodec, Save/PlayerCodec,
+	Save/CharacterCodec): a growing byte writer and a bounds-checked reader, the numbers they use,
+	palettes (names, not ids), item stacks, and the text the bytes are kept as in a DataStore.
+	Pure, so the specs run it.
 
 	  Writer    `writer()` grows a buffer as it is written (doubling); `finish` gives the bytes
 	            written. Numbers are little endian, as Net/Protocol's: u8, u16, u32, i32, f32,
@@ -13,12 +14,33 @@
 	  Reader    `reader(b)` reads them back and errors ("truncated save", "bad varint") on
 	            anything that runs past the end or is out of range; decoders run it under pcall,
 	            so a damaged save is refused as a whole, never half read.
-	  Stacks    u16 item, varint count (1..255), varint damage (a tool's wear, 0 new), then the
-	            item data in Net/Protocol's format (Protocol.writeData / readData: Minecraft's
-	            item NBT made flat, checked by Items.validData). An item this version doesn't
-	            know (a save from a newer one) reads back as nil and `lost` (the decoders count
-	            it: a world or player holding one is never written back, Save/WorldStore): the
-	            stack is dropped, not the save.
+	  Palettes  names, not ids. Ids are given out as content loads, so another version may give a
+	            block or an item another one (or none). A record's writer gathers the names of the
+	            blocks, items, fluids, mob kinds and effects it writes (`indexOf`: each id once,
+	            numbered 1.. in the order first written; 0 stays 0 for every kind: Air, no item,
+	            no fluid) and writes them once (`writePalette`: for each of PALETTE_KINDS in order,
+	            varint n + n texts), before what uses them; the reader (`readPalette`) maps each
+	            index to today's id of its name (`idOf`; blocks and items through Blocks.find and
+	            Items.find, so a RENAMED line keeps a renamed one). A name this version doesn't
+	            know (a newer version's, or content since removed) reads as nil: a block becomes
+	            air, an item is `lost`, a fluid or a mob is dropped, an effect skipped (each
+	            decoder says, and counts what is lost: a record holding such a name is never
+	            written back that session, Save/WorldStore), never a refused record. An index the
+	            palette doesn't have is a damaged save. So content can be added, removed and
+	            reordered between versions, and renamed with a RENAMED line; to retire a block or
+	            item for good, a RENAMED line names what it becomes.
+	  Versions  every record starts with its version: one from a newer version is refused (NEWER:
+	            never written over), and so is one from an older one (OLDER), never misread: its
+	            ids were that version's. The callers start such a region, player or character
+	            afresh and say so (Save/WorldStore, World/WorldSave, Players/CharacterStore).
+	  Stacks    varint item (its index in the record's palette, 0: empty), varint count (1..255),
+	            varint damage (a tool's wear, 0 new), then the item data in Net/Protocol's format
+	            (Protocol.writeData / readData: Minecraft's item NBT made flat, checked by
+	            Items.validData), the numbers under Items/ItemData's id keys (a weapon's rounds and
+	            attachments, a tank's fluid) indices in the palette too. An item this version
+	            doesn't know reads back as nil and `lost` (the decoders count it): the stack is
+	            dropped, not the save; an id in its data this version doesn't know drops that key
+	            and counts the stack `lost` too.
 	  Text      DataStore values are JSON: binary has to become text. Base85 (Ascii85's
 	            arithmetic: 4 bytes are a big-endian u32 written as 5 digits base 85, the last
 	            group of k bytes as k + 1 digits) over 85 printable ASCII characters that JSON
@@ -33,14 +55,42 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Blocks = require(Shared.Blocks)
+local Effects = require(Shared.Effects)
+local Fluids = require(Shared.Fluids)
+local ItemData = require(Shared.Items.ItemData)
 local Items = require(Shared.Items)
+local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
+-- (Every machine kind defined: their tanks' "<name>Fluid" keys are ItemData id keys.)
+require(Shared.Machines)
 
 export type Writer = { b: buffer, n: number }
 export type Reader = { b: buffer, o: number, len: number }
 export type Stack = Items.Stack
 
+-- What a palette names (see the header): one of PALETTE_KINDS, "block", "item", "fluid", "mob"
+-- or "effect".
+export type PaletteKind = string
+export type Palette = {
+	-- Each kind's names, index i the i-th.
+	names: { [PaletteKind]: { string } },
+	-- Today's id -> its index (written ids; a read palette's known names too).
+	index: { [PaletteKind]: { [number]: number } },
+	-- Index -> today's id of its name (false: a name this version doesn't know).
+	ids: { [PaletteKind]: { [number]: number | false } },
+}
+
 local SaveCodec = {}
+
+-- The kinds a palette names, in the order they are written.
+SaveCodec.PALETTE_KINDS = table.freeze({ "block", "item", "fluid", "mob", "effect" } :: { PaletteKind })
+-- Why a record from another version is refused (see the header).
+SaveCodec.NEWER = "saved by a newer version"
+SaveCodec.OLDER = "saved by an older version"
+
+-- (Id 0 is none for every kind, Air for blocks: never in a palette.)
+assert(Blocks.AIR == 0, "SaveCodec keeps Air as 0")
 
 -- The base85 digits, in order (85 characters JSON leaves alone).
 local DIGITS: { number } = {}
@@ -254,40 +304,226 @@ function SaveCodec.readText(r: Reader): string
 	return value
 end
 
---[[ Stacks ]]
+--[[ Palettes (names, not ids) ]]
 
--- Writes `stack` (nil or an empty one: item 0).
-function SaveCodec.stack(w: Writer, stack: Stack?)
-	if stack == nil or stack.count < 1 or not Items.isValid(stack.item) then
-		SaveCodec.u16(w, 0)
-		return
+-- The name of `id`, one of `kind`'s, as this version has it (nil: none).
+local function nameOf(kind: PaletteKind, id: number): string?
+	if kind == "block" then
+		return if Blocks.isValid(id) then Blocks.get(id).name else nil
+	elseif kind == "item" then
+		local def = Items.get(id)
+		return if def then def.name else nil
+	elseif kind == "fluid" then
+		local fluid = Fluids.get(id)
+		return if fluid then fluid.name else nil
+	elseif kind == "mob" then
+		local mob = MobList.get(id)
+		return if mob then mob.name else nil
 	end
-	SaveCodec.u16(w, stack.item)
-	SaveCodec.varint(w, math.clamp(math.floor(stack.count), 1, 255))
-	SaveCodec.varint(w, math.clamp(Items.cleanDamage(stack.damage) or 0, 0, 65535))
-	local size = Protocol.dataSize(stack.data)
-	ensure(w, size)
-	w.n = Protocol.writeData(w.b, w.n, stack.data)
+	local effect = Effects.get(id)
+	return if effect then effect.name else nil
 end
 
--- A stack written by `stack` (nil: empty, or an item this version doesn't know: then `lost` true).
-function SaveCodec.readStack(r: Reader): (Stack?, boolean)
-	local item = SaveCodec.readU16(r)
-	if item == 0 then
+-- Today's id of the `kind` named `name` (nil: none). Blocks and items follow their RENAMED.
+local function findId(kind: PaletteKind, name: string): number?
+	if kind == "block" then
+		return Blocks.find(name)
+	elseif kind == "item" then
+		return Items.find(name)
+	elseif kind == "fluid" then
+		return Fluids.find(name)
+	elseif kind == "mob" then
+		return MobList.find(name)
+	end
+	return Effects.id[name]
+end
+
+-- An empty palette (a record's writer starts with one).
+function SaveCodec.palette(): Palette
+	local palette: Palette = { names = {}, index = {}, ids = {} }
+	for _, kind in SaveCodec.PALETTE_KINDS do
+		palette.names[kind] = {}
+		palette.index[kind] = {}
+		palette.ids[kind] = {}
+	end
+	return palette
+end
+
+--[[
+	The index `id` (one of `kind`'s) is written as, its name added to `palette` the first time:
+	0 for 0 (Air, no item, no fluid ...) and for an id this version has no such thing for (the
+	callers write only ids they checked).
+]]
+function SaveCodec.indexOf(palette: Palette, kind: PaletteKind, id: number): number
+	if id == 0 then
+		return 0
+	end
+	local index = palette.index[kind]
+	local at = index[id]
+	if at then
+		return at
+	end
+	local name = nameOf(kind, id)
+	if name == nil then
+		return 0
+	end
+	local names = palette.names[kind]
+	table.insert(names, name)
+	local added = #names
+	index[id] = added
+	palette.ids[kind][added] = id
+	return added
+end
+
+--[[
+	Today's id of index `index` of `kind` in a read `palette`: 0 for 0, nil for a name this version
+	doesn't know. Errors on an index the palette doesn't have (a damaged save).
+]]
+function SaveCodec.idOf(palette: Palette, kind: PaletteKind, index: number): number?
+	if index == 0 then
+		return 0
+	end
+	local id = palette.ids[kind][index]
+	if id == nil then
+		error("bad palette index in save", 0)
+	end
+	return if type(id) == "number" then id else nil
+end
+
+-- Writes `palette`'s names (for each of PALETTE_KINDS: varint n, then n texts).
+function SaveCodec.writePalette(w: Writer, palette: Palette)
+	for _, kind in SaveCodec.PALETTE_KINDS do
+		local names = palette.names[kind]
+		SaveCodec.varint(w, #names)
+		for _, name in names do
+			SaveCodec.text(w, name)
+		end
+	end
+end
+
+-- A palette `writePalette` wrote, each name mapped to today's id (false: none by that name).
+function SaveCodec.readPalette(r: Reader): Palette
+	local palette = SaveCodec.palette()
+	for _, kind in SaveCodec.PALETTE_KINDS do
+		local names, index, ids = palette.names[kind], palette.index[kind], palette.ids[kind]
+		for i = 1, SaveCodec.readVarint(r) do
+			local name = SaveCodec.readText(r)
+			names[i] = name
+			local id = findId(kind, name)
+			ids[i] = if id then id else false
+			if id and index[id] == nil then
+				index[id] = i
+			end
+		end
+	end
+	return palette
+end
+
+--[[ Stacks ]]
+
+--[[
+	`data` with the numbers under id keys (ItemData) as `palette` indices: the same table when it
+	has none; a key whose number is no id of its kind is left out. (Keys in order: the same data
+	always adds its names alike.)
+]]
+local function savedData(data: Items.Data?, palette: Palette): Items.Data?
+	if data == nil then
+		return nil
+	end
+	local keys: { string }? = nil
+	local kinds: { [string]: string } = {}
+	for key in next, data do
+		local kind = ItemData.idKind(key)
+		if kind then
+			local list = keys or {}
+			keys = list
+			table.insert(list, key)
+			kinds[key] = kind
+		end
+	end
+	if keys == nil then
+		return data
+	end
+	table.sort(keys)
+	local out: Items.Data = table.clone(data)
+	for _, key in keys do
+		local value = data[key]
+		local index = if type(value) == "number" then SaveCodec.indexOf(palette, kinds[key], value) else 0
+		-- (None, or no id: the key goes.)
+		out[key] = (if index > 0 or value == 0 then index else nil) :: any
+	end
+	return out
+end
+
+-- Data `savedData` wrote, its id keys today's ids again, and whether an id this version doesn't
+-- know was left out. Errors on an id key whose number is no index (a damaged save).
+local function loadedData(data: Items.Data?, palette: Palette): (Items.Data?, boolean)
+	if data == nil then
+		return nil, false
+	end
+	local out: Items.Data? = nil
+	local lost = false
+	for key, value in next, data do
+		local kind = ItemData.idKind(key)
+		if kind then
+			if type(value) ~= "number" or value < 0 or value ~= math.floor(value) then
+				error("bad item data in save", 0)
+			end
+			local copy: Items.Data = out or table.clone(data)
+			out = copy
+			local id = SaveCodec.idOf(palette, kind, value)
+			-- (None: the key goes.)
+			copy[key] = id :: any
+			if id == nil then
+				lost = true
+			end
+		end
+	end
+	if out == nil then
+		return data, false
+	end
+	return Items.cleanData(out), lost
+end
+
+-- Writes `stack` (nil or an empty one: item 0), its item and the ids in its data by `palette`.
+function SaveCodec.stack(w: Writer, stack: Stack?, palette: Palette)
+	if stack == nil or stack.count < 1 or not Items.isValid(stack.item) then
+		SaveCodec.varint(w, 0)
+		return
+	end
+	SaveCodec.varint(w, SaveCodec.indexOf(palette, "item", stack.item))
+	SaveCodec.varint(w, math.clamp(math.floor(stack.count), 1, 255))
+	SaveCodec.varint(w, math.clamp(Items.cleanDamage(stack.damage) or 0, 0, 65535))
+	local data = savedData(stack.data, palette)
+	local size = Protocol.dataSize(data)
+	ensure(w, size)
+	w.n = Protocol.writeData(w.b, w.n, data)
+end
+
+--[[
+	A stack written by `stack` with the record's `palette`: nil for empty; nil and `lost` true for
+	an item this version doesn't know; the stack and `lost` true when an id in its data was one
+	(that key left out).
+]]
+function SaveCodec.readStack(r: Reader, palette: Palette): (Stack?, boolean)
+	local index = SaveCodec.readVarint(r)
+	if index == 0 then
 		return nil, false
 	end
 	local count = SaveCodec.readVarint(r)
 	local damage = SaveCodec.readVarint(r)
-	local ok, data, after = Protocol.readData(r.b, r.o, r.len)
+	local ok, saved, after = Protocol.readData(r.b, r.o, r.len)
 	if not ok then
 		error("bad item data in save", 0)
 	end
 	r.o = after
-	if not Items.isValid(item) or count < 1 or count > 255 then
+	local item = SaveCodec.idOf(palette, "item", index)
+	local data, lostData = loadedData(saved, palette)
+	if item == nil or not Items.isValid(item) or count < 1 or count > 255 then
 		return nil, true
 	end
 	local stack = Items.newStack(item, count, if damage > 0 then damage else nil, data)
-	return stack, stack == nil
+	return stack, stack == nil or lostData
 end
 
 --[[ Text (base85) ]]

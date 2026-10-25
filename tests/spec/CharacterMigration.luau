@@ -1,10 +1,10 @@
 --[[
 	Returning players' old data into characters (server Save/CharacterMigration, Config.Characters
 	.Migrate): the old progress becomes a Mediumcore "legacy" character with the user's avatar all
-	worn; an old per-world player record (Save/PlayerCodec, version 1, 2 or 3: the zombie
-	apocalypse's survivor record, which versions 1 and 2 read as zeros) is taken in once per
-	world by the first character entering it (its place and game mode to the world's entry for
-	that character, its slots, armor, equipment (no accessory worn twice), cursor and Mana
+	worn; a per-world player record (Save/PlayerCodec, as a world saved with characters off holds:
+	version 6, names not ids; an older version's is never read, so it gives nothing) is taken in
+	once per world by the first character entering it (its place and game mode to the world's
+	entry for that character, its slots, armor, equipment (no accessory worn twice), cursor and Mana
 	Crystals into the character, what does not fit listed to drop), the character keeping the
 	world's id at once and the world who took it once that character was saved (WorldMeta's
 	legacyImported, saved and read back); and what a world keeps of each character (WorldStore's
@@ -101,7 +101,8 @@ return function(t, shared, require, server)
 		}
 	end
 
-	-- A version 1 player record's text, as a world saved before characters (and equipment) held it.
+	-- A version 1 player record's text, as a world saved before characters (and equipment) held it:
+	-- its items as that version's ids (u16), before palettes. This version never reads it.
 	local function versionOne(record: PlayerCodec.Record): string
 		local w = SaveCodec.writer(256)
 		SaveCodec.u8(w, 1)
@@ -133,10 +134,21 @@ return function(t, shared, require, server)
 		SaveCodec.u8(w, #held)
 		for _, entry in held do
 			SaveCodec.u8(w, entry[1])
-			SaveCodec.stack(w, entry[2])
+			SaveCodec.u16(w, entry[2].item)
+			SaveCodec.varint(w, entry[2].count)
+			SaveCodec.varint(w, 0)
+			SaveCodec.u8(w, 0)
 		end
 		SaveCodec.u8(w, 0)
 		return SaveCodec.toText(SaveCodec.finish(w))
+	end
+
+	-- A player record's flags byte (after the version byte and the record's palette).
+	local function flagsOf(bytes: buffer): number
+		local r = SaveCodec.reader(bytes)
+		SaveCodec.readU8(r)
+		SaveCodec.readPalette(r)
+		return SaveCodec.readU8(r)
 	end
 
 	local function oldRecord(): PlayerCodec.Record
@@ -190,10 +202,10 @@ return function(t, shared, require, server)
 		t.eq((back :: any).legacy, true)
 		t.eq((keptProgress :: any).points, 340)
 		t.eq(lock, nil, "nobody holds it until it is selected")
-		-- (The zombie apocalypse's survivor record, CharacterCodec version 2: a migrated character
-		-- starts it afresh, healthy, and keeps it through its key. 3 since the food bar, 4 since
-		-- the radiation dose.)
-		t.eq(CharacterCodec.VERSION, 4)
+		-- (The zombie apocalypse's survivor record, since CharacterCodec version 2: a migrated
+		-- character starts it afresh, healthy, and keeps it through its key. 3 since the food bar,
+		-- 4 since the radiation dose, 5 since palettes: names, not ids.)
+		t.eq(CharacterCodec.VERSION, 5)
 		local stored = back :: CharacterCodec.Record
 		t.eq(stored.alive + stored.kills + stored.moons + stored.infection, 0, "a fresh survivor record")
 	end)
@@ -242,9 +254,9 @@ return function(t, shared, require, server)
 		local f = fake()
 		local saves = WorldStore.new(f.store, f.env)
 		local world = WorldStore.create(saves, settings(), USER)
-		-- The world as saved before characters: a version 1 record for the user.
+		-- The world as saved with characters off: a player record for the user.
 		local old = oldRecord()
-		local text = versionOne(old)
+		local text = PlayerCodec.toText(old)
 		local first = WorldStore.save(saves, world, {
 			regions = {},
 			players = { [USER] = text },
@@ -253,7 +265,7 @@ return function(t, shared, require, server)
 		})
 		t.eq(first.ok, true)
 		t.ok(world.meta.players[tostring(USER)] ~= nil, "listed in the meta")
-		-- A server opens it: the record reads (version 1), and the first character takes it in.
+		-- A server opens it: the record reads, and the first character takes it in.
 		local f2 = fake("server-b")
 		f2.data = f.data
 		f2.clock = f.clock + 1000
@@ -400,7 +412,7 @@ return function(t, shared, require, server)
 		t.eq(CharacterMigration.shouldImport(world.meta, USER, other), false, "then no other character")
 	end)
 
-	t.test("character migration: an equipment record (version 2) round trips; version 1 still reads", function()
+	t.test("character migration: an equipment record round trips; an older version's is never read", function()
 		local record = oldRecord()
 		record.accessories[1] = Items.newStack(Items.id.HermesBoots, 1)
 		record.vanityArmor[1] = Items.newStack(Items.id.TopHat, 1)
@@ -412,30 +424,33 @@ return function(t, shared, require, server)
 		t.eq(back.vanityAccessories[7].item, Items.id.ShinyRedBalloon)
 		t.eq(back.hidden, 0x0101)
 		t.eq(back.cursor.count, 60)
-		local plain = PlayerCodec.fromText(versionOne(oldRecord())) :: any
-		t.ok(plain ~= nil, "a version 1 record reads")
-		t.eq(plain.slots[20].item, id.IronIngot)
-		t.eq(plain.hidden, 0)
-		t.eq(next(plain.accessories), nil)
-		-- Version 1 never had places past the cursor: such bytes are damage.
+		-- A version 1 record (before palettes: its ids were that version's) is never read, so
+		-- there is nothing to take in: the player of such a world starts afresh (World/WorldSave).
+		local plain, why = PlayerCodec.fromText(versionOne(oldRecord()))
+		t.eq(plain, nil, "a version 1 record is not read")
+		t.eq(why, SaveCodec.OLDER)
+		-- A place past the vanity accessories is damage.
+		local palette = SaveCodec.palette()
 		local w = SaveCodec.writer(64)
-		SaveCodec.u8(w, 1)
+		SaveCodec.u8(w, PlayerCodec.VERSION)
+		SaveCodec.indexOf(palette, "item", Items.id.HermesBoots)
+		SaveCodec.writePalette(w, palette)
 		SaveCodec.u8(w, 0)
 		SaveCodec.f32(w, 20)
 		SaveCodec.u8(w, 255)
 		SaveCodec.u8(w, 255)
 		SaveCodec.u8(w, 1)
 		SaveCodec.u8(w, 1)
-		SaveCodec.u8(w, Types.PLACE_ACCESSORY)
-		SaveCodec.stack(w, Items.newStack(Items.id.HermesBoots, 1) :: any)
+		SaveCodec.u8(w, Types.PLACE_END + 1)
+		SaveCodec.stack(w, Items.newStack(Items.id.HermesBoots, 1) :: any, palette)
 		SaveCodec.u8(w, 0)
-		t.eq((PlayerCodec.decode(SaveCodec.finish(w))), nil)
+		t.eq(select(2, PlayerCodec.decode(SaveCodec.finish(w))), "bad inventory slot")
 	end)
 
-	t.test("character migration: a survivor record (version 3) round trips; versions 1 and 2 read zeros", function()
-		-- (4 since Minecraft's food bar: the test below; 5 since the radiation dose, tests/spec/
-		-- Radiation.)
-		t.eq(PlayerCodec.VERSION, 5, "bumped for the survivor record, the food bar, then the dose")
+	t.test("character migration: a survivor record round trips; none written while all 0", function()
+		-- (Since version 3. 4 since Minecraft's food bar: the test below; 5 since the radiation
+		-- dose, tests/spec/Radiation; 6 since palettes, names not ids: tests/spec/SaveNames.)
+		t.eq(PlayerCodec.VERSION, 6, "bumped for the survivor record, the food bar, the dose, then names")
 		local record = oldRecord()
 		record.alive, record.kills, record.moons, record.infection = 50000, 12, 2, 30001
 		local back = PlayerCodec.fromText(PlayerCodec.toText(record)) :: any
@@ -444,29 +459,14 @@ return function(t, shared, require, server)
 		t.eq(back.moons, 2)
 		t.eq(back.infection, 30001)
 		t.eq(back.slots[20].item, id.IronIngot, "the rest as before")
-		-- Version 2: the same bytes without the last 12 (u32 alive, u16 kills, u16 moons, u32
-		-- infection) and their flag (bit 5) under version byte 2.
+		-- The flag (bit 5) and the 12 bytes (u32 alive, u16 kills, u16 moons, u32 infection), none
+		-- of them for a fresh record; cut short, damage.
 		local bytes = PlayerCodec.encode(record)
-		t.ok(bit32.btest(buffer.readu8(bytes, 1), 32), "the survivor record's flag")
-		local two = buffer.create(buffer.len(bytes) - 12)
-		buffer.copy(two, 0, bytes, 0, buffer.len(two))
-		buffer.writeu8(two, 0, 2)
-		buffer.writeu8(two, 1, buffer.readu8(bytes, 1) - 32)
-		local old = PlayerCodec.decode(two) :: any
-		t.ok(old ~= nil, "a version 2 record reads")
-		t.eq(old.alive, 0)
-		t.eq(old.kills, 0)
-		t.eq(old.moons, 0)
-		t.eq(old.infection, 0, "healthy")
-		t.eq(old.cursor.count, 60)
-		-- Version 2 never had them: such bytes are damage. A fresh record writes none.
-		t.ok(not bit32.btest(buffer.readu8(PlayerCodec.encode(PlayerCodec.new()), 1), 32), "all 0: none")
-		local wrong = buffer.create(buffer.len(bytes))
-		buffer.copy(wrong, 0, bytes, 0, buffer.len(bytes))
-		buffer.writeu8(wrong, 0, 2)
-		t.eq((PlayerCodec.decode(wrong)), nil)
-		local plain = PlayerCodec.fromText(versionOne(oldRecord())) :: any
-		t.eq(plain.alive, 0, "version 1: zeros too")
+		t.ok(bit32.btest(flagsOf(bytes), 32), "the survivor record's flag")
+		t.ok(not bit32.btest(flagsOf(PlayerCodec.encode(PlayerCodec.new())), 32), "all 0: none")
+		local short = buffer.create(buffer.len(bytes) - 2)
+		buffer.copy(short, 0, bytes, 0, buffer.len(short))
+		t.eq((PlayerCodec.decode(short)), nil)
 		-- Damage written as nothing odd: non-finite and out-of-range numbers are clamped.
 		local odd = oldRecord()
 		odd.alive, odd.kills, odd.moons, odd.infection = 0 / 0, 1e9, -3, math.huge
@@ -497,17 +497,17 @@ return function(t, shared, require, server)
 		)
 	end)
 
-	t.test("character migration: the food bar (version 4) round trips; versions 1 to 3 have none", function()
+	t.test("character migration: the food bar (since version 4) round trips; none kept is a full bar", function()
 		-- (Minecraft's hunger, Shared/Hunger: an optional block after the survivor record, as that
 		-- one came, flag bit 6.)
 		local record = oldRecord()
 		record.alive = 5
 		t.eq(record.hunger, nil, "none kept: the player starts with a full bar")
 		local plain = PlayerCodec.encode(record)
-		t.ok(not bit32.btest(buffer.readu8(plain, 1), 64), "no food bar, no flag")
+		t.ok(not bit32.btest(flagsOf(plain), 64), "no food bar, no flag")
 		record.hunger = { food = 13, saturation = 0.5, exhaustion = 2.75, timer = 61 }
 		local bytes = PlayerCodec.encode(record)
-		t.ok(bit32.btest(buffer.readu8(bytes, 1), 64), "the food bar's flag")
+		t.ok(bit32.btest(flagsOf(bytes), 64), "the food bar's flag")
 		t.eq(buffer.len(bytes), buffer.len(plain) + 16, "four f32 at the end")
 		local back = PlayerCodec.decode(bytes) :: any
 		t.ok(back ~= nil, "round trips")
@@ -516,18 +516,7 @@ return function(t, shared, require, server)
 		t.eq(back.hunger.exhaustion, 2.75)
 		t.eq(back.hunger.timer, 61)
 		t.eq(back.alive, 5, "the survivor record before it")
-		-- Version 3 (before the food bar): the same bytes without it read with none; a version 3
-		-- byte with the flag is damage (an older server refuses a newer record the same way).
-		local three = buffer.create(buffer.len(plain))
-		buffer.copy(three, 0, plain, 0)
-		buffer.writeu8(three, 0, 3)
-		local old = PlayerCodec.decode(three) :: any
-		t.ok(old ~= nil and old.hunger == nil, "version 3: no food bar")
-		local wrong = buffer.create(buffer.len(bytes))
-		buffer.copy(wrong, 0, bytes, 0)
-		buffer.writeu8(wrong, 0, 3)
-		t.eq((PlayerCodec.decode(wrong)), nil, "version 3 never had the flag")
-		t.eq((PlayerCodec.fromText(versionOne(oldRecord())) :: any).hunger, nil, "version 1: none")
+		t.eq((PlayerCodec.decode(plain) :: any).hunger, nil, "none kept: none read (a full bar)")
 		local cut = buffer.create(buffer.len(bytes) - 1)
 		buffer.copy(cut, 0, bytes, 0, buffer.len(cut))
 		t.eq((PlayerCodec.decode(cut)), nil, "a truncated food bar")

@@ -18,9 +18,13 @@
 	           decodes them, renewing the lock every third of its timeout while it reads (a long
 	           load never leaves a running server holding a stale lock). Any failure gives the
 	           lock back and returns nil and why: a world that could not be read whole is never
-	           started, so nothing is ever written over it. A world holding blocks, items or mobs
-	           this version doesn't know (saved by a newer one) opens, but is never saved
-	           (`canSave` false): writing it would lose them.
+	           started, so nothing is ever written over it. A world holding names of blocks,
+	           items, fluids or mobs this version doesn't know (a newer one's, or content since
+	           removed: Save/SaveCodec) opens, but is never saved (`canSave` false): writing it
+	           would lose them. A region saved by an older version (before palettes: ids that
+	           were that version's, SaveCodec.OLDER) is never read: it is left out (`outdated`:
+	           the world there is what the seed generates) and its key stays listed, so the
+	           next save that writes it puts the new region there.
 	  save     writes what changed (see `save`): never for a world that can't be saved
 	           (`canSave` false: its lock was lost, or it was refused), never past
 	           Config.Save.MaxWorldBytes (refused as a whole, and said so), and only once the
@@ -32,11 +36,12 @@
 	           old head and parts stay intact).
 	  players  `loadPlayer` reads one player's record with retries: false when it could not be
 	           read (the caller then never writes that player this session, so an outage can't
-	           replace a saved inventory with an empty one); their records go out with `save`
-	           and `savePlayers`, each with its order (`order`: later captures are higher), and
-	           a record older than one already written (or being written) for that player is
-	           never written: an autosave's retry can't put back what a leaving player had
-	           minutes before.
+	           replace a saved inventory with an empty one), none and `outdated` for a record
+	           of an older version (the player starts afresh, and is saved); their records go
+	           out with `save` and `savePlayers`, each with its order (`order`: later captures
+	           are higher), and a record older than one already written (or being written) for
+	           that player is never written: an autosave's retry can't put back what a leaving
+	           player had minutes before.
 	  characters  with Config.Characters on, what the world keeps of each character (Save/
 	           WorldCharacterCodec: where it stood, its game mode) instead of a player record:
 	           `loadCharacter`, `saveCharacters` and `save`'s `characters`, by name
@@ -61,6 +66,7 @@ local WorldSettings = require(Shared.WorldSettings)
 
 local PlayerCodec = require(script.Parent.PlayerCodec)
 local RegionCodec = require(script.Parent.RegionCodec)
+local SaveCodec = require(script.Parent.SaveCodec)
 local WorldCharacterCodec = require(script.Parent.WorldCharacterCodec)
 local SaveLock = require(script.Parent.SaveLock)
 local SaveScheduler = require(script.Parent.SaveScheduler)
@@ -117,8 +123,11 @@ export type Loaded = {
 	world: World,
 	settings: WorldSettings.Settings,
 	regions: { RegionCodec.Region },
-	-- Edits, items and mobs dropped while reading (from a newer version).
+	-- What was left out while reading: names this version doesn't know (RegionCodec `dropped`).
 	dropped: number,
+	-- The regions saved by an older version, left out (see the header): the world there starts
+	-- afresh from the seed.
+	outdated: { string },
 }
 
 export type SaveInput = {
@@ -545,6 +554,7 @@ function WorldStore.load(
 		reason = nil,
 	}
 	local regions: { RegionCodec.Region } = {}
+	local outdated: { string } = {}
 	local dropped = 0
 	for _, name in names do
 		local head = heads[name]
@@ -555,11 +565,16 @@ function WorldStore.load(
 			return fail(`region {name} is damaged`)
 		end
 		local region, decodeProblem = RegionCodec.tryDecode(bytes, rx, rz)
-		if region == nil then
+		if region then
+			dropped += region.dropped
+			table.insert(regions, region)
+		elseif decodeProblem == SaveCodec.OLDER then
+			-- (Never read: left out, the seed's world there. Its state stays listed, so the next
+			-- save writing it goes into its other slot as any region's.)
+			table.insert(outdated, name)
+		else
 			return fail(`region {name}: {decodeProblem}`)
 		end
-		dropped += region.dropped
-		table.insert(regions, region)
 		local size, largest = 0, 0
 		for _, text in parts do
 			local partBytes = WorldMeta.valueBytes(text)
@@ -572,9 +587,10 @@ function WorldStore.load(
 	if dropped > 0 then
 		-- (Written back, they would be gone for good: a newer version's world is played here, not saved.)
 		world.canSave = false
-		world.reason = "it holds blocks, items or mobs this version doesn't know (saved by a newer version)"
+		world.reason =
+			"it holds blocks, items, fluids or mobs this version doesn't know (saved by a newer version, or since removed)"
 	end
-	return { world = world, settings = settings, regions = regions, dropped = dropped }, nil
+	return { world = world, settings = settings, regions = regions, dropped = dropped, outdated = outdated }, nil
 end
 
 --[[ Players ]]
@@ -582,25 +598,26 @@ end
 --[[
 	A player's record in the world: true and the record (nil: none saved yet, a new player), or
 	false when it could not be read (or is damaged, or from a newer version): then never write
-	that player this session. Yields.
+	that player this session. A record of an older version (SaveCodec.OLDER: never read) is true,
+	none and `outdated` true: the player starts afresh, and their next record goes over it. Yields.
 ]]
-function WorldStore.loadPlayer(saves: Saves, world: World, userId: number): (boolean, PlayerCodec.Record?)
+function WorldStore.loadPlayer(saves: Saves, world: World, userId: number): (boolean, PlayerCodec.Record?, boolean)
 	local ok, value = read(saves, WorldMeta.playerKey(world.id, userId))
 	if not ok then
-		return false, nil
+		return false, nil, false
 	end
 	local text = WorldMeta.readPlayer(value)
 	if text == nil then
-		return true, nil
+		return true, nil, false
 	elseif type(text) ~= "string" then
-		return false, nil
+		return false, nil, false
 	end
-	local record = PlayerCodec.fromText(text)
+	local record, why = PlayerCodec.fromText(text)
 	if record == nil then
-		return false, nil
+		return why == SaveCodec.OLDER, nil, why == SaveCodec.OLDER
 	end
 	world.players[string.format("%.0f", userId)] = text
-	return true, record
+	return true, record, false
 end
 
 --[[

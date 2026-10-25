@@ -1,7 +1,7 @@
 --[[
 	Saving worlds (server Save/, World/WorldSave): the bytes (SaveCodec: numbers, stacks, base85
-	text JSON never escapes), regions (RegionCodec: edit runs, every record, ids from a newer
-	version dropped, damaged bytes refused, parts near the 4 MB a key holds), players
+	text JSON never escapes), regions (RegionCodec: edit runs, every record, names this version
+	doesn't know left out, damaged bytes refused, parts near the 4 MB a key holds), players
 	(PlayerCodec), the records and keys (WorldMeta), locks (SaveLock), the write scheduler within
 	Roblox's budgets and the 6 s per key (SaveScheduler, against a fake DataStore), the world's
 	state to regions and back through the real server systems (WorldSnapshot: a generated chunk
@@ -12,8 +12,10 @@
 	world's most, retries; owners, full lists, the lock kept through a long load and looked at
 	before saving, two servers' parts never joined, players' records in order, what a newer
 	version saved never written back, block updates waiting for their chunk), with the sizes a
-	typical edited area takes.
+	typical edited area takes. Names, not ids (palettes): tests/spec/SaveNames.
 ]]
+
+local SaveNames = require("../lib/SaveNames")
 
 return function(t, shared, require, server, client)
 	local Blocks = require(shared.Blocks)
@@ -404,22 +406,30 @@ return function(t, shared, require, server, client)
 		if pick then
 			table.insert(stacks, Items.newStack(pick, 1, 17))
 		end
+		-- (Items by name: a palette written beside them, as each record has its own.)
+		local palette = SaveCodec.palette()
 		local w = SaveCodec.writer()
 		for _, stack in stacks do
-			SaveCodec.stack(w, stack)
+			SaveCodec.stack(w, stack, palette)
 		end
-		SaveCodec.stack(w, nil)
-		-- An item id this version doesn't know (past the last item, whatever content there is).
-		SaveCodec.u16(w, Items.ITEM_BASE + #Items.list)
+		SaveCodec.stack(w, nil, palette)
+		-- An item this version doesn't know (a name only another version has).
+		table.insert(palette.names.item, "ItemOfAnotherVersion")
+		SaveCodec.varint(w, #palette.names.item)
 		SaveCodec.varint(w, 1)
 		SaveCodec.varint(w, 0)
 		SaveCodec.u8(w, 0)
+		local names = SaveCodec.writer()
+		SaveCodec.writePalette(names, palette)
+		local read = SaveCodec.readPalette(SaveCodec.reader(SaveCodec.finish(names)))
 		local r = SaveCodec.reader(SaveCodec.finish(w))
 		for _, stack in stacks do
-			t.ok(sameStack(SaveCodec.readStack(r), stack), "stack")
+			t.ok(sameStack(SaveCodec.readStack(r, read), stack), "stack")
 		end
-		t.eq(SaveCodec.readStack(r), nil, "empty")
-		t.eq(SaveCodec.readStack(r), nil, "unknown item dropped")
+		t.eq(SaveCodec.readStack(r, read), nil, "empty")
+		local unknown, lost = SaveCodec.readStack(r, read)
+		t.eq(unknown, nil, "unknown item dropped")
+		t.eq(lost, true, "and counted")
 		t.ok(SaveCodec.atEnd(r))
 	end)
 
@@ -541,7 +551,8 @@ return function(t, shared, require, server, client)
 		t.eq(back.ticks[1].delay, 5)
 		t.eq(back.dropped, 0)
 
-		-- The wrong key, a newer version, damage and leftovers are refused.
+		-- The wrong key, a newer version, damage and leftovers are refused (older versions too:
+		-- tests/spec/SaveNames).
 		t.eq((RegionCodec.tryDecode(bytes, 0, 2)), nil, "region under another key")
 		local newer = buffer.create(buffer.len(bytes))
 		buffer.copy(newer, 0, bytes)
@@ -553,15 +564,17 @@ return function(t, shared, require, server, client)
 		t.eq((RegionCodec.tryDecode(cut)), nil, "cut short")
 	end)
 
-	t.test("world save: edits of blocks this version doesn't know are dropped, the rest kept", function()
+	t.test("world save: edits of blocks this version doesn't know become Air, counted; the rest kept", function()
 		local region = RegionCodec.new(0, 0)
-		-- (Ids past the last block, whatever content there is.)
-		local unknown = Blocks.count
-		region.chunks[Coords.chunkKey(0, 0)] = { [0] = STONE, [1] = unknown, [2] = unknown + 1000, [5] = id.Glass }
-		local back = RegionCodec.decode(RegionCodec.encode(region))
+		region.chunks[Coords.chunkKey(0, 0)] = { [0] = STONE, [1] = id.Sand, [2] = id.Sand, [5] = id.Glass }
+		-- (Saved by a version with a block this one doesn't have: its name in the palette.)
+		local bytes = SaveNames.region(SaveCodec, RegionCodec.encode(region), function(kind: string, name: string)
+			return if kind == "block" and name == "Sand" then "BlockOfAnotherVersion" else name
+		end)
+		local back = RegionCodec.decode(bytes)
 		t.eq(back.dropped, 2)
 		t.eq(back.chunks[Coords.chunkKey(0, 0)][0], STONE)
-		t.eq(back.chunks[Coords.chunkKey(0, 0)][1], nil)
+		t.eq(back.chunks[Coords.chunkKey(0, 0)][1], AIR, "Minecraft's unknown blocks: air")
 		t.eq(back.chunks[Coords.chunkKey(0, 0)][5], id.Glass)
 	end)
 
@@ -662,8 +675,9 @@ return function(t, shared, require, server, client)
 		t.eq(clamped.mana, Config.Mana.Max)
 		t.eq(clamped.crystals, Config.Mana.MaxCrystals)
 		record.mana, record.crystals = nil, 0
-		-- No position, nothing held: tiny.
-		t.ok(#PlayerCodec.toText(PlayerCodec.new()) < 20)
+		-- No position, nothing held: tiny (16 bytes, 20 characters: it was under 20 before its
+		-- palette's five empty counts came).
+		t.ok(#PlayerCodec.toText(PlayerCodec.new()) <= 20)
 		t.eq((PlayerCodec.fromText("not base85 \\")), nil)
 		t.eq((PlayerCodec.fromText(42)), nil)
 		local bytes = PlayerCodec.encode(record)
@@ -1108,7 +1122,7 @@ return function(t, shared, require, server, client)
 		t.eq(RegionCodec.isEmpty(region), false)
 		local back = RegionCodec.decode(RegionCodec.encode(region), 0, 0)
 		t.eq(back.natural[Coords.chunkKey(0, 0)][5], AIR)
-		-- Without any, a region encodes as before (no record 12: older builds still read it).
+		-- Without any, a region has no record 12.
 		local plain = RegionCodec.new(0, 0)
 		plain.chunks[Coords.chunkKey(0, 0)] = { [5] = STONE }
 		local bytes = RegionCodec.encode(plain)
@@ -1118,7 +1132,7 @@ return function(t, shared, require, server, client)
 		t.ok(buffer.len(RegionCodec.encode(withNatural)) > buffer.len(bytes), "the record is extra")
 	end)
 
-	t.test("world save (seasons): record 13 THAW round trips; a region saved before it thaws as it did", function()
+	t.test("world save (seasons): record 13 THAW round trips beside the edits", function()
 		t.eq(RegionCodec.TAGS.THAW, 13)
 		local WATER, ICE = Blocks.fluidId("Water", 0), id.Ice
 		local game = newGame()
@@ -1154,11 +1168,12 @@ return function(t, shared, require, server, client)
 		t.eq(world:thawAt(-20, FLOOR - 1, 700), nil)
 		world:setBlock(-20, FLOOR - 1, 700, ICE)
 		t.eq(world:thawAt(-20, FLOOR - 1, 700), nil, "a player's ice is no weather's")
-		-- A region with the seasons' maps is version 2; one without is version 1, as before.
+		-- Every region is version 3 since palettes, with the seasons' maps or without (versions 1
+		-- and 2, before palettes, are never read: tests/spec/SaveNames).
 		local key = Coords.chunkKey(0, 0)
 		local plain = RegionCodec.new(0, 0)
 		plain.chunks[key] = { [5] = STONE }
-		t.eq(buffer.readu8(RegionCodec.encode(plain), 0), 1, "older builds still read it")
+		t.eq(buffer.readu8(RegionCodec.encode(plain), 0), RegionCodec.VERSION)
 		local thawing = RegionCodec.new(0, 0)
 		thawing.chunks[key] = { [5] = ICE }
 		thawing.thaw[key] = { [5] = WATER }
@@ -1167,22 +1182,9 @@ return function(t, shared, require, server, client)
 		t.eq(RegionCodec.isEmpty(only), false)
 		local bytes = RegionCodec.encode(thawing)
 		t.eq(buffer.readu8(bytes, 0), RegionCodec.VERSION)
-		t.eq(RegionCodec.VERSION, 2)
+		t.eq(RegionCodec.VERSION, 3)
 		t.eq(RegionCodec.decode(bytes, 0, 0).thaw[key][5], WATER)
-		-- A version 1 region with a natural map (saved before record 13) thaws what that build
-		-- thawed: the natural map's Water under an Ice edit.
-		local old = RegionCodec.new(0, 0)
-		old.chunks[key] = { [5] = ICE, [6] = ICE, [7] = ICE, [8] = id.SnowLayer2 }
-		old.natural[key] = { [5] = WATER, [6] = AIR, [8] = AIR }
-		local v1 = RegionCodec.encode(old)
-		buffer.writeu8(v1, 0, 1)
-		local back = RegionCodec.decode(v1, 0, 0)
-		t.eq(back.thaw[key][5], WATER, "the weather's ice over the seed's water")
-		t.eq(back.thaw[key][6], nil, "ice over the seed's air is none of the weather's")
-		t.eq(back.thaw[key][7], nil, "nor ice with no natural entry")
-		t.eq(back.thaw[key][8], nil, "snow is no ice")
-		t.eq(back.natural[key][8], AIR, "the natural map as it was")
-		t.eq(next(RegionCodec.decode(RegionCodec.encode(old), 0, 0).thaw), nil, "version 2 says what thaws itself")
+		t.eq(RegionCodec.decode(bytes, 0, 0).chunks[key][5], ICE)
 	end)
 
 	t.test("world save: a typical edited area's size", function()
@@ -1857,10 +1859,12 @@ return function(t, shared, require, server, client)
 		furnish(game)
 		local world = WorldStore.create(saves, settings())
 		local saved = input(game)
-		-- A block a newer version added, in a chunk of region 0_0.
-		local newer = RegionCodec.decode(saved.regions["0_0"], 0, 0)
-		newer.chunks[Coords.chunkKey(0, 0)][7] = 60000
-		saved.regions["0_0"] = RegionCodec.encode(newer)
+		-- A block a newer version added, in region 0_0: a name in its palette this version
+		-- doesn't know.
+		local first = SaveNames.regionNames(SaveCodec, saved.regions["0_0"]).block[1]
+		saved.regions["0_0"] = SaveNames.region(SaveCodec, saved.regions["0_0"], function(kind: string, name: string)
+			return if kind == "block" and name == first then "BlockOfANewerVersion" else name
+		end)
 		t.eq(WorldStore.save(saves, world, saved).ok, true)
 		WorldStore.release(saves, world)
 		local b = fakeStore(backend, { job = "b", clock = fake.clock + 10 })
@@ -1877,7 +1881,6 @@ return function(t, shared, require, server, client)
 		t.eq(#b.writes, writes)
 
 		-- A chest holding an item, and a player record holding one, this version doesn't know.
-		local isValid = Items.isValid
 		local region = RegionCodec.new(0, 0)
 		table.insert(region.containers, {
 			x = 2,
@@ -1890,22 +1893,77 @@ return function(t, shared, require, server, client)
 				slots = { [1] = Items.newStack(id.Sand, 3), [2] = Items.newStack(id.Stone, 1) },
 			},
 		})
-		local bytes = RegionCodec.encode(region)
 		local record = PlayerCodec.new()
 		record.slots[1] = Items.newStack(id.Sand, 3)
 		record.slots[2] = Items.newStack(id.Stone, 5)
 		local text = PlayerCodec.toText(record)
-		local items: any = Items
-		items.isValid = function(item: number): boolean
-			return item ~= id.Sand and isValid(item)
+		-- (Saved by a version whose Sand this one doesn't have.)
+		local function newer(kind: string, name: string): string
+			return if kind == "item" and name == "Sand" then "SandOfANewerVersion" else name
 		end
-		local back = RegionCodec.decode(bytes, 0, 0)
-		local player = PlayerCodec.fromText(text) :: any
-		items.isValid = isValid
+		local back = RegionCodec.decode(SaveNames.region(SaveCodec, RegionCodec.encode(region), newer), 0, 0)
+		local player =
+			PlayerCodec.decode(SaveNames.record(SaveCodec, PlayerCodec.encode(record), newer)) :: PlayerCodec.Record
 		t.eq(back.dropped, 1, "the chest's unknown stack counts")
 		t.eq(player.dropped, 1, "the record's too")
 		t.ok(sameStack(player.slots[2], record.slots[2]), "the rest is read")
-		t.eq(PlayerCodec.fromText(text).dropped, 0)
+		t.eq((PlayerCodec.fromText(text) :: PlayerCodec.Record).dropped, 0)
+	end)
+
+	t.test("world save: a region or player record an older version saved starts afresh, written anew", function()
+		local backend = newBackend()
+		local fake = fakeStore(backend)
+		local saves = WorldStore.new(fake.store, fake.env)
+		local game = newGame()
+		furnish(game)
+		local world = WorldStore.create(saves, settings())
+		local player = PlayerCodec.new()
+		player.slots[1] = Items.newStack(id.Stone, 10)
+		t.eq(WorldStore.save(saves, world, input(game, nil, nil, { [101] = PlayerCodec.toText(player) })).ok, true)
+		WorldStore.release(saves, world)
+		-- Region 0_0 and the player's record as an older version wrote them (before palettes: the
+		-- version bytes 2 and 5 over what follows, which such a version wrote with its ids).
+		local head = backend.data[WorldMeta.regionKey(world.id, "0_0")]
+		t.eq(head.parts, 1)
+		local regionBytes = SaveCodec.fromText(head.d) :: buffer
+		buffer.writeu8(regionBytes, 0, 2)
+		head.d = SaveCodec.toText(regionBytes)
+		local stored = backend.data[WorldMeta.playerKey(world.id, 101)]
+		local playerBytes = SaveCodec.fromText(stored.d) :: buffer
+		buffer.writeu8(playerBytes, 0, 5)
+		stored.d = SaveCodec.toText(playerBytes)
+		-- Another server opens it: that region is left out (the seed's world there), never read.
+		local b = fakeStore(backend, { job = "b", clock = fake.clock + 10 })
+		local savesB = WorldStore.new(b.store, b.env)
+		local loaded = WorldStore.load(savesB, world.id) :: any
+		t.ok(loaded ~= nil, "it opens")
+		t.eq(table.concat(loaded.outdated, ","), "0_0", "said to be an older version's")
+		t.eq(#loaded.regions, 1, "the other region is read")
+		t.eq(loaded.dropped, 0)
+		t.eq(loaded.world.canSave, true, "and it is saved: the user accepted losing old saves")
+		local ok, record, outdated = WorldStore.loadPlayer(savesB, loaded.world, 101)
+		t.eq(ok, true, "read")
+		t.eq(record, nil, "none: the player starts afresh")
+		t.eq(outdated, true, "and is told why")
+		-- The next save writes region 0_0 anew (World/WorldSave counts it as held: written even
+		-- with nothing there now) and the player's record over the old one.
+		b.advance(10)
+		local result = WorldStore.save(
+			savesB,
+			loaded.world,
+			input(newGame(), {}, { ["0_0"] = true }, { [101] = PlayerCodec.toText(PlayerCodec.new()) })
+		)
+		t.eq(result.ok, true, result.message)
+		t.eq(result.regionsWritten, 1)
+		t.eq(result.playersWritten, 1)
+		WorldStore.release(savesB, loaded.world)
+		local c = fakeStore(backend, { job = "c", clock = b.clock + 10 })
+		local savesC = WorldStore.new(c.store, c.env)
+		local again = WorldStore.load(savesC, world.id) :: any
+		t.eq(#again.outdated, 0, "this version's now")
+		t.eq(#again.regions, 2)
+		local okAgain, fresh, old = WorldStore.loadPlayer(savesC, again.world, 101)
+		t.ok(okAgain and fresh ~= nil and not old, "the player's new record")
 	end)
 
 	t.test("world save: block updates waiting for their chunk are saved again as they were", function()

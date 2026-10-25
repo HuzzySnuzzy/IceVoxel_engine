@@ -37,6 +37,11 @@
 	            its own into the transporters and chests around it (Mekanism's ejector: server
 	            Transmitters/Transport and Eject)
 	  fields    data names after the header (letters, digits, "_": they double as item data keys)
+	  types     { [field]: "block" | "item" | "fluid" }: the fields holding a content id (the
+	            Metal Miner's `mining` a block, the Electric Furnace's `smelting` an item). Ids
+	            are given out as content loads, so saves keep these by name (server Save/
+	            RegionCodec, through its palette: `idFields`); a tank's "<name>Fluid" is a fluid
+	            on its own. A kept field with a type is an id key of the item too (Items/ItemData)
 	  keep      fields kept in the item when the machine is broken (energy and tanks always are),
 	            while they differ from what a fresh machine's start at (`defaults`)
 	  defaults  { [field]: number }: what a fresh machine's fields start at (default 0; a
@@ -65,6 +70,10 @@
 	            the Electric Furnace's "No power"). It travels in Machines records with the header,
 	            so WAILA knows it without the window, and `status` gets it as `view.state` (0 for
 	            kinds without one)
+	  stateOf   stateOf(data) -> the state code its views and records carry, worked out from its
+	            data (default: the `state` field as it is). The Metal Miner keeps the code alone
+	            in its field and its `stateOf` adds its ore's place in this version's ore list,
+	            read from `mining`, so no place in a list is ever saved
 	  rates     rates(container, energy) -> (input, output): J/t the network may put in / take
 	            out now (default the block's `energy.input` / `output`)
 	  quickMove quickMove(item) -> { slot }: shift-click targets from the inventory (default the
@@ -117,7 +126,7 @@
 	  kinds and blocks  define, kind, bind (tests bind test-only kinds to spare blocks), bindBlocks,
 	                    isMachine, kindOf, energyOf, hasEnergy, role, containerSize
 	  containers, data  newContainer, newData, isContainer, field, get, set, energy, capacity, room,
-	                    state, MAX_STATE
+	                    state, MAX_STATE, idFields (the data holding ids: saves)
 	  energy maths      QUANTUM, quantise, quantiseUp, produce, use, rates, share, tick
 	  working           showActive, DEACTIVATION_DELAY (Mekanism's blockDeactivationDelay)
 	  slots             isOutput, mayPlace, slotLimit, quickMoveTargets (Inventory/Menu),
@@ -147,6 +156,7 @@
 local Blocks = require(script.Parent.Parent.Blocks)
 local Fluids = require(script.Parent.Parent.Fluids)
 local Items = require(script.Parent.Parent.Items)
+local ItemData = require(script.Parent.Parent.Items.ItemData)
 local Types = require(script.Parent.Parent.Inventory.Types)
 -- (Its Sample type: what TickContext.climate gives. Rooms requires only Config.)
 local Rooms = require(script.Parent.Parent.Seasons.Rooms)
@@ -155,6 +165,8 @@ local TurretTypes = require(script.Parent.Parent.Turrets.Types)
 
 type Container = Types.Container
 export type EnergySpec = Blocks.EnergySpec
+-- What a field's number is an id of (KindSpec `types`).
+export type IdKind = ItemData.IdKind
 
 -- One slot of a kind (see the header).
 export type SlotSpec = {
@@ -311,6 +323,8 @@ export type ButtonSpec = { id: number, x: number, y: number, w: number, h: numbe
 export type KindSpec = {
 	slots: { SlotSpec }?,
 	fields: { string }?,
+	-- (Checked: each an IdKind.)
+	types: { [string]: string }?,
 	keep: { string }?,
 	panel: PanelSpec?,
 	tick: ((container: Container, ctx: TickContext) -> ())?,
@@ -320,6 +334,7 @@ export type KindSpec = {
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean?,
 	state: string?,
+	stateOf: ((data: { number }) -> number)?,
 	tanks: { TankSpec }?,
 	info: { [string]: number }?,
 	fuelOnly: boolean?,
@@ -346,8 +361,12 @@ export type Kind = {
 	rates: ((container: Container, energy: EnergySpec) -> (number, number))?,
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean,
-	-- The data index of its state code field (nil: none).
+	-- The data index of its state code field (nil: none), and what works out the code its views
+	-- and records carry (KindSpec `stateOf`; nil: the field as it is).
 	state: number?,
+	stateOf: ((data: { number }) -> number)?,
+	-- The data indices holding a content id, and what of (KindSpec `types`, tanks' fluids).
+	ids: { [number]: IdKind },
 	-- Slots transporters reach per face (0..5): insert / extract.
 	insertFaces: { [number]: { number } },
 	extractFaces: { [number]: { number } },
@@ -609,7 +628,8 @@ end
 	Defines the machine kind `name` from `spec` (see the header) and returns it. Names are unique;
 	BlockList's `machine.kind` names one. Errors on a bad spec: too many slots or fields (tanks
 	count), a field or tank name that is no data key or repeats a header name or another field, a
-	kept field that is no field, a tank without a whole capacity, a role or a carriable fluid.
+	kept or typed field that is no field, a type that is no kind of id, a tank without a whole
+	capacity, a role or a carriable fluid.
 ]]
 function Machines.define(name: string, spec: KindSpec): Kind
 	assert(type(name) == "string" and name ~= "", "a kind needs a name")
@@ -653,6 +673,29 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		stateField == nil or table.find(fields, stateField),
 		`Machine kind {name}: its state {stateField} is no field`
 	)
+	assert(spec.stateOf == nil or stateField ~= nil, `Machine kind {name} works out a state but has none`)
+	-- The fields holding ids (`types`), then the fluid of each tank taking several.
+	local ids: { [number]: IdKind } = {}
+	local specTypes: { [string]: string } = spec.types or {}
+	for field, typeName in specTypes do
+		assert(table.find(fields, field), `Machine kind {name}: a type for {field}, which is no field`)
+		assert(
+			typeName == "block" or typeName == "item" or typeName == "fluid",
+			`Machine kind {name}: {field} holds no kind of id {typeName}`
+		)
+		local idKind: IdKind = (typeName :: any) :: IdKind
+		ids[index[field]] = idKind
+		if table.find(keep, field) then
+			-- (Kept in the item: an id key of its data, Machines.save.)
+			ItemData.addIdKey(field, idKind)
+		end
+	end
+	for _, tank in tanks do
+		if tank.fluidIndex then
+			ids[tank.fluidIndex] = "fluid"
+			ItemData.addIdKey(`{tank.name}Fluid`, "fluid")
+		end
+	end
 	local insertFaces: { [number]: { number } } = {}
 	local extractFaces: { [number]: { number } } = {}
 	local outputs: { number } = {}
@@ -738,6 +781,8 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		quickMove = spec.quickMove,
 		creative = spec.creative == true,
 		state = if stateField then index[stateField] else nil,
+		stateOf = spec.stateOf,
+		ids = table.freeze(ids),
 		insertFaces = table.freeze(insertFaces),
 		extractFaces = table.freeze(extractFaces),
 		outputs = table.freeze(outputs),
@@ -964,22 +1009,39 @@ function Machines.room(container: Container): number
 end
 
 --[[
-	The kind's state code of a machine's container (KindSpec `state`): a whole number
-	0..MAX_STATE, 0 for kinds without one (and for anything else in the field). Only reads (a
-	client's window may have no data yet).
+	The kind's state code of a machine's container (KindSpec `state`, worked out by its `stateOf`
+	when it has one): a whole number 0..MAX_STATE, 0 for kinds without one (and for anything else
+	in the field, or a `stateOf` that fails). Only reads (a client's window may have no data yet).
 ]]
 function Machines.state(container: Container): number
 	local binding = bindings[container.block]
 	local index = if binding then binding.kind.state else nil
 	local data = container.data
-	if index == nil or data == nil then
+	if binding == nil or index == nil or data == nil then
 		return 0
 	end
 	local value = number(data[index])
+	local stateOf = binding.kind.stateOf
+	if stateOf then
+		local ok, worked = pcall(stateOf, data)
+		value = if ok and type(worked) == "number" then number(worked) else 0
+	end
 	if value < 0 or value > Machines.MAX_STATE or value ~= math.floor(value) then
 		return 0
 	end
 	return value
+end
+
+local NO_ID_FIELDS: { [number]: IdKind } = table.freeze({})
+
+--[[
+	The data indices of the machine `block`'s container that hold a content id, and what of
+	("block", "item" or "fluid": KindSpec `types` and the fluid of each tank taking several), so
+	saves keep them by name (server Save/RegionCodec). Empty for kinds without and other blocks.
+]]
+function Machines.idFields(block: number): { [number]: IdKind }
+	local binding = bindings[block]
+	return if binding then binding.kind.ids else NO_ID_FIELDS
 end
 
 --[[

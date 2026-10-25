@@ -38,7 +38,8 @@
 	  progress       ticks worked on the item in the input (the arrow: progress / ticksRequired)
 	  ticksRequired  ticks an item takes (200; fewer with Speed Upgrades)
 	  energyPerTick  J a tick of work uses (50; more with Speed, less with Energy Upgrades)
-	  smelting       the item being smelted (0: none): another item starts over
+	  smelting       the item being smelted (0: none): another item starts over (an item id,
+	                 `types`: saves keep it by name)
 	  state          why it is not working (the state code WAILA gets): IDLE (nothing to smelt),
 	                 NO_POWER (less than a tick's energy) or OUTPUT_FULL (no room for the result)
 	  activeDelay    ticks ACTIVE is held on through stops (Mekanism's updateDelay, below)
@@ -165,6 +166,7 @@ assert(#SLOTS == ENERGY, "the Electric Furnace's upgrade slots are 3 and 4")
 return Core.define("smelter", {
 	slots = SLOTS,
 	fields = { "progress", "ticksRequired", "energyPerTick", "smelting", "state", "activeDelay" },
+	types = { smelting = "item" },
 	state = "state",
 	panel = {
 		progress = { x = 79, y = 34, value = "progress", total = "ticksRequired" },

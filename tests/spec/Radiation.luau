@@ -8,7 +8,7 @@
 	mined, a stack carried, a Block of Uranium beside you, a vein far off; creative, the suit, off),
 	the scan's bounded and measured cost, the Geiger counter's click rate (a Poisson process at the
 	rate asked, capped), what is published and shown, and the dose saved in the player record
-	(Save/PlayerCodec version 5) and the character (Save/CharacterCodec version 4).
+	(Save/PlayerCodec, since version 5) and the character (Save/CharacterCodec, since version 4).
 ]]
 
 local fs = require("@lune/fs")
@@ -26,6 +26,7 @@ return function(t, shared, require, server)
 	local RadiationRules = require(server.Players.RadiationRules)
 	local PlayerCodec = require(server.Save.PlayerCodec)
 	local CharacterCodec = require(server.Save.CharacterCodec)
+	local SaveCodec = require(server.Save.SaveCodec)
 
 	local B, I, E = Blocks.id, Items.id, Effects.id
 	local settings = Config.Radiation
@@ -665,31 +666,33 @@ return function(t, shared, require, server)
 
 	--[[ Saved ]]
 
-	t.test("radiation: the dose is saved in the player record (version 5) and the character (version 4)", function()
+	t.test("radiation: the dose is saved in the player record and the character", function()
+		-- (Since Save/PlayerCodec version 5 and Save/CharacterCodec version 4; today 6 and 5:
+		-- names, not ids, tests/spec/SaveNames.)
+		-- A record's flags byte: after the version byte and the record's palette.
+		local function flagsOf(bytes: buffer): number
+			local r = SaveCodec.reader(bytes)
+			SaveCodec.readU8(r)
+			SaveCodec.readPalette(r)
+			return SaveCodec.readU8(r)
+		end
 		-- Save/PlayerCodec: an optional f32 after the food bar, flag bit 7.
 		local record = PlayerCodec.new()
 		t.eq(record.radiation, 0, "none")
 		local plain = PlayerCodec.encode(record)
-		t.ok(not bit32.btest(buffer.readu8(plain, 1), 128), "no dose, no flag")
+		t.ok(not bit32.btest(flagsOf(plain), 128), "no dose, no flag")
 		record.radiation = 2.5
 		local bytes = PlayerCodec.encode(record)
-		t.eq(buffer.readu8(bytes, 0), 5, "version 5")
-		t.ok(bit32.btest(buffer.readu8(bytes, 1), 128), "the dose's flag")
+		t.eq(buffer.readu8(bytes, 0), PlayerCodec.VERSION)
+		t.ok(bit32.btest(flagsOf(bytes), 128), "the dose's flag")
 		t.eq(buffer.len(bytes), buffer.len(plain) + 4, "an f32 at the end")
 		t.eq((PlayerCodec.decode(bytes) :: any).radiation, 2.5, "round trips")
-		local four = buffer.create(buffer.len(plain))
-		buffer.copy(four, 0, plain, 0)
-		buffer.writeu8(four, 0, 4)
-		t.eq((PlayerCodec.decode(four) :: any).radiation, 0, "version 4: none")
-		local wrong = buffer.create(buffer.len(bytes))
-		buffer.copy(wrong, 0, bytes, 0)
-		buffer.writeu8(wrong, 0, 4)
-		t.eq((PlayerCodec.decode(wrong)), nil, "version 4 never had the flag")
+		t.eq((PlayerCodec.decode(plain) :: any).radiation, 0, "none written: none")
 		local cut = buffer.create(buffer.len(bytes) - 1)
 		buffer.copy(cut, 0, bytes, 0, buffer.len(cut))
 		t.eq((PlayerCodec.decode(cut)), nil, "a truncated dose")
 		record.radiation = 0 / 0
-		t.ok(not bit32.btest(buffer.readu8(PlayerCodec.encode(record), 1), 128), "NaN: none written")
+		t.ok(not bit32.btest(flagsOf(PlayerCodec.encode(record)), 128), "NaN: none written")
 		record.radiation = -1
 		t.eq((PlayerCodec.decode(PlayerCodec.encode(record)) :: any).radiation, 0, "negative: none")
 		-- Nothing live yet (the title screen): the saved dose is kept; once a character stands,
@@ -719,18 +722,11 @@ return function(t, shared, require, server)
 		local none = CharacterCodec.encode(character)
 		character.radiation = 4.25
 		local withDose = CharacterCodec.encode(character)
-		t.eq(buffer.readu8(withDose, 0), 4, "version 4")
-		t.ok(bit32.btest(buffer.readu8(withDose, 1), 32), "the dose's flag")
+		t.eq(buffer.readu8(withDose, 0), CharacterCodec.VERSION)
+		t.ok(bit32.btest(flagsOf(withDose), 32), "the dose's flag")
 		t.eq(buffer.len(withDose), buffer.len(none) + 4)
 		t.eq((CharacterCodec.decode(withDose) :: any).radiation, 4.25, "round trips")
-		local three = buffer.create(buffer.len(none))
-		buffer.copy(three, 0, none, 0)
-		buffer.writeu8(three, 0, 3)
-		t.eq((CharacterCodec.decode(three) :: any).radiation, 0, "version 3: none")
-		local bad = buffer.create(buffer.len(withDose))
-		buffer.copy(bad, 0, withDose, 0)
-		buffer.writeu8(bad, 0, 3)
-		t.eq((CharacterCodec.decode(bad)), nil, "version 3 never had the flag")
+		t.eq((CharacterCodec.decode(none) :: any).radiation, 0, "none written: none")
 		local kept = CharacterCodec.new(1, "Curie", Characters.Difficulty.Classic, Appearance.default(), 0)
 		CharacterCodec.keepThings(kept, character)
 		t.eq(kept.radiation, 4.25, "an unfair visit cures nothing")

@@ -842,7 +842,9 @@ return function(t, shared, require, server, client)
 		end
 		t.eq(OffMachines.energy(container), 100000, "nothing used")
 		t.eq(container.slots[OUTPUT], nil, "nothing made")
-		t.eq(OffMachines.state(container), 0)
+		-- (Its own code, IDLE: 0 was MINING with no ore before the state field kept the code
+		-- alone, the ore read from `mining`; tests/spec/SaveNames.)
+		t.eq(OffMachines.state(container), MinerRules.packState(STATE.IDLE, 0))
 		t.eq(OffMachines.status(block, OffMachines.view(container)), "Idle")
 		t.eq(OffMachines.get(container, "rate"), 0)
 		t.eq(container.data[ACTIVE], 0, "dark")

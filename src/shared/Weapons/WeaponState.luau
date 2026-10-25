@@ -17,7 +17,8 @@
 	  lit      firearm             the weapon light is on
 
 	Twelve keys at most (with `jam` only beside `ch`). Data tables are frozen values: every change
-	makes new data (Items.withData), never one changed in place.
+	makes new data (Items.withData), never one changed in place. The keys holding item ids are
+	listed in Items/ItemData.ID_KEYS too (saves keep them by name): a new one goes there as well.
 
 	Everything that reads a weapon stack reads it through `sane`: a clamped copy (the same table
 	when nothing needed changing), so a creative player's odd data (Inventory/Menu lets creative

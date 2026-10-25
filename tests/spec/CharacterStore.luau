@@ -8,8 +8,9 @@
 	had then (CharacterCodec.keepThings), creating writes the record
 	before the list (an orphan of a failed list write is taken over), the most a user keeps,
 	deleting and renaming refused while another server has the character, the session-only
-	store in memory, and the zombie apocalypse's survivor record and infection in the record
-	(CharacterCodec version 2; a version 1 record reads them as 0).
+	store in memory, the zombie apocalypse's survivor record and infection and the food bar in the
+	record, and a character an older version saved selected as who it is, its things afresh
+	(CharacterCodec version 5: names, not ids; tests/spec/SaveNames).
 ]]
 
 return function(t, shared, require, server)
@@ -20,7 +21,16 @@ return function(t, shared, require, server)
 	local Items = require(shared.Items)
 	local CharacterCodec = require(server.Save.CharacterCodec)
 	local CharacterSaves = require(server.Save.CharacterSaves)
+	local SaveCodec = require(server.Save.SaveCodec)
 	local SaveLock = require(server.Save.SaveLock)
+
+	-- A character record's flags byte (after the version byte and the record's palette).
+	local function flagsOf(bytes: buffer): number
+		local r = SaveCodec.reader(bytes)
+		SaveCodec.readU8(r)
+		SaveCodec.readPalette(r)
+		return SaveCodec.readU8(r)
+	end
 
 	local USER = 1234567
 	local D = Characters.Difficulty
@@ -318,6 +328,51 @@ return function(t, shared, require, server)
 		end
 	)
 
+	t.test("character store: one an older version saved is selected as who it is, then saved whole", function()
+		local backend = newBackend()
+		local a = fakeStore(backend, { job = "server-a" })
+		CharacterSaves.create(a.saves, USER, newRecord(1, "Alice"), { v = 1, points = 3 }, false)
+		-- Its bytes as version 4 wrote them: the head every version wrote alike (no ids), then
+		-- its things in that version's ids (never read).
+		local w = SaveCodec.writer()
+		SaveCodec.u8(w, 4)
+		SaveCodec.u8(w, 1) -- (a thirst: what follows the head)
+		SaveCodec.u32(w, 1)
+		SaveCodec.text(w, "Alice")
+		SaveCodec.u8(w, D.Mediumcore)
+		for _, time in { 1600000000, 1700000000, 7200 } do
+			SaveCodec.f64(w, time)
+		end
+		SaveCodec.u32(w, 4)
+		local look = Appearance.encode(Appearance.default())
+		SaveCodec.u16(w, buffer.len(look))
+		SaveCodec.bytes(w, look)
+		for _ = 1, 30 do
+			SaveCodec.u8(w, 0x5A)
+		end
+		backend.data[CharacterSaves.recordKey(USER, 1)].data = SaveCodec.toText(SaveCodec.finish(w))
+		local status, record, progress = CharacterSaves.select(a.saves, USER, 1)
+		t.eq(status, "ok", "no damage: it plays")
+		local old = record :: CharacterCodec.Record
+		t.eq(old.outdated, true, "said to be an older version's (the player is told)")
+		t.eq(old.name, "Alice")
+		t.eq(old.difficulty, D.Mediumcore)
+		t.eq(old.deaths, 4)
+		t.eq(old.played, 7200)
+		t.eq(next(old.slots), nil, "its things start afresh")
+		t.eq(old.thirst, nil)
+		t.eq(old.dropped, 0, "so it is saved")
+		t.eq((progress :: any).points, 3, "its progress (kept by name) as it was")
+		a.env.wait(10)
+		old.slots[1] = Items.newStack(Items.id.Stick, 2)
+		t.eq(CharacterSaves.save(a.saves, USER, 1, old, progress, 1, true), "ok")
+		local back = stored(backend, 1) :: CharacterCodec.Record
+		t.eq(back.outdated, false, "this version's, whole, now")
+		t.eq(back.name, "Alice")
+		t.eq(back.deaths, 4)
+		t.eq(back.slots[1].count, 2)
+	end)
+
 	t.test("character store: a released character is taken at once; a lost lock stops saving", function()
 		local backend = newBackend()
 		local a = fakeStore(backend, { job = "server-a" })
@@ -465,12 +520,12 @@ return function(t, shared, require, server)
 		t.eq(back.slots[5].count, 3)
 	end)
 
-	t.test("character store: the survivor record and infection are saved (version 2; version 1 reads 0)", function()
+	t.test("character store: the survivor record and infection are saved", function()
 		-- (The zombie apocalypse: server Apocalypse/Survival's record and Apocalypse/Infection's
-		-- progress, Save/CharacterCodec version 2.)
-		-- (3 since Minecraft's food bar, the test below; 4 since the radiation dose, tests/spec/
-		-- Radiation.)
-		t.eq(CharacterCodec.VERSION, 4, "bumped for the survivor record, the food bar, then the dose")
+		-- progress, since Save/CharacterCodec version 2.)
+		-- (5 since palettes, names not ids: older records come back as who they are only, tests/
+		-- spec/SaveNames.)
+		t.eq(CharacterCodec.VERSION, 5, "bumped for the survivor record, the food bar, the dose, then names")
 		local record = newRecord(5, "Survivor")
 		t.eq(record.alive, 0, "a new character starts at 0")
 		t.eq(record.infection, 0, "healthy")
@@ -488,23 +543,9 @@ return function(t, shared, require, server)
 		t.eq(clamped.moons, 0)
 		t.eq(clamped.alive, 0, "NaN reads 0")
 		t.eq(clamped.infection, 4294967295)
-		-- A version 1 record (before the apocalypse): the same bytes without the last 12, read with
-		-- zeros.
+		-- Bytes cut short are damaged.
 		record.alive, record.kills, record.moons, record.infection = 99, 9, 1, 500
 		local bytes = CharacterCodec.encode(record)
-		local old = buffer.create(buffer.len(bytes) - 12)
-		buffer.copy(old, 0, bytes, 0, buffer.len(old))
-		buffer.writeu8(old, 0, 1)
-		local legacy, why = CharacterCodec.decode(old)
-		t.ok(legacy ~= nil, `a version 1 record still reads ({why})`)
-		if legacy then
-			t.eq(legacy.alive, 0)
-			t.eq(legacy.kills, 0)
-			t.eq(legacy.moons, 0)
-			t.eq(legacy.infection, 0)
-			t.eq(legacy.name, "Survivor", "the rest as it was")
-		end
-		-- Version 2 bytes cut short are damaged.
 		local short = buffer.create(buffer.len(bytes) - 4)
 		buffer.copy(short, 0, bytes, 0, buffer.len(short))
 		t.eq((CharacterCodec.decode(short)), nil, "a truncated survivor record")
@@ -515,15 +556,15 @@ return function(t, shared, require, server)
 		t.eq(kept.kills, 0, "the record itself is the character's, not a thing")
 	end)
 
-	t.test("character store: the food bar is saved (version 3; older records have none: a full bar)", function()
+	t.test("character store: the food bar is saved (since version 3; none: a full bar)", function()
 		-- (Minecraft's hunger: Shared/Hunger's state, kept by server Players/ToughAsNails.)
 		local record = newRecord(6, "Hungry")
 		t.eq(record.hunger, nil, "a new character keeps none: it starts full")
 		local plain = CharacterCodec.encode(record)
-		t.ok(not bit32.btest(buffer.readu8(plain, 1), 16), "no food bar, no flag")
+		t.ok(not bit32.btest(flagsOf(plain), 16), "no food bar, no flag")
 		record.hunger = { food = 7, saturation = 1.5, exhaustion = 3.25, timer = 42 }
 		local bytes = CharacterCodec.encode(record)
-		t.ok(bit32.btest(buffer.readu8(bytes, 1), 16), "the food bar's flag (bit 4)")
+		t.ok(bit32.btest(flagsOf(bytes), 16), "the food bar's flag (bit 4)")
 		t.eq(buffer.len(bytes), buffer.len(plain) + 16, "four f32 at the end")
 		local back = CharacterCodec.decode(bytes) :: CharacterCodec.Record
 		t.ok(back ~= nil and back.hunger ~= nil, "round trips")
@@ -532,17 +573,6 @@ return function(t, shared, require, server)
 		t.eq(hunger.saturation, 1.5)
 		t.eq(hunger.exhaustion, 3.25)
 		t.eq(hunger.timer, 42)
-		-- A version 2 record (before the food bar) reads with none; a version 2 byte with the
-		-- flag is damage.
-		local two = buffer.create(buffer.len(plain))
-		buffer.copy(two, 0, plain, 0)
-		buffer.writeu8(two, 0, 2)
-		local old = CharacterCodec.decode(two)
-		t.ok(old ~= nil and old.hunger == nil, "version 2: no food bar (a full one)")
-		local wrong = buffer.create(buffer.len(bytes))
-		buffer.copy(wrong, 0, bytes, 0)
-		buffer.writeu8(wrong, 0, 2)
-		t.eq((CharacterCodec.decode(wrong)), nil, "version 2 never had the flag")
 		-- Non-finite numbers are damage; what is written is cleaned (NaN as 0).
 		local cut = buffer.create(buffer.len(bytes) - 4)
 		buffer.copy(cut, 0, bytes, 0, buffer.len(cut))

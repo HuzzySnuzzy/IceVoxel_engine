@@ -29,35 +29,44 @@
 	  thaw        the weather's ice (World/WorldServer `thaw`: chunk key -> local index -> the
 	              block it thaws back to), the cells still holding the ice the weather froze
 
-	Stream: u8 version, zigzag rx, zigzag rz, varint RegionChunks, then records (u8 tag, varint
-	length, payload), each read back exactly to its length (anything else is a damaged save).
-	The version is VERSION (2) for a region with the seasons' maps (records 12 and 13), else 1,
-	so a region without them is the same bytes as before and older builds still read it. A
-	version 1 region with a natural map was saved before record 13: its weather's ice is what
-	that build thawed, the natural map's Water under an Ice edit, so that becomes its thaw map.
+	Stream: u8 version (VERSION, 3), zigzag rx, zigzag rz, varint RegionChunks, then records (u8
+	tag, varint length, payload), each read back exactly to its length (anything else is a
+	damaged save). The first record is the region's palette (Save/SaveCodec: names, not ids): every
+	block, item, fluid and mob kind the others hold is its index there, so content can be added,
+	removed or reordered between versions without moving a block. A region of version 1 or 2
+	(before palettes: ids that were another version's) is refused, never misread (SaveCodec.OLDER:
+	Save/WorldStore starts it afresh from the seed), and a newer one too (never written over).
+	 14 PALETTE    the palette (SaveCodec.writePalette), first
 	  1 EDITS      u16 chunk (lcx x RegionChunks + lcz, its place in the region), varint runs, then
 	               per run: varint gap (cells skipped since the last run's end: local indices are
 	               ChunkLayout's, x then z then y, so a dug tunnel or a wall is a few runs),
 	               varint (length - 1) x 2 + same (1: the previous run's block), varint block
 	               (when not the same). A chunk's whole 16 x 16 layer of one block is one run.
-	  2 CONTAINER  position (u16 x, y, z within the region), u8 kind (Inventory/Types KINDS), u16
-	               block, u8 size, u8 n + n x f64 data, u8 stacks + stacks x (u8 slot, stack)
+	  2 CONTAINER  position (u16 x, y, z within the region), u8 kind (Inventory/Types KINDS),
+	               varint block, u8 size, u8 n + n x f64 data, u8 stacks + stacks x (u8 slot,
+	               stack). The data's ids are palette indices too: a furnace's cooking item
+	               (Crafting/Smelting.ID_FIELDS), a machine's fields holding ids and its tanks'
+	               fluids (Shared/Machines.idFields: the Metal Miner's ore, the Electric Furnace's
+	               item)
 	  3 SOURCED    varint n + n x position
 	  4 STRUCTURE  position, Structures/Settings' structure format
 	  5 JIGSAW     position, its jigsaw format
-	  6 PIPE       position, u16 modes, u8 colour, u8 fluid, varint mB
-	  7 TANK       position, u8 fluid, varint mB
+	  6 PIPE       position, u16 modes, u8 colour, varint fluid, varint mB
+	  7 TANK       position, varint fluid, varint mB
 	  8 TRANSPORT  position, u8 colour, stack
 	  9 ITEM       f64 x, y, z, varint age, varint pickup delay, stack
-	 10 MOB        u8 kind, u8 variant, f64 x, y, z, f32 yaw, f32 health
+	 10 MOB        varint kind, u8 variant, f64 x, y, z, f32 yaw, f32 health
 	 11 TICKS      varint n + n x (position, varint delay)
 	 12 NATURAL    what the seed generated at cells the seasons' weather changed (World/
 	               WorldServer's natural map: snow and ice that melting deletes), as EDITS: u16
-	               chunk, varint runs of index gap + block. Builds before it refuse the record
-	               (an unknown record: "played but not saved", World/WorldSave).
+	               chunk, varint runs of index gap + block
 	 13 THAW       the weather's ice (World/WorldServer's thaw map: what each cell thaws back
-	               to), as EDITS. Version 2 (above).
-	Unknown block ids, items and mob kinds (a save from a newer version) are dropped one by one.
+	               to), as EDITS
+	Names this version doesn't know (a newer version's, or content since removed) are counted
+	(`dropped`) one by one: an edit of such a block becomes Air, a natural or thaw entry is left
+	out, a container of such a block goes (its stacks with it), a stack is dropped (or, for an id
+	in its data, that key), a pipe's or tank's fluid empties, a mob goes, an id in a container's
+	data becomes 0 (nothing: what the machine works on starts over).
 
 	Parts (`split` / `join`): a stream longer than a key holds is cut into parts of at most
 	`maxText` characters of base85 text each (4 bytes are 5 characters; the cuts fall anywhere,
@@ -73,14 +82,17 @@ local ChunkLayout = require(Shared.World.ChunkLayout)
 local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local MobList = require(Shared.Entities.MobList)
 local Settings = require(Shared.Structures.Settings)
+local Smelting = require(Shared.Crafting.Smelting)
 local Types = require(Shared.Inventory.Types)
 
 local SaveCodec = require(script.Parent.SaveCodec)
 
 type Writer = SaveCodec.Writer
 type Reader = SaveCodec.Reader
+type Palette = SaveCodec.Palette
 type Stack = Items.Stack
 
 export type ContainerRecord = { x: number, y: number, z: number, container: Types.Container }
@@ -130,22 +142,23 @@ export type Region = {
 	-- Chunk key -> local index -> the block the weather's ice thaws back to (World/WorldServer
 	-- `thaw`).
 	thaw: { [number]: { [number]: number } },
-	-- Edits, items and mobs dropped while reading (ids this version doesn't know).
+	-- What was left out while reading, one by one: names this version doesn't know (see the
+	-- header).
 	dropped: number,
 }
 
 local RegionCodec = {}
 
--- The version of a region with the seasons' maps (see the header); one without them is 1.
-RegionCodec.VERSION = 2
+-- The version regions are written with (see the header: older ones are refused).
+RegionCodec.VERSION = 3
 local SIZE = Config.ChunkSize
 local HEIGHT = Config.WorldHeight
 local CELLS = SIZE * SIZE * HEIGHT
+local AIR = Blocks.AIR
 
 local EDITS, CONTAINER, SOURCED, STRUCTURE, JIGSAW, PIPE, TANK, TRANSPORT, ITEM, MOB, TICKS =
 	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
-local NATURAL, THAW = 12, 13
-local WATER, ICE = Blocks.fluidId("Water", 0), Blocks.id.Ice
+local NATURAL, THAW, PALETTE = 12, 13, 14
 RegionCodec.TAGS = table.freeze({
 	EDITS = EDITS,
 	CONTAINER = CONTAINER,
@@ -160,6 +173,7 @@ RegionCodec.TAGS = table.freeze({
 	TICKS = TICKS,
 	NATURAL = NATURAL,
 	THAW = THAW,
+	PALETTE = PALETTE,
 })
 
 local KIND_CODE: { [string]: number } = {}
@@ -283,6 +297,7 @@ local function encodeEdits(
 	chunkKey: number,
 	edits: { [number]: number },
 	scratch: Writer,
+	palette: Palette,
 	tag: number?
 )
 	local indices: { number } = {}
@@ -313,7 +328,7 @@ local function encodeEdits(
 		SaveCodec.varint(runs, start - expected)
 		SaveCodec.varint(runs, (length - 1) * 2 + (if same then 1 else 0))
 		if not same then
-			SaveCodec.varint(runs, block)
+			SaveCodec.varint(runs, SaveCodec.indexOf(palette, "block", block))
 		end
 		count += 1
 		expected = start + length
@@ -325,7 +340,21 @@ local function encodeEdits(
 	record(w, tag or EDITS, scratch)
 end
 
-local function encodeContainer(w: Writer, region: Region, entry: ContainerRecord, scratch: Writer)
+--[[
+	The data indices of `container` holding a content id, and what of, by the kind of its block
+	today: a furnace's cooking item (Crafting/Smelting), a machine's typed fields and tanks' fluids
+	(Shared/Machines.idFields). nil: none.
+]]
+local function idFields(container: Types.Container): { [number]: SaveCodec.PaletteKind }?
+	if container.kind == "furnace" then
+		return Smelting.ID_FIELDS :: any
+	elseif container.kind == Machines.CONTAINER_KIND then
+		return Machines.idFields(container.block) :: any
+	end
+	return nil
+end
+
+local function encodeContainer(w: Writer, region: Region, entry: ContainerRecord, scratch: Writer, palette: Palette)
 	local container = entry.container
 	local code = KIND_CODE[container.kind]
 	if code == nil then
@@ -334,14 +363,20 @@ local function encodeContainer(w: Writer, region: Region, entry: ContainerRecord
 	scratch.n = 0
 	position(scratch, region, entry.x, entry.y, entry.z)
 	SaveCodec.u8(scratch, code)
-	SaveCodec.u16(scratch, container.block)
+	SaveCodec.varint(scratch, SaveCodec.indexOf(palette, "block", container.block))
 	local size = math.clamp(container.size, 0, Types.MAX_CONTAINER)
 	SaveCodec.u8(scratch, size)
 	local data = container.data
 	local count = if data then math.min(#data, Types.MAX_CONTAINER_DATA) else 0
+	local ids = idFields(container)
 	SaveCodec.u8(scratch, count)
 	for i = 1, count do
 		local value = (data :: { number })[i]
+		local kind = if ids then ids[i] else nil
+		if kind then
+			-- (An id as its palette index: 0, nothing, for none and anything that is no id.)
+			value = SaveCodec.indexOf(palette, kind, value)
+		end
 		SaveCodec.f64(scratch, if value == value then value else 0)
 	end
 	local stacks = 0
@@ -356,21 +391,22 @@ local function encodeContainer(w: Writer, region: Region, entry: ContainerRecord
 		local stack = container.slots[slot]
 		if stack and stack.count >= 1 then
 			SaveCodec.u8(scratch, slot)
-			SaveCodec.stack(scratch, stack)
+			SaveCodec.stack(scratch, stack, palette)
 		end
 	end
 	record(w, CONTAINER, scratch)
 end
 
--- The region's bytes (records in a fixed order: the same region always encodes alike).
-function RegionCodec.encode(region: Region): buffer
+--[[
+	The region's bytes (records in a fixed order: the same region always encodes alike), its
+	palette first. `palette`: one to start from (default an empty one), its names keeping their
+	indices: the specs' stand-in for a version whose content came in another order.
+]]
+function RegionCodec.encode(region: Region, palette: Palette?): buffer
+	local names = palette or SaveCodec.palette()
+	-- (The records first, gathering the palette, which goes before them.)
 	local w = SaveCodec.writer(4096)
 	local scratch = SaveCodec.writer(1024)
-	local seasons = next(region.natural) ~= nil or next(region.thaw) ~= nil
-	SaveCodec.u8(w, if seasons then RegionCodec.VERSION else 1)
-	SaveCodec.zigzag(w, region.rx)
-	SaveCodec.zigzag(w, region.rz)
-	SaveCodec.varint(w, RegionCodec.chunks())
 
 	local chunkKeys: { number } = {}
 	for key in region.chunks do
@@ -378,10 +414,10 @@ function RegionCodec.encode(region: Region): buffer
 	end
 	table.sort(chunkKeys)
 	for _, key in chunkKeys do
-		encodeEdits(w, region, key, region.chunks[key], scratch)
+		encodeEdits(w, region, key, region.chunks[key], scratch, names)
 	end
 	for _, entry in region.containers do
-		encodeContainer(w, region, entry, scratch)
+		encodeContainer(w, region, entry, scratch, names)
 	end
 	if #region.sourced > 0 then
 		scratch.n = 0
@@ -411,14 +447,14 @@ function RegionCodec.encode(region: Region): buffer
 		position(scratch, region, entry.x, entry.y, entry.z)
 		SaveCodec.u16(scratch, entry.modes)
 		SaveCodec.u8(scratch, entry.colour)
-		SaveCodec.u8(scratch, entry.fluid)
+		SaveCodec.varint(scratch, SaveCodec.indexOf(names, "fluid", entry.fluid))
 		SaveCodec.varint(scratch, math.max(0, math.floor(entry.amount)))
 		record(w, PIPE, scratch)
 	end
 	for _, entry in region.tanks do
 		scratch.n = 0
 		position(scratch, region, entry.x, entry.y, entry.z)
-		SaveCodec.u8(scratch, entry.fluid)
+		SaveCodec.varint(scratch, SaveCodec.indexOf(names, "fluid", entry.fluid))
 		SaveCodec.varint(scratch, math.max(0, math.floor(entry.amount)))
 		record(w, TANK, scratch)
 	end
@@ -426,7 +462,7 @@ function RegionCodec.encode(region: Region): buffer
 		scratch.n = 0
 		position(scratch, region, entry.x, entry.y, entry.z)
 		SaveCodec.u8(scratch, entry.colour)
-		SaveCodec.stack(scratch, entry.stack)
+		SaveCodec.stack(scratch, entry.stack, names)
 		record(w, TRANSPORT, scratch)
 	end
 	for _, entry in region.items do
@@ -436,19 +472,22 @@ function RegionCodec.encode(region: Region): buffer
 		SaveCodec.f64(scratch, entry.z)
 		SaveCodec.varint(scratch, math.max(0, math.floor(entry.age)))
 		SaveCodec.varint(scratch, math.clamp(math.floor(entry.pickupDelay), 0, 32767))
-		SaveCodec.stack(scratch, entry.stack)
+		SaveCodec.stack(scratch, entry.stack, names)
 		record(w, ITEM, scratch)
 	end
 	for _, entry in region.mobs do
-		scratch.n = 0
-		SaveCodec.u8(scratch, entry.kind)
-		SaveCodec.u8(scratch, math.clamp(entry.variant, 0, 255))
-		SaveCodec.f64(scratch, entry.x)
-		SaveCodec.f64(scratch, entry.y)
-		SaveCodec.f64(scratch, entry.z)
-		SaveCodec.f32(scratch, entry.yaw)
-		SaveCodec.f32(scratch, entry.health)
-		record(w, MOB, scratch)
+		local kind = SaveCodec.indexOf(names, "mob", entry.kind)
+		if kind > 0 then
+			scratch.n = 0
+			SaveCodec.varint(scratch, kind)
+			SaveCodec.u8(scratch, math.clamp(entry.variant, 0, 255))
+			SaveCodec.f64(scratch, entry.x)
+			SaveCodec.f64(scratch, entry.y)
+			SaveCodec.f64(scratch, entry.z)
+			SaveCodec.f32(scratch, entry.yaw)
+			SaveCodec.f32(scratch, entry.health)
+			record(w, MOB, scratch)
+		end
 	end
 	local naturalKeys: { number } = {}
 	for key in region.natural do
@@ -456,7 +495,7 @@ function RegionCodec.encode(region: Region): buffer
 	end
 	table.sort(naturalKeys)
 	for _, key in naturalKeys do
-		encodeEdits(w, region, key, region.natural[key], scratch, NATURAL)
+		encodeEdits(w, region, key, region.natural[key], scratch, names, NATURAL)
 	end
 	local thawKeys: { number } = {}
 	for key in region.thaw do
@@ -464,7 +503,7 @@ function RegionCodec.encode(region: Region): buffer
 	end
 	table.sort(thawKeys)
 	for _, key in thawKeys do
-		encodeEdits(w, region, key, region.thaw[key], scratch, THAW)
+		encodeEdits(w, region, key, region.thaw[key], scratch, names, THAW)
 	end
 	if #region.ticks > 0 then
 		scratch.n = 0
@@ -475,12 +514,27 @@ function RegionCodec.encode(region: Region): buffer
 		end
 		record(w, TICKS, scratch)
 	end
-	return SaveCodec.finish(w)
+
+	local out = SaveCodec.writer(w.n + 256)
+	SaveCodec.u8(out, RegionCodec.VERSION)
+	SaveCodec.zigzag(out, region.rx)
+	SaveCodec.zigzag(out, region.rz)
+	SaveCodec.varint(out, RegionCodec.chunks())
+	scratch.n = 0
+	SaveCodec.writePalette(scratch, names)
+	record(out, PALETTE, scratch)
+	SaveCodec.bytes(out, w.b, w.n)
+	return SaveCodec.finish(out)
 end
 
 --[[ Decoding ]]
 
-local function decodeEdits(r: Reader, region: Region, into: { [number]: { [number]: number } }?)
+--[[
+	An EDITS record into `into` (default the region's edits; the seasons' maps for NATURAL and
+	THAW). A block this version doesn't know is counted, and becomes Air in edits (Minecraft's
+	unknown blocks) or is left out of a map.
+]]
+local function decodeEdits(r: Reader, region: Region, palette: Palette, into: { [number]: { [number]: number } }?)
 	local chunks = into or region.chunks
 	local n = RegionCodec.chunks()
 	local place = SaveCodec.readU16(r)
@@ -495,25 +549,30 @@ local function decodeEdits(r: Reader, region: Region, into: { [number]: { [numbe
 		chunks[key] = edits
 	end
 	local runs = SaveCodec.readVarint(r)
-	local cell, block = 0, -1
+	local cell = 0
+	local block: number? = nil
+	local known = false
 	for _ = 1, runs do
 		cell += SaveCodec.readVarint(r)
 		local shape = SaveCodec.readVarint(r)
 		local length = shape // 2 + 1
 		if shape % 2 == 0 then
-			block = SaveCodec.readVarint(r)
-		elseif block < 0 then
+			block = SaveCodec.idOf(palette, "block", SaveCodec.readVarint(r))
+			known = true
+		elseif not known then
 			error("run repeats no block", 0)
 		end
 		if cell + length > CELLS then
 			error("edit outside its chunk", 0)
 		end
-		if Blocks.isValid(block) then
-			for index = cell, cell + length - 1 do
-				edits[index] = block
-			end
-		else
+		local placed = block or (if into == nil then AIR else nil)
+		if block == nil then
 			region.dropped += length
+		end
+		if placed ~= nil then
+			for index = cell, cell + length - 1 do
+				edits[index] = placed
+			end
 		end
 		cell += length
 	end
@@ -522,10 +581,10 @@ local function decodeEdits(r: Reader, region: Region, into: { [number]: { [numbe
 	end
 end
 
-local function decodeContainer(r: Reader, region: Region)
+local function decodeContainer(r: Reader, region: Region, palette: Palette)
 	local x, y, z = readPosition(r, region)
 	local kind = Types.KINDS[SaveCodec.readU8(r)]
-	local block = SaveCodec.readU16(r)
+	local block = SaveCodec.idOf(palette, "block", SaveCodec.readVarint(r))
 	local size = SaveCodec.readU8(r)
 	local count = SaveCodec.readU8(r)
 	if kind == nil or size > Types.MAX_CONTAINER or count > Types.MAX_CONTAINER_DATA then
@@ -543,7 +602,7 @@ local function decodeContainer(r: Reader, region: Region)
 	local slots: { [number]: Stack? } = {}
 	for _ = 1, SaveCodec.readU8(r) do
 		local slot = SaveCodec.readU8(r)
-		local stack, lost = SaveCodec.readStack(r)
+		local stack, lost = SaveCodec.readStack(r, palette)
 		if lost then
 			region.dropped += 1
 		end
@@ -551,23 +610,46 @@ local function decodeContainer(r: Reader, region: Region)
 			slots[slot] = stack
 		end
 	end
-	if not Blocks.isValid(block) then
+	if block == nil or not Blocks.isValid(block) then
 		region.dropped += 1
 		return
 	end
-	table.insert(region.containers, {
-		x = x,
-		y = y,
-		z = z,
-		container = { kind = kind, block = block, size = size, slots = slots, data = data },
-	})
+	local container: Types.Container = { kind = kind, block = block, size = size, slots = slots, data = data }
+	local ids = idFields(container)
+	if ids and data then
+		-- (The ids in its data, today's again: one this version doesn't know is nothing, 0.)
+		for i, idKind in ids do
+			local index = data[i]
+			if index ~= nil then
+				if index < 0 or index ~= math.floor(index) then
+					error("bad palette index in save", 0)
+				end
+				local id = SaveCodec.idOf(palette, idKind, index)
+				if id == nil then
+					region.dropped += 1
+				end
+				data[i] = id or 0
+			end
+		end
+	end
+	table.insert(region.containers, { x = x, y = y, z = z, container = container })
 end
 
-local function decodeRecord(r: Reader, region: Region, tag: number)
+-- A fluid's palette index read back: today's id, NONE (0) for one this version doesn't know.
+local function readFluid(r: Reader, region: Region, palette: Palette): number
+	local fluid = SaveCodec.idOf(palette, "fluid", SaveCodec.readVarint(r))
+	if fluid == nil then
+		region.dropped += 1
+		return 0
+	end
+	return fluid
+end
+
+local function decodeRecord(r: Reader, region: Region, tag: number, palette: Palette)
 	if tag == EDITS then
-		decodeEdits(r, region)
+		decodeEdits(r, region, palette)
 	elseif tag == CONTAINER then
-		decodeContainer(r, region)
+		decodeContainer(r, region, palette)
 	elseif tag == SOURCED then
 		for _ = 1, SaveCodec.readVarint(r) do
 			local x, y, z = readPosition(r, region)
@@ -591,46 +673,52 @@ local function decodeRecord(r: Reader, region: Region, tag: number)
 		table.insert(region.jigsaws, { x = x, y = y, z = z, settings = settings })
 	elseif tag == PIPE then
 		local x, y, z = readPosition(r, region)
+		local modes = SaveCodec.readU16(r)
+		local colour = SaveCodec.readU8(r)
+		local fluid = readFluid(r, region, palette)
+		local amount = SaveCodec.readVarint(r)
 		table.insert(region.pipes, {
 			x = x,
 			y = y,
 			z = z,
-			modes = SaveCodec.readU16(r),
-			colour = SaveCodec.readU8(r),
-			fluid = SaveCodec.readU8(r),
-			amount = SaveCodec.readVarint(r),
+			modes = modes,
+			colour = colour,
+			fluid = fluid,
+			-- (A fluid this version doesn't know empties it.)
+			amount = if fluid == 0 then 0 else amount,
 		})
 	elseif tag == TANK then
 		local x, y, z = readPosition(r, region)
-		table.insert(
-			region.tanks,
-			{ x = x, y = y, z = z, fluid = SaveCodec.readU8(r), amount = SaveCodec.readVarint(r) }
-		)
+		local fluid = readFluid(r, region, palette)
+		local amount = SaveCodec.readVarint(r)
+		table.insert(region.tanks, { x = x, y = y, z = z, fluid = fluid, amount = if fluid == 0 then 0 else amount })
 	elseif tag == TRANSPORT then
 		local x, y, z = readPosition(r, region)
 		local colour = SaveCodec.readU8(r)
-		local stack = SaveCodec.readStack(r)
+		local stack, lost = SaveCodec.readStack(r, palette)
+		if lost then
+			region.dropped += 1
+		end
 		if stack then
 			table.insert(region.transport, { x = x, y = y, z = z, colour = colour, stack = stack })
-		else
-			region.dropped += 1
 		end
 	elseif tag == ITEM then
 		local x, y, z = SaveCodec.readFinite(r), SaveCodec.readFinite(r), SaveCodec.readFinite(r)
 		local age = SaveCodec.readVarint(r)
 		local pickupDelay = SaveCodec.readVarint(r)
-		local stack = SaveCodec.readStack(r)
-		if stack then
-			table.insert(region.items, { x = x, y = y, z = z, stack = stack, age = age, pickupDelay = pickupDelay })
-		else
+		local stack, lost = SaveCodec.readStack(r, palette)
+		if lost then
 			region.dropped += 1
 		end
+		if stack then
+			table.insert(region.items, { x = x, y = y, z = z, stack = stack, age = age, pickupDelay = pickupDelay })
+		end
 	elseif tag == MOB then
-		local kind = SaveCodec.readU8(r)
+		local kind = SaveCodec.idOf(palette, "mob", SaveCodec.readVarint(r))
 		local variant = SaveCodec.readU8(r)
 		local x, y, z = SaveCodec.readFinite(r), SaveCodec.readFinite(r), SaveCodec.readFinite(r)
 		local yaw, health = SaveCodec.readF32(r), SaveCodec.readF32(r)
-		if MobList.get(kind) and yaw == yaw and health == health then
+		if kind and MobList.get(kind) and yaw == yaw and health == health then
 			table.insert(
 				region.mobs,
 				{ kind = kind, variant = variant, x = x, y = y, z = z, yaw = yaw, health = health }
@@ -644,25 +732,29 @@ local function decodeRecord(r: Reader, region: Region, tag: number)
 			table.insert(region.ticks, { x = x, y = y, z = z, delay = math.max(1, SaveCodec.readVarint(r)) })
 		end
 	elseif tag == NATURAL then
-		decodeEdits(r, region, region.natural)
+		decodeEdits(r, region, palette, region.natural)
 	elseif tag == THAW then
-		decodeEdits(r, region, region.thaw)
+		decodeEdits(r, region, palette, region.thaw)
 	else
 		error(`unknown record {tag} in save`, 0)
 	end
 end
 
 --[[
-	The region in `bytes` (errors with the reason when they are damaged, or from a newer version:
-	use `tryDecode` for a nil instead). `rx`, `rz`: the region the key is for (it must match).
+	The region in `bytes` (errors with the reason when they are damaged, or from another version:
+	SaveCodec.NEWER, SaveCodec.OLDER; use `tryDecode` for a nil instead). `rx`, `rz`: the region
+	the key is for (it must match).
 ]]
 function RegionCodec.decode(bytes: buffer, rx: number?, rz: number?): Region
 	local r = SaveCodec.reader(bytes)
 	local version = SaveCodec.readU8(r)
 	if version > RegionCodec.VERSION then
-		error("saved by a newer version", 0)
+		error(SaveCodec.NEWER, 0)
 	elseif version < 1 then
 		error("not a region", 0)
+	elseif version < RegionCodec.VERSION then
+		-- (Before palettes: its ids were that version's. Never read.)
+		error(SaveCodec.OLDER, 0)
 	end
 	local region = RegionCodec.new(SaveCodec.readZigzag(r), SaveCodec.readZigzag(r))
 	if SaveCodec.readVarint(r) ~= RegionCodec.chunks() then
@@ -671,6 +763,7 @@ function RegionCodec.decode(bytes: buffer, rx: number?, rz: number?): Region
 	if (rx ~= nil and rx ~= region.rx) or (rz ~= nil and rz ~= region.rz) then
 		error("region saved under another key", 0)
 	end
+	local palette: Palette? = nil
 	while not SaveCodec.atEnd(r) do
 		local tag = SaveCodec.readU8(r)
 		local length = SaveCodec.readVarint(r)
@@ -679,27 +772,20 @@ function RegionCodec.decode(bytes: buffer, rx: number?, rz: number?): Region
 			error("truncated save", 0)
 		end
 		local inner = SaveCodec.reader(r.b, r.o, stop)
-		decodeRecord(inner, region, tag)
+		if tag == PALETTE then
+			if palette then
+				error("a second palette in save", 0)
+			end
+			palette = SaveCodec.readPalette(inner)
+		elseif palette == nil then
+			error(`record {tag} before the palette`, 0)
+		else
+			decodeRecord(inner, region, tag, palette)
+		end
 		if inner.o ~= stop then
 			error(`record {tag} has bytes left over`, 0)
 		end
 		r.o = stop
-	end
-	if version < 2 then
-		-- (Saved before record 13: the weather's ice is the natural map's Water under an Ice edit.)
-		for key, naturals in region.natural do
-			local edits = region.chunks[key]
-			for index, block in naturals do
-				if block == WATER and edits and edits[index] == ICE then
-					local thaws = region.thaw[key]
-					if thaws == nil then
-						thaws = {}
-						region.thaw[key] = thaws
-					end
-					thaws[index] = WATER
-				end
-			end
-		end
 	end
 	return region
 end

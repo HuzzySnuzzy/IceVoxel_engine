@@ -7,17 +7,19 @@
 	             first (Coal Ore, Iron Ore, Osmium Ore, Gold Ore, Emerald Ore, Diamond Ore, with
 	             Config.Miner.Ores' numbers), then every block entry with `miner = { ticks, joules,
 	             floor? }` in id order (the Ores pack's Copper, Lead, Zinc, Sulfur, Saltpetre and
-	             Uranium Ore). The order is packed into the miner's state, so new ores go after
-	             these. Each gives its drop (Items.blockDrops: Coal, Raw Iron, Raw Osmium, Raw Gold,
-	             an Emerald, a Diamond, Raw Copper, Raw Lead, Raw Zinc, a Sulfur, a Saltpetre, Raw
-	             Uranium; one a time), not the ore block (drops are what furnaces and
-	             the Electric Furnace take, and an ore block can't be moved: a miner is built on a
-	             vein where it lies), at its numbers: ticks an item, J a tick, the least J an item
-	             costs (`floor`: coal never makes more energy than it took)
+	             Uranium Ore). Any order would do: saves keep a miner's ore by name, never its
+	             place here. Each gives its drop (Items.blockDrops: Coal, Raw Iron, Raw Osmium,
+	             Raw Gold, an Emerald, a Diamond, Raw Copper, Raw Lead, Raw Zinc, a Sulfur, a
+	             Saltpetre, Raw Uranium; one a time), not the ore block (drops are what furnaces
+	             and the Electric Furnace take, and an ore block can't be moved: a miner is built
+	             on a vein where it lies), at its numbers: ticks an item, J a tick, the least J an
+	             item costs (`floor`: coal never makes more energy than it took)
 	  ore        the Ore of a block (nil: no ore)
-	  STATE      the miner's state codes: MINING, NO_POWER, OUTPUT_FULL, NO_ORE ("No ore below")
-	  packState  its state field: code + 8 x the ore's index in ORES (0: none), frozen;
-	             unpackState reads it back
+	  STATE      the miner's state codes: MINING, NO_POWER, OUTPUT_FULL, NO_ORE ("No ore below"),
+	             IDLE (switched off); its state field holds the code alone
+	  packState  the state its views and records carry (Kinds/Miner's `stateOf`, from the code and
+	             the ore of its `mining`): code + 8 x the ore's index in ORES (0: none), a place in
+	             this version's list, never saved; unpackState reads it back
 	  settings   what an ore costs with `speed` Speed and `energy` Energy Upgrades installed
 	             (Mekanism's maths, Machines/Upgrades, as the Electric Furnace's): the ticks an
 	             item takes (`Upgrades.ticks`: its ticks x 10^(-speed/8), truncated), the J a tick
@@ -54,9 +56,9 @@ export type Ore = {
 
 local MinerRules = {}
 
--- The miner's state codes (the low three bits of its state field).
-MinerRules.STATE = table.freeze({ MINING = 0, NO_POWER = 1, OUTPUT_FULL = 2, NO_ORE = 3 })
-local MAX_CODE = MinerRules.STATE.NO_ORE
+-- The miner's state codes (its state field; the low three bits of a packed state).
+MinerRules.STATE = table.freeze({ MINING = 0, NO_POWER = 1, OUTPUT_FULL = 2, NO_ORE = 3, IDLE = 4 })
+local MAX_CODE = MinerRules.STATE.IDLE
 
 -- The side list: the ores whose entries carry no `miner` yet, at Config.Miner.Ores' numbers.
 local NAMES = {
@@ -126,14 +128,14 @@ function MinerRules.ore(block: number?): Ore?
 	return if block then byBlock[block] else nil
 end
 
--- The state field: `code` (STATE) + 8 x `index` (an ORES index, 0: none).
+-- The state views and records carry: `code` (STATE) + 8 x `index` (an ORES index, 0: none).
 function MinerRules.packState(code: number, index: number): number
 	local c = if code == code then math.clamp(math.floor(code), 0, MAX_CODE) else 0
 	local i = if index == index then math.clamp(math.floor(index), 0, #ores) else 0
 	return c + 8 * i
 end
 
--- The state field read back: (code, the ORES index, 0 none). Anything else reads as (MINING, 0).
+-- A packed state read back: (code, the ORES index, 0 none). Anything else reads as (MINING, 0).
 function MinerRules.unpackState(state: number): (number, number)
 	if type(state) ~= "number" or state ~= math.floor(state) or state < 0 then
 		return MinerRules.STATE.MINING, 0

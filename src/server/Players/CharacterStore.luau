@@ -25,7 +25,9 @@
 	             and selected at once); delete and rename (refused while another server has the
 	             character); select (loads it and takes its lock, waiting up to
 	             Config.Characters.LockWait for another server still saving it, then "This
-	             character is open on another server"; a dead one is refused); avatar (the user's
+	             character is open on another server"; a dead one is refused; one an older version
+	             saved comes back as who it is, its things afresh, and the player is told:
+	             Save/CharacterCodec's `outdated`); avatar (the user's
 	             own avatar for the editor: ServerMessage.Avatar, and the editor's preview rig);
 	             preview (a listed character's rig, wearing its armour, vanity and accessories:
 	             `dressedOf`) and edit preview (the editor's rig with an edited look):
@@ -704,6 +706,10 @@ local function select(player: Player, user: User, id: number): string
 	user.dressed[id] = dressedOf(loaded)
 	if loaded.dropped > 0 then
 		return `{loaded.name} holds items this version doesn't know: it plays, but is not saved`
+	elseif loaded.outdated then
+		-- (Only its head was read: Save/CharacterCodec. Its next save writes it whole.)
+		warn(`[IceVoxel] {player.Name}'s character "{loaded.name}" was saved by an older version: it starts afresh`)
+		return `{loaded.name} was saved by an older version: its things could not be kept, it starts afresh`
 	end
 	return ""
 end
@@ -1293,6 +1299,9 @@ autoPlay = function(player: Player, user: User)
 		warn(`[IceVoxel] {player.Name} has no character to play: {why}`)
 		notify(player, `You have no character to play ({why}): nothing is saved for you this visit`)
 		return
+	elseif chosen and why ~= "" then
+		-- (What the list would have said: one not saved, or one an older version saved.)
+		notify(player, why)
 	end
 	sendList(player, user)
 	-- (Entering puts the look on the body standing, and on every later one: `onCharacter`.)

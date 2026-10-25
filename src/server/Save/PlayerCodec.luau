@@ -28,26 +28,24 @@
 	            version 4; with characters the character keeps it); and the radiation dose (Sv:
 	            Shared/Radiation, server Players/Radiation; optional, version 5; with characters the
 	            character keeps it).
-	  Bytes     u8 VERSION, u8 flags (bit 0 position, 1 thirst, 2 temperature, 3 hidden looks,
-	            4 mana, 5 survivor record, 6 hunger, 7 radiation), [f64 x, y, z, f32 yaw], f32 health, u8 mode and u8 previous (GameMode
-	            ids, 255 none), u8 selected, [u16 hidden], u8 n + n x (u8 place:
-	            Inventory/Types.PLACE_*: 1..36 slots, 37..40 armor, 41 cursor, 42..48 accessories,
-	            49..52 vanity armor, 53..59 vanity accessories; stack), [5 x f32 thirst], [10 x
-	            f32 temperature],
-	            [f32 mana, u8 crystals], u8 n + n x (u8 effect, u8 amplifier, i32 ticks, u8
-	            ambient), [u32 alive, u16 kills, u16 moons, u32 infection] (version 3 on, only
-	            when not all 0), [4 x f32 hunger] (version 4 on), [f32 dose] (version 5 on, only
-	            when above 0). Typical: 60-430 bytes.
-	  Versions  2 added the equipment places, the hidden bits and the mana; 3 the survivor record
-	            and the infection; 4 the food bar; 5 the radiation dose. A version 1 record (places
-	            up to 41, flags up to 7) still reads, a version 1 or 2 one with its survivor record
-	            and infection at 0, a version 1 to 3 one with no food bar (nil: the player gets a
-	            full one, 20 food, 5 saturation, as a new one does), a version 1 to 4 one with no
-	            dose, and an older server refuses a newer one, so it never writes over what it
-	            can't keep.
-	Decoding checks every number: non-finite ones, unknown modes, slots and effects are a damaged
-	record (nil), and unknown items are dropped (SaveCodec.readStack) and counted (`dropped`: such
-	a record is not written back this session, World/WorldSave).
+	  Bytes     u8 VERSION, the record's palette (Save/SaveCodec: names, not ids: its items, the
+	            fluids in their data, its effects), u8 flags (bit 0 position, 1 thirst, 2
+	            temperature, 3 hidden looks, 4 mana, 5 survivor record, 6 hunger, 7 radiation),
+	            [f64 x, y, z, f32 yaw], f32 health, u8 mode and u8 previous (GameMode ids, 255
+	            none), u8 selected, [u16 hidden], u8 n + n x (u8 place: Inventory/Types.PLACE_*:
+	            1..36 slots, 37..40 armor, 41 cursor, 42..48 accessories, 49..52 vanity armor,
+	            53..59 vanity accessories; stack), [5 x f32 thirst], [10 x f32 temperature],
+	            [f32 mana, u8 crystals], u8 n + n x (varint effect, u8 amplifier, i32 ticks, u8
+	            ambient), [u32 alive, u16 kills, u16 moons, u32 infection] (only when not all 0),
+	            [4 x f32 hunger], [f32 dose] (only when above 0). Typical: 100-700 bytes.
+	  Versions  6 keeps names (the palette). A record of versions 1 to 5 (before it: ids that were
+	            that version's) is refused, never misread (SaveCodec.OLDER: Save/WorldStore gives
+	            the player a fresh record, World/WorldSave tells them), and an older server
+	            refuses a newer one, so it never writes over what it can't keep.
+	Decoding checks every number: non-finite ones, unknown modes and slots are a damaged record
+	(nil); names this version doesn't know are left out: items are dropped (SaveCodec.readStack)
+	and counted (`dropped`: such a record is not written back this session, World/WorldSave),
+	effects skipped.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -62,6 +60,7 @@ local Types = require(Shared.Inventory.Types)
 local SaveCodec = require(script.Parent.SaveCodec)
 
 type Stack = Items.Stack
+type Palette = SaveCodec.Palette
 
 export type Thirst = { thirst: number, hydration: number, exhaustion: number, effect: number, timer: number }
 export type Temperature = {
@@ -120,14 +119,11 @@ export type Record = {
 
 local PlayerCodec = {}
 
--- (4 before the radiation dose, 3 before the food bar, 2 before the zombie apocalypse's
--- survivor record and infection, 1 before the equipment.)
-PlayerCodec.VERSION = 5
+-- (6 since palettes: older ones are refused. 5 brought the radiation dose, 4 the food bar, 3 the
+-- zombie apocalypse's survivor record and infection, 2 the equipment.)
+PlayerCodec.VERSION = 6
 -- The most dose a record keeps (Sv).
 PlayerCodec.MAX_DOSE = 1e6
--- The flags each version knew (by version): 1 up to the hidden looks, 2 the mana, 3 the survivor
--- record, 4 the food bar, 5 the dose.
-local FLAGS_UP_TO = { 7, 31, 63, 127, 255 }
 local NONE = 255
 local CURSOR = Types.PLACE_CURSOR
 local THIRST_FIELDS = { "thirst", "hydration", "exhaustion", "effect", "timer" }
@@ -238,9 +234,14 @@ local function stores(record: Record): { { any } }
 	}
 end
 
-function PlayerCodec.encode(record: Record): buffer
+--[[
+	The record's bytes. `palette`: one to start from (default an empty one), its names keeping
+	their indices: the specs' stand-in for a version whose content came in another order.
+]]
+function PlayerCodec.encode(record: Record, palette: Palette?): buffer
+	local names = palette or SaveCodec.palette()
+	-- (What follows the palette first, gathering it.)
 	local w = SaveCodec.writer(256)
-	SaveCodec.u8(w, PlayerCodec.VERSION)
 	local position = record.position and finite(record.x) and finite(record.y) and finite(record.z)
 	local hidden = if finite(record.hidden or 0) then math.clamp(math.floor(record.hidden or 0), 0, 65535) else 0
 	local mana = record.mana
@@ -299,7 +300,7 @@ function PlayerCodec.encode(record: Record): buffer
 	SaveCodec.u8(w, #held)
 	for _, entry in held do
 		SaveCodec.u8(w, entry.place)
-		SaveCodec.stack(w, entry.stack)
+		SaveCodec.stack(w, entry.stack, names)
 	end
 	local thirst = record.thirst
 	if thirst then
@@ -328,7 +329,7 @@ function PlayerCodec.encode(record: Record): buffer
 	end
 	SaveCodec.u8(w, #effects)
 	for _, effect in effects do
-		SaveCodec.u8(w, effect.effect)
+		SaveCodec.varint(w, SaveCodec.indexOf(names, "effect", effect.effect))
 		SaveCodec.u8(w, math.clamp(math.floor(effect.amplifier), 0, Effects.MAX_AMPLIFIER))
 		SaveCodec.i32(w, math.clamp(math.floor(effect.ticks), -1, 2147483647))
 		SaveCodec.u8(w, if effect.ambient then 1 else 0)
@@ -349,20 +350,27 @@ function PlayerCodec.encode(record: Record): buffer
 		-- (Far above any dose a source gives: an f32 keeps it.)
 		SaveCodec.f32(w, math.min(dose, PlayerCodec.MAX_DOSE))
 	end
-	return SaveCodec.finish(w)
+	local out = SaveCodec.writer(w.n + 128)
+	SaveCodec.u8(out, PlayerCodec.VERSION)
+	SaveCodec.writePalette(out, names)
+	SaveCodec.bytes(out, w.b, w.n)
+	return SaveCodec.finish(out)
 end
 
 local function decode(bytes: buffer): Record
 	local r = SaveCodec.reader(bytes)
 	local version = SaveCodec.readU8(r)
-	if version < 1 or version > PlayerCodec.VERSION then
-		error("not a player record of this version", 0)
+	if version > PlayerCodec.VERSION then
+		error(SaveCodec.NEWER, 0)
+	elseif version < 1 then
+		error("not a player record", 0)
+	elseif version < PlayerCodec.VERSION then
+		-- (Before palettes: its ids were that version's. Never read.)
+		error(SaveCodec.OLDER, 0)
 	end
+	local palette = SaveCodec.readPalette(r)
 	local record = PlayerCodec.new()
 	local flags = SaveCodec.readU8(r)
-	if flags > FLAGS_UP_TO[version] then
-		error("bad player flags", 0)
-	end
 	if bit32.btest(flags, 1) then
 		record.position = true
 		record.x, record.y, record.z = SaveCodec.readFinite(r), SaveCodec.readFinite(r), SaveCodec.readFinite(r)
@@ -389,12 +397,11 @@ local function decode(bytes: buffer): Record
 	if bit32.btest(flags, 8) then
 		record.hidden = SaveCodec.readU16(r)
 	end
-	-- (Version 1 knew the slots, the armor and the cursor only.)
-	local lastPlace = if version >= 2 then Types.PLACE_END else CURSOR
+	local lastPlace = Types.PLACE_END
 	local parts = stores(record)
 	for _ = 1, SaveCodec.readU8(r) do
 		local place = SaveCodec.readU8(r)
-		local stack, lost = SaveCodec.readStack(r)
+		local stack, lost = SaveCodec.readStack(r, palette)
 		if lost then
 			record.dropped += 1
 		end
@@ -447,14 +454,21 @@ local function decode(bytes: buffer): Record
 		record.mana, record.crystals = math.clamp(mana, 0, Config.Mana.Max), crystals
 	end
 	for _ = 1, SaveCodec.readU8(r) do
-		local effect = SaveCodec.readU8(r)
+		local index = SaveCodec.readVarint(r)
 		local amplifier = SaveCodec.readU8(r)
 		local ticks = SaveCodec.readI32(r)
 		local ambient = SaveCodec.readU8(r)
-		if not Effects.isValid(effect) or ticks < -1 or ambient > 1 then
+		local effect = SaveCodec.idOf(palette, "effect", index)
+		if index == 0 or ticks < -1 or ambient > 1 then
 			error("bad effect", 0)
 		end
-		table.insert(record.effects, { effect = effect, amplifier = amplifier, ticks = ticks, ambient = ambient == 1 })
+		-- (One this version doesn't know is skipped.)
+		if effect then
+			table.insert(
+				record.effects,
+				{ effect = effect, amplifier = amplifier, ticks = ticks, ambient = ambient == 1 }
+			)
+		end
 	end
 	if bit32.btest(flags, 32) then
 		record.alive = SaveCodec.readU32(r)
@@ -486,7 +500,8 @@ local function decode(bytes: buffer): Record
 	return record
 end
 
--- The record in `bytes`, or nil and why not (damaged, or from a newer version).
+-- The record in `bytes`, or nil and why not (damaged, or from another version: SaveCodec.NEWER,
+-- SaveCodec.OLDER).
 function PlayerCodec.decode(bytes: buffer): (Record?, string?)
 	local ok, result = pcall(decode, bytes)
 	if ok then

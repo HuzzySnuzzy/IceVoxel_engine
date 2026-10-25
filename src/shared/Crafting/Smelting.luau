@@ -31,6 +31,9 @@ local Smelting = {}
 
 -- Ticks to smelt one item.
 Smelting.COOK_TIME = 200
+-- The data indices holding a content id (`cookingItem`, an item): saves keep it by name (server
+-- Save/RegionCodec's palette), as machines' `types` (Shared/Machines.idFields).
+Smelting.ID_FIELDS = table.freeze({ [5] = "item" } :: { [number]: "block" | "item" | "fluid" })
 
 local results: { [number]: Stack } = {}
 local fuels: { [number]: number } = {}

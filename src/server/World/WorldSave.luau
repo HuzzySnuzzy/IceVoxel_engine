@@ -20,7 +20,11 @@
 	             and Config.Save.LoadLatest) takes the world's lock and reads its record and
 	             regions, showing "Loading world: 12 / 40" on every title screen; a world that
 	             can't be read whole is never started (nor written), and one holding what this
-	             version doesn't know is played but not saved. startWorld then makes the world:
+	             version doesn't know is played but not saved. Saves keep names, not ids
+	             (Save/SaveCodec's palettes), so content can change between versions; a region
+	             saved by an older version (before them) is never read: the world there starts
+	             afresh from the seed (said in the output), and the first save writes it anew.
+	             startWorld then makes the world:
 	             `attach` gives it the loaded edits before any chunk is generated (and makes a
 	             new world's handle), `restore` puts containers, machines, pipes, structure
 	             blocks, items, animals, operators and the sections (the clock, and whatever
@@ -52,6 +56,8 @@
 	             record could not be read starts afresh, and one whose record holds items this
 	             version doesn't know plays with the rest: neither is written this session (an
 	             outage never replaces a saved inventory with an empty one), and they are told.
+	             One whose record an older version saved (never read) starts afresh too, is told,
+	             and is saved.
 	             Records go out with every save, and at once when a player leaves, each numbered
 	             as it is captured: an older one is never written over a newer
 	             (WorldStore's `order`). Their equipment (accessories, vanity, hidden looks) and
@@ -488,7 +494,12 @@ function WorldSave.prepare(
 	prepared = loaded
 	if loaded.dropped > 0 then
 		warn(
-			`[IceVoxel] {loaded.dropped} blocks, items or mobs this version doesn't know were left out of the world: it is not saved this session`
+			`[IceVoxel] {loaded.dropped} blocks, items, fluids or mobs this version doesn't know were left out of the world: it is not saved this session`
+		)
+	end
+	if #loaded.outdated > 0 then
+		warn(
+			`[IceVoxel] {#loaded.outdated} regions of world "{loaded.world.meta.name}" were saved by an older version and could not be kept: they start afresh from the seed`
 		)
 	end
 	return loaded.settings, nil
@@ -966,12 +977,12 @@ local function track(player: Player)
 		-- (Back before their record was written: the one they left with, theirs again now: a
 		-- later capture of them supersedes it, and nothing writes it over their newer ones.)
 		local left = departed[player.UserId]
-		local ok, record
+		local ok, record, outdated
 		if left then
 			departed[player.UserId] = nil
-			ok, record = true, PlayerCodec.fromText(left.text)
+			ok, record, outdated = true, PlayerCodec.fromText(left.text), false
 		else
-			ok, record = WorldStore.loadPlayer(store, world, player.UserId)
+			ok, record, outdated = WorldStore.loadPlayer(store, world, player.UserId)
 		end
 		if players[player] ~= ps then
 			return
@@ -983,6 +994,14 @@ local function track(player: Player)
 			notify(
 				player,
 				"Your things in this world could not be read: you start afresh, and this visit is not saved for you"
+			)
+		elseif outdated then
+			warn(
+				`[IceVoxel] the record of {player.Name} in this world was saved by an older version: they start afresh`
+			)
+			notify(
+				player,
+				"Your things in this world were saved by an older version and could not be kept: you start afresh"
 			)
 		elseif record then
 			if record.dropped > 0 then
@@ -1184,6 +1203,10 @@ function WorldSave.restore(parts: WorldSnapshot.Systems)
 			then
 				live[RegionCodec.name(region.rx, region.rz)] = true
 			end
+		end
+		-- (An older version's regions, never read: the first save writes them anew.)
+		for _, name in loaded.outdated do
+			live[name] = true
 		end
 		print(
 			`[IceVoxel] world "{loaded.world.meta.name}" loaded: {#loaded.regions} regions, {report.containers} containers, {report.machines} machines, {report.pipes} pipes and tanks, {report.items} items, {report.mobs} animals`

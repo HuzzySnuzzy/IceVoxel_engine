@@ -21,9 +21,13 @@
 	   8 ticksRequired  ticks an item takes (its ore's, fewer with Speed Upgrades)
 	   9 energyPerTick  J a tick of work uses (its ore's, changed by the cards, never under the
 	                    ore's floor over its ticks)
-	  10 mining         the ore block seen under it (0: none): another one starts over
-	  11 state          MinerRules.packState(code, ore index): MINING ("Mining Diamond Ore"),
-	                    NO_POWER, OUTPUT_FULL, NO_ORE ("No ore below")
+	  10 mining         the ore block seen under it (0: none): another one starts over (a block id,
+	                    `types`: saves keep it by name)
+	  11 state          the code alone (MinerRules.STATE): MINING ("Mining Diamond Ore"), NO_POWER,
+	                    OUTPUT_FULL, NO_ORE ("No ore below"), IDLE (switched off); its views and
+	                    records carry MinerRules.packState of the code and the ore of `mining`
+	                    (`stateOf`), so no place in the ore list is ever saved and the list may
+	                    change between versions
 	  12 activeDelay    Mekanism's deactivation delay (Machines.showActive: ACTIVE while it works,
 	                    its grille glows and its drill loops)
 	RATE is minus the J it used this tick. It takes as much energy as its store holds in a tick
@@ -88,8 +92,26 @@ for index, ore in MinerRules.ORES do
 	DROPS[index] = table.freeze(assert(Items.newStack(ore.drop, 1)))
 end
 
--- The data index of `ticksRequired` (the panel's second line reads it from the window).
+-- The data index of `ticksRequired` (the panel's second line reads it from the window), and of
+-- `mining` and `state` (`stateOf`).
 local TICKS_REQUIRED = Core.HEADER + 2
+local MINING, STATE_FIELD = Core.HEADER + 4, Core.HEADER + 5
+
+--[[
+	The state the miner's views and records carry (KindSpec `stateOf`): its code with the ore of
+	`mining` (MinerRules.packState: the ore's place in this version's list, worked out here, never
+	saved); none named while it sees no ore or is switched off. 0 for a code that is none.
+]]
+local function stateOf(data: { number }): number
+	local code = data[STATE_FIELD]
+	if type(code) ~= "number" or code ~= math.floor(code) or code < 0 or code > STATE.IDLE then
+		return 0
+	elseif code == STATE.NO_ORE or code == STATE.IDLE then
+		return MinerRules.packState(code, 0)
+	end
+	local ore = MinerRules.ore(data[MINING])
+	return MinerRules.packState(code, if ore then ore.index else 0)
+end
 
 -- Is there room in the output for one more `drop` (the same item, wear and data, within its limit)?
 local function fits(container: Container, drop: Items.Stack): boolean
@@ -106,7 +128,7 @@ local function tick(container: Container, ctx: Core.TickContext)
 	local wasWorking = Core.get(container, "rate") < 0
 	if not Config.Miner.Enabled then
 		-- Switched off: inert, nothing used or made.
-		Core.set(container, "state", MinerRules.packState(STATE.MINING, 0))
+		Core.set(container, "state", STATE.IDLE)
 		Core.set(container, "rate", 0)
 		Core.showActive(container, wasWorking, false)
 		return
@@ -155,7 +177,8 @@ local function tick(container: Container, ctx: Core.TickContext)
 		end
 	end
 	Core.set(container, "progress", progress)
-	Core.set(container, "state", MinerRules.packState(code, if ore then ore.index else 0))
+	-- (The code alone: `stateOf` adds the ore from `mining`.)
+	Core.set(container, "state", code)
 	Core.set(container, "rate", if working then -Core.quantiseUp(energyPerTick) else 0)
 	-- (Held on through short stops: Mekanism's blockDeactivationDelay, Shared/Machines.)
 	Core.showActive(container, wasWorking, working)
@@ -183,7 +206,9 @@ end
 local kind = Core.define("miner", {
 	slots = SLOTS,
 	fields = { "progress", "ticksRequired", "energyPerTick", "mining", "state", "activeDelay" },
+	types = { mining = "block" },
 	state = "state",
+	stateOf = stateOf,
 	panel = {
 		progress = { x = 79, y = 34, value = "progress", total = "ticksRequired" },
 		status = { x = 8, y = 20 },
@@ -227,5 +252,6 @@ local kind = Core.define("miner", {
 	info = info,
 })
 assert(kind.index.ticksRequired == TICKS_REQUIRED, "the Metal Miner's ticksRequired is its second field")
+assert(kind.index.mining == MINING and kind.index.state == STATE_FIELD, "the Metal Miner's mining and state")
 
 return kind
