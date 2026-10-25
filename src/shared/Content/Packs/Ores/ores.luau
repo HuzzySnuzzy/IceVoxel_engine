@@ -1,9 +1,9 @@
 --!strict
 --[[
 	The new ores' features (Generation/Ores' header says how each was mapped from Minecraft's,
-	Mekanism's and Create's), after the Base pack's so every older ore keeps its veins: copper,
-	lead, zinc, sulfur in the cave lava's band (and its vents, which Generation/Ores places), saltpetre
-	under dry land, uranium small and buried.
+	Mekanism's and Create's; each feature's veins come from its own random stream, so adding one
+	moves no other's): copper, lead, zinc, sulfur in the cave lava's band (and its vents, which
+	Generation/Ores places), saltpetre under dry land, uranium small and buried.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Define)

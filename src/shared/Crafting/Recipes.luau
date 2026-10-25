@@ -1,8 +1,9 @@
 --!strict
 --[[
-	Every crafting and smelting recipe, by item name: the content packs' `recipes` (Shared/Content;
-	the Base pack's are Minecraft's, Mekanism's and the rest the game had, the Ores pack's its
-	metals'), merged in load order, split by type, each type in that order:
+	Every crafting and smelting recipe, by item name: the content packs' `recipes` (Shared/Content:
+	each feature pack's, Minecraft's, Mekanism's, Survival's... the Ores pack's its metals'), merged
+	in load order, split by type, each type in that order (Crafting.match answers the first that
+	matches: tests/spec/CraftingGrids checks no recipe hides another):
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's

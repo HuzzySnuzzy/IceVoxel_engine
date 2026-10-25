@@ -48,6 +48,25 @@ return function(t, shared, require, server)
 		return if b then Hash.string(buffer.tostring(b)) else 0
 	end
 
+	-- A block by its name's hash (16 bits), not its id: ids follow the content packs.
+	local codes: { [number]: number } = {}
+	local function code(block: number): number
+		local c = codes[block]
+		if not c then
+			c = Hash.string(Blocks.get(block).name) % 65536
+			codes[block] = c
+		end
+		return c
+	end
+	-- The digest of chunk data with every cell's block by name (`code`).
+	local function named(data: buffer): number
+		local out = buffer.create(buffer.len(data))
+		for i = 0, buffer.len(data) // 2 - 1 do
+			buffer.writeu16(out, i * 2, code(readu16(data, i * 2)))
+		end
+		return digest(out)
+	end
+
 	local function at(r: any, px: number, y: number, pz: number): number
 		if y >= r.height then
 			return AIR
@@ -263,21 +282,25 @@ return function(t, shared, require, server)
 	-- data digest of every full detail row (each holds some; only stone left over became ore),
 	-- from 2497134012, 3308524465, 1407525034, 1128386215, 2062877020, 897012576, 103057674 and
 	-- 4100114075; no other value of any row moved.
+	-- Since the content packs split (blocks' ids follow the packs), the data digests and the
+	-- columns' digest read each block by its name's hash (`named`, `code`): recomputed so on the
+	-- commit before the split, where every id-based value still held (the columns' was 882441969),
+	-- and the same after it.
 	local PINNED = {
-		{ 0, 0, 0, 1533265479, 2385823076, 637642054, 112, 73, 75 },
-		{ 0, 3, -2, 1252999072, 2787425146, 1146561170, 112, 71, 74 },
-		{ 0, -7, 11, 26880291, 2203614583, 1426292326, 96, 60, 64 },
-		{ 0, 20, 5, 2738892515, 684176278, 885456967, 112, 40, 84 },
-		{ 1, 1, 1, 2419421421, 670723311, 0, 56, 35, 41 },
-		{ 2, -2, 3, 3908353193, 1244948833, 0, 24, 13, 16 },
-		{ 4, 0, 0, 784031936, 522254533, 0, 7, 3, 5 },
-		{ 0, 100, -40, 421750206, 2634376917, 4083301882, 272, 229, 246 },
-		{ 0, -150, 60, 2462164432, 3657096357, 3972328917, 144, 98, 107 },
-		{ 3, 10, -10, 1875142174, 3052199922, 0, 40, 25, 35 },
-		{ 6, 0, 0, 3250628276, 4267492549, 0, 12, 1, 9 },
-		{ 0, 21, 118, 327341723, 1369674844, 1140634773, 112, 64, 71 },
-		{ 0, 22, 119, 2956438959, 2112851314, 3314049870, 112, 65, 71 },
-		{ 2, 5, 29, 3341450558, 1389781405, 0, 28, 14, 17 },
+		{ 0, 0, 0, 2020112233, 2385823076, 637642054, 112, 73, 75 },
+		{ 0, 3, -2, 448628366, 2787425146, 1146561170, 112, 71, 74 },
+		{ 0, -7, 11, 1411476657, 2203614583, 1426292326, 96, 60, 64 },
+		{ 0, 20, 5, 1947456610, 684176278, 885456967, 112, 40, 84 },
+		{ 1, 1, 1, 573666017, 670723311, 0, 56, 35, 41 },
+		{ 2, -2, 3, 1343452639, 1244948833, 0, 24, 13, 16 },
+		{ 4, 0, 0, 3174872468, 522254533, 0, 7, 3, 5 },
+		{ 0, 100, -40, 2104854834, 2634376917, 4083301882, 272, 229, 246 },
+		{ 0, -150, 60, 1634297742, 3657096357, 3972328917, 144, 98, 107 },
+		{ 3, 10, -10, 3180192341, 3052199922, 0, 40, 25, 35 },
+		{ 6, 0, 0, 3354153939, 4267492549, 0, 12, 1, 9 },
+		{ 0, 21, 118, 3834757082, 1369674844, 1140634773, 112, 64, 71 },
+		{ 0, 22, 119, 3741921682, 2112851314, 3314049870, 112, 65, 71 },
+		{ 2, 5, 29, 2461268665, 1389781405, 0, 28, 14, 17 },
 	}
 
 	t.test("default world: byte for byte what it was before world types (chunks, columns, spawn, map)", function()
@@ -285,7 +308,7 @@ return function(t, shared, require, server)
 			for _, p in PINNED do
 				local r = gen.generate(p[1], p[2], p[3], nil, true)
 				local what = `L{p[1]} {p[2]},{p[3]}`
-				t.eq(digest(r.data), p[4], `{what} data`)
+				t.eq(named(r.data), p[4], `{what} data`)
 				t.eq(digest(r.summary), p[5], `{what} summary`)
 				t.eq(digest(r.surface), p[6], `{what} surface`)
 				t.eq(r.height, p[7], `{what} height`)
@@ -296,9 +319,9 @@ return function(t, shared, require, server)
 			for i = 0, 199 do
 				local x, z = (i * 7919) % 6000 - 3000, (i * 104729) % 6000 - 3000
 				local h, b, v, s = gen.column(x, z)
-				acc = Hash.hash3(acc, h, b * 1000 + s, math.floor(v * 1e6))
+				acc = Hash.hash3(acc, h, b * 65536 + code(s), math.floor(v * 1e6))
 			end
-			t.eq(acc, 882441969, "columns")
+			t.eq(acc, 2538438384, "columns")
 			local x, y, z = gen.findSpawn()
 			t.eq(`{x} {y} {z}`, "512 87 -128", "spawn")
 			t.eq(digest(MapPainter.new(gen)(-512, 300, 8, 32)), 1346689466, "map tile")
@@ -660,16 +683,18 @@ return function(t, shared, require, server)
 		t.ok(found[Blocks.fluidId("Lava", 8)] and found[B.Lava], "lava levels")
 		t.ok(found[B.TallGrassTop] and found[B.WallTorchNorth], "upper halves and wall torches")
 		t.eq((WorldTypes.get("debugBlocks") :: any).ticks, false, "no ticks: nothing flows or drops")
-		-- Spawn standing on block 0 (bedrock), which column() reports.
+		-- Spawn standing on the bedrock (its place in the grid follows its id), which column()
+		-- reports.
+		local bx, bz = DebugWorlds.gridPosition((table.find(list, B.Bedrock) :: number) - 1, width)
 		local x, y, z = gen.findSpawn()
-		t.eq(`{x} {y} {z}`, "1 71 1")
-		local h, _, _, surface = gen.column(1, 1)
+		t.eq(`{x} {y} {z}`, `{bx} 71 {bz}`)
+		local h, _, _, surface = gen.column(bx, bz)
 		t.eq(h, 71)
 		t.eq(surface, B.Bedrock)
-		t.eq((gen.column(2, 2)), 0, "the gaps are empty")
+		t.eq((gen.column(bx + 1, bz + 1)), 0, "the gaps are empty")
 		local world = WorldServer.new(gen)
 		local sx, sy, sz = SafeSpot.find(world, x, z)
-		t.eq(`{sx} {sy} {sz}`, "1 71 1", "a safe spot on the bedrock")
+		t.eq(`{sx} {sy} {sz}`, `{bx} 71 {bz}`, "a safe spot on the bedrock")
 	end)
 
 	t.test("debug blocks: far levels keep the grid (the cell holding each block)", function()

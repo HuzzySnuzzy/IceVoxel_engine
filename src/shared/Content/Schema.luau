@@ -52,8 +52,9 @@
 	                                in place of its usual drop (Items.lootDrop; Items' leafDrop,
 	                                randomDrop and strawDrop)
 	  override         block, item, texture  patches the entry of that name an earlier pack made
-	The fields blocks always had (blastResistance, zombieBreak, flammable) say on the entry what the
-	Base pack's tables (BLAST_RESISTANCE, ZOMBIE_BREAK, the fire odds) set by name.
+	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
+	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
+	gone: each entry says its own).
 
 	A type check (`Schema.check`, a Check) answers nil for a good value, or what is wrong with it
 	(" must be a number, not a string"), and the path into it (".shape[2].size").

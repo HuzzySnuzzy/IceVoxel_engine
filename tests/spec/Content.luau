@@ -1,6 +1,6 @@
 --[[
-	Content packs (Shared/Content, Content/Schema, Content/Define): the game's packs (Core, Base,
-	Ores) and the ids they give; discovery of Luau and JSON packs through Content.load (the fixture
+	Content packs (Shared/Content, Content/Schema, Content/Define): the game's packs (Core, the
+	feature packs, Ores last) and the ids they give; discovery of Luau and JSON packs through Content.load (the fixture
 	packs in tests/fixtures/content/packs: Beta, JSON, order 10; Alpha, Luau, order 20, a "_"
 	helper and Define's metal; Gamma, order 20 after Alpha by name, overriding both), their order,
 	ids, overrides and merged tags; kind folders (tests/fixtures/content/folders: Delta, Luau, a
@@ -65,14 +65,17 @@ return function(t, shared, require, _server, _client)
 
 	--[[ The game's packs ]]
 
-	t.test("content: the game's packs load in order, Air and Cave Air first, the ores after Base", function()
+	t.test("content: the game's packs load in order, Air and Cave Air first, the ores last", function()
 		local content = Content.default
 		local order = names(content.packs)
-		local core, base, ores =
-			string.find(order, "Core", 1, true),
-			string.find(order, "Base", 1, true),
-			string.find(order, "Ores", 1, true)
-		t.ok(core and base and ores and core < base and base < ores, `Core, Base, Ores: {order}`)
+		-- (The feature packs, by their order: each comes after the one before it.)
+		local last = 0
+		for _, name in { "Core", "Minecraft", "Mekanism", "Survival", "Terraria", "Apocalypse", "Turrets", "Ores" } do
+			local at = string.find(order, name, 1, true)
+			t.ok(at ~= nil and at > last, `{name} after the packs before it: {order}`)
+			last = at or last
+		end
+		t.ok(not string.find(order, "Base", 1, true), "no Base pack left")
 		for index = 2, #content.packs do
 			local a, b = content.packs[index - 1], content.packs[index]
 			t.ok(a.order < b.order or (a.order == b.order and a.name < b.name), "sorted by order, then name")
@@ -93,10 +96,11 @@ return function(t, shared, require, _server, _client)
 		end
 		t.ok(Blocks.count < Items.ITEM_BASE, "fewer blocks than ITEM_BASE")
 		t.eq(Items.ITEM_BASE, Content.ITEM_BASE)
-		-- The Ores pack's after Base's, the lists the registries keep the merged ones.
+		-- The Ores pack's after the Turrets pack's, the lists the registries keep the merged ones.
 		t.ok(Blocks.id.CopperOre > Blocks.id.AmmoPress and Items.id.RawCopper > Items.id.LaserSight, "the ores last")
 		t.eq(content.where("block", "UraniumOre"), "pack Ores, block UraniumOre")
-		t.eq(content.where("item", "Stick"), "pack Base, item Stick")
+		t.eq(content.where("item", "Stick"), "pack Minecraft, items/materials, item Stick", "a kind folder's file")
+		t.eq(content.where("item", "HermesBoots"), "pack Terraria, item HermesBoots")
 		t.eq(require(shared.Blocks.BlockList), content.blocks, "Blocks.BlockList")
 		t.eq(require(shared.Items.ItemList), content.items, "Items.ItemList")
 		t.eq(content.entry("UraniumOre"), content.block("UraniumOre"))
@@ -868,7 +872,7 @@ return function(t, shared, require, _server, _client)
 	local function clash(kinds: { [string]: any }, path: { string }, parts: { string }, before: ((any, any) -> ())?)
 		local env, root = fresh(function(env, packs)
 			local folder = env.folder(packs, "Clash")
-			env.module(folder, "pack", { order = 900, requires = { "Base" } })
+			env.module(folder, "pack", { order = 900, requires = { "Minecraft", "Terraria" } })
 			for kind, value in kinds do
 				env.module(folder, kind, value)
 			end
@@ -884,7 +888,7 @@ return function(t, shared, require, _server, _client)
 		local message = if ok then "(it loaded)" else tostring(err)
 		t.ok(has(message, parts), `{table.concat(path, ".")}: {message}`)
 	end
-	local STONE = "pack Base (patched by Clash), block Stone"
+	local STONE = "pack Minecraft (patched by Clash), blocks/terrain, block Stone"
 
 	t.test("content: a value both on an entry and in a registry's side table is an error", function()
 		clash(
@@ -898,16 +902,14 @@ return function(t, shared, require, _server, _client)
 			{ `TexturePack: {STONE} has its texture both on its entry and in LEGACY_BLOCKS` }
 		)
 		clash({ items = { { name = "HermesBoots", override = true, icon = "" } } }, { "TexturePack" }, {
-			"TexturePack: pack Base (patched by Clash), item HermesBoots has its icon both on its entry and in LEGACY_ICONS",
+			"TexturePack: pack Terraria (patched by Clash), item HermesBoots has its icon both on its entry and in LEGACY_ICONS",
 		})
 		clash({ items = { { name = "Shears", override = true, age = "iron" } } }, { "Progression", "Ages" }, {
-			"Ages: pack Base (patched by Clash), item Shears names its Age, and the side lists name one for it too (iron)",
+			"Ages: pack Minecraft (patched by Clash), items/tools, item Shears names its Age, and the side lists name one for it too (iron)",
 		})
-		clash(
-			{ blocks = { { name = "Tnt", override = true, skill = "demolition" } } },
-			{ "Progression", "Skills" },
-			{ "Skills: pack Base (patched by Clash), block Tnt names its skill, and demolition's recipes name it too" }
-		)
+		clash({ blocks = { { name = "Tnt", override = true, skill = "demolition" } } }, { "Progression", "Skills" }, {
+			"Skills: pack Minecraft (patched by Clash), blocks/fire, block Tnt names its skill, and demolition's recipes name it too",
+		})
 		clash(
 			{ blocks = { { name = "Stone", override = true, skill = "juggling" } } },
 			{ "Progression", "Skills" },
@@ -916,13 +918,15 @@ return function(t, shared, require, _server, _client)
 		clash(
 			{ blocks = { { name = "CoalOre", override = true, knowledge = { mine = 9 } } } },
 			{ "Progression", "Knowledge" },
-			{ "Knowledge: pack Base (patched by Clash), block CoalOre has its mine points, and Knowledge.ORES too" }
+			{
+				"Knowledge: pack Minecraft (patched by Clash), blocks/ores, block CoalOre has its mine points, and Knowledge.ORES too",
+			}
 		)
 		clash(
 			{ blocks = { { name = "IronOre", override = true, miner = { ticks = 1, joules = 1 } } } },
 			{ "Machines", "MinerRules" },
 			{
-				"MinerRules: pack Base (patched by Clash), block IronOre has its miner numbers, and MinerRules' side list names it too",
+				"MinerRules: pack Minecraft (patched by Clash), blocks/ores, block IronOre has its miner numbers, and MinerRules' side list names it too",
 			}
 		)
 		clash(
@@ -936,7 +940,9 @@ return function(t, shared, require, _server, _client)
 		clash(
 			{ blocks = { { name = "Fire", override = true, sounds = { ["break"] = "block.fire.extinguish" } } } },
 			{ "Sounds" },
-			{ "Sounds: pack Base (patched by Clash), block Fire has its sounds, and SoundList.BLOCK_SOUNDS too" }
+			{
+				"Sounds: pack Minecraft (patched by Clash), blocks/fire, block Fire has its sounds, and SoundList.BLOCK_SOUNDS too",
+			}
 		)
 		clash(
 			{ blocks = { { name = "Stone", override = true, sounds = { ["break"] = "block.stone.shatter" } } } },
@@ -952,16 +958,14 @@ return function(t, shared, require, _server, _client)
 			{ items = { { name = "IronHelmet", override = true, equipSound = "item.armor.equip_gold" } } },
 			{ "Sounds" },
 			{
-				"Sounds: pack Base (patched by Clash), item IronHelmet has its equip sound, and SoundList.ARMOR's Iron names it too",
+				"Sounds: pack Minecraft (patched by Clash), items/armor, item IronHelmet has its equip sound, and SoundList.ARMOR's Iron names it too",
 			}
 		)
-		clash(
-			{ blocks = { { name = "Ice", override = true, cools = true } } },
-			{ "ToughAsNails", "Temperature" },
-			{ "Temperature: pack Base (patched by Clash), block Ice cools, and Config.ToughAsNails.CoolingBlocks too" }
-		)
+		clash({ blocks = { { name = "Ice", override = true, cools = true } } }, { "ToughAsNails", "Temperature" }, {
+			"Temperature: pack Minecraft (patched by Clash), blocks/terrain, block Ice cools, and Config.ToughAsNails.CoolingBlocks too",
+		})
 		clash({ blocks = { { name = "Planks", override = true, fuel = 300 } } }, { "Crafting", "Recipes" }, {
-			"Recipes: pack Base (patched by Clash), block Planks has its fuel both on its entry and in LEGACY_FUEL (#planks)",
+			"Recipes: pack Minecraft (patched by Clash), blocks/wood, block Planks has its fuel both on its entry and in LEGACY_FUEL (#planks)",
 		})
 		clash({
 			blocks = {
@@ -972,7 +976,7 @@ return function(t, shared, require, _server, _client)
 				},
 			},
 		}, { "Items" }, {
-			"Items: pack Base (patched by Clash), block Gravel has loot, and a side rule (leafDrop, randomDrop, STRAW_CHANCE) drops for it too",
+			"Items: pack Minecraft (patched by Clash), blocks/terrain, block Gravel has loot, and a side rule (leafDrop, randomDrop, STRAW_CHANCE) drops for it too",
 		})
 	end)
 end

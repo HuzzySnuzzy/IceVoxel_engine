@@ -1,0 +1,181 @@
+--!strict
+--[[
+	The Minecraft pack's wood: the five trees' logs and leaves, and their planks (the planks
+	recipes and the doors, fences and tools are made of; tags "logs", "planks" and "leaves" are
+	Core's).
+
+	  * Leaves hold up no torches or lanterns (Minecraft's LeavesBlock has no support shape).
+	    Shears harvest them, as in Minecraft; otherwise they drop a sapling or sticks now and then
+	    (Items.leafDrop), and they decay once their tree has no log left (server Behaviours/Leaves).
+	  * flammable (Minecraft 1.20.1's FireBlock.bootStrap): logs 5 / 5, planks 5 / 20, leaves 30 /
+	    60. blastResistance: planks 3 (Minecraft's), logs and leaves their hardness.
+	  * zombieBreak: leaves 120 ticks, logs and planks 600 (half a minute).
+]]
+
+local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
+
+type BlockSpec = Schema.BlockSpec
+
+return {
+	{
+		name = "OakLog",
+		color = { 106, 82, 52 },
+		material = "Wood",
+		hardness = 2,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 5 },
+		zombieBreak = 600,
+	},
+	{
+		name = "OakLeaves",
+		behaviour = "Leaves",
+		color = { 68, 128, 46 },
+		material = "LeafyGrass",
+		hardness = 0.2,
+		drops = false,
+		tool = "hoe",
+		sturdy = false,
+		shearDrops = true,
+		flammable = { ignite = 30, burn = 60 },
+		zombieBreak = 120,
+	},
+	{
+		name = "BirchLog",
+		color = { 216, 212, 198 },
+		material = "Wood",
+		hardness = 2,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 5 },
+		zombieBreak = 600,
+	},
+	{
+		name = "BirchLeaves",
+		behaviour = "Leaves",
+		color = { 112, 150, 68 },
+		material = "LeafyGrass",
+		hardness = 0.2,
+		drops = false,
+		tool = "hoe",
+		sturdy = false,
+		shearDrops = true,
+		flammable = { ignite = 30, burn = 60 },
+		zombieBreak = 120,
+	},
+	{
+		name = "SpruceLog",
+		color = { 74, 54, 34 },
+		material = "Wood",
+		hardness = 2,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 5 },
+		zombieBreak = 600,
+	},
+	{
+		name = "SpruceLeaves",
+		behaviour = "Leaves",
+		color = { 44, 88, 56 },
+		material = "LeafyGrass",
+		hardness = 0.2,
+		drops = false,
+		tool = "hoe",
+		sturdy = false,
+		shearDrops = true,
+		flammable = { ignite = 30, burn = 60 },
+		zombieBreak = 120,
+	},
+	{
+		name = "AcaciaLog",
+		color = { 118, 108, 98 },
+		material = "Wood",
+		hardness = 2,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 5 },
+		zombieBreak = 600,
+	},
+	{
+		name = "AcaciaLeaves",
+		behaviour = "Leaves",
+		color = { 108, 138, 40 },
+		material = "LeafyGrass",
+		hardness = 0.2,
+		drops = false,
+		tool = "hoe",
+		sturdy = false,
+		shearDrops = true,
+		flammable = { ignite = 30, burn = 60 },
+		zombieBreak = 120,
+	},
+	{
+		name = "JungleLog",
+		color = { 96, 76, 44 },
+		material = "Wood",
+		hardness = 2,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 5 },
+		zombieBreak = 600,
+	},
+	{
+		name = "JungleLeaves",
+		behaviour = "Leaves",
+		color = { 40, 120, 30 },
+		material = "LeafyGrass",
+		hardness = 0.2,
+		drops = false,
+		tool = "hoe",
+		sturdy = false,
+		shearDrops = true,
+		flammable = { ignite = 30, burn = 60 },
+		zombieBreak = 120,
+	},
+	{
+		name = "Planks",
+		color = { 170, 134, 84 },
+		material = "WoodPlanks",
+		hardness = 2,
+		blastResistance = 3,
+		tool = "axe",
+		displayName = "Oak Planks",
+		flammable = { ignite = 5, burn = 20 },
+		zombieBreak = 600,
+	},
+	{
+		name = "BirchPlanks",
+		color = { 196, 178, 123 },
+		material = "WoodPlanks",
+		hardness = 2,
+		blastResistance = 3,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 20 },
+		zombieBreak = 600,
+	},
+	{
+		name = "SprucePlanks",
+		color = { 114, 84, 48 },
+		material = "WoodPlanks",
+		hardness = 2,
+		blastResistance = 3,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 20 },
+		zombieBreak = 600,
+	},
+	{
+		name = "AcaciaPlanks",
+		color = { 168, 90, 50 },
+		material = "WoodPlanks",
+		hardness = 2,
+		blastResistance = 3,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 20 },
+		zombieBreak = 600,
+	},
+	{
+		name = "JunglePlanks",
+		color = { 160, 115, 80 },
+		material = "WoodPlanks",
+		hardness = 2,
+		blastResistance = 3,
+		tool = "axe",
+		flammable = { ignite = 5, burn = 20 },
+		zombieBreak = 600,
+	},
+} :: { BlockSpec }

@@ -22,7 +22,8 @@
 	             even next to an edit.
 	             Below y = 0 the game counts everything as bedrock, so a player who falls lands on
 	             the world's floor (Minecraft's debug world has a barrier floor at y = 60). The
-	             spawn stands on block 0 (bedrock, at 1, 70, 1); the type suggests spectator mode.
+	             spawn stands on the bedrock (wherever its id puts it in the grid); the type
+	             suggests spectator mode.
 	All Structures  every template of the structure library (Structures/Library, sorted by name:
 	             each piece on its own, rotation 0, as saved), then every generated jigsaw
 	             structure assembled whole (from a seed of its own, on flat ground), on a grass floor
@@ -144,7 +145,8 @@ function DebugWorlds.allBlocks(seed: number): TerrainGenerator.Generator
 		table.insert(placed, z)
 		table.insert(placed, block)
 	end
-	local sx, sz = DebugWorlds.gridPosition(0, width)
+	-- (On the bedrock: the grid follows the ids, so look it up.)
+	local sx, sz = DebugWorlds.gridPosition((table.find(list, Blocks.id.Bedrock) or 1) - 1, width)
 	return LayeredGenerator.new({
 		seed = seed,
 		stack = LayeredGenerator.EMPTY,

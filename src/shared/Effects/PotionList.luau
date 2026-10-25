@@ -1,10 +1,10 @@
 --!strict
 --[[
 	The potions (Minecraft 1.20.1's Potions, brewed here in a crafting grid: the game has no
-	brewing stand). Pure data that requires nothing, read by ItemList (the potion items, in this
-	order, so: ALWAYS ADD NEW POTIONS AT THE END, and new variants of a potion never, as the item
-	ids are list positions), Crafting/Recipes (the brewing) and ToughAsNails/Drinks (drinking them:
-	the 32 tick hold, the effects given when it finishes, the Glass Bottle back).
+	brewing stand). Pure data that requires nothing, read by the Minecraft content pack (the potion
+	items, in this order, and their brewing recipes) and ToughAsNails/Drinks (drinking them: the 32
+	tick hold, the effects given when it finishes, the Glass Bottle back). A potion added here gets
+	its items and recipes with the others (item ids are given at load, Shared/Content).
 
 	A potion is a Purified Water Bottle brewed with its `ingredient` (shapeless, any grid; an item
 	or block name, or a recipe "#tag"), giving `effect` (an EffectList name) for `seconds` (nil:
@@ -33,7 +33,7 @@ export type PotionSpec = {
 	long: number?,
 }
 
--- One potion item: its ItemList name, what it is shown as, and what drinking it gives.
+-- One potion item: its item name, what it is shown as, and what drinking it gives.
 export type Variant = {
 	item: string,
 	displayName: string,
@@ -83,8 +83,6 @@ local list: { PotionSpec } = {
 	{ name = "Resistance", ingredient = "IronIngot", effect = "Resistance", seconds = 90, strong = 45 },
 }
 
--- Add new potions above this line, at the end (never reorder: the item ids follow this order).
-
 local PotionList = {}
 
 PotionList.list = list
@@ -98,7 +96,7 @@ PotionList.EMPTY = "GlassBottle"
 local TICKS_PER_SECOND = 20
 
 --[[
-	The potion items of `potion`, in ItemList's order: the base, the strong one, the long one (those
+	The potion items of `potion`, in the pack's order: the base, the strong one, the long one (those
 	it has).
 ]]
 function PotionList.variants(potion: PotionSpec): { Variant }
@@ -145,7 +143,7 @@ function PotionList.variants(potion: PotionSpec): { Variant }
 	return variants
 end
 
--- Every potion item, in ItemList's order.
+-- Every potion item, in the pack's order.
 function PotionList.all(): { Variant }
 	local all: { Variant } = {}
 	for _, potion in list do

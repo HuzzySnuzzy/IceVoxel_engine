@@ -139,9 +139,10 @@ return function(t, shared, require)
 	t.test("ore generation: adding the newer ores moved no earlier ore (osmium included)", function()
 		-- Checksums of every cell of the older ores in all-stone chunks (as Generation's for the
 		-- ores before osmium), taken before the newer ores existed: they only replace stone left
-		-- over, so every earlier feature must keep drawing the same numbers.
+		-- over, so every earlier feature must keep drawing the same numbers. (Each block counts by
+		-- its name's hash, not its id: ids follow the packs.)
 		local height = 700
-		local expected = { "1061:2124375055", "1044:1405127212", "1053:15318503" }
+		local expected = { "1061:256719182", "1044:1569629523", "1053:1057389610" }
 		for i, chunk in { { 0, 0 }, { 3, -2 }, { -57, 1201 } } do
 			local data = stoneChunk(height)
 			Ores.place(data, 4242, chunk[1], chunk[2], height)
@@ -149,7 +150,7 @@ return function(t, shared, require)
 			for cell = 0, buffer.len(data) // 2 - 1 do
 				local id = buffer.readu16(data, cell * 2)
 				if id ~= B.Stone and id ~= B.Bedrock and not isNewer[id] then
-					sum = (sum * 31 + cell * 7 + id) % 2147483647
+					sum = (sum * 31 + cell * 7 + Hash.string(Blocks.get(id).name) % 65536) % 2147483647
 					n += 1
 				end
 			end

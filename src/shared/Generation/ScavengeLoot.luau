@@ -2,8 +2,8 @@
 --[[
 	The zombie apocalypse's loot: what the ruins' and bunkers' containers hold (Generation/Cities,
 	Generation/Bunkers fill their Chests, Supply Crates and Medicine Cabinets from them), rolled
-	from the content packs' loot tables (Shared/Content: the Base pack's `loot` has the tables and
-	what is in them). Pure, deterministic: a container's items come from its position and the
+	from the content packs' loot tables (Shared/Content: the Apocalypse pack's `loot` has the tables
+	and what is in them). Pure, deterministic: a container's items come from its position and the
 	world's salt alone, as Generation/Mineshafts' chests do, so every machine agrees and nothing is
 	saved until a player opens one (server Players/Containers keeps it from then on). Loot ignores
 	the Ages: scavenging is how a survivor gets ahead.

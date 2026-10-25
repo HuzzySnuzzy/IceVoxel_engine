@@ -5,5 +5,5 @@
 return {
 	order = 900,
 	description = "Every per-entry field, for tests/spec/Content.",
-	requires = { "Core", "Base" },
+	requires = { "Core", "Minecraft" },
 }

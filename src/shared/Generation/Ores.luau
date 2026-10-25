@@ -79,8 +79,8 @@
 	Saltpetre needs each column's surface height and biome (`Ores.place`'s `surface` and
 	`biomes`, from TerrainGenerator); without them it draws its numbers and places nothing.
 
-	The features are the content packs' `ores` (Shared/Content: the Base pack's stones, Minecraft's
-	ores and osmium, the Ores pack's copper .. uranium), in load order. Each ore draws from one
+	The features are the content packs' `ores` (Shared/Content: the Minecraft pack's stones and
+	ores, the Mekanism pack's osmium, the Ores pack's copper .. uranium), in load order. Each ore draws from one
 	random stream per chunk, in that order, so new ores go after the others (a pack of a later
 	order): an ore placed earlier never moves, and a later one only replaces the stone left over. A
 	feature that places nothing somewhere (saltpetre under wet land, a buried cell left as stone)
@@ -153,8 +153,8 @@ export type Ore = {
 	buried: number?,
 }
 
--- Every feature: the content packs' `ores` (Shared/Content: the Base pack's stones, Minecraft's ores
--- and osmium, then the Ores pack's), in load order, each block by id.
+-- Every feature: the content packs' `ores` (Shared/Content: the Minecraft pack's stones and ores,
+-- the Mekanism pack's osmium, then the Ores pack's), in load order, each block by id.
 local ORES: { Ore } = {}
 do
 	local content = Content.default

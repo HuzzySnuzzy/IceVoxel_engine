@@ -366,7 +366,8 @@ return function(t, shared, require)
 		-- Checksums of every non-osmium ore cell in all-stone chunks, taken before osmium existed:
 		-- the features before it in Ores.FEATURES must keep drawing the same numbers. (The ores
 		-- after osmium only replace stone left over, so they are left out too; OreGeneration pins
-		-- osmium and the rest against them.)
+		-- osmium and the rest against them. Each block counts by its name's hash, not its id: ids
+		-- follow the packs.)
 		local later: { [number]: boolean } = {}
 		local after = false
 		for _, ore in Ores.FEATURES do
@@ -376,7 +377,7 @@ return function(t, shared, require)
 			end
 		end
 		local height = 700
-		local expected = { "922:1760838665", "921:2061121151", "914:384238489" }
+		local expected = { "922:10116833", "921:460687070", "914:1847593037" }
 		for i, chunk in { { 0, 0 }, { 3, -2 }, { -57, 1201 } } do
 			local data = ChunkLayout.create(height)
 			for cell = ChunkLayout.LAYER, ChunkLayout.LAYER * height - 1 do
@@ -387,7 +388,7 @@ return function(t, shared, require)
 			for cell = 0, buffer.len(data) // 2 - 1 do
 				local id = buffer.readu16(data, cell * 2)
 				if id ~= Blocks.id.Stone and id ~= Blocks.id.Air and not later[id] then
-					sum = (sum * 31 + cell * 7 + id) % 2147483647
+					sum = (sum * 31 + cell * 7 + Hash.string(Blocks.get(id).name) % 65536) % 2147483647
 					n += 1
 				end
 			end

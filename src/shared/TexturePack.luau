@@ -5,8 +5,8 @@
 	(Shared/Content), so the server, the client, worker Actors and Lune all require it; Blocks
 	resolves it into each block's `textures` (per face).
 
-	  Textures  the packs' `textures` (the Base pack's are the hand-edited sheet: Content/Packs/
-	            Base/textures), texture name -> Texture
+	  Textures  the packs' `textures` (each pack's for its blocks: the hand-edited sheets are the
+	            Minecraft pack's textures/ and the Apocalypse pack's), texture name -> Texture
 	  Blocks    block name -> Faces: each block entry's `texture`, and LEGACY_BLOCKS below for the
 	            blocks whose entries name none yet (a block in both is an error)
 	  Icons     item name -> its icon: each item entry's `icon`, and LEGACY_ICONS below (an item in
@@ -68,8 +68,8 @@
 	  "Enable Mesh / Image APIs" in Game Settings > Security, and images the place's owner owns),
 	  then prints to the output (F9 in game, or Studio's Output) a block starting
 	      [IceVoxel] Texture averages (paste into TexturePack.Textures[...].Average):
-	  Paste its lines into the textures' entries (their packs' `textures`: the Base pack's for the
-	  sheet), so nothing has to be measured again. Until then distant chunks guess
+	  Paste its lines into the textures' entries (their packs' `textures`: Content/Packs/<pack>/
+	  textures), so nothing has to be measured again. Until then distant chunks guess
 	  those textures' colours each session, and the world is restyled once they are measured;
 	  `lune run tests/build_textures --list` names the filled textures still without one.
 

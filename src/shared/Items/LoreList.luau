@@ -18,7 +18,7 @@
 
 local Content = require(script.Parent.Parent.Content)
 
--- The side table, by name (Base pack order; the twelve turrets' from a loop below).
+-- The side table, by name (the old lists' order; the twelve turrets' from a loop below).
 local lore: { [string]: string } = {
 	-- Blocks (BlockList order) --------------------------------------------------------------------
 	Stone = "Common rock. Breaks into Cobblestone.",

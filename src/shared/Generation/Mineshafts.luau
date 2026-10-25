@@ -423,7 +423,8 @@ Mineshafts.reach = reach
 --[[ Loot ]]
 
 -- The chests' loot table: the packs' `mineshaft` (Minecraft's chests/abandoned_mineshaft on this
--- game's items: the Base pack's loot), { item (false: nothing), weight, fewest, most } per entry.
+-- game's items: the Minecraft pack's loot), { item (false: nothing), weight, fewest, most } per
+-- entry.
 local LOOT: { { rolls: { number }, entries: { { any } } } } =
 	assert(Content.default.loot.mineshaft, "Mineshafts: no pack has the loot table mineshaft")
 Mineshafts.LOOT = LOOT

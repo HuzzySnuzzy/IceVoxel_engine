@@ -128,7 +128,7 @@ local stem = Plants.stem
 	at once, grass sounds, washed away, the Plant behaviour unless it has its own, scattered; an
 	upper half (`plant.bottom`) names its lower half as its `item` and drops nothing, anything else
 	stands on its soil (`support` "Down"). A plant with `placeable = false` is no item of its own
-	either: an item places it (ItemList `places`: the herbs, planted by their leaves and roots).
+	either: an item places it (its `places`: the herbs, planted by their leaves and roots).
 	At most 4 boxes. Returns `spec`.
 ]]
 function Plants.plant(spec: BlockSpec): BlockSpec
@@ -263,7 +263,7 @@ end
 
 --[[
 	A herb (Tough As Nails' water and teas): a plant on dirt that is no item of its own (its item
-	plants it, ItemList `places`), spreading slowly (server Behaviours/Herb), drawn with `shape`
+	plants it, its `places`), spreading slowly (server Behaviours/Herb), drawn with `shape`
 	inside `bounds`; it burns like the flowers (60 / 100).
 ]]
 function Plants.herb(

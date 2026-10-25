@@ -2,8 +2,9 @@
 --[[
 	Every block type in the game: the content packs' block entries (Shared/Content), merged, in id
 	order (a block's id is its place minus one). The list itself moved into the packs (Core's Air
-	and Cave Air, the Base pack's blocks, the Ores pack's...); this module keeps `Blocks.BlockList`
-	and its types for the code and specs that read them. The fields are Content/Schema's.
+	and Cave Air, then the Minecraft, Mekanism, Survival, Apocalypse, Turrets and Ores packs'
+	blocks); this module keeps `Blocks.BlockList` and its types for the code and specs that read
+	them. The fields are Content/Schema's.
 ]]
 
 local Content = require(script.Parent.Parent.Content)
