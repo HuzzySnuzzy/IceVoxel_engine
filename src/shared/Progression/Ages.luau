@@ -108,16 +108,6 @@ for _, name in
 		"ManaPotion",
 		"TuxedoShirt",
 		"TuxedoPants",
-		-- (The apocalypse's things of iron: nails and what they make, the blades and the hatch.)
-		"Nails",
-		"ReinforcedBarricade",
-		"SpikedBat",
-		"Machete",
-		"Crowbar",
-		"CeilingLamp",
-		"BunkerHatch",
-		-- (The weapons' iron: crossbow bolts.)
-		"CrossbowBolt",
 		-- (The new ores' lead, zinc and brass and the Hazmat suit are too: their entries say so,
 		-- in the Ores pack.)
 	}
@@ -133,10 +123,6 @@ for _, name in
 		"Tnt",
 		-- (And uranium smelting, on its ingot's entry: a smelting result is never of an Age after
 		-- the transporters', which feed furnaces with no window and so no gate.)
-		-- (Concrete, and what smelting and vines make of it: the results are gated, not the inputs.)
-		"Concrete",
-		"CrackedConcrete",
-		"MossyConcrete",
 	}
 do
 	table.insert(industrial, name)

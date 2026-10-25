@@ -3,7 +3,12 @@
 	The zombie apocalypse's blocks (Generation/Cities, Generation/Bunkers, server Apocalypse/). Each
 	sets its own blast resistance, fire odds and zombie break time (`zombieBreak`, ticks for one
 	ordinary zombie: server Mobs/MobAI; asphalt and bricks 2400, a barricade 900, a reinforced one
-	3000, concrete 6000; the rusty metal, the containers, the bunker hatch and the lamp never).
+	3000, concrete 6000; the rusty metal, the containers, the bunker hatch and the lamp never), and
+	its texture, lore and Age, on the block that is the item: the barricades along Z and the shut
+	hatch (their textures cover the turned barricades and the open hatch too), the lamp and not its
+	cave twin (a light: never textured). The Reinforced Barricade, the Bunker Hatch and the Ceiling
+	Lamp are the Iron Age's, Concrete (cracked and mossy too: the results are gated, not the
+	inputs) the Industrial Age's, the rest the Stone Age's.
 
 	  * The ruins: Asphalt, Cracked Asphalt and the two painted road lines (Road Line on top: white,
 	    Yellow Road Line: the centre line; their sides and bottoms are asphalt), only found, never
@@ -48,6 +53,8 @@ return function(define: Define.Context): { BlockSpec }
 			toolLevel = 0,
 			blastResistance = 3,
 			zombieBreak = 2400,
+			texture = { All = "asphalt" },
+			lore = "Old road surface. Holds the summer heat long after the cars stopped.",
 		},
 		{
 			name = "CrackedAsphalt",
@@ -60,6 +67,8 @@ return function(define: Define.Context): { BlockSpec }
 			toolLevel = 0,
 			blastResistance = 3,
 			zombieBreak = 2400,
+			texture = { All = "cracked asphalt" },
+			lore = "Road broken by roots and frost. Nobody came to fix it.",
 		},
 		{
 			name = "RoadLine",
@@ -72,6 +81,8 @@ return function(define: Define.Context): { BlockSpec }
 			toolLevel = 0,
 			blastResistance = 3,
 			zombieBreak = 2400,
+			texture = { Top = "road line", Sides = "asphalt", Bottom = "asphalt" },
+			lore = "A faded white lane line nobody follows any more.",
 		},
 		{
 			name = "RoadLineYellow",
@@ -84,13 +95,33 @@ return function(define: Define.Context): { BlockSpec }
 			toolLevel = 0,
 			blastResistance = 3,
 			zombieBreak = 2400,
+			texture = { Top = "road line yellow", Sides = "asphalt", Bottom = "asphalt" },
+			lore = "Yellow paint: do not cross. Nobody is left to mind.",
 		},
 	}
 	for _, concrete in
 		{
-			{ name = "Concrete", color = { 168, 168, 162 }, hardness = 1.8 },
-			{ name = "CrackedConcrete", color = { 150, 150, 144 }, hardness = 1.5 },
-			{ name = "MossyConcrete", color = { 122, 140, 100 }, hardness = 1.8 },
+			{
+				name = "Concrete",
+				color = { 168, 168, 162 },
+				hardness = 1.8,
+				texture = { All = "concrete" },
+				lore = "Poured stone that cities were built of. Gravel and sand make it.",
+			},
+			{
+				name = "CrackedConcrete",
+				color = { 150, 150, 144 },
+				hardness = 1.5,
+				texture = { All = "cracked concrete" },
+				lore = "Concrete giving up, one crack at a time. Smelt Concrete for it.",
+			},
+			{
+				name = "MossyConcrete",
+				color = { 122, 140, 100 },
+				hardness = 1.8,
+				texture = { All = "mossy concrete" },
+				lore = "Concrete with Vines worked into it: the ruins' green.",
+			},
 		}
 	do
 		table.insert(list, {
@@ -103,12 +134,25 @@ return function(define: Define.Context): { BlockSpec }
 			toolLevel = 0,
 			blastResistance = 6,
 			zombieBreak = 6000,
+			texture = concrete.texture,
+			lore = concrete.lore,
+			age = "industrial",
 		})
 	end
 	for _, brick in
 		{
-			{ name = "CrackedBricks", color = { 140, 74, 60 } },
-			{ name = "MossyBricks", color = { 112, 108, 74 } },
+			{
+				name = "CrackedBricks",
+				color = { 140, 74, 60 },
+				texture = { All = "cracked bricks" },
+				lore = "Bricks split by weather and neglect. Smelt Bricks for them.",
+			},
+			{
+				name = "MossyBricks",
+				color = { 112, 108, 74 },
+				texture = { All = "mossy bricks" },
+				lore = "Old brickwork wearing a coat of moss. Bricks and Vines make it.",
+			},
 		}
 	do
 		table.insert(list, {
@@ -121,6 +165,8 @@ return function(define: Define.Context): { BlockSpec }
 			toolLevel = 0,
 			blastResistance = 6,
 			zombieBreak = 2400,
+			texture = brick.texture,
+			lore = brick.lore,
 		})
 	end
 	define.append(list, {
@@ -136,6 +182,8 @@ return function(define: Define.Context): { BlockSpec }
 			blastResistance = 6,
 			drops = "ScrapMetal" :: string,
 			dropCount = 3,
+			texture = { All = "rusty metal" },
+			lore = "Corroded sheet steel. Breaks up into Scrap Metal.",
 		},
 		{
 			name = "SupplyCrate",
@@ -149,6 +197,8 @@ return function(define: Define.Context): { BlockSpec }
 			container = 27,
 			menu = "Chest",
 			flammable = { ignite = 5, burn = 20 },
+			texture = { Top = "supply crate top", Sides = "supply crate side", Bottom = "supply crate top" },
+			lore = "A wooden crate someone stocked and never came back for.",
 		},
 		{
 			name = "MedicineCabinet",
@@ -161,11 +211,19 @@ return function(define: Define.Context): { BlockSpec }
 			blastResistance = 2,
 			container = 27,
 			menu = "Chest",
+			texture = { Top = "medicine cabinet top", Sides = "medicine cabinet side" },
+			lore = "Check it for bandages and pills before anyone else does.",
 		},
 	})
 
-	-- Barricades, along each axis.
-	for _, reinforced in { false, true } do
+	-- Barricades, along each axis (the one along Z is the item: its lore and Age).
+	for _, barricade: { reinforced: boolean, lore: string, age: string? } in
+		{
+			{ reinforced = false, lore = "Boards nailed across a gap. Zombies take a while to break it." },
+			{ reinforced = true, lore = "Boards and scrap steel. The dead will be at it a long time.", age = "iron" },
+		}
+	do
+		local reinforced = barricade.reinforced
 		local base = if reinforced then "ReinforcedBarricade" else "Barricade"
 		for _, axis in { "Z", "X" } do
 			local turned = axis == "X"
@@ -189,6 +247,9 @@ return function(define: Define.Context): { BlockSpec }
 				-- (Boards with gaps: a draughty wall.)
 				insulation = 0.15,
 				zombieBreak = if reinforced then 3000 else 900,
+				texture = if turned then nil else { All = "planks" },
+				lore = if turned then nil else barricade.lore,
+				age = if turned then nil else barricade.age,
 			})
 		end
 	end
@@ -226,6 +287,9 @@ return function(define: Define.Context): { BlockSpec }
 				else { to = "BunkerHatchOpen", sound = "block.bunker_hatch.open" },
 			-- (Shut, a steel floor face; open, the shaft's air flows through.)
 			insulation = if open then nil else 0.06,
+			texture = if open then nil else { All = "bunker hatch" },
+			lore = if open then nil else "A steel hatch over a ladder shaft. The dead can't break it.",
+			age = if open then nil else "iron",
 		})
 	end
 
@@ -253,8 +317,13 @@ return function(define: Define.Context): { BlockSpec }
 		support = "Up",
 		behaviour = "Attached",
 		brokenByFluid = true,
+		lore = "A caged lamp that hangs from the ceiling. Still glowing.",
+		age = "iron",
 	}
 	table.insert(list, lamp)
-	table.insert(list, define.caveTwin(lamp))
+	-- (The twin's item is the lamp: the lore and the Age are the lamp's alone.)
+	local twin = define.caveTwin(lamp)
+	twin.lore, twin.age = nil, nil
+	table.insert(list, twin)
 	return list
 end

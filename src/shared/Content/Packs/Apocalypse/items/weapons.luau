@@ -2,7 +2,9 @@
 --[[
 	Weapons in the manner of DayZ (Shared/Weapons: WeaponList holds their numbers, WeaponState what a
 	stack's item data keeps; server Weapons/, client Interaction/Firearms). Box models in their
-	colours until their icons are made; the client builder may tune the models and tilts.
+	colours until their icons are made (each entry's `icon` is blank, so each look is one id to
+	paste); the client builder may tune the models and tilts. Of the two made here, crossbow bolts
+	(iron tipped) are the Iron Age's and the improvised suppressor the Stone Age's.
 
 	Firearms (a 9mm pistol, a .357 revolver, a 9mm submachine gun, a pump and a double-barrel
 	shotgun, a bolt-action and a semi-automatic 7.62 rifle, a 5.56 assault rifle, a scoped .308
@@ -56,6 +58,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 3, 1, 1 }, { -0.5, -1.2, 0 }, POLY, "SmoothPlastic"),
 			}),
 			tilt = 0,
+			icon = "",
+			lore = "A 9mm sidearm. Takes a 15-round magazine. Raise it with the right button to fire.",
 		},
 		{
 			name = "Revolver",
@@ -70,6 +74,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 3, 6, 2.6 }, { -4, -2.5, 0 }, STOCK, "Wood", -20),
 			}),
 			tilt = 0,
+			icon = "",
+			lore = "Six .357 rounds loaded by hand. Never jams.",
 		},
 		{
 			name = "Smg",
@@ -85,6 +91,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 6, 2, 2 }, { -9, 1, 0 }, POLY, "SmoothPlastic"),
 			}),
 			tilt = 0,
+			icon = "",
+			lore = "A 9mm submachine gun. Fast, loud and hungry for ammo.",
 		},
 		{
 			name = "PumpShotgun",
@@ -100,6 +108,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 9, 3.5, 2.4 }, { -14, 0, 0 }, STOCK, "Wood", 8),
 			}),
 			tilt = 30,
+			icon = "",
+			lore = "Six shells of buckshot or slugs. Devastating up close.",
 		},
 		{
 			name = "DoubleBarrelShotgun",
@@ -116,6 +126,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 10, 4, 2.4 }, { -14, 0, 0 }, STOCK, "Wood", 10),
 			}),
 			tilt = 30,
+			icon = "",
+			lore = "Two barrels, two shells, no jams.",
 		},
 		{
 			name = "BoltActionRifle",
@@ -126,6 +138,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			material = "Metal",
 			model = drawn("BoltActionRifle", boltRifle(STOCK)),
 			tilt = 30,
+			icon = "",
+			lore = "Five 7.62 rounds, one at a time. Drops a zombie in one hit.",
 		},
 		{
 			name = "SemiAutoRifle",
@@ -141,6 +155,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 3, 3, 2 }, { -1, -1.5, 0 }, GUNMETAL),
 			}),
 			tilt = 30,
+			icon = "",
+			lore = "Ten 7.62 rounds loaded by hand, as fast as you pull the trigger.",
 		},
 		{
 			name = "AssaultRifle",
@@ -157,6 +173,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 8, 1, 2 }, { 0, 4, 0 }, POLY, "SmoothPlastic"),
 			}),
 			tilt = 30,
+			icon = "",
+			lore = "A 5.56 rifle with a 30-round magazine. F switches to automatic.",
 		},
 		{
 			name = "HuntingRifle",
@@ -166,6 +184,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			material = "Metal",
 			model = drawn("HuntingRifle", hunting),
 			tilt = 30,
+			icon = "",
+			lore = "A scoped .308 rifle for long shots.",
 		},
 		{
 			name = "SmallBoreRifle",
@@ -180,6 +200,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 6, 2.4, 2 }, { -1, 2, 0 }, GUNMETAL),
 			}),
 			tilt = 30,
+			icon = "",
+			lore = "A quiet .22 rifle. Few zombies hear it.",
 		},
 		{
 			name = "Crossbow",
@@ -194,6 +216,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 2, 3, 1.5 }, { 9.5, 1, 0 }, GUN_STEEL, "Metal"),
 			}),
 			tilt = 30,
+			icon = "",
+			lore = "Fires bolts almost silently. Bolts can often be picked up again.",
 		},
 
 		--[[ Magazines ]]
@@ -207,6 +231,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 2.4, 8, 2 }, { 0, 0, 0 }, POLY),
 				box({ 3, 1, 2.4 }, { 0, -4.3, 0 }, POLY),
 			},
+			icon = "",
+			lore = "Holds 15 9mm rounds for the 9mm Pistol. Drop rounds on it to load.",
 		},
 		{
 			name = "SmgMagazine",
@@ -218,6 +244,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 3, 12, 2.2 }, { 0, 0, 0 }, POLY),
 				box({ 3.6, 1, 2.6 }, { 0, -6.3, 0 }, POLY),
 			},
+			icon = "",
+			lore = "Holds 30 9mm rounds for the SMG.",
 		},
 		{
 			name = "RifleMagazine",
@@ -229,6 +257,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 3.5, 12, 2.4 }, { 0, 0, 0 }, OLIVE, nil, 12),
 				box({ 4, 1, 2.8 }, { 1.2, -6, 0 }, POLY, nil, 12),
 			},
+			icon = "",
+			lore = "Holds 30 5.56 rounds for the Assault Rifle.",
 		},
 		{
 			name = "HuntingMagazine",
@@ -237,6 +267,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = POLY,
 			material = "SmoothPlastic",
 			model = { box({ 3, 4, 2.4 }, { 0, 0, 0 }, POLY) },
+			icon = "",
+			lore = "Holds 5 .308 rounds for the Hunting Rifle.",
 		},
 		{
 			name = "SmallBoreMagazine",
@@ -254,6 +286,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 					shape = "Cylinder",
 				},
 			},
+			icon = "",
+			lore = "Holds 10 .22 rounds for the Small-Bore Rifle.",
 		},
 
 		--[[ Ammunition ]]
@@ -264,6 +298,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = BRASS,
 			material = "Metal",
 			model = cartridges(THREE, { 2, 4 }, BRASS, { 1.6, 1.6 }, { 180, 120, 70 }, 2.6, "Ball"),
+			icon = "",
+			lore = "For the 9mm Pistol and the SMG. Load them into a magazine.",
 		},
 		{
 			name = "Rounds357",
@@ -272,6 +308,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = BRASS,
 			material = "Metal",
 			model = cartridges(THREE, { 2, 5.5 }, BRASS, { 1.6, 1.6 }, { 200, 200, 205 }, 3.35, "Ball"),
+			icon = "",
+			lore = "For the Revolver.",
 		},
 		{
 			name = "Buckshot",
@@ -280,6 +318,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = { 170, 40, 36 },
 			material = "SmoothPlastic",
 			model = shells({ 170, 40, 36 }),
+			icon = "",
+			lore = "Eight pellets a shell. Deadly close, useless far.",
 		},
 		{
 			name = "Slugs",
@@ -288,6 +328,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = { 50, 110, 60 },
 			material = "SmoothPlastic",
 			model = shells({ 50, 110, 60 }),
+			icon = "",
+			lore = "One heavy lead slug. A shotgun that reaches.",
 		},
 		{
 			name = "Rounds22",
@@ -297,6 +339,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = BRASS,
 			material = "Metal",
 			model = cartridges({ -4.5, -1.5, 1.5, 4.5 }, { 1.2, 3 }, BRASS, { 1, 1 }, { 170, 110, 70 }),
+			icon = "",
+			lore = "Small and quiet. For the Small-Bore Rifle.",
 		},
 		{
 			name = "Rounds556",
@@ -305,6 +349,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = BRASS,
 			material = "Metal",
 			model = rounds556,
+			icon = "",
+			lore = "For the Assault Rifle.",
 		},
 		{
 			name = "Rounds762",
@@ -313,6 +359,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = { 120, 120, 110 },
 			material = "Metal",
 			model = cartridges(THREE, { 2.2, 6 }, { 120, 120, 110 }, { 1.6, 2 }, TIP_COPPER, 4),
+			icon = "",
+			lore = "For the Bolt-Action and Semi-Auto Rifles.",
 		},
 		{
 			name = "Rounds308",
@@ -321,6 +369,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 			color = BRASS,
 			material = "Metal",
 			model = cartridges(THREE, { 2.4, 8 }, BRASS, { 1.6, 2.4 }, TIP_COPPER, 5),
+			icon = "",
+			lore = "For the Hunting Rifle.",
 		},
 		{
 			name = "CrossbowBolt",
@@ -333,6 +383,9 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 3, 3, 0.4 }, { 0, -6, 0 }, { 180, 40, 40 }, "Fabric"),
 			},
 			tilt = -45,
+			icon = "",
+			lore = "Iron-tipped bolts for the Crossbow.",
+			age = "iron",
 		},
 
 		--[[ Attachments ]]
@@ -346,6 +399,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 4, 4, 3 }, { 0, 0.5, 0 }, POLY),
 				box({ 2.5, 2.5, 0.4 }, { 0, 0.5, 1.6 }, { 220, 60, 60 }, "Glass"),
 			},
+			icon = "",
+			lore = "A small optic. Drop it on a weapon to mount it.",
 		},
 		{
 			name = "RifleScope",
@@ -358,6 +413,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 4, 4, 4 }, { 6, 0, 0 }, POLY),
 				box({ 2, 2, 2 }, { 0, 2, 0 }, POLY),
 			},
+			icon = "",
+			lore = "Four times magnification for rifles.",
 		},
 		{
 			name = "Suppressor",
@@ -368,6 +425,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 12, 3.2, 3.2 }, { 0, 0, 0 }, POLY),
 				box({ 1, 3.4, 3.4 }, { -5.5, 0, 0 }, GUN_STEEL),
 			},
+			icon = "",
+			lore = "Muffles shots so zombies hear them from far less. Wears out.",
 		},
 		{
 			name = "ImprovisedSuppressor",
@@ -379,6 +438,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 1.5, 4.4, 4.4 }, { -2.5, 0, 0 }, { 150, 154, 158 }, "Fabric"),
 				box({ 1.5, 4.4, 4.4 }, { 2, 0, 0 }, { 150, 154, 158 }, "Fabric"),
 			},
+			icon = "",
+			lore = "A bottle taped to the barrel. Muffles a few dozen shots.",
 		},
 		{
 			name = "WeaponFlashlight",
@@ -390,6 +451,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 2, 3.6, 3.6 }, { 3.5, 0, 0 }, POLY),
 				box({ 0.4, 2.8, 2.8 }, { 4.7, 0, 0 }, { 255, 240, 180 }, "Glass"),
 			},
+			icon = "",
+			lore = "A light for the barrel. L turns it on.",
 		},
 
 		--[[ Melee ]]
@@ -406,6 +469,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 1.8, 5, 1.4 }, { 0, -4.5, 0 }, POLY, "SmoothPlastic"),
 			},
 			tilt = -45,
+			icon = "",
+			lore = "A kitchen blade. Quiet, quick, and lethal from behind.",
 		},
 		{
 			name = "HuntingKnife",
@@ -421,6 +486,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 2, 5, 1.8 }, { 0, -4.5, 0 }, DARK, "Wood"),
 			},
 			tilt = -45,
+			icon = "",
+			lore = "A sturdy hunting blade. Kills an unaware zombie from behind.",
 		},
 		{
 			name = "PipeWrench",
@@ -435,6 +502,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 2, 1, 2.2 }, { 0, 5, 0 }, GUN_STEEL),
 			},
 			tilt = -45,
+			icon = "",
+			lore = "Heavy steel. Hold the attack button for a crushing blow.",
 		},
 		{
 			name = "Sledgehammer",
@@ -449,6 +518,8 @@ return function(_define: Define.Context): { Schema.ItemSpec }
 				box({ 7, 4, 4 }, { 0, 7.5, 0 }, GUNMETAL),
 			},
 			tilt = -45,
+			icon = "",
+			lore = "Slow and brutal. Breaks stone in a pinch.",
 		},
 	}
 end

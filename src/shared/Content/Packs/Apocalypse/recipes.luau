@@ -22,8 +22,8 @@
 	  Concrete              Gravel and Sand on the diagonals make four
 	  Mossy Concrete, Mossy Bricks   Concrete or Bricks with a Vine
 	Smelting: Concrete cracks into Cracked Concrete, Bricks into Cracked Bricks, and Scrap Metal
-	melts into an Iron Nugget. Progression/Ages keeps the iron ones (and the hatch and lamp) for
-	the Iron Age and concrete for the Industrial Age.
+	melts into an Iron Nugget. The results' entries name their Ages (`age`): the iron ones (and
+	the hatch and lamp) the Iron Age's, concrete the Industrial Age's.
 
 	Weapons (Shared/Weapons; DayZ makes no gun, magazine or round: the ruins and bunkers hide them;
 	the Turrets pack's Ammo Press presses rounds from iron and gunpowder):

@@ -1,8 +1,9 @@
 --!strict
 --[[
 	The zombie apocalypse's things (the pack's loot fills the ruins' and bunkers' crates and cabinets
-	with them; its recipes make some). Box models in their colours until their icons are made
-	(TexturePack's LEGACY_ICONS names them, blank).
+	with them; its recipes make some). Box models in their colours until their icons are made (each
+	entry's `icon` is blank, so each look is one id to paste). Nails, the Spiked Bat, the Machete and
+	the Crowbar, the things of iron, are the Iron Age's (`age`), the rest the Stone Age's.
 
 	Medical supplies (eaten through Shared/Items/Foods, server Apocalypse/Survival): a Bandage (a
 	white roll), a Medkit (a red case with a white cross), Antibiotics (a pill bottle with an orange
@@ -79,6 +80,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 4, 4, 6.2 }, offset = { 0, 1, 0 }, shape = "Cylinder", color = shade(BANDAGE, 0.8) },
 				{ size = { 6, 3, 1 }, offset = { 3, -4.5, 2.4 }, rotation = -15 },
 			},
+			icon = "",
+			lore = "Stops bleeding and closes small wounds.",
 		},
 		{
 			name = "Medkit",
@@ -92,6 +95,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 5, 1.6, 0.4 }, offset = { 0, -2, 2.6 }, color = WHITE },
 				{ size = { 1.6, 5, 0.4 }, offset = { 0, -2, 2.6 }, color = WHITE },
 			},
+			icon = "",
+			lore = "Stops bleeding, heals a lot and keeps healing for a while.",
 		},
 		{
 			name = "Antibiotics",
@@ -103,6 +108,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 7.4, 3, 6.4 }, offset = { 0, 4, 0 }, color = PILL_CAP },
 				{ size = { 5, 4, 0.4 }, offset = { 0, -2, 3.1 }, color = shade(PILL_CAP, 0.9) },
 			},
+			icon = "",
+			lore = "Cures a bite's infection, if you take it in time.",
 		},
 		{
 			name = "Painkillers",
@@ -110,6 +117,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = BLISTER,
 			material = "Foil",
 			model = blister,
+			icon = "",
+			lore = "Takes the edge off: a little health now, more over time.",
 		},
 		{
 			name = "Rag",
@@ -120,6 +129,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 7, 5, 1.5 }, offset = { -1, 3, 0.3 }, rotation = -15, color = shade(RAG, 0.88) },
 				{ size = { 3, 4, 1.2 }, offset = { 5, -4.5, 0 }, rotation = 25, color = shade(RAG, 1.1) },
 			},
+			icon = "",
+			lore = "A strip of cloth from old wool. Two make Bandages.",
 		},
 		{
 			name = "DuctTape",
@@ -137,12 +148,17 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				},
 				{ size = { 3.5, 3, 1 }, offset = { 4, -5, 1.5 }, rotation = -30 },
 			},
+			icon = "",
+			lore = "Holds anything together, for now. Medkits need it.",
 		},
 		{
 			name = "Nails",
 			color = NAIL,
 			material = "Metal",
 			model = nails,
+			icon = "",
+			lore = "For barricades, spiked bats and other bad days.",
+			age = "iron",
 		},
 		{
 			name = "ScrapMetal",
@@ -154,6 +170,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 7, 4, 1 }, offset = { 2, -2.5, 0.6 }, rotation = -25, color = shade(SCRAP, 0.8) },
 				{ size = { 4, 4, 1 }, offset = { -3.5, -3, -0.4 }, rotation = 45, color = shade(SCRAP, 1.15) },
 			},
+			icon = "",
+			lore = "Twisted steel from wrecks. A furnace turns it into Iron Nuggets.",
 		},
 		{
 			name = "CannedBeans",
@@ -161,6 +179,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = CAN,
 			material = "Metal",
 			model = can({ 170, 60, 40 }),
+			icon = "",
+			lore = "Beans in a dented can. Still good, mostly.",
 		},
 		{
 			name = "CannedPeaches",
@@ -168,6 +188,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = CAN,
 			material = "Metal",
 			model = can({ 230, 150, 60 }),
+			icon = "",
+			lore = "Sweet peaches in syrup. A rare treat in the ruins.",
 		},
 		{
 			name = "Crackers",
@@ -180,6 +202,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 0.8, 0.8, 0.4 }, offset = { -1.2, -0.8, 1.8 }, color = shade(CRACKERS, 0.7) },
 				{ size = { 3, 1.2, 0.4 }, offset = { 3, 2, 1.6 }, color = { 200, 50, 40 } },
 			},
+			icon = "",
+			lore = "Dry and filling. You will want water after.",
 		},
 		{
 			name = "ChocolateBar",
@@ -191,6 +215,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 7, 6.4, 2.4 }, offset = { -2.5, 0, 0 }, color = WRAPPER },
 				{ size = { 4, 1.2, 0.4 }, offset = { -2.5, 0.5, 1.3 }, color = { 236, 200, 60 } },
 			},
+			icon = "",
+			lore = "Quick energy for a quick escape.",
 		},
 		{
 			name = "MilitaryRation",
@@ -202,6 +228,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 10, 1.5, 2.7 }, offset = { 0, 5.25, 0 }, color = shade(RATION, 0.75) },
 				{ size = { 6, 3, 0.4 }, offset = { 0, -1, 1.4 }, color = shade(RATION, 1.4) },
 			},
+			icon = "",
+			lore = "A sealed meal for one long day. Bunkers keep them.",
 		},
 		{
 			name = "BottledWater",
@@ -224,6 +252,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 					material = "SmoothPlastic",
 				},
 			},
+			icon = "",
+			lore = "Clean water in a sealed bottle. The bottle is kept.",
 		},
 		{
 			name = "SodaCan",
@@ -236,6 +266,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 6, 0.8, 5 }, offset = { 0, 4.9, 0 }, color = CAN },
 				{ size = { 7.2, 1.5, 6.2 }, offset = { 0, -1, 0 }, color = WHITE },
 			},
+			icon = "",
+			lore = "Warm, flat and sugary. Puts a spring in your step.",
 		},
 		{
 			name = "BaseballBat",
@@ -245,6 +277,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			material = "Wood",
 			model = bat(),
 			tilt = -45,
+			icon = "",
+			lore = "A wooden bat. Swing for the head.",
 		},
 		{
 			name = "SpikedBat",
@@ -254,6 +288,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			material = "Wood",
 			model = spiked,
 			tilt = -45,
+			icon = "",
+			lore = "A bat with nails through it. Swing harder.",
+			age = "iron",
 		},
 		{
 			name = "Machete",
@@ -270,6 +307,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 2.6, 1, 1.8 }, offset = { 0, -3.5, 0 }, color = GRIP, material = "SmoothPlastic" },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "A long blade for brush, cobwebs and the dead alike.",
+			age = "iron",
 		},
 		{
 			name = "Crowbar",
@@ -285,6 +325,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 2.5, 1.2, 1.5 }, offset = { 1.5, -9, 0 }, rotation = -30, color = shade(CROWBAR, 0.8) },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "Pries, smashes and digs: a survivor's favourite.",
+			age = "iron",
 		},
 		{
 			name = "FireAxe",
@@ -301,6 +344,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 3, 1.5, 1.5 }, offset = { 2.5, 7, 0 }, rotation = -20, color = shade(AXE_HEAD, 0.85) },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "A firefighter's axe. Chops wood and anything else.",
 		},
 		{
 			name = "HerbalPoultice",
@@ -313,6 +358,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 3, 2, 0.4 }, offset = { -2, 3, 1.1 }, rotation = 30, color = shade(POULTICE, 1.3) },
 				{ size = { 2.5, 1.5, 0.4 }, offset = { 2.5, -3, 1.1 }, rotation = -20, color = { 206, 168, 112 } },
 			},
+			icon = "",
+			lore = "Mint and ginger in a rag: slows a bite's infection. Only pills cure it.",
 		},
 	}
 end
