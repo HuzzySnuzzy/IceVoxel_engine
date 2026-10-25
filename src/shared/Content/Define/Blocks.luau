@@ -13,7 +13,6 @@ local Schema = require(script.Parent.Parent.Schema)
 type BlockSpec = Schema.BlockSpec
 type ShapeBox = Schema.ShapeBox
 type Bounds = Schema.Bounds
-type EnergySpec = Schema.EnergySpec
 
 local Blocks = {}
 
@@ -397,7 +396,17 @@ end
 	made with `doorPiece`) and, closed, its insulation (Blocks `insulation`; default a wooden door's
 	0.1).
 ]]
-export type DoorWood = { wood: string, color: { number }, upper: (c: { number }) -> { ShapeBox }, insulation: number? }
+export type DoorWood = {
+	wood: string,
+	color: { number },
+	upper: (c: { number }) -> { ShapeBox },
+	insulation: number?,
+	-- Fields put over (or added to) its item, the lower half facing North ("<Wood>Door": its lore,
+	-- Age, fuel, and its `texture`, which every lower half takes), and over the upper half facing
+	-- North ("<Wood>DoorTop": its `texture`, every upper half's).
+	item: { [string]: any }?,
+	top: { [string]: any }?,
+}
 
 --[[
 	A box of a door half's design: pixels across the door (u: -8 at the hinge .. 8), up the half
@@ -526,6 +535,16 @@ function Blocks.door(wood: DoorWood): { BlockSpec }
 						end
 						spec.icon = icon
 					end
+					-- (The wood's own fields for its item and its upper half facing North.)
+					local own: { [string]: any }? = if item
+						then wood.item
+						elseif name == base .. "Top" then wood.top
+						else nil
+					if own then
+						for field, value in own do
+							(spec :: any)[field] = value
+						end
+					end
 					table.insert(list, spec)
 				end
 			end
@@ -612,12 +631,20 @@ end
 	look and only the eighth is sturdy and keeps `base.insulation` (a room's wall face; fewer let a
 	room's air through). "<Name>1" is the item; the others drop and are placed as it, each dropping
 	n of `base.drops`. Walking in it multiplies the speed by `speeds[n]`. The item is a single layer.
+	What `base` says of the item (its lore, Age, fuel...: ITEM_FIELDS) and its `texture` (the
+	texture pack's entry, which covers every layer) are layer 1's alone.
 ]]
+local ITEM_FIELDS = { "lore", "age", "skill", "fuel", "tags", "texture" }
 function Blocks.layers(base: BlockSpec, speeds: { number }): { BlockSpec }
 	local list: { BlockSpec } = {}
 	for n = 1, 8 do
 		local layered = n >= 2
 		local spec = table.clone(base)
+		if layered then
+			for _, field in ITEM_FIELDS do
+				(spec :: any)[field] = nil
+			end
+		end
 		spec.name = `{base.name}{n}`
 		spec.render = "Transparent"
 		spec.transparency = 0
@@ -640,24 +667,19 @@ function Blocks.layers(base: BlockSpec, speeds: { number }): { BlockSpec }
 end
 
 --[[
-	A Mekanism style machine block of kind `kind` (Shared/Machines) in `colour`: hardness 3.5, a
-	pickaxe to drop anything, metal sounds, drawn with its BlockDecor faces (decor `name`), with
-	`energy` (Schema's: capacity 0 for a fuel-only kind). BlockList's heatMachine: the seasons'
-	stoves, heaters and coolers.
+	`spec` (its name, colour, `machine` kind of Shared/Machines and `energy`, Schema's: capacity 0
+	for a fuel-only kind; its lore, Age...) made a Mekanism style machine block: hardness 3.5, a
+	pickaxe to drop anything, metal sounds, drawn with its BlockDecor faces (decor: its name).
+	BlockList's heatMachine: the seasons' stoves, heaters and coolers. Returns `spec`.
 ]]
-function Blocks.machine(name: string, kind: string, colour: { number }, energy: EnergySpec): BlockSpec
-	return {
-		name = name,
-		color = colour,
-		material = "Metal",
-		sound = "metal",
-		hardness = 3.5,
-		tool = "pickaxe",
-		toolLevel = 0,
-		decor = name,
-		machine = { kind = kind },
-		energy = energy,
-	}
+function Blocks.machine(spec: BlockSpec): BlockSpec
+	spec.material = "Metal"
+	spec.sound = "metal"
+	spec.hardness = 3.5
+	spec.tool = "pickaxe"
+	spec.toolLevel = 0
+	spec.decor = spec.name
+	return spec
 end
 
 return Blocks

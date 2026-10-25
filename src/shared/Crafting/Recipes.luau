@@ -76,7 +76,6 @@ local LEGACY_FUEL: { [string]: number } = {
 	["#planks"] = 300,
 	CraftingTable = 300,
 	Chest = 300,
-	Bowl = 100,
 	WhiteWool = 100,
 	Ladder = 300,
 	OakFence = 300,

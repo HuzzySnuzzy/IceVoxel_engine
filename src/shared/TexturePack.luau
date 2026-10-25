@@ -236,8 +236,6 @@ local LEGACY_BLOCKS: { [string]: Faces } = {
 	AcaciaSapling = { Sprite = "sapling" },
 	JungleSapling = { Sprite = "sapling" },
 	RedMushroom = { Sprite = "red mushroom" },
-	Mint = { Sprite = "mint" },
-	WildGinger = { Sprite = "wild ginger" },
 
 	-- Wool
 	WhiteWool = { All = "white wool" },
@@ -285,13 +283,6 @@ local LEGACY_BLOCKS: { [string]: Faces } = {
 	Barricade = { All = "planks" },
 	ReinforcedBarricade = { All = "planks" },
 	BunkerHatch = { All = "bunker hatch" },
-
-	-- The seasons (an entry covers a variant group: every snow layer, both door halves' groups)
-	SnowLayer1 = { All = "snow" },
-	InsulatedPlanks = { All = "insulated planks" },
-	InsulatedGlass = { All = "insulated glass" },
-	InsulatedDoor = { Front = "insulated door bottom" },
-	InsulatedDoorTop = { Front = "insulated door top" },
 }
 
 -- Item name -> its inventory icon ("" = not made yet; see the header): the side table, for

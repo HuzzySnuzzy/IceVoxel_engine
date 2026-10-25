@@ -10,14 +10,18 @@
 	    canteen's round window, murky green-brown when dirty, clear blue when purified. Filled
 	    bottles stack to 16 (Minecraft's honey bottles), so a furnace purifies a stack in one go.
 	    The Glass Bottle is here, with the water that came with it, though the Minecraft pack's
-	    potions and the Terraria pack's mana potions are drunk from it too.
+	    potions and the Terraria pack's mana potions are drunk from it too. The Canteen is the Iron
+	    Age's.
 	  * Bowls (Minecraft's wooden Bowl: three planks in a V make four) as water containers: filled
 	    at a water source into a Dirty Water Bowl, purified in a furnace or with Mint Leaves into a
 	    Purified Water Bowl, and brewed with a herb into a tea (Mint Tea, Ginger Tea, Herbal Tea
 	    with both). Drinking one gives the Bowl back. Filled bowls stack to 16 like the filled
 	    bottles; teas to 1, like Minecraft's stews. A brown bowl with a darker foot; filled, the
 	    drink's top over its rim (murky, clear blue, the teas' pale green, amber and gold), with a
-	    leaf or a slice of root floating on a tea (the pack's _models).
+	    leaf or a slice of root floating on a tea (the pack's _models). An empty bowl burns 100
+	    ticks as furnace fuel (Minecraft's).
+	What each one gives when drunk is ToughAsNails/Drinks' (its tooltip's "When drunk:" lines);
+	their icons are blank, so each look is one id to paste.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -44,6 +48,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = define.GLASS,
 			material = "Glass",
 			model = bottle(nil),
+			icon = "",
+			lore = "Fill it at water for a drink.",
 		},
 		{
 			name = "DirtyWaterBottle",
@@ -51,6 +57,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = DIRTY_WATER,
 			material = "Glass",
 			model = bottle(DIRTY_WATER),
+			icon = "",
+			lore = "Unsafe to drink. Purify it in a furnace, on a campfire or with mint.",
 		},
 		{
 			name = "PurifiedWaterBottle",
@@ -58,6 +66,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = PURIFIED_WATER,
 			material = "Glass",
 			model = bottle(PURIFIED_WATER),
+			icon = "",
+			lore = "Clean water. Also the base of every potion.",
 		},
 		{
 			name = "Canteen",
@@ -65,6 +75,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = models.CANTEEN,
 			material = "Metal",
 			model = canteen({ 58, 58, 62 }),
+			icon = "",
+			lore = "Fill it at water. Holds several sips.",
+			age = "iron",
 		},
 		{
 			name = "DirtyWaterCanteen",
@@ -72,6 +85,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = DIRTY_WATER,
 			material = "Metal",
 			model = canteen(DIRTY_WATER),
+			icon = "",
+			lore = "Unsafe to drink. Purify it, or top it up at water.",
 		},
 		{
 			name = "PurifiedWaterCanteen",
@@ -79,14 +94,26 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = PURIFIED_WATER,
 			material = "Metal",
 			model = canteen(PURIFIED_WATER),
+			icon = "",
+			lore = "Clean water, a few sips at a time.",
 		},
-		{ name = "Bowl", color = models.BOWL, material = "Wood", model = bowl(nil) },
+		{
+			name = "Bowl",
+			color = models.BOWL,
+			material = "Wood",
+			model = bowl(nil),
+			icon = "",
+			lore = "Fill it at water. Holds a little more than a bottle.",
+			fuel = 100,
+		},
 		{
 			name = "DirtyWaterBowl",
 			maxStack = 16,
 			color = DIRTY_WATER,
 			material = "Wood",
 			model = bowl(DIRTY_WATER),
+			icon = "",
+			lore = "Unsafe to drink. Purify it in a furnace, on a campfire or with mint.",
 		},
 		{
 			name = "PurifiedWaterBowl",
@@ -94,6 +121,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = PURIFIED_WATER,
 			material = "Wood",
 			model = bowl(PURIFIED_WATER),
+			icon = "",
+			lore = "Clean water. Brew a herb into it for tea.",
 		},
 		{
 			name = "MintTea",
@@ -101,6 +130,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = MINT_TEA,
 			material = "Wood",
 			model = bowl(MINT_TEA, { MINT_FLOAT }),
+			icon = "",
+			lore = "A cooling brew for hot places.",
 		},
 		{
 			name = "GingerTea",
@@ -108,6 +139,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = GINGER_TEA,
 			material = "Wood",
 			model = bowl(GINGER_TEA, { GINGER_FLOAT }),
+			icon = "",
+			lore = "A warming brew for cold places.",
 		},
 		{
 			name = "HerbalTea",
@@ -115,6 +148,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = HERBAL_TEA,
 			material = "Wood",
 			model = bowl(HERBAL_TEA, { MINT_FLOAT, GINGER_FLOAT }),
+			icon = "",
+			lore = "Mint and ginger together: steadies you in heat and cold.",
 		},
 	}
 end

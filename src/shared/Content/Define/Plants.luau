@@ -262,28 +262,15 @@ function Plants.sapling(name: string, colour: { number }, displayName: string): 
 end
 
 --[[
-	A herb (Tough As Nails' water and teas): a plant on dirt that is no item of its own (its item
-	plants it, its `places`), spreading slowly (server Behaviours/Herb), drawn with `shape`
-	inside `bounds`; it burns like the flowers (60 / 100).
+	A herb (Tough As Nails' water and teas): `spec` (its name, colour, `shape` inside `bounds`, its
+	texture, how it burns...) made a plant on dirt that is no item of its own (its item plants it,
+	its `places`), spreading slowly (server Behaviours/Herb). Returns `spec`.
 ]]
-function Plants.herb(
-	name: string,
-	displayName: string,
-	colour: { number },
-	shape: { ShapeBox },
-	bounds: Bounds
-): BlockSpec
-	return plant({
-		name = name,
-		displayName = displayName,
-		color = colour,
-		placeable = false,
-		behaviour = "Herb",
-		plant = { soil = "dirt" },
-		shape = shape,
-		bounds = bounds,
-		flammable = { ignite = 60, burn = 100 },
-	})
+function Plants.herb(spec: BlockSpec): BlockSpec
+	spec.placeable = false
+	spec.behaviour = "Herb"
+	spec.plant = { soil = "dirt" }
+	return plant(spec)
 end
 
 return Plants

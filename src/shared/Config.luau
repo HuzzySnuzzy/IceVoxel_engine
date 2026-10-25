@@ -1601,7 +1601,7 @@ local Config = {
 		-- with a warning, so a block may be listed here before it exists. Lit furnaces and working
 		-- Heat and Combustion Generators warm too (server Players/ToughAsNails registers them).
 		-- Within 2 blocks of one, cold sources no longer cool (a fire beats the snow around it).
-		HeatingBlocks = { "Lava", "Fire", "Campfire" },
+		HeatingBlocks = { "Lava", "Fire" },
 		-- Blocks that cool the player by 3 steps within ProximityRadius.
 		CoolingBlocks = { "Ice", "PackedIce", "BlueIce", "Snow" },
 		-- The picture as the extremes build (client Rendering/TemperatureGrade): its Saturation

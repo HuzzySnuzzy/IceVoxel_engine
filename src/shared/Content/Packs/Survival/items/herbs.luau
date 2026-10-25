@@ -4,7 +4,7 @@
 	plant drops: a sprig of three bright leaves on a pale stem; they cure dirty water in a crafting
 	grid and brew Mint Tea. Ginger Root, what Wild Ginger drops: a knobbly tan root with a pink bud;
 	it brews Ginger Tea. Each plants its herb back on dirt or grass (`places`, the pack's Mint and
-	WildGinger blocks).
+	WildGinger blocks). Blank icons, so each look is one id to paste.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -23,6 +23,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = MINT,
 			material = "SmoothPlastic",
 			places = "Mint",
+			icon = "",
+			lore = "Purifies water, brews mint tea and Swiftness. Plant it to grow mint.",
 			model = {
 				{ size = { 1, 9, 1 }, offset = { 0.5, -3.5, -0.2 }, rotation = -10, color = { 84, 124, 60 } },
 				{ size = { 5.5, 3, 1 }, offset = { -2.6, 0.5, 0 }, rotation = 28, color = MINT_DARK },
@@ -42,6 +44,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = GINGER,
 			material = "SmoothPlastic",
 			places = "WildGinger",
+			icon = "",
+			lore = "Brews ginger tea and Fire Resistance. Plant it to grow ginger.",
 			model = {
 				{ size = { 9, 3.5, 3.5 }, offset = { -0.5, -1, 0 }, rotation = 12 },
 				{ size = { 3, 4, 3 }, offset = { 2.4, 2, 0 }, rotation = -18 },

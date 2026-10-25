@@ -98,8 +98,6 @@ for _, name in
 		"GoldBlock",
 		"RawGoldBlock",
 		"Lantern",
-		"Canteen",
-		"Thermometer",
 		"Rail",
 		-- (Terraria's things of iron, gold and emerald, and the Mana Potion: brewing.)
 		"Aglet",
@@ -120,10 +118,6 @@ for _, name in
 		"BunkerHatch",
 		-- (The weapons' iron: crossbow bolts.)
 		"CrossbowBolt",
-		-- (The seasons' iron: the stove, insulated glass and doors.)
-		"WoodStove",
-		"InsulatedGlass",
-		"InsulatedDoor",
 		-- (The new ores' lead, zinc and brass and the Hazmat suit are too: their entries say so,
 		-- in the Ores pack.)
 	}
@@ -143,19 +137,12 @@ for _, name in
 		"Concrete",
 		"CrackedConcrete",
 		"MossyConcrete",
-		-- (The seasons: the Oil Heater.)
-		"OilHeater",
 	}
 do
 	table.insert(industrial, name)
 end
 
-local electric: { string } = {
-	-- (The seasons: electric heating and cooling.)
-	"ElectricHeater",
-	"AirConditioner",
-	"ElectricFan",
-}
+local electric: { string } = {}
 
 local atomic: { string } = {
 	"Nuke",

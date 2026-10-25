@@ -45,7 +45,7 @@
 	                  a door's 32 halves from its wood's design, the design's boxes
 	  fence(base)     a fence's 16 variants (lone post and arms) from its own fields
 	  layers(base, speeds)   a layered block's eight heights (snow layers)
-	  machine(name, kind, colour, energy)   a Mekanism style machine block (heaters, coolers)
+	  machine(spec)   a Mekanism style machine block (heaters, coolers) from its own fields
 
 	Plants (Define/Plants: Minecraft's ground foliage)
 	  GROUND, STEM, LEAF, LEAF_LIGHT   the ground's height, flower stems' and leaves' greens
@@ -56,7 +56,7 @@
 	  tallFlower(name, colour, lower, upper, extra, displayName?)   a two block flower
 	  flower(name, colour, shape, displayName?), tulip(name, colour)   flowers on dirt
 	  mushroom(name, colour, shape, displayName), sapling(name, colour, displayName)
-	  herb(name, displayName, colour, shape, bounds)   a Tough As Nails herb, planted by its item
+	  herb(spec)      a Tough As Nails herb, planted by its item
 
 	Recipes (Define/Recipes) and metals (Define/Metal)
 	  shaped, shapeless, smelting   recipe records

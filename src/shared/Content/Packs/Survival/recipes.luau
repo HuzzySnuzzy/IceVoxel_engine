@@ -18,7 +18,7 @@
 	(ToughAsNails/Boiling), so a mint leaf cures water and never makes more of it far from any. A
 	Purified Water Bowl brews a tea with a herb: Mint Leaves make Mint Tea (Internal Chill), Ginger
 	Root Ginger Tea (Internal Warmth), both Herbal Tea. A bowl burns 100 ticks as fuel
-	(Minecraft's; Crafting/Recipes' fuel).
+	(Minecraft's; the Bowl's `fuel`).
 
 	Tough As Nails' gear for the cold and the heat. The Campfire is Minecraft's: a stick on top and
 	one each side of a coal or charcoal, over three logs of any wood (" S ", "SCS", "LLL"). Straw
@@ -26,9 +26,9 @@
 	(Shears harvest them): 24 for a set, as leather. The Thermometer (TAN's) is an iron nugget over
 	glass over glow dust, the game's redstone (TAN's own uses copper and redstone).
 
-	The seasons (Shared/Seasons; Progression/Ages: the Snow Layer and Insulated Planks are the Stone
-	Age's, the Wood Stove, Insulated Glass and Insulated Door the Iron Age's, the Oil Heater the
-	Industrial Age's, the Electric Heater, Air Conditioner and Electric Fan the Electric Age's):
+	The seasons (Shared/Seasons; their entries' `age`: the Snow Layer and Insulated Planks are the
+	Stone Age's, the Wood Stove, Insulated Glass and Insulated Door the Iron Age's, the Oil Heater
+	the Industrial Age's, the Electric Heater, Air Conditioner and Electric Fan the Electric Age's):
 	  Snow Layer       three Snow blocks in a row make six (Minecraft's)
 	  Insulated Planks planks and White Wool in a checker make four
 	  Insulated Glass  glass between Iron Nuggets makes two

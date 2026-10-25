@@ -2872,7 +2872,7 @@ for performance:
 | `ToughAsNails.ClemencyTicks` / `RespawnClemencyTicks` | 6000 / 1200 | Climate Clemency on joining / respawning: the temperature held neutral, half the thirst drain, no dehydration (0: none). |
 | `ToughAsNails.WetTicks` | 100 | Ticks a player stays wet out of water (3 steps colder). |
 | `ToughAsNails.ColdExhaustion` / `LeatherFreezeImmunity` | 0.005 / false | With the seasons on: food exhaustion a tick in the COLD zone and below (shivering: a food point every 40 s), and whether a leather piece still stops hypothermia (false: clothes slow freezing but never stop it, as Don't Starve's; without seasons a piece always does). |
-| `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire, Campfire / ice, snow | Heat sources within that many blocks warm 3 steps (5 within 2 blocks, where cold sources no longer cool), cold sources cool 3 (fluid or block names; unknown names are skipped with a warning). |
+| `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire / ice, snow | Heat sources within that many blocks warm 3 steps (5 within 2 blocks, where cold sources no longer cool), cold sources cool 3 (fluid or block names; unknown names are skipped with a warning). |
 | `Progression.Enabled` / `GateRecipes` | true / true | Knowledge, Ages and the skill tree at all (off: no bar, no gates, no perks); a later Age's (or a skill's) crafting and smelting results locked. |
 | `Progression.Save` / `SaveInterval` | true / 120 | Keep progress between sessions (DataStore "IceVoxelProgress_v1"; Studio needs API access); seconds between saves of changed progress (and on leaving and shutdown). |
 | `Progression.RepeatBudget` | 20 | Points a minute at most from repeated actions together (ores, logs, smelting, crafting, mobs; the knowledge perks included); discoveries are not limited. |
@@ -4209,7 +4209,7 @@ Climate.addColdSource("PowderSnow")
 A source counts within `ProximityRadius` blocks of the player's feet (a cube), checked once a
 second, and warms 3 steps (5 when one is within 2 blocks, and then cold sources don't cool) or
 cools 3, however many there are. A name no block has yet is skipped with a warning, so a block
-can go into `HeatingBlocks` before it exists (the Campfire is listed there).
+can go into `HeatingBlocks` before it exists (the Campfire's entry says `heats = true` instead).
 
 **Drinks and containers (Tough As Nails).** `Shared/ToughAsNails/Drinks` reads three tables:
 `ITEMS` (a full item: its drink, the empty container it leaves, `sips` for a canteen), `FILLS` (an

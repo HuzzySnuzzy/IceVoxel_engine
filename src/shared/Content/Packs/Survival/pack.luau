@@ -22,10 +22,12 @@
 	    insulation   Insulated Planks, Insulated Glass and the Insulated Door: blocks/seasons,
 	                 recipes, textures
 
+	Each entry carries what the registries make of it: its lore, its texture or icon (blank: still
+	to make), its Age and fuel, the campfire's warmth (`heats`), the armor's equip sound.
+
 	Calls made here: the Glass Bottle is here (Tough As Nails' water brought it), though the
 	Minecraft pack's potions are brewed from its Purified Water Bottle; the Bowl, Minecraft's, came
-	with the teas. The heating and cooling blocks (the campfire's warmth) are still Config
-	.ToughAsNails' side lists, by name.
+	with the teas. The Straw that grass drops is the grass's (the Minecraft pack's blocks).
 ]]
 return {
 	order = 300,

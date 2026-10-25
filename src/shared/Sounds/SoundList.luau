@@ -800,11 +800,7 @@ SoundList.MENUS = {
 
 -- Armor equip sounds by the start of the item's name (ItemList's armor materials), else
 -- ARMOR_DEFAULT.
-SoundList.ARMOR = {
-	-- (Tough As Nails' straw and leaf armor: soft, like leather.)
-	{ prefix = "Straw", sound = "item.armor.equip_leather" },
-	{ prefix = "Leaf", sound = "item.armor.equip_leather" },
-} :: { { prefix: string, sound: string } }
+SoundList.ARMOR = {} :: { { prefix: string, sound: string } }
 SoundList.ARMOR_DEFAULT = "item.armor.equip_generic"
 
 -- A hurting landing of more half hearts than this sounds big.

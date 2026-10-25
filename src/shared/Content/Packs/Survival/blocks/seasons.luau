@@ -11,7 +11,8 @@
 	    layer of 8 is a wall face (`insulation` 0.02), fewer let a room's air through. The server's
 	    SnowLayer behaviour drops a layer whose support goes, and Seasons/SnowWorld piles and melts
 	    them. Not a Tough As Nails cold source: the season brings the cold. They take the
-	    Minecraft pack's "snow" texture.
+	    Minecraft pack's "snow" texture, which layer 1's entry gives every layer (`layers` keeps
+	    what is said of the item, its texture and lore, on layer 1).
 	  * Heaters, coolers and stoves (Shared/Machines kinds "stove", "oilheater", "heater" and
 	    "cooler"; their room heat: server Seasons/RoomWorld through Players/Climate's room sources):
 	    Mekanism style machine blocks (Content/Define's `machine`), drawn with their BlockDecor
@@ -25,7 +26,8 @@
 	  * Insulation (Shared/Seasons/Rooms): Insulated Planks (planks and wool, U 0.006: a room of
 	    them keeps its heat four times longer than planks; they burn like planks), Insulated Glass
 	    (double panes in an iron frame, U 0.04: a window that loses a third of glass's) and the
-	    Insulated Door (Content/Define's `door`: 32 halves of a padded oak door, U 0.03 closed).
+	    Insulated Door (Content/Define's `door`: 32 halves of a padded oak door, U 0.03 closed; its
+	    item's lore, Age and picture are `item`'s, its upper halves' picture `top`'s).
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -49,14 +51,51 @@ return function(define: Define.Context): { BlockSpec }
 		drops = "Snowball" :: string,
 		insulation = 0.02,
 		behaviour = "SnowLayer",
+		texture = { All = "snow" },
+		lore = "A thin cover of snow. Use it on snow to pile it higher; deep snow slows you.",
 	}, SNOW_SPEED)
 
 	define.append(list, {
-		define.machine("WoodStove", "stove", { 56, 54, 54 }, { capacity = 0 }),
-		define.machine("OilHeater", "oilheater", { 120, 64, 44 }, { capacity = 0 }),
-		define.machine("ElectricHeater", "heater", { 150, 154, 162 }, { capacity = 16000, input = 400 }),
-		define.machine("AirConditioner", "cooler", { 196, 204, 210 }, { capacity = 20000, input = 500 }),
-		define.machine("ElectricFan", "cooler", { 132, 138, 146 }, { capacity = 2000, input = 100 }),
+		define.machine({
+			name = "WoodStove",
+			color = { 56, 54, 54 },
+			machine = { kind = "stove" },
+			energy = { capacity = 0 },
+			lore = "Burns furnace fuel four times as long to heat the room it stands in.",
+			age = "iron",
+		}),
+		define.machine({
+			name = "OilHeater",
+			color = { 120, 64, 44 },
+			machine = { kind = "oilheater" },
+			energy = { capacity = 0 },
+			lore = "Burns oil or fuel to hold a room at its set point.",
+			age = "industrial",
+		}),
+		define.machine({
+			name = "ElectricHeater",
+			color = { 150, 154, 162 },
+			machine = { kind = "heater" },
+			energy = { capacity = 16000, input = 400 },
+			lore = "Holds a room at its set point on power. Outdoors it warms whoever stands close.",
+			age = "electric",
+		}),
+		define.machine({
+			name = "AirConditioner",
+			color = { 196, 204, 210 },
+			machine = { kind = "cooler" },
+			energy = { capacity = 20000, input = 500 },
+			lore = "Cools a room to its set point on power. Useless outdoors.",
+			age = "electric",
+		}),
+		define.machine({
+			name = "ElectricFan",
+			color = { 132, 138, 146 },
+			machine = { kind = "cooler" },
+			energy = { capacity = 2000, input = 100 },
+			lore = "Takes the edge off a hot room. Cheap to run.",
+			age = "electric",
+		}),
 	})
 
 	define.append(list, {
@@ -70,6 +109,8 @@ return function(define: Define.Context): { BlockSpec }
 			tool = "axe",
 			insulation = 0.006,
 			flammable = { ignite = 5, burn = 20 },
+			texture = { All = "insulated planks" },
+			lore = "Wool-lined boards. A room of them keeps its warmth far longer.",
 		},
 		{
 			name = "InsulatedGlass",
@@ -81,6 +122,9 @@ return function(define: Define.Context): { BlockSpec }
 			hardness = 0.6,
 			tool = "pickaxe",
 			insulation = 0.04,
+			texture = { All = "insulated glass" },
+			lore = "Double panes in iron: a window that keeps the cold out.",
+			age = "iron",
 		},
 	})
 	define.append(
@@ -103,6 +147,12 @@ return function(define: Define.Context): { BlockSpec }
 					),
 				}
 			end,
+			item = {
+				texture = { Front = "insulated door bottom" },
+				lore = "A padded door. Closed, it keeps a room's warmth in.",
+				age = "iron",
+			},
+			top = { texture = { Front = "insulated door top" } },
 		})
 	)
 	return list

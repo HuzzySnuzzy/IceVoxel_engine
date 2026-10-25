@@ -14,11 +14,12 @@
 	    Shears harvest) cools a step a piece, so a desert's 9 by day becomes 5, warm, and the
 	    hottest target (10, sprinting by lava) 6. Neither is freeze immune (leather is) and neither
 	    does anything on the other side of neutral (insulation only pulls towards 0). They sound
-	    like leather when put on (SoundList.ARMOR).
+	    like leather when put on (`equipSound`).
 	  * Thermometer (TAN's): while it is the held item, the HUD reads out the body temperature and
 	    where it is going in the item-in-hands box over the quickbar (client Ui/Hud). A glass tube
 	    on an iron plate with a red bulb; an iron nugget over glass over glow dust (the game's
-	    redstone) makes it.
+	    redstone) makes it, from the Iron Age.
+	Their icons are blank, so each look is one id to paste.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Parent.Define)
@@ -36,6 +37,9 @@ local INSULATING_ARMOR: { Define.ArmorMaterial } = {
 		points = { 1, 3, 2, 1 },
 		toughness = 0,
 		tan = { warmth = 1 },
+		lore = "Woven straw: warm, but flimsy.",
+		icon = "",
+		equipSound = "item.armor.equip_leather",
 	},
 	{
 		name = "Leaf",
@@ -44,6 +48,9 @@ local INSULATING_ARMOR: { Define.ArmorMaterial } = {
 		points = { 1, 3, 2, 1 },
 		toughness = 0,
 		tan = { cooling = 1 },
+		lore = "Woven leaves keep you cool in the heat.",
+		icon = "",
+		equipSound = "item.armor.equip_leather",
 	},
 }
 
@@ -63,6 +70,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 7, 2, 3.6 }, offset = { 0, -1, 0 }, color = { 142, 104, 52 } },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "From grass broken by hand. Makes straw armor and rope.",
 		},
 	}
 	for _, armor in INSULATING_ARMOR do
@@ -83,6 +92,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			{ size = { 1.2, 0.5, 0.4 }, offset = { -1.9, 2.5, -0.1 }, color = { 60, 60, 66 } },
 			{ size = { 1.2, 0.5, 0.4 }, offset = { -1.9, 0, -0.1 }, color = { 60, 60, 66 } },
 		},
+		icon = "",
+		lore = "Hold it to read the temperature around you.",
+		age = "iron",
 	})
 	return list
 end

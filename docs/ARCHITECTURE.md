@@ -5375,7 +5375,7 @@ cover): the server module registers the Furnace (while its container's litTime >
 and Combustion Generators (while their machine is active). `Climate.sources` gives the distance of
 the nearest heat and cold source (along the farthest axis); a check only runs for a block of its
 kind within range that would be nearer than the nearest found so far. The Campfire, always lit, is
-a plain `HeatingBlocks` name; anything new that warms only sometimes (burning blocks) registers
+a plain `heats` entry; anything new that warms only sometimes (burning blocks) registers
 with a check. The seasons' weather ice (the View's `seasonal`: `WorldServer.thawAt`, what the
 weather froze) is no cold source, as the season's climate already carries that cold; a player's
 ice and a frozen biome's still cool.
@@ -5386,7 +5386,7 @@ ice and a frozen biome's still cool.
   logs, the glowing bed of embers that carries its light 15, the 7 pixel outline), not solid (the
   hull has no 7 pixel step) but `obstructs`, strength 2 with an axe, dropping itself (Minecraft
   drops 2 charcoal without Silk Touch, which the game has no way to get, so it could never be
-  moved). A `HeatingBlocks` heat source; standing in it hurts (Players/Burning, above in Fluids);
+  moved). A heat source (`heats`); standing in it hurts (Players/Burning, above in Fluids);
   spawns avoid it (SpawnUnsafeBlocks Body and Hazards); its flames and crackle are fire's
   (Rendering);
 - **boiling** (`ToughAsNails/Boiling`, pure): a right click on a campfire with dirty water
@@ -8140,7 +8140,7 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
   with `block.fire.ambient` (they are FireRenderer's records too), and dirty water boiled on one
   bubbles with `block.campfire.boil` (this game's; the server, at the campfire: Players/ItemUse;
   the splash pitched up). Straw and leaf armor go on with `item.armor.equip_leather`
-  (`SoundList.ARMOR` prefixes "Straw" and "Leaf").
+  (their entries' `equipSound`).
 - Turrets and the Metal Miner (appended after the seasons', the last events): `block.turret.servo`
   (a turning turret: the falling wind pitched up, at most `Config.Turrets.Client.ServoLoops` of
   them; Rendering/TurretView), `block.metal_miner.hum` and `block.ammo_press.hum` (a working

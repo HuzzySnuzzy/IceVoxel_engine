@@ -13,8 +13,8 @@
 	`obstructs`, so it is never placed inside a player. Strength 2 (hardness and blast resistance),
 	an axe mines it fast, wood sounds. Minecraft drops 2 charcoal without Silk Touch, which this
 	game has no enchantment for: here it drops itself, so a campfire can be moved. A heat source
-	(Config.ToughAsNails.HeatingBlocks: 3 steps within 5 blocks, 5 within 2) where dirty water boils
-	clean (Shared/ToughAsNails/Boiling); it crackles like fire (Audio/Ambience through
+	(`heats`, Shared/ToughAsNails/Temperature: 3 steps within 5 blocks, 5 within 2) where dirty water
+	boils clean (Shared/ToughAsNails/Boiling); it crackles like fire (Audio/Ambience through
 	FireRenderer.firesNear). Spawns never land in or next to one (Players/SpawnUnsafeBlocks). Its
 	item shows a few flames over the logs (`icon`).
 ]]
@@ -61,5 +61,7 @@ return {
 		icon = campfireIcon,
 		bounds = { min = { 0, 0, 0 }, max = { 16, 7, 16 } },
 		obstructs = true,
+		heats = true,
+		lore = "Warms you when close and boils dirty water clean. Hot to touch.",
 	},
 } :: { Schema.BlockSpec }

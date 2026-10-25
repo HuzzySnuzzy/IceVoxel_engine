@@ -117,9 +117,9 @@ end
 	warms a step a piece and is freeze immune, Minecraft's freeze_immune_wearables). What every
 	piece says of itself, each optional (Schema's fields of those names): `equipSound`, the event
 	putting it on plays (SoundList's "item.armor.equip_<material>"; none: what Sounds.armorEquip
-	gives armor naming none), so a set names its sound once; `lore`, its tooltip line; `age`, the Age opening its recipes; and
-	`icons`, each piece's icon by its name (ARMOR_PIECES': Helmet, Chestplate, Leggings, Boots;
-	"" = not made yet).
+	gives armor naming none), so a set names its sound once; `lore`, its tooltip line; `age`, the
+	Age opening its recipes; `icon`, every piece's icon ("" = not made yet); and `icons`, a piece's
+	own icon by its name (ARMOR_PIECES': Helmet, Chestplate, Leggings, Boots), over `icon`.
 ]]
 export type ArmorMaterial = {
 	name: string,
@@ -131,6 +131,7 @@ export type ArmorMaterial = {
 	equipSound: string?,
 	lore: string?,
 	age: string?,
+	icon: string?,
 	icons: { [string]: string }?,
 }
 
@@ -148,7 +149,7 @@ function Items.armorSet(armor: ArmorMaterial): { ItemSpec }
 			color = armor.color,
 			material = armor.material,
 			model = piece.model,
-			icon = icons[piece.name],
+			icon = icons[piece.name] or armor.icon,
 			lore = armor.lore,
 			age = armor.age,
 			equipSound = armor.equipSound,

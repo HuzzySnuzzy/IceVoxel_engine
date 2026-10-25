@@ -5,7 +5,9 @@
 	alight), boiling dirty water clean on it (every dirty container, a canteen keeping its sips,
 	creative's rule, who may), Straw from grass by hand, Straw and Leaf armor (leather's points, a
 	step of warmth or cooling a piece, what full and partial sets do to the coldest and the hottest
-	targets, a tundra simulated tick by tick), the Thermometer's recipe, and the new sounds.
+	targets, a tundra simulated tick by tick), the Thermometer's recipe, the new sounds, and every
+	entry of the Survival pack carrying its own lore, icon or texture, Age, fuel, heat and equip
+	sound (no side table naming it).
 ]]
 
 return function(t, shared, require, server)
@@ -153,8 +155,11 @@ return function(t, shared, require, server)
 	end)
 
 	t.test("campfire: a heat source, 5 steps within 2 blocks, and it outweighs the snow there", function()
-		t.ok(Climate.isHeating(B.Campfire), "Config.ToughAsNails.HeatingBlocks")
-		t.ok(table.find(Config.ToughAsNails.HeatingBlocks, "Campfire") ~= nil)
+		-- (Its entry `heats` now, not Config.ToughAsNails.HeatingBlocks: the Survival pack's
+		-- entries carry their own values.)
+		t.ok(Climate.isHeating(B.Campfire), "the Campfire's `heats`")
+		t.ok(table.find(Temperature.HEATING_BLOCKS, "Campfire") ~= nil)
+		t.ok(table.find(Config.ToughAsNails.HeatingBlocks, "Campfire") == nil, "not in the side list too")
 		-- A tundra: snow underfoot everywhere (a cold source), a campfire at `distance`.
 		local function tundraTarget(distance: number?, dayTime: number, armor: { [number]: Items.Stack? }?): number
 			local campfire = if distance then { distance, 64, 0 } else nil
@@ -483,5 +488,41 @@ return function(t, shared, require, server)
 		t.eq(Items.get(I.Thermometer).armor, nil, "held, not worn")
 		t.ok(#(Items.get(I.Thermometer).model :: { any }) > 0, "a model")
 		t.ok(#(Items.get(I.Straw).model :: { any }) > 0)
+	end)
+
+	--[[ The Survival pack's entries ]]
+
+	t.test("survival pack: each entry says its own lore, icon or texture, Age, fuel, heat and equip sound", function()
+		local content = require(shared.Content).default
+		local LoreList = require(shared.Items.LoreList)
+		local TexturePack = require(shared.TexturePack)
+		local Ages = require(shared.Progression.Ages)
+		local Recipes = require(shared.Crafting.Recipes)
+		local count = 0
+		-- (A registry's value for an entry with the field on the entry comes from the entry: a value
+		-- both there and in a side table fails the load.)
+		for _, entry in content.entries do
+			local isBlock = content.block(entry.name) ~= nil
+			local where = content.where(if isBlock then "block" else "item", entry.name)
+			if string.find(where, "pack Survival", 1, true) == nil then
+				continue
+			end
+			count += 1
+			local own = entry :: any
+			t.eq(own.lore, LoreList[entry.name], `{where}: its lore on its entry`)
+			if isBlock then
+				t.ok(TexturePack.Blocks[entry.name] == nil or own.texture ~= nil, `{where}: its texture`)
+				t.eq(own.heats == true, table.find(Temperature.HEATING_BLOCKS, entry.name) ~= nil, `{where}: heats`)
+			else
+				t.ok(own.icon ~= nil, `{where}: its icon ("" blank)`)
+				t.eq(own.equipSound ~= nil, own.armor ~= nil, `{where}: an armor piece's equip sound`)
+			end
+			t.eq(own.age ~= nil, Ages.ofName(entry.name) > 1, `{where}: its Age`)
+			t.eq(own.fuel, Recipes.fuel[entry.name], `{where}: its fuel`)
+		end
+		t.ok(count > 50, "the pack's blocks and items")
+		t.eq(Sounds.armorEquip(I.StrawHelmet), Sounds.find("item.armor.equip_leather"), "straw sounds like leather")
+		t.eq(Sounds.armorEquip(I.LeafBoots), Sounds.find("item.armor.equip_leather"), "and so do leaves")
+		t.eq(Recipes.fuel.Bowl, 100, "a bowl burns as Minecraft's")
 	end)
 end

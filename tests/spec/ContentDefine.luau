@@ -97,6 +97,69 @@ return function(t, shared, require)
 		valid("blocks", layers)
 	end)
 
+	t.test("define: what a door's, a layered block's, an armor set's and a herb's entries say of themselves", function()
+		-- A door's item and its upper half facing North take the wood's `item` and `top`.
+		local door = Define.door({
+			wood = "Felt",
+			color = { 100, 100, 100 },
+			upper = function(_c)
+				return { Define.doorPiece(-8, 8, -8, 8) }
+			end,
+			item = { lore = "Soft.", age = "iron", texture = { Front = "felt door bottom" } },
+			top = { texture = { Front = "felt door top" } },
+		})
+		for _, half in door do
+			local own = half.name == "FeltDoor" or half.name == "FeltDoorTop"
+			t.eq(half.texture ~= nil, own, `{half.name}: only the two entries the texture pack keys by`)
+			t.eq(half.lore, if half.name == "FeltDoor" then "Soft." else nil, `{half.name}'s lore`)
+		end
+		valid("blocks", door)
+		-- A layered block's item fields and its texture are layer 1's alone (its other heights are
+		-- no items, and layer 1's texture covers them).
+		local layers = Define.layers(
+			{ name = "Ash", drops = "Ash1", lore = "Grey.", texture = { All = "ash" }, age = "iron" },
+			{ 1, 1, 1, 1, 1, 1, 1, 1 }
+		)
+		t.eq(layers[1].lore, "Grey.")
+		t.eq(layers[1].texture and layers[1].texture.All, "ash")
+		t.eq(layers[1].age, "iron")
+		for n = 2, 8 do
+			t.ok(layers[n].lore == nil and layers[n].texture == nil and layers[n].age == nil, `Ash{n}: none`)
+			t.eq(layers[n].drops, "Ash1", "the block's own fields stay")
+		end
+		-- An armor set's lore, icon and equip sound on every piece.
+		local armor = Define.armorSet({
+			name = "Felt",
+			color = { 1, 1, 1 },
+			material = "Fabric",
+			points = { 1, 1, 1, 1 },
+			toughness = 0,
+			lore = "Soft.",
+			icon = "",
+			equipSound = "item.armor.equip_leather",
+		})
+		for _, piece in armor do
+			t.eq(piece.lore, "Soft.")
+			t.eq(piece.icon, "")
+			t.eq(piece.equipSound, "item.armor.equip_leather")
+		end
+		valid("items", armor)
+		-- A herb from its own fields: a plant on dirt, no item, spreading by its behaviour.
+		local herb = Define.herb({
+			name = "Sage",
+			color = { 1, 2, 3 },
+			shape = { Define.stem(6) },
+			bounds = Define.FLOWER_BOUNDS,
+			texture = { Sprite = "sage" },
+		})
+		t.eq(herb.placeable, false)
+		t.eq(herb.behaviour, "Herb")
+		t.eq(herb.plant and herb.plant.soil, "dirt")
+		t.eq(herb.support, "Down")
+		t.eq(herb.texture and herb.texture.Sprite, "sage")
+		valid("blocks", { herb })
+	end)
+
 	t.test("define: plants, tall plants and flowers; transmitters, cables, tanks, machines", function()
 		local tall = Define.tallFlower("Bloom", { 1, 2, 3 }, { Define.stem(6) }, { Define.stem(4) }, {})
 		t.eq(names(tall), "Bloom BloomTop")
@@ -126,8 +189,17 @@ return function(t, shared, require)
 		t.eq(cable.shape[1].material, "SmoothPlastic", "the conductor")
 		local tank = Define.tank({ name = "TestTank", tank = { tier = 1, capacity = 1000 } }, { 3, 3, 3 })
 		t.eq(tank.sturdy, true)
-		local machine = Define.machine("TestHeater", "heater", { 1, 1, 1 }, { capacity = 100, input = 10 })
+		-- (A machine is made from its own fields now, so its entry shows its lore and Age too.)
+		local machine = Define.machine({
+			name = "TestHeater",
+			color = { 1, 1, 1 },
+			machine = { kind = "heater" },
+			energy = { capacity = 100, input = 10 },
+			age = "iron",
+		})
 		t.eq(machine.decor, "TestHeater")
+		t.eq(machine.hardness, 3.5)
+		t.eq(machine.age, "iron", "its own fields kept")
 		valid("blocks", { pipe, cable, tank, machine })
 	end)
 
