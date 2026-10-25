@@ -21,9 +21,10 @@
 	                  and knockback, the clients' effects) before any block goes, as Minecraft
 	                  hurts entities in explode() before finalizeExplosion drops anything;
 	               3. Minecraft's explosion sound (entity.generic.explode, Audio/Sounds);
-	               4. every affected non-air block becomes air, dropping its items (leaves their
-	                  sapling or sticks, Items.leafDrop) with chance 1 / power (Behaviours/Drops;
-	                  containers drop their contents through Inventories as for any change);
+	               4. every affected non-air block becomes air, dropping its items (its `loot`
+	                  now and then, Items.lootDrop: leaves their sapling or sticks, else its
+	                  usual drop) with chance 1 / power (Behaviours/Drops; containers drop
+	                  their contents through Inventories as for any change);
 	                  unclaimed fuel among them is ignited instead (it is the explosive), and
 	                  explosive blocks are handed to the primer (`setPrimer`, Behaviours/Tnt:
 	                  TNT and the Nuke are lit with a short fuse, lit ones stay, as Minecraft's
@@ -319,7 +320,7 @@ local function detonate(world: World, state: State, pending: Pending): number
 			continue
 		end
 		if world:setBlock(bx, by, bz, AIR) and random() < chance then
-			local stack = Items.leafDrop(block, random) or Items.blockDrops(block)
+			local stack = Items.lootDrop(block, random) or Items.blockDrops(block)
 			if stack then
 				Drops.stack(bx, by, bz, stack)
 			end

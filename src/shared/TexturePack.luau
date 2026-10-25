@@ -7,10 +7,8 @@
 
 	  Textures  the packs' `textures` (each pack's for its blocks: the hand-edited sheets are the
 	            Minecraft pack's textures/ and the Apocalypse pack's), texture name -> Texture
-	  Blocks    block name -> Faces: each block entry's `texture`, and LEGACY_BLOCKS below for the
-	            blocks whose entries name none yet (a block in both is an error)
-	  Icons     item name -> its icon: each item entry's `icon`, and LEGACY_ICONS below (an item in
-	            both is an error)
+	  Blocks    block name -> Faces: each block entry's `texture`
+	  Icons     item name -> its icon: each item entry's `icon`
 
 	Filling an entry
 	  Paste the *Image* asset id of a square image (512 x 512 px; one image covers one block face,
@@ -103,10 +101,9 @@
 	  16 x 16 pixel art scaled up; transparent around the item), "rbxassetid://<number>", or "" for
 	  not made yet. Inventories, the hotbar and JEI draw a filled icon instead of the item's model
 	  (client Ui/ItemIcon); the hand, dropped items and characters keep drawing the model (ItemList
-	  `model`, in the item's voxel colours). Items without an entry are drawn as models too: the
-	  list holds the items made since icons came in (Terraria's), blank, so each look is one id to
-	  paste. Nothing to build: an image is shown as it is (no MaterialVariant). Shared/Items checks
-	  every name and id when it loads.
+	  `model`, in the item's voxel colours). Items whose icon is blank are drawn as models too, so
+	  each look is one id to paste. Nothing to build: an image is shown as it is (no
+	  MaterialVariant). Shared/Items checks every name and id when it loads.
 ]]
 
 local Content = require(script.Parent.Content)
@@ -116,46 +113,24 @@ local Schema = require(script.Parent.Content.Schema)
 export type Texture = Schema.Texture
 export type Faces = Schema.Faces
 
--- Block name -> the texture of each face: the side table, for blocks whose entries name no
--- `texture` yet (an entry's own goes into Blocks below, and naming both is an error).
-local LEGACY_BLOCKS: { [string]: Faces } = {
-	-- Ores and their blocks
-
-	-- Plants
-}
-
--- Item name -> its inventory icon ("" = not made yet; see the header): the side table, for
--- items whose entries have no `icon` yet (naming both is an error).
-local LEGACY_ICONS: { [string]: string } = {}
-
 local content = Content.default
 
 -- Every texture: the packs'.
 local Textures: { [string]: Texture } = content.textures
 
--- Every block's faces: its entry's, else the side table's.
-local Blocks: { [string]: Faces } = table.clone(LEGACY_BLOCKS)
+-- Block name -> the texture of each face: every block entry's `texture`.
+local Blocks: { [string]: Faces } = {}
 for _, spec in content.blocks do
-	local texture = spec.texture
-	if texture then
-		assert(
-			LEGACY_BLOCKS[spec.name] == nil,
-			`TexturePack: {content.where("block", spec.name)} has its texture both on its entry and in LEGACY_BLOCKS`
-		)
-		Blocks[spec.name] = texture
+	if spec.texture then
+		Blocks[spec.name] = spec.texture
 	end
 end
 
--- Every item's icon: its entry's, else the side table's.
-local Icons: { [string]: string } = table.clone(LEGACY_ICONS)
+-- Item name -> its inventory icon ("" = not made yet; see the header): every item entry's `icon`.
+local Icons: { [string]: string } = {}
 for _, spec in content.items do
-	local icon = spec.icon
-	if icon then
-		assert(
-			LEGACY_ICONS[spec.name] == nil,
-			`TexturePack: {content.where("item", spec.name)} has its icon both on its entry and in LEGACY_ICONS`
-		)
-		Icons[spec.name] = icon
+	if spec.icon then
+		Icons[spec.name] = spec.icon
 	end
 end
 

@@ -7,13 +7,12 @@
 	step of warmth or cooling a piece, what full and partial sets do to the coldest and the hottest
 	targets, a tundra simulated tick by tick), the Thermometer's recipe, the new sounds, and every
 	entry of the Survival pack carrying its own lore, icon or texture, Age, fuel, heat and equip
-	sound (no side table naming it).
+	sound.
 ]]
 
 return function(t, shared, require, server)
 	local Biomes = require(shared.Biomes)
 	local Blocks = require(shared.Blocks)
-	local Config = require(shared.Config)
 	local Crafting = require(shared.Crafting)
 	local Fire = require(shared.Fire)
 	local GameMode = require(shared.GameMode)
@@ -155,11 +154,9 @@ return function(t, shared, require, server)
 	end)
 
 	t.test("campfire: a heat source, 5 steps within 2 blocks, and it outweighs the snow there", function()
-		-- (Its entry `heats` now, not Config.ToughAsNails.HeatingBlocks: the Survival pack's
-		-- entries carry their own values.)
+		-- (Its entry says it `heats`.)
 		t.ok(Climate.isHeating(B.Campfire), "the Campfire's `heats`")
 		t.ok(table.find(Temperature.HEATING_BLOCKS, "Campfire") ~= nil)
-		t.ok(table.find(Config.ToughAsNails.HeatingBlocks, "Campfire") == nil, "not in the side list too")
 		-- A tundra: snow underfoot everywhere (a cold source), a campfire at `distance`.
 		local function tundraTarget(distance: number?, dayTime: number, armor: { [number]: Items.Stack? }?): number
 			local campfire = if distance then { distance, 64, 0 } else nil
@@ -329,8 +326,7 @@ return function(t, shared, require, server)
 	--[[ Straw ]]
 
 	t.test("straw: grass broken without Shears gives Straw now and then; Shears the grass", function()
-		-- (The grass's entries carry their Straw as `loot`, Items.lootDrop: Items' STRAW_CHANCE rule
-		-- is gone.)
+		-- (The grass's entries carry their Straw as `loot`, Items.lootDrop.)
 		local function strawOf(block: number, roll: number): number?
 			local stack = Items.lootDrop(block, rolls({ roll }))
 			return if stack then stack.item else nil
@@ -501,8 +497,7 @@ return function(t, shared, require, server)
 		local Ages = require(shared.Progression.Ages)
 		local Recipes = require(shared.Crafting.Recipes)
 		local count = 0
-		-- (A registry's value for an entry with the field on the entry comes from the entry: a value
-		-- both there and in a side table fails the load.)
+		-- (A registry's value for an entry with the field on the entry comes from the entry.)
 		for _, entry in content.entries do
 			local isBlock = content.block(entry.name) ~= nil
 			local where = content.where(if isBlock then "block" else "item", entry.name)

@@ -2,8 +2,8 @@
 	Random ticks (server World/RandomTicker: Minecraft's randomTickSpeed per section) and what they
 	drive: grass spreading onto dirt under the open sky (Behaviours/Grass), fast leaf decay once a
 	tree has no log within 6 blocks (Behaviours/Leaves; leaves players placed stay), leaves' drops
-	(Items.leafDrop) and saplings growing into their trees (Behaviours/Sapling), on a flat world
-	with a generated tree.
+	(their `loot`, Items.lootDrop; Shears keep the leaves) and saplings growing into their trees
+	(Behaviours/Sapling), on a flat world with a generated tree.
 ]]
 
 return function(t, shared, require, server)
@@ -244,14 +244,15 @@ return function(t, shared, require, server)
 	end)
 
 	t.test("leaves drop a sapling one time in 20 (jungle 40) or sticks one in 50, by hand too", function()
-		t.eq((Items.leafDrop(B.OakLeaves, cycle({ 0 })) :: any).item, I.OakSapling)
-		t.eq((Items.leafDrop(B.SpruceLeaves, cycle({ 0.049 })) :: any).item, I.SpruceSapling)
-		t.eq(Items.leafDrop(B.JungleLeaves, cycle({ 0.03, 0.5 })), nil, "jungle: 1 in 40")
-		local sticks = Items.leafDrop(B.OakLeaves, cycle({ 0.5, 0.01, 0.9 })) :: any
+		-- (Their entries' `loot`, Items.lootDrop: by themselves too, decaying or blown up.)
+		t.eq((Items.lootDrop(B.OakLeaves, cycle({ 0 })) :: any).item, I.OakSapling)
+		t.eq((Items.lootDrop(B.SpruceLeaves, cycle({ 0.049 })) :: any).item, I.SpruceSapling)
+		t.eq(Items.lootDrop(B.JungleLeaves, cycle({ 0.03, 0.5 })), nil, "jungle: 1 in 40")
+		local sticks = Items.lootDrop(B.OakLeaves, cycle({ 0.5, 0.01, 0.9 })) :: any
 		t.eq(sticks.item, I.Stick)
 		t.eq(sticks.count, 2)
-		t.eq(Items.leafDrop(B.OakLeaves, cycle({ 0.5 })), nil)
-		t.eq(Items.leafDrop(STONE, cycle({ 0 })), nil, "not leaves")
+		t.eq(Items.lootDrop(B.OakLeaves, cycle({ 0.5 })), nil)
+		t.eq(Items.lootDrop(STONE, cycle({ 0 })), nil, "not leaves")
 		local saplings = 0
 		for _ = 1, 4000 do
 			local stack = EditRules.drops(B.OakLeaves, false, nil)
@@ -260,7 +261,15 @@ return function(t, shared, require, server)
 			end
 		end
 		t.ok(saplings > 120 and saplings < 290, `about 200 saplings from 4000 leaves by hand ({saplings})`)
-		t.eq((EditRules.drops(B.OakLeaves, false, I.Shears) :: any).item, I.OakLeaves, "Shears: the leaves")
+		-- Shears harvest the leaves themselves (`shearDrops`), and the loot stands aside: never a
+		-- sapling or sticks.
+		for _ = 1, 400 do
+			local stack = EditRules.drops(B.OakLeaves, false, I.Shears)
+			t.eq(stack and stack.item, I.OakLeaves, "Shears: the leaves")
+			if not (stack and stack.item == I.OakLeaves) then
+				break
+			end
+		end
 		t.eq(EditRules.drops(B.OakLeaves, true, nil), nil, "creative: nothing")
 	end)
 

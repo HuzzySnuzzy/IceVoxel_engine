@@ -32,4 +32,13 @@ return {
 			{ rolls = { 1, 1 }, entries = { { "Snowball", 1, 2, 2 }, { false, 1, 0, 0 } } },
 		},
 	},
+	-- (Another pack's planks: in Core's #planks, so they burn as Core's `fuel` says.)
+	{
+		name = "FixturePlanks",
+		color = { 180, 140, 90 },
+		material = "WoodPlanks",
+		tags = { "planks" },
+	},
+	-- (An entry's own fuel beats its tag's.)
+	{ name = "Planks", override = true, fuel = 100 },
 }

@@ -8,15 +8,8 @@
 	                              packs grafted into Content/Packs), so their load-time checks run
 	                              as in the game, and returns the View; or nil and the error a pack
 	                              or a registry stopped the load with (Content's names the pack,
-	                              the kind and the entry). `world`: scanWorld's names.
-	  readPacks(root, require, define, kinds)
-	                              each pack folder's own data, as its modules give it, in load order
-	                              (`order`, then name, as Content.load sorts them): what each pack
-	                              made and patched, which the merged content keeps no list of. A
-	                              kind (a key of `kinds`: Schema.SINGULAR) may be a module or a
-	                              folder of modules, merged in name order (lists one after another,
-	                              tables of names together); modules whose names start with "_"
-	                              are a pack's helpers, left out.
+	                              the kind and the entry). `world`: scanWorld's names. Where each
+	                              entry came from is the content's own record (`content.origin`).
 	  scanWorld(dirs?)            the words the world's sources use outside comments (DIRS: the
 	                              terrain, biomes, features and structures, the seasons' snow,
 	                              blocks that grow or spread), so the View can tell which blocks the
@@ -26,7 +19,7 @@
 
 	How the game gives items, as the View says it (ContentTool follows the recipes itself):
 	  * the world: breaking a block it makes gives what Shared/Items says (its drop, what Shears
-	    get, its `loot`, and the side rules: leaves' saplings and sticks, gravel's flint, grass's
+	    get, everything its `loot` may give: leaves' saplings and sticks, gravel's flint, grass's
 	    straw), and so does breaking a block an item placed (`places`);
 	  * `found`: what needs nothing first: the chests' loot tables (the ruins' and bunkers',
 	    Generation/ScavengeLoot.NAMES, and the mineshafts'), the structure templates' chests, the
@@ -91,92 +84,11 @@ function ContentGame.scanWorld(dirs: { string }?): { [string]: string }
 	return words
 end
 
-local function sortedChildren(folder: any): { any }
-	local children = folder:GetChildren()
-	table.sort(children, function(a, b)
-		return a.Name < b.Name
-	end)
-	return children
-end
-
--- A module's data: its value, or what its function makes with Content/Define (as Content.load).
-local function moduleData(module: any, require: (any) -> any, define: any): any
-	local data = require(module)
-	if type(data) == "function" then
-		data = data(define)
-	end
-	return data
-end
-
--- A kind's data: a module's, or a folder's modules' (and subfolders') merged in name order.
-local function kindData(node: any, require: (any) -> any, define: any): any
-	if node:IsA("ModuleScript") then
-		return moduleData(node, require, define)
-	end
-	local merged: { [any]: any } = {}
-	for _, child in sortedChildren(node) do
-		if string.sub(child.Name, 1, 1) ~= "_" then
-			local part = kindData(child, require, define)
-			if type(part) == "table" then
-				if #part > 0 then
-					for _, entry in part do
-						table.insert(merged, entry)
-					end
-				else
-					for key, value in part do
-						if merged[key] == nil then
-							merged[key] = value
-						end
-					end
-				end
-			end
-		end
-	end
-	return merged
-end
-
-export type PackData = { name: string, manifest: any, kinds: { [string]: any } }
-
---[[
-	Each pack under `root` (a folder of pack folders) as its own modules give it, sorted as Content
-	loads them. `kinds` are Content/Schema's (anything else in a pack is the loader's to refuse).
-]]
-function ContentGame.readPacks(root: any, require: (any) -> any, define: any, kinds: { [string]: any }): { PackData }
-	local packs: { PackData } = {}
-	for _, folder in sortedChildren(root) do
-		if not folder:IsA("Folder") then
-			continue
-		end
-		local manifest: any = nil
-		local data: { [string]: any } = {}
-		for _, child in sortedChildren(folder) do
-			local name = child.Name
-			if string.sub(name, 1, 1) == "_" then
-				continue
-			elseif name == "pack" and child:IsA("ModuleScript") then
-				manifest = moduleData(child, require, define)
-			elseif kinds[name] then
-				data[name] = kindData(child, require, define)
-			end
-		end
-		table.insert(packs, { name = folder.Name, manifest = manifest or {}, kinds = data })
-	end
-	table.sort(packs, function(a: PackData, b: PackData): boolean
-		local x, y = a.manifest.order or 0, b.manifest.order or 0
-		if x ~= y then
-			return x < y
-		end
-		return a.name < b.name
-	end)
-	return packs
-end
-
 -- The View's parts, from the registries (see the header).
 local function build(env: any, shared: any, words: { [string]: string }): any
 	local require = env.require
 	local Content = require(shared.Content)
 	local Schema = require(shared.Content.Schema)
-	local Define = require(shared.Content.Define)
 	local Blocks = require(shared.Blocks)
 	local Items = require(shared.Items)
 	local LoreList = require(shared.Items.LoreList)
@@ -190,6 +102,7 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 	local Library = require(shared.Structures.Library)
 	local ScavengeLoot = require(shared.Generation.ScavengeLoot)
 	local Mineshafts = require(shared.Generation.Mineshafts)
+	local Machines = require(shared.Machines)
 	-- (The rest of the registries that build themselves from the packs, for their load-time
 	-- checks: a pack's mistake one of them refuses is the game's too.)
 	for _, path in
@@ -248,9 +161,16 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		end
 	end
 	local textured: { [string]: boolean } = {}
+	-- (The creative tier's machines, Mekanism's creative energy cube: no recipe makes one, by
+	-- design, though any player may hold one, so survival never giving it is no finding.)
+	local creativeMachines: { [string]: boolean } = {}
 	for id = 0, Blocks.count - 1 do
 		local def = Blocks.get(id)
 		textured[def.name] = def.textures ~= nil
+		local kind = Machines.kindOf(id)
+		if kind and kind.creative then
+			creativeMachines[def.name] = true
+		end
 	end
 
 	-- The world's blocks: the ones its sources name, the ore features' and the templates'.
@@ -351,11 +271,8 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		return a.to < b.to or (a.to == b.to and a.from < b.from)
 	end)
 
-	-- What breaking a block gives (Shared/Items: tools, Shears, its loot, the side rules).
+	-- What breaking a block gives (Shared/Items: tools, Shears, everything its loot may give).
 	local shears = Items.find("Shears")
-	local function zero(): number
-		return 0
-	end
 	local function drops(block: string): { string }
 		local id = Blocks.find(block)
 		local out: { string } = {}
@@ -372,15 +289,6 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		if shears then
 			add(Items.drops(id, shears))
 		end
-		-- (The side rules at their luckiest rolls: the leaves' sapling, then their sticks.)
-		add(Items.leafDrop(id, zero))
-		local rolls = 0
-		add(Items.leafDrop(id, function(): number
-			rolls += 1
-			return if rolls == 1 then 0.999 else 0
-		end))
-		add(Items.randomDrop(id, zero))
-		add(Items.strawDrop(id, zero))
 		local spec = content.block(block)
 		local loot = spec and spec.loot
 		local pools = if type(loot) == "string" then content.loot[loot] else loot
@@ -416,7 +324,7 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 
 	return {
 		content = content,
-		packs = ContentGame.readPacks(shared.Content.Packs, require, Define, Schema.SINGULAR),
+		packs = content.packs,
 		kinds = Schema.KINDS,
 		suggest = Schema.suggest,
 		lore = LoreList,
@@ -433,6 +341,7 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		found = found,
 		converts = converts,
 		creativeOnly = creativeOnly,
+		creativeMachines = creativeMachines,
 		itemId = function(name: string): number?
 			return Items.find(name)
 		end,

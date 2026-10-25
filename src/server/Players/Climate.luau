@@ -23,14 +23,13 @@
 	                    nearest of each, in blocks along the farthest axis)
 
 	Heat and cold sources (TAN's heating_blocks and cooling_blocks tags): Temperature.HEATING_BLOCKS
-	and .COOLING_BLOCKS (Config.ToughAsNails.HeatingBlocks and .CoolingBlocks, and the content
-	packs' blocks with `heats` / `cools`), by fluid name (every level of the fluid and its cave twin:
-	"Lava") or block name ("Fire", "Campfire", "Ice"). A name no block or fluid has is skipped with
-	a warning, so a block can be named before it exists (it warms from the moment BlockList has
-	one). Blocks that warm only in some state register a check (`addHeatSource(block, check)`: a
-	furnace while lit, a generator while working; Players/ToughAsNails registers those), and
-	anything else may add its own the same way, e.g. a brazier that is lit only sometimes:
-	`Climate.addHeatSource("Brazier", isLit)`. A check runs only for a block of its kind within
+	and .COOLING_BLOCKS (the content packs' blocks with `heats` / `cools`), by fluid name (every
+	level of the fluid and its cave twin: "Lava") or block name ("Fire", "Campfire", "Ice"). Blocks
+	that warm only in some state register a check (`addHeatSource(block, check)`: a furnace while
+	lit, a generator while working; Players/ToughAsNails registers those), and anything else may
+	add its own the same way, e.g. a brazier that is lit only sometimes:
+	`Climate.addHeatSource("Brazier", isLit)` (a name no block or fluid has is skipped with a
+	warning, so a block can be named before it exists). A check runs only for a block of its kind within
 	range, once a second per player, and never for one farther than the nearest source found so
 	far. A source may have a reach of its own, at most the proximity radius (`radius`: the
 	Electric Heater's Config.Seasons.Heat.SpaceHeaterRadius, the Electric Fan's FanRadius). (Within

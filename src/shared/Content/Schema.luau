@@ -17,40 +17,37 @@
 	  ores      { OreFeature }: ore features (Generation/Ores' format, the block by name)
 	  ages      { AgeRecord }: the Ages, in order (Core's; Progression/Ages)
 	  lore      { [name]: line }: tooltip lore of items no entry carries its own of
+	  fuel      { [tag]: ticks }: furnace fuel by item tag (Core's logs and planks: every item in
+	            the tag burns this long, unless its entry gives its own `fuel`)
 	A pack's `pack` module is its manifest (MANIFEST_FIELDS): { order, description, requires? }.
 
-	Per-entry fields that feed other registries (each replaces a side table that registry kept by
-	name; those tables still work while content moves into packs, but giving a value both ways is
-	an error):
+	Per-entry fields that feed other registries (each registry reads them off the entries; see
+	there what a value means):
 	  lore             block, item  the tooltip's lore line (Items/LoreList)
 	  texture          block        its faces' textures: { All, Sides, Top, Bottom, Front, Sprite }
 	                                (TexturePack.Blocks' Faces)
 	  icon             item         its inventory picture, "rbxassetid://<n>", or "" for not made
 	                                yet (TexturePack.Icons). (A block's `icon` is still its item's
 	                                model boxes.)
-	  age              block, item  the Age that opens its recipes, by id ("iron"; Progression/Ages'
-	                                recipe lists)
+	  age              block, item  the Age that opens its recipes, by id ("iron"; Progression/Ages)
 	  skill            block, item  the skill node its recipes also need, by id ("demolition";
-	                                Progression/Skills' `recipes`)
+	                                Progression/Skills)
 	  knowledge        block, item  { mine = points }: mining it again (Knowledge.ORES), { smelt =
 	                                points }: each one smelted (Knowledge.SMELTED)
 	  miner            block        { ticks, joules, floor? }: the Metal Miner copies this ore at
-	                                these numbers (Machines/MinerRules' list, Config.Miner.Ores)
-	  radiation        block, item  Sv/h it gives a block away or carried (Config.Radiation.Sources)
-	  radiationShield  block        the share of radiation it lets through (Config.Radiation
-	                                .Shielding)
-	  shielding        item         armor: the share of radiation it keeps out (Config.Radiation
-	                                .Hazmat)
-	  fuel             block, item  burn ticks as furnace fuel (Crafting/Recipes' fuel)
+	                                these numbers (Machines/MinerRules.ORES)
+	  radiation        block, item  Sv/h it gives a block away or carried (Radiation.STRENGTH)
+	  radiationShield  block        the share of radiation it lets through (Radiation.TRANSMISSION)
+	  shielding        item         armor: the share of radiation it keeps out (Radiation.SHIELDING)
+	  fuel             block, item  burn ticks as furnace fuel (Crafting/Recipes' fuel; it beats
+	                                a tag's, the packs' `fuel`)
 	  tags             block, item  the tags it is in, { "planks" } (the packs' tags)
-	  heats, cools     block        true: it warms / cools a player near it, Tough As Nails (Config
-	                                .ToughAsNails.HeatingBlocks / CoolingBlocks)
-	  sounds           block        { [action] = event }: its own action sounds (SoundList
-	                                .BLOCK_SOUNDS)
-	  equipSound       item         armor: the event putting it on plays (SoundList.ARMOR)
+	  heats, cools     block        true: it warms / cools a player near it, Tough As Nails
+	                                (ToughAsNails/Temperature.HEATING_BLOCKS / COOLING_BLOCKS)
+	  sounds           block        { [action] = event }: its own action sounds (Sounds.block)
+	  equipSound       item         armor: the event putting it on plays (Sounds.armorEquip)
 	  loot             block        a loot table's name, or its pools: now and then what it gives
-	                                in place of its usual drop (Items.lootDrop; Items' leafDrop,
-	                                randomDrop and strawDrop)
+	                                in place of its usual drop (Items.lootDrop)
 	  food             item         what eating it does, Minecraft's food component: { heal,
 	                                nutrition?, saturation?, effect?, useTicks?, cures?, effects?,
 	                                aftermath?, setback?, sound?, burp? } (Items/Foods.ITEMS, whose
@@ -918,10 +915,9 @@ Schema.LOOT_TABLE = LOOT_TABLE
 
 	Directions are Minecraft's: North = -Z, South = +Z, West = -X, East = +X.
 
-	Textures: an entry's `texture` (or TexturePack's side table LEGACY_BLOCKS) per face; Blocks
-	resolves it (Shared/TexturePack). `color` and `material` stay the block's plain look (drawn
-	while its texture is blank or textures are off, and on the map) and the colour a tinted
-	texture takes.
+	Textures: an entry's `texture` per face; Blocks resolves it (Shared/TexturePack). `color` and
+	`material` stay the block's plain look (drawn while its texture is blank or textures are off,
+	and on the map) and the colour a tinted texture takes.
 ]]
 Schema.BLOCK_FIELDS = {
 	name = STRING,
@@ -1086,9 +1082,9 @@ Schema.BLOCK_FIELDS = {
 	               `damage` half hearts; `fire` the chance it sets the mob burning, `knockback` its
 	               push (blocks a tick). Stacks to 1.
 
-	Icons: an item's `icon` (or TexturePack's side table LEGACY_ICONS) is its picture (blank until
-	one is made); inventories draw a filled one instead of the item's model (client Ui/ItemIcon).
-	New items get a blank one (""), so swapping their look in later is one id.
+	Icons: an item's `icon` is its picture (blank until one is made); inventories draw a filled one
+	instead of the item's model (client Ui/ItemIcon). New items get a blank one (""), so swapping
+	their look in later is one id.
 ]]
 local MODEL_BOX = record({
 	size = VEC3,
@@ -1248,7 +1244,8 @@ Schema.MANIFEST_FIELDS = {
 --[[ The kinds ]]
 
 -- Every kind a pack may hold, in the order a pack's modules load (`pack` first).
-Schema.KINDS = table.freeze({ "blocks", "items", "recipes", "tags", "textures", "loot", "ores", "ages", "lore" })
+Schema.KINDS =
+	table.freeze({ "blocks", "items", "recipes", "tags", "textures", "loot", "ores", "ages", "lore", "fuel" })
 -- Each kind's entries' name in messages.
 Schema.SINGULAR = table.freeze({
 	blocks = "block",
@@ -1260,6 +1257,7 @@ Schema.SINGULAR = table.freeze({
 	ores = "ore feature",
 	ages = "Age",
 	lore = "lore",
+	fuel = "fuel tag",
 }) :: { [string]: string }
 -- The kinds that are lists of entries (the rest are tables of names).
 Schema.LISTS =
@@ -1279,6 +1277,7 @@ local VALUE_CHECKS: { [string]: Check } = {
 	tags = STRINGS,
 	loot = LOOT_TABLE,
 	lore = STRING,
+	fuel = NUMBER,
 }
 
 --[[

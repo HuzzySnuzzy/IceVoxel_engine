@@ -762,12 +762,6 @@ SoundList.EVENTS = {
 } :: { EventSpec }
 
 --[[
-	Blocks whose action sounds are their own rather than their sound type's (Sounds.block): by
-	block name, action -> event.
-]]
-SoundList.BLOCK_SOUNDS = {} :: { [string]: { [string]: string } }
-
---[[
 	The cave moods (Sounds/MusicList.Moods): ambient.cave.mood1, ambient.cave.mood2, ... in the
 	category ambient.cave, so a developer's Sound named "ambient.cave" replaces them all, and one
 	plays at a time (SoundRules.CAPS). Minecraft plays a mood at volume 0.5
@@ -795,9 +789,8 @@ SoundList.MENUS = {
 	Chest = { open = "block.chest.open", close = "block.chest.close" },
 } :: { [string]: { open: string, close: string } }
 
--- Armor equip sounds by the start of the item's name (ItemList's armor materials), else
--- ARMOR_DEFAULT.
-SoundList.ARMOR = {} :: { { prefix: string, sound: string } }
+-- The equip sound of armor whose entry names no `equipSound` of its own (Sounds.armorEquip), and
+-- of accessories and vanity clothes.
 SoundList.ARMOR_DEFAULT = "item.armor.equip_generic"
 
 -- A hurting landing of more half hearts than this sounds big.

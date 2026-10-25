@@ -412,7 +412,7 @@ return function(t, shared, require, server)
 			t.eq(if drop then `{Items.get(drop.item).name} x{drop.count}` else nil, expected, `x = {x} drop`)
 			t.eq(worn, wear, `x = {x} wear`)
 		end
-		-- Tall grass: 2 short grass with Shears, from either half; by hand a Straw (Items.strawDrop:
+		-- Tall grass: 2 short grass with Shears, from either half; by hand a Straw (its `loot`:
 		-- always from tall grass); Shears wear 1.
 		check(0, FLOOR + 1, false, SHEARS, "ShortGrass x2", 1)
 		check(2, FLOOR, false, SHEARS, "ShortGrass x2", 1)

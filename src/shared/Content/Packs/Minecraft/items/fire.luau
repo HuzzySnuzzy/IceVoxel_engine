@@ -2,7 +2,7 @@
 --[[
 	Fire and explosives (Shared/Fire, server Behaviours/Fire and Behaviours/Tnt):
 
-	  * Flint: Minecraft's, which gravel drops one time in 10 (Items.randomDrop): a dark chipped
+	  * Flint: Minecraft's, which gravel drops one time in 10 (Gravel's `loot`): a dark chipped
 	    shard with a pale glint.
 	  * Flint and Steel: Minecraft's (shapeless: an iron ingot and flint), 64 uses, each lighting a
 	    fire in front of the clicked face where fire can burn (Players/ItemUse); a steel striker's

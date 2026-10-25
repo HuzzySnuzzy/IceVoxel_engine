@@ -23,8 +23,7 @@
 
 	A node's `recipes` (result item names) stay locked until the node is unlocked, besides their
 	Age (Demolition: Gunpowder and TNT; Fission: the Nuke): every content pack entry naming the
-	node (`skill = "demolition"`, Shared/Content), and the node's own `recipes` here, the side list
-	for entries that name none yet (a name in both, or an unknown skill, is an error).
+	node (`skill = "demolition"`, Shared/Content), in id order (an unknown skill is an error).
 	`row` places it on the skill tree screen (Ui/SkillTreeScreen: a column per Age), `icon` is
 	the item drawn in its frame. Three branches run across the Ages: knowledge (rows 1 and 2),
 	tools (3 and 4), survival (5 and 6).
@@ -83,7 +82,6 @@ type Spec = {
 	age: string,
 	requires: { string }?,
 	perk: Perk,
-	recipes: { string }?,
 }
 
 local NONE: Perk = { kind = "none" }
@@ -175,7 +173,6 @@ local SPECS: { Spec } = {
 		age = "industrial",
 		requires = { "prospector" },
 		perk = NONE,
-		recipes = {},
 	},
 	{
 		id = "scholar",
@@ -300,7 +297,7 @@ for index, spec in SPECS do
 		cost = age.index,
 		requires = spec.requires or {},
 		perk = spec.perk,
-		recipes = spec.recipes or {},
+		recipes = {},
 	}
 	assert(skill.row >= 1 and skill.row <= Skills.ROWS, `Skills: {spec.id} is on row {skill.row}`)
 	for _, other in byAge[skill.age] do
@@ -310,10 +307,6 @@ for index, spec in SPECS do
 		local before = byId[required]
 		assert(before, `Skills: {spec.id} needs {required}, which must come before it`)
 		assert(before.age <= skill.age, `Skills: {spec.id} needs {required} of a later Age`)
-	end
-	for _, name in skill.recipes do
-		assert(skillOfName[name] == nil, `Skills: {name} is unlocked by two skills`)
-		skillOfName[name] = skill
 	end
 	byId[skill.id] = skill
 	table.insert(list, skill)
@@ -329,10 +322,6 @@ do
 			local where = content.where(if content.block(entry.name) then "block" else "item", entry.name)
 			local skill = byId[id]
 			assert(skill, `Skills: {where} names an unknown skill {id}`)
-			local other = skillOfName[entry.name]
-			if other then
-				error(`Skills: {where} names its skill, and {other.id}'s recipes name it too`)
-			end
 			table.insert(skill.recipes, entry.name)
 			skillOfName[entry.name] = skill
 		end

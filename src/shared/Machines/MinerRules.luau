@@ -3,12 +3,11 @@
 	The Metal Miner's rules (Machines/Kinds/Miner, kind "miner"), pure: which blocks it mines, what
 	each one gives, and its state code.
 
-	  ORES       every ore block the content packs have (Shared/Content): the side list NAMES
-	             first (Coal Ore, Iron Ore, Osmium Ore, Gold Ore, Emerald Ore, Diamond Ore, with
-	             Config.Miner.Ores' numbers), then every block entry with `miner = { ticks, joules,
-	             floor? }` in id order (the Ores pack's Copper, Lead, Zinc, Sulfur, Saltpetre and
-	             Uranium Ore). Any order would do: saves keep a miner's ore by name, never its
-	             place here. Each gives its drop (Items.blockDrops: Coal, Raw Iron, Raw Osmium,
+	  ORES       every block entry of the content packs (Shared/Content) with `miner = { ticks,
+	             joules, floor? }`, in id order: the Minecraft pack's Coal, Iron, Gold, Diamond
+	             and Emerald Ore, Mekanism's Osmium Ore, the Ores pack's Copper, Lead, Zinc,
+	             Sulfur, Saltpetre and Uranium Ore. Any order would do: saves keep a miner's ore by
+	             name, never its place here. Each gives its drop (Items.blockDrops: Coal, Raw Iron, Raw Osmium,
 	             Raw Gold, an Emerald, a Diamond, Raw Copper, Raw Lead, Raw Zinc, a Sulfur, a
 	             Saltpetre, Raw Uranium; one a time), not the ore block (drops are what furnaces
 	             and the Electric Furnace take, and an ore block can't be moved: a miner is built
@@ -30,12 +29,11 @@
 	             more than the 320 kJ it burns for in a Heat Generator (355.6 kJ a coal in a Block
 	             of Coal), so coal is never energy-positive
 
-	Checked as this loads: every ore is a block whose drop is an item, Config.Miner.Ores names each
-	of NAMES and nothing else, and no ore is both in NAMES and an entry with `miner`.
+	Checked as this loads: every ore is a block whose drop is one item, at whole ticks and some J a
+	tick.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
-local Config = require(script.Parent.Parent.Config)
 local Content = require(script.Parent.Parent.Content)
 local Items = require(script.Parent.Parent.Items)
 local Core = require(script.Parent.Core)
@@ -43,7 +41,7 @@ local Upgrades = require(script.Parent.Upgrades)
 
 -- One ore the miner copies (see the header).
 export type Ore = {
-	-- Its place in ORES (1..), its block and name, its drop (an item), and Config.Miner.Ores'
+	-- Its place in ORES (1..), its block and name, its drop (an item), and its entry's `miner`:
 	-- ticks an item, J a tick and least J an item (0: none).
 	index: number,
 	name: string,
@@ -60,58 +58,37 @@ local MinerRules = {}
 MinerRules.STATE = table.freeze({ MINING = 0, NO_POWER = 1, OUTPUT_FULL = 2, NO_ORE = 3, IDLE = 4 })
 local MAX_CODE = MinerRules.STATE.IDLE
 
--- The side list: the ores whose entries carry no `miner` yet, at Config.Miner.Ores' numbers.
-local NAMES: { string } = {}
--- (Config.Miner.Ores by name.)
-local ORE_NUMBERS: { [string]: { ticks: number, joules: number, floor: number? } } = Config.Miner.Ores :: any
-
--- Every ore and its numbers, in ORES order: the side list's, then the entries' (`miner`).
-local listed: { { name: string, numbers: { ticks: number, joules: number, floor: number? }, where: string } } = {}
-for _, name in NAMES do
-	local numbers = ORE_NUMBERS[name]
-	assert(numbers, `MinerRules: Config.Miner.Ores has no {name}`)
-	table.insert(listed, { name = name, numbers = numbers, where = name })
-end
-for name in ORE_NUMBERS do
-	assert(table.find(NAMES, name), `MinerRules: Config.Miner.Ores names {name}, which is no ore it mines`)
-end
+-- Every ore, in id order: the block entries with `miner`.
+local ores: { Ore } = {}
+local byBlock: { [number]: Ore } = {}
 do
 	local content = Content.default
 	for _, spec in content.blocks do
 		local numbers = spec.miner
-		if numbers then
-			local where = content.where("block", spec.name)
-			assert(
-				not table.find(NAMES, spec.name),
-				`MinerRules: {where} has its miner numbers, and MinerRules' side list names it too`
-			)
-			table.insert(listed, { name = spec.name, numbers = numbers, where = where })
+		if numbers == nil then
+			continue
 		end
+		local where = content.where("block", spec.name)
+		local block = Blocks.id[spec.name]
+		local drop = Items.blockDrops(block)
+		assert(drop and drop.count == 1, `MinerRules: {where} must drop one item`)
+		assert(
+			numbers.ticks >= 1 and numbers.ticks == math.floor(numbers.ticks) and numbers.joules > 0,
+			`MinerRules: {where} needs whole ticks and J a tick`
+		)
+		local index = #ores + 1
+		local ore: Ore = table.freeze({
+			index = index,
+			name = spec.name,
+			block = block,
+			drop = drop.item,
+			ticks = numbers.ticks,
+			joules = numbers.joules,
+			floor = numbers.floor or 0,
+		})
+		ores[index] = ore
+		byBlock[block] = ore
 	end
-end
-
-local ores: { Ore } = {}
-local byBlock: { [number]: Ore } = {}
-for index, entry in listed do
-	local name, numbers = entry.name, entry.numbers
-	local block = Blocks.id[name]
-	local drop = Items.blockDrops(block)
-	assert(drop and drop.count == 1, `MinerRules: {entry.where} must drop one item`)
-	assert(
-		numbers.ticks >= 1 and numbers.ticks == math.floor(numbers.ticks) and numbers.joules > 0,
-		`MinerRules: {entry.where} needs whole ticks and J a tick`
-	)
-	local ore: Ore = table.freeze({
-		index = index,
-		name = name,
-		block = block,
-		drop = drop.item,
-		ticks = numbers.ticks,
-		joules = numbers.joules,
-		floor = numbers.floor or 0,
-	})
-	ores[index] = ore
-	byBlock[block] = ore
 end
 
 MinerRules.ORES = table.freeze(ores)

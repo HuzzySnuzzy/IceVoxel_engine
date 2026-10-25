@@ -95,8 +95,8 @@
 	             of insulation are added to the armor's.
 	  Heat       lit furnaces (a furnace container burning: litTime > 0) and working Heat and
 	             Combustion Generators (their machine's active flag) are heat sources
-	             (Climate.addHeatSource), besides Config.ToughAsNails.HeatingBlocks; so are the
-	             seasons' Wood Stove and Oil Heater (radiant) and Electric Heater (within
+	             (Climate.addHeatSource), besides the blocks with `heats` on their entries; so
+	             are the seasons' Wood Stove and Oil Heater (radiant) and Electric Heater (within
 	             Config.Seasons.Heat.SpaceHeaterRadius) while they deliver heat (their `heat`
 	             field), and the Air Conditioner and Electric Fan (within FanRadius) cold sources
 	             while they cool. Rooms (server Seasons/RoomWorld) take the same machines' heat

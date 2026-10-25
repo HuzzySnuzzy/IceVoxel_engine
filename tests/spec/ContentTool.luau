@@ -3,10 +3,10 @@
 	tests/lib/ContentGame): every check on the fixture packs in tests/fixtures/content/tool (Lint,
 	one of each finding, and LintPatch, a JSON pack patching it), grafted into a fresh game after
 	its own packs; the game's packs, which load and whose faces rule agrees with the TexturePack
-	spec's; a load error, named; each pack's own data read from modules or from folders of
-	modules; what each entry came from (the fixture packs of tests/spec/Content: Gamma's
-	overrides); the lists and the pages; and a new pack's modules, which load and pass the check
-	as they are made.
+	spec's; a load error, named; what each entry came from (the loader's record, content.origin:
+	the fixture packs of tests/spec/Content, Gamma's overrides; a kind folder's recipes by their
+	file); the lists and the pages; and a new pack's modules, which load and pass the check as
+	they are made.
 
 	Nothing here pins an id or a total: the game's content may grow.
 ]]
@@ -191,7 +191,11 @@ return function(t, shared, require, _server, _client)
 		end
 		local summary = ContentTool.summary(view)
 		t.eq(#summary, #view.packs, "a summary line per pack")
-		t.ok(has(summary, { "Core", "order 0", "ages" }), "Core's")
+		t.ok(has(summary, { "Core", "order 0", "ages", "fuel" }), "Core's")
+		-- (The creative tier's machines are no finding: no recipe makes the Creative Energy Cube,
+		-- by design, as Mekanism's.)
+		t.ok(view.creativeMachines.CreativeEnergyCube, "a machine of a creative kind")
+		t.eq(finding(ContentTool.check(view), "survival", "block CreativeEnergyCube"), nil, "not out of reach")
 	end)
 
 	t.test("content tool: the faces rule is the TexturePack spec's", function()
@@ -247,39 +251,7 @@ return function(t, shared, require, _server, _client)
 		t.ok(other and string.find(other, "BrokenAir", 1, true), other)
 	end)
 
-	--[[ The packs' own data ]]
-
-	t.test("content tool: a pack's kinds read from modules or folders of modules, in name order", function()
-		local env = Loader.new()
-		local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
-		local Define = env.require((root :: any).Content.Define)
-		local packs = env.folder(root, "Packs")
-		local late = env.folder(packs, "Late")
-		env.module(late, "pack", { order = 5 })
-		local early = env.folder(packs, "Early")
-		env.module(early, "pack", { order = 1 })
-		local blocks = env.folder(early, "blocks")
-		env.module(blocks, "b", { { name = "B1" }, { name = "B2" } })
-		env.module(blocks, "a", function(define)
-			t.eq(define, Define, "a function module gets Define")
-			return { { name = "A1" } }
-		end)
-		env.module(blocks, "_helper", "left out")
-		local textures = env.folder(early, "textures")
-		env.module(textures, "x", { one = { Color = "" } })
-		env.module(textures, "y", { two = { Color = "" } })
-		env.module(early, "_shared", "left out")
-		local read = ContentGame.readPacks(packs, env.require, Define, Schema.SINGULAR)
-		t.eq(read[1].name, "Early", "by order")
-		t.eq(read[2].name, "Late")
-		local names = {}
-		for _, entry in read[1].kinds.blocks do
-			table.insert(names, entry.name)
-		end
-		t.eq(table.concat(names, " "), "A1 B1 B2", "lists one after another, in name order")
-		t.ok(read[1].kinds.textures.one and read[1].kinds.textures.two, "tables of names together")
-		t.eq(read[1].kinds._shared, nil, "helpers left out")
-	end)
+	--[[ Where things came from (content.origin) ]]
 
 	t.test("content tool: where entries came from: the maker and the packs that patched them", function()
 		-- (tests/spec/Content's fixture packs: Beta, Alpha, then Gamma patching both.)
@@ -288,16 +260,8 @@ return function(t, shared, require, _server, _client)
 		local folder = env.mount(PACKS, "ReplicatedStorage", "ContentFixtures")
 		local Content = env.require((root :: any).Content)
 		local content = Content.load(folder)
-		local view = {
-			content = content,
-			packs = ContentGame.readPacks(
-				folder,
-				env.require,
-				env.require((root :: any).Content.Define),
-				Schema.SINGULAR
-			),
-			kinds = Schema.KINDS,
-		}
+		-- (The packs' own data is no longer read again: the content's own record says it.)
+		local view = { content = content, packs = content.packs, kinds = Schema.KINDS }
 		local lines = assert(ContentTool.list(view, "blocks"))
 		t.ok(has(lines, { "AlphaStone", "Alpha (patched by Gamma)" }), "patched")
 		t.ok(has(lines, { "BetaStone", "Beta" }), "made")
@@ -307,8 +271,31 @@ return function(t, shared, require, _server, _client)
 			t.ok(string.find(where, `pack {ContentTool.packOf(view, "blocks", spec.name)}`, 1, true), where)
 		end
 		local recipes = assert(ContentTool.list(view, "recipes", "Alpha"))
-		t.ok(has(recipes, { "AlphaWand", "Alpha #" }), "a pack's recipes, by their place in it")
+		-- (As the loader names a recipe: "Alpha, recipe #1".)
+		t.ok(has(recipes, { "AlphaWand", "Alpha, recipe #" }), "a pack's recipes, by their place in it")
 		t.ok(not has(recipes, { "BetaGem" }), "only that pack's")
+		local tags = assert(ContentTool.list(view, "tags"))
+		t.ok(has(tags, { "#fixture_stones", "Beta, Alpha, Gamma" }), "a tag: every pack adding to it")
+		t.ok(has(ContentTool.summary(view), { "Gamma", "blocks 1 (1 override)", "tags 1" }), "Gamma's summary")
+	end)
+
+	t.test("content tool: a kind folder's recipe is named by its file, as the loader names it", function()
+		local view = assert(fresh())
+		local content = view.content
+		-- (The Minecraft pack's recipes are a kind folder: recipes/<file>.)
+		local index: number? = nil
+		for at, recipe in content.recipes do
+			if recipe.result == "Torch" then
+				index = at
+				break
+			end
+		end
+		local origin = content.origin("recipe", index :: number) :: any
+		t.eq(origin.pack, "Minecraft")
+		t.ok(origin.file and string.sub(origin.file, 1, 8) == "recipes/", `its file ({origin.file})`)
+		local name = `{origin.file}, recipe #{origin.index}`
+		t.ok(has(assert(ContentTool.list(view, "recipes", "Minecraft")), { "Torch", `Minecraft, {name}` }), name)
+		t.ok(has(assert(ContentTool.show(view, "Torch")), { `pack Minecraft, {name}:` }), "and on its page")
 	end)
 
 	--[[ Lists and pages ]]
@@ -373,7 +360,7 @@ return function(t, shared, require, _server, _client)
 		local view = assert(fresh())
 		local order = ContentTool.nextOrder(view)
 		for _, pack in view.packs do
-			t.ok(order > pack.manifest.order, "after every pack")
+			t.ok(order > pack.order, "after every pack")
 		end
 		t.eq(ContentTool.scaffoldProblem(view, "Scaffolded"), nil)
 		local files = ContentTool.scaffold("Scaffolded", order)

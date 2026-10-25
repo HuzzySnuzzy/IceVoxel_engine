@@ -48,13 +48,13 @@
 
 	The Ages themselves are the content packs' `ages` (Shared/Content: Core's), in order. An Age's
 	`recipes` are the results (item names) it opens: every block and item entry naming it (`age =
-	"iron"`), and the side lists below (by Age id) for the entries that name none yet; a name in
-	both is an error. Crafting and smelting results of a later Age are locked for a player who
-	hasn't reached it (Shared/Progression.allows; how: Inventory/Menu). `milestones` are
-	discoveries (Progression/Knowledge categories): one key ("craft" "Furnace": crafted a Furnace at
-	least once), or `count` of a category ("biome" 6). `level` is the knowledge level it needs.
-	Reaching an Age is automatic once all are met (the server checks after every change), Ages one
-	after another; it gives `reward` points (a discovery: Forager's perk counts).
+	"iron"`; Content checks the id), in id order. Crafting and smelting results of a later Age are
+	locked for a player who hasn't reached it (Shared/Progression.allows; how: Inventory/Menu).
+	`milestones` are discoveries (Progression/Knowledge categories): one key ("craft" "Furnace":
+	crafted a Furnace at least once), or `count` of a category ("biome" 6). `level` is the
+	knowledge level it needs. Reaching an Age is automatic once all are met (the server checks
+	after every change), Ages one after another; it gives `reward` points (a discovery: Forager's
+	perk counts).
 
 	Ids (`id`) are what saves keep, so an Age may be renamed or a new one inserted without
 	breaking them; the list's order is the order they come in.
@@ -87,50 +87,11 @@ export type Age = {
 
 local Content = require(script.Parent.Parent.Content)
 
--- (The side lists: what each Age opens, by name, for the entries that name no `age` yet.)
-
-local iron: { string } = {}
-for _, name in
-	{
-		-- (The new ores' lead, zinc and brass and the Hazmat suit are too: their entries say so,
-		-- in the Ores pack.)
-	} :: { string }
-do
-	table.insert(iron, name)
-end
-
-local industrial: { string } = {}
-for _, name in
-	{
-		-- (And uranium smelting, on its ingot's entry: a smelting result is never of an Age after
-		-- the transporters', which feed furnaces with no window and so no gate.)
-	} :: { string }
-do
-	table.insert(industrial, name)
-end
-
-local electric: { string } = {}
-
-local atomic: { string } = {
-	-- (And uranium's nugget and blocks, on their entries; the ore and Raw Uranium are mined in any
-	-- Age, and the ingot smelted from the Industrial Age.)
-}
-
--- The side lists by Age id (the Stone Age opens everything no later Age names).
-local LEGACY: { [string]: { string } } = {
-	iron = iron,
-	industrial = industrial,
-	electric = electric,
-	atomic = atomic,
-}
-
 local content = Content.default
 
--- The Ages: the packs' records, each with the results it opens (the side list's, then every entry
--- naming it, in id order).
+-- The Ages: the packs' records, each with the results it opens (below: every entry naming it).
 local list: { Age } = {}
 for index, record in content.ages do
-	local recipes = table.clone(LEGACY[record.id] or {})
 	table.insert(list, {
 		index = index,
 		id = record.id,
@@ -138,16 +99,9 @@ for index, record in content.ages do
 		level = record.level,
 		milestones = record.milestones,
 		reward = record.reward,
-		recipes = recipes,
+		recipes = {},
 		color = record.color,
 	})
-end
-for id in LEGACY do
-	local found = false
-	for _, age in list do
-		found = found or age.id == id
-	end
-	assert(found, `Ages: the side lists name an Age {id} no pack has`)
 end
 
 local Ages = {}
@@ -160,13 +114,9 @@ local byId: { [string]: Age } = {}
 local ageOfName: { [string]: number } = {}
 -- Every milestone of every Age, in order (the protocol's bits).
 local milestones: { Milestone } = {}
-for index, age in list do
+for _, age in list do
 	assert(byId[age.id] == nil, `Ages: duplicate id {age.id}`)
 	byId[age.id] = age
-	for _, name in age.recipes do
-		assert(ageOfName[name] == nil, `Ages: {name} is named by two Ages`)
-		ageOfName[name] = index
-	end
 	for _, milestone in age.milestones do
 		assert((milestone.key == nil) ~= (milestone.count == nil), `Ages: {age.id} milestone needs a key or a count`)
 		table.insert(milestones, milestone)
@@ -176,12 +126,7 @@ end
 for _, entry in content.entries do
 	local id = entry.age
 	if id then
-		local where = content.where(if content.block(entry.name) then "block" else "item", entry.name)
 		local age = byId[id] :: Age
-		assert(
-			ageOfName[entry.name] == nil,
-			`Ages: {where} names its Age, and the side lists name one for it too ({list[ageOfName[entry.name] or 1].id})`
-		)
 		table.insert(age.recipes, entry.name)
 		ageOfName[entry.name] = age.index
 	end

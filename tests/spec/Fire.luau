@@ -427,8 +427,7 @@ return function(t, shared, require, server)
 		t.eq(Items.get(I.FlintAndSteel).durability, 64)
 		t.eq(Items.maxStack(I.FlintAndSteel), 1)
 		t.eq(Items.displayName(I.FlintAndSteel), "Flint and Steel")
-		-- Gravel gives flint one time in 10. (Its entry's `loot` now, Items.lootDrop: Items'
-		-- randomDrop rule is gone.)
+		-- Gravel gives flint one time in 10 (its entry's `loot`, Items.lootDrop).
 		local flint = Items.lootDrop(B.Gravel, cycle({ 0.05 }))
 		t.ok(flint ~= nil and flint.item == I.Flint and flint.count == 1)
 		t.eq(Items.lootDrop(B.Gravel, cycle({ 0.5 })), nil)
@@ -443,6 +442,18 @@ return function(t, shared, require, server)
 			end
 		end
 		t.ok(flints > 140 and flints < 260, `about 200 flint in 2000 ({flints})`)
+		-- With Shears too, as Minecraft's gravel: they harvest nothing of their own from it
+		-- (`shearDrops`), so its loot stands.
+		local sheared = 0
+		math.randomseed(4)
+		for _ = 1, 2000 do
+			local stack = EditRules.drops(B.Gravel, false, I.Shears)
+			t.ok(stack ~= nil, "gravel always drops, with Shears too")
+			if stack and stack.item == I.Flint then
+				sheared += 1
+			end
+		end
+		t.ok(sheared > 140 and sheared < 260, `about 200 flint in 2000 with Shears ({sheared})`)
 		t.eq(EditRules.drops(B.Gravel, true, nil), nil, "creative: no drops")
 	end)
 

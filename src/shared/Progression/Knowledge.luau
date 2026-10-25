@@ -65,37 +65,34 @@ Knowledge.DEFAULT_DISCOVERY = 5
 
 --[[
 	ORES and SMELTED: the content packs' entries' `knowledge` ({ mine = points } on an ore block,
-	{ smelt = points } on a smelting result; Shared/Content), and the side tables below for those
-	whose entries carry none yet. A name in both is an error.
+	{ smelt = points } on a smelting result; Shared/Content), by name.
 ]]
 local content = Content.default
 
--- `legacy`'s numbers and every entry's `knowledge[field]`, frozen.
-local function merged(legacy: { [string]: number }, field: string, side: string): { [string]: number }
-	local points = table.clone(legacy)
+-- Every entry's `knowledge[field]`, by name, frozen.
+local function pointsOf(field: string): { [string]: number }
+	local byName: { [string]: number } = {}
 	for _, entry in content.entries do
 		local value = entry.knowledge and (entry.knowledge :: any)[field]
 		if value then
-			local where = content.where(if content.block(entry.name) then "block" else "item", entry.name)
-			assert(legacy[entry.name] == nil, `Knowledge: {where} has its {field} points, and {side} too`)
-			points[entry.name] = value
+			byName[entry.name] = value
 		end
 	end
-	return table.freeze(points)
+	return table.freeze(byName)
 end
 
--- Points for mining an ore again (Minecraft's ore experience: coal 0-2, diamond and emerald 3-7;
--- iron and gold give theirs in the furnace there, a little here too). (The new ores' are on their
--- entries: the metals as iron and osmium, the powders as coal, uranium as gold.)
-Knowledge.ORES = merged({}, "mine", "Knowledge.ORES")
+-- Points for mining an ore again, by block name: each ore entry's (Minecraft's ore experience:
+-- coal 0-2, diamond and emerald 3-7; iron and gold give theirs in the furnace there, a little here
+-- too; the Ores pack's metals as iron and osmium, its powders as coal, uranium as gold).
+Knowledge.ORES = pointsOf("mine")
 
 -- Points for chopping a log (blocks whose name ends in "Log").
 Knowledge.LOG = 0.25
 
--- Points per item smelted (Minecraft's furnace recipe experience), by result; others SMELT_DEFAULT.
--- (The new ores' are on their entries: Minecraft's copper ingot gives 0.7, lead and zinc as it,
--- uranium as gold, the powders 0.1.)
-Knowledge.SMELTED = merged({}, "smelt", "Knowledge.SMELTED")
+-- Points per item smelted, by result name: each result entry's (Minecraft's furnace recipe
+-- experience: an iron ingot 0.7, copper's 0.7 and lead and zinc as it, uranium as gold, the
+-- powders 0.1); others SMELT_DEFAULT.
+Knowledge.SMELTED = pointsOf("smelt")
 Knowledge.SMELT_DEFAULT = 0.1
 
 -- Points per craft (a result taken; a shift click's every round).

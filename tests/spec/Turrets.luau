@@ -153,7 +153,7 @@ return function(t, shared, require, server, client)
 		end
 	)
 
-	-- (The Turrets pack's entries say all of this themselves: no side table names them.)
+	-- (The Turrets pack's entries say all of this themselves.)
 	t.test("turrets: each entry carries its lore, icon and Age; a feature switched off, its entries no Age", function()
 		local function entries(content: any): { [string]: any }
 			local found: { [string]: any } = {}
@@ -1060,9 +1060,8 @@ return function(t, shared, require, server, client)
 			t.eq(ore.block, B[name])
 			t.eq(ore.drop, I[drop], `{name} gives {drop}`)
 			t.eq(MinerRules.ORES[ore.index], ore, `{name} in its place`)
-			-- (Its numbers: the ore entry's `miner`, else Config.Miner.Ores' side table.)
-			local numbers = (Config.Miner.Ores :: any)[name]
-				or (require(shared.Content).default.block(name) :: any).miner
+			-- (Its numbers: the ore entry's `miner`.)
+			local numbers = (require(shared.Content).default.block(name) :: any).miner
 			t.eq(ore.ticks, numbers.ticks)
 		end
 		local diamond = (MinerRules.ore(B.DiamondOre) :: MinerRules.Ore).index

@@ -1078,7 +1078,6 @@ return function(t, shared, require, _server, client)
 	end
 
 	t.test("jei: Duplicating: the Metal Miner copies each ore into its drop, with its time and energy", function()
-		local Config = require(shared.Config)
 		local Machines = require(shared.Machines)
 		local MinerRules = require(shared.Machines.MinerRules)
 		local info = Machines.info(Blocks.id.MetalMiner)
@@ -1109,14 +1108,14 @@ return function(t, shared, require, _server, client)
 		for index, ore in MinerRules.ORES do
 			local drop = drops[ore.name] or Items.get(ore.drop).name
 			local entry = entries[index]
-			-- (Config's side table, or the ore's own entry's `miner`: the Ores pack's carry theirs.)
-			local numbers = (Config.Miner.Ores :: any)[ore.name] or (Content.default.block(ore.name) :: any).miner
+			-- (The ore's own entry's `miner`.)
+			local numbers = (Content.default.block(ore.name) :: any).miner
 			t.eq(#entry.inputs[1], 1, `{ore.name}: one input`)
 			t.eq(entry.inputs[1][1], id[ore.name], `{ore.name}: the ore block, in MinerRules' order`)
 			t.eq(entry.inputs[2], nil)
 			t.eq(entry.output and entry.output.item, id[drop], `{ore.name} gives its drop`)
 			t.eq(entry.output and entry.output.count, 1, "one at a time")
-			t.eq(entry.ticks, numbers.ticks, `{ore.name}: Config's ticks`)
+			t.eq(entry.ticks, numbers.ticks, `{ore.name}: its entry's ticks`)
 			t.eq(entry.ticks, info[`{ore.name}Ticks`], "as its info says")
 			t.eq(entry.power, numbers.joules, `{ore.name}: J a tick`)
 			t.eq(entry.energy, math.max(numbers.ticks * numbers.joules, numbers.floor or 0), `{ore.name}: J an item`)

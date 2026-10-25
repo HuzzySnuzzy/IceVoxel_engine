@@ -3,9 +3,9 @@
 	Tough As Nails' gear for the cold and the heat (Shared/ToughAsNails/Temperature; the Campfire is
 	a block, blocks/campfire).
 
-	  * Straw: what Short Grass and Tall Grass give when broken without Shears now and then
-	    (Items.strawDrop: Minecraft's grass drops wheat seeds there, and the game has no wheat), a
-	    golden bundle tied in the middle, modelled upright and tilted like a stick.
+	  * Straw: what Short Grass and Tall Grass give when broken without Shears now and then (their
+	    `loot`, the Minecraft pack's: Minecraft's grass drops wheat seeds there, and the game has
+	    no wheat), a golden bundle tied in the middle, modelled upright and tilted like a stick.
 	  * Straw and Leaf armor (Content/Define's `armorSet`): insulation for the climate (`tan`), with
 	    leather's armor points (1 / 3 / 2 / 1, no toughness; this game's armor doesn't wear, so it
 	    has no durability either). Straw (crafted from Straw in the armor shapes) warms a step a

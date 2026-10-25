@@ -9,8 +9,8 @@
 	  Decay    when a neighbour changes (a log chopped, a leaf gone), the leaf checks after a random
 	           Config.Server.LeafDecay.MinDelay..MaxDelay ticks (a fraction of a second, where
 	           Minecraft waits for a random tick: minutes) and, cut off, turns to air and drops what
-	           leaves drop by themselves (Items.leafDrop: a sapling now and then, sometimes
-	           sticks). Its neighbours then check in turn, so a felled tree's canopy falls apart
+	           leaves drop by themselves (their `loot`, Items.lootDrop: a sapling now and then,
+	           sometimes sticks). Its neighbours then check in turn, so a felled tree's canopy falls apart
 	           within a few seconds. A random tick (World/RandomTicker) checks too, for leaves cut
 	           off while their chunk wasn't loaded.
 	  Placed   leaves a player placed never decay (Minecraft's persistent): the server's edit list
@@ -105,7 +105,7 @@ local function check(world: any, x: number, y: number, z: number, block: number,
 		return world:peekBlock(bx, by, bz)
 	end, x, y, z)
 	if not supported and world:setBlock(x, y, z, Blocks.AIR) then
-		local stack = Items.leafDrop(block, random)
+		local stack = Items.lootDrop(block, random)
 		if stack then
 			Drops.stack(x, y, z, stack)
 		end

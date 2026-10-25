@@ -1,20 +1,21 @@
 --!strict
 --[[
 	Content packs (Minecraft's data packs): every block, item, recipe, tag, texture, loot table, ore
-	feature, Age and lore line of the game comes from a pack, a folder under Content/Packs. The
-	registries (Blocks, Items, TexturePack, Crafting, Progression, the Metal Miner, Radiation,
-	generation, loot, sounds, Tough As Nails) build themselves from what this module loads; adding
-	content is adding entries to a pack, or a pack.
+	feature, Age, lore line and fuel tag of the game comes from a pack, a folder under
+	Content/Packs, and every value about an entry is on the entry. The registries (Blocks, Items,
+	TexturePack, Crafting, Progression, the Metal Miner, Radiation, generation, loot, sounds, Tough
+	As Nails) build themselves from what this module loads; adding content is adding entries to a
+	pack, or a pack.
 
 	A pack
 	  A folder holding `pack`, its manifest ({ order = n, description = "...", requires = { pack
 	  names }? }), and any of the kinds Content/Schema lists (blocks, items, recipes, tags, textures,
-	  loot, ores, ages, lore), each a module of the kind's name: a Luau module returning its data, or
-	  `function(define) -> data` (define: Content/Define, the shared helpers and Config, for packs
-	  that build entries or read switches), or a `.json` file holding it (Rojo makes a JSON file a
-	  ModuleScript returning its table, and so does the Lune loader). Any other module in a pack is
-	  an error (a misspelt kind would be ignored otherwise) unless its name starts with "_": the
-	  pack's own helpers, which its kind modules require (at the pack's top only).
+	  loot, ores, ages, lore, fuel), each a module of the kind's name: a Luau module returning its
+	  data, or `function(define) -> data` (define: Content/Define, the shared helpers and Config,
+	  for packs that build entries or read switches), or a `.json` file holding it (Rojo makes a
+	  JSON file a ModuleScript returning its table, and so does the Lune loader). Any other module
+	  in a pack is an error (a misspelt kind would be ignored otherwise) unless its name starts with
+	  "_": the pack's own helpers, which its kind modules require (at the pack's top only).
 
 	Kind folders
 	  A kind may also be a folder of the kind's name (`Minecraft/blocks/`), as Minecraft's data
@@ -23,9 +24,10 @@
 	  folders inside it in their place among them (`blocks/plants/flowers` after `blocks/ores`).
 	  So a big pack splits into files (`blocks/terrain`, `blocks/plants`...), and adding content
 	  may be adding a file. A list kind's files are appended to each other; a named kind's
-	  (textures, loot, lore) may not name one thing twice, and tags join as across packs. Messages
-	  name the file: "pack Minecraft, blocks/plants, block Poppy". A pack has a kind as a module or
-	  as a folder, not both; a kind folder holds only modules and folders (no "_" helpers).
+	  (textures, loot, lore, fuel) may not name one thing twice, and tags join as across packs.
+	  Messages name the file: "pack Minecraft, blocks/plants, block Poppy". A pack has a kind as a
+	  module or as a folder, not both; a kind folder holds only modules and folders (no "_"
+	  helpers).
 
 	Order and ids
 	  Packs load sorted by (`order`, name), and a pack's entries keep their order. A block's id is
@@ -48,21 +50,22 @@
 	                 name once.
 	  recipes        appended in load order; so are ore features (each with a name of its own)
 	                 and Ages (each id once).
-	  loot, lore     by name, each once.
+	  loot, lore     by name, each once; so is fuel (by tag: every item in the tag burns that
+	                 long, unless its entry gives its own `fuel`, Crafting/Recipes).
 
 	Checks, as packs load (each message names the pack, the kind and the entry):
 	  * the manifest and every entry against Content/Schema: unknown fields (with "did you mean"),
 	    wrong types, missing fields;
 	  * names taken twice, overrides of nothing, a `requires` that does not load first;
 	  * every cross-reference: the names recipes, tags and loot tables give (items or blocks), the
-	    tags recipes name, `drops`, `shearDrops`, `item`, `places`, `caveTwin`, a plant's other half,
-	    a toggle's `to`, a block's loot table, an ore feature's block, the Ages entries name (`age`),
-	    the textures blocks name (`texture`) and the blocks textures are tinted like, the Ages'
-	    milestones' items, every lore line's item, and a lore line both on an entry and in a pack's
-	    `lore`.
-	  The registries check the rest as they load, naming the pack too (`where`): a skill, a sound
-	  event, a machine kind; and a value given both on an entry and in a side table a registry still
-	  keeps while content moves into packs (each registry's header names its side tables).
+	    tags recipes and fuel name, `drops`, `shearDrops`, `item`, `places`, `caveTwin`, a plant's
+	    other half, a toggle's `to`, a block's loot table, an ore feature's block, the Ages entries
+	    name (`age`), the textures blocks name (`texture`) and the blocks textures are tinted like,
+	    the Ages' milestones' items, every lore line's item, and a lore line both on an entry and in
+	    a pack's `lore`.
+	  The registries check what only they know of an entry's value as they load, naming the pack
+	  too (`where`): a skill, a sound event or action, a machine kind, the miner's numbers, a
+	  radiation or shielding number, a fuel's ticks.
 
 	API
 	  Content.default             the packs under Content/Packs, loaded once: what the game uses
@@ -70,13 +73,20 @@
 	  Content.build(packs)        merges and checks packs already loaded ({ PackData })
 	  content.blocks, .items      the merged entries, in id order (Schema's BlockSpec, ItemSpec);
 	                              .entries: both, blocks first
-	  content.recipes, .tags, .textures, .loot, .ores, .ages, .lore   the other kinds, merged
+	  content.recipes, .tags, .textures, .loot, .ores, .ages, .lore, .fuel
+	                              the other kinds, merged
 	  content.packs               the packs, in load order
 	  content.blockId, .itemId    name -> id (items: those that are no blocks)
 	  content.block(name), .item(name), .entry(name)   an entry by name, nil when there is none
 	  content.where(kind, name)   "pack Minecraft, blocks/terrain, block Stone" (kind: Schema
-	                              .SINGULAR's word: "block", "item", "texture"...; the file only
-	                              for a kind folder's), for registries' messages
+	                              .SINGULAR's word: "block", "item", "texture"..., or the kind;
+	                              the file only for a kind folder's), for registries' messages
+	  content.origin(kind, name)  the same as data (Origin, nil when nothing has the name): the
+	                              pack that made it, its kind folder's file (nil: the kind's
+	                              module), the packs that patched it in load order. A tag's: the
+	                              first pack putting names in it, then (`patched`) the packs adding
+	                              to it. A recipe's (`name`: its place in content.recipes): its
+	                              pack, file and `index`, its place in that file's list.
 ]]
 
 local Define = require(script.Define)
@@ -104,6 +114,11 @@ export type PackData = {
 	folders: { [string]: { PackFile } }?,
 }
 
+-- Where something came from (`origin`): the pack that made it and the kind folder's file it is in
+-- (nil: the kind's module), the packs that patched it in load order; a recipe's place in its file's
+-- list (`index`).
+export type Origin = { pack: string, file: string?, patched: { string }, index: number? }
+
 export type Content = {
 	packs: { PackInfo },
 	blocks: { BlockSpec },
@@ -116,12 +131,14 @@ export type Content = {
 	ores: { OreFeature },
 	ages: { AgeRecord },
 	lore: { [string]: string },
+	fuel: { [string]: number },
 	blockId: { [string]: number },
 	itemId: { [string]: number },
 	block: (name: string) -> BlockSpec?,
 	item: (name: string) -> ItemSpec?,
 	entry: (name: string) -> Entry?,
 	where: (kind: string, name: string) -> string,
+	origin: (kind: string, name: string | number) -> Origin?,
 }
 
 local Content = {}
@@ -218,15 +235,20 @@ function Content.build(input: { PackData }): Content
 		patched[kind] = {}
 	end
 	local recipes: { Recipe } = {}
-	-- Each recipe's pack and file ("pack P, recipes/tools") and its place in the file's list.
-	local recipeFrom: { { from: string, index: number } } = {}
+	-- Each recipe's pack and file ("pack P, recipes/tools", and apart) and its place in the file's
+	-- list.
+	local recipeFrom: { { from: string, pack: string, file: string?, index: number } } = {}
 	local tags: { [string]: { string } } = {}
 	local tagHas: { [string]: { [string]: boolean } } = {}
 	-- Who put each name in a tag: tag -> name -> "pack X" or "pack X, block Y".
 	local tagFrom: { [string]: { [string]: string } } = {}
+	-- The packs that put names in each tag: tag -> pack -> the file it first did so from (none: the
+	-- kind's module).
+	local tagPacks: { [string]: { [string]: { file: string? } } } = {}
 	local textures: { [string]: Texture } = {}
 	local loot: { [string]: { Pool } } = {}
 	local lore: { [string]: string } = {}
+	local fuel: { [string]: number } = {}
 	local ores: { OreFeature } = {}
 	local ages: { AgeRecord } = {}
 
@@ -256,13 +278,17 @@ function Content.build(input: { PackData }): Content
 		return nil
 	end
 
-	local function addToTag(tag: string, name: string, from: string)
+	local function addToTag(tag: string, name: string, from: string, pack: string, file: string?)
 		local list = tags[tag]
 		if list == nil then
 			list = {}
 			tags[tag] = list
 			tagHas[tag] = {}
 			tagFrom[tag] = {}
+			tagPacks[tag] = {}
+		end
+		if tagPacks[tag][pack] == nil then
+			tagPacks[tag][pack] = { file = file }
 		end
 		if not tagHas[tag][name] then
 			tagHas[tag][name] = true
@@ -397,7 +423,7 @@ function Content.build(input: { PackData }): Content
 							mergeEntry(kind, pack, file, entry)
 						elseif kind == "recipes" then
 							table.insert(recipes, table.clone(entry))
-							table.insert(recipeFrom, { from = place, index = index })
+							table.insert(recipeFrom, { from = place, pack = pack, file = file, index = index })
 						elseif kind == "ores" then
 							local before = made.ores[entry.name]
 							if before then
@@ -439,17 +465,15 @@ function Content.build(input: { PackData }): Content
 						end
 						if kind == "tags" then
 							for _, member in value[name] do
-								addToTag(name, member, place)
+								addToTag(name, member, place, pack, file)
 							end
 						else
-							mergeNamed(
-								kind,
-								pack,
-								file,
-								if kind == "textures" then textures elseif kind == "loot" then loot else lore,
-								name,
-								value[name]
-							)
+							local into: { [string]: any } = if kind == "textures"
+								then textures
+								elseif kind == "loot" then loot
+								elseif kind == "fuel" then fuel
+								else lore
+							mergeNamed(kind, pack, file, into, name, value[name])
 						end
 					end
 				end
@@ -477,8 +501,9 @@ function Content.build(input: { PackData }): Content
 
 	-- Entries' own tags, after every pack's lists.
 	for _, entry in entries do
+		local kind = if blockAt[entry.name] then "blocks" else "items"
 		for _, tag in (entry.tags or {}) :: { string } do
-			addToTag(tag, entry.name, whereOf(if blockAt[entry.name] then "blocks" else "items", entry.name))
+			addToTag(tag, entry.name, whereOf(kind, entry.name), made[kind][entry.name], madeIn[kind][entry.name])
 		end
 	end
 
@@ -627,6 +652,13 @@ function Content.build(input: { PackData }): Content
 	for name in lore do
 		needName(whereOf("lore", name), "lore", name)
 	end
+	for tag, ticks in fuel do
+		if tags[tag] == nil then
+			fail(`{whereOf("fuel", tag)}: names unknown tag #{tag}{hint(tag, tags)}`)
+		elseif ticks <= 0 then
+			fail(`{whereOf("fuel", tag)}: burns for {ticks} ticks`)
+		end
+	end
 
 	local content = {
 		packs = packs,
@@ -640,6 +672,7 @@ function Content.build(input: { PackData }): Content
 		ores = ores,
 		ages = ages,
 		lore = lore,
+		fuel = fuel,
 		blockId = blockId,
 		itemId = itemId,
 	} :: Content
@@ -663,6 +696,35 @@ function Content.build(input: { PackData }): Content
 	function content.where(kind: string, name: string): string
 		local plural = kindOfWord[kind]
 		return if plural then whereOf(plural, name) else `{kind} {name}`
+	end
+	-- (Each pack's place in load order, to give a tag's packs in that order.)
+	local packAt: { [string]: number } = {}
+	for index, info in packs do
+		packAt[info.name] = index
+	end
+	function content.origin(kind: string, name: string | number): Origin?
+		local plural = kindOfWord[kind]
+		if plural == "recipes" then
+			local from = if type(name) == "number" then recipeFrom[name] else nil
+			return if from then { pack = from.pack, file = from.file, patched = {}, index = from.index } else nil
+		elseif plural == "tags" then
+			local by = if type(name) == "string" then tagPacks[name] else nil
+			if by == nil then
+				return nil
+			end
+			local order: { string } = {}
+			for pack in by do
+				table.insert(order, pack)
+			end
+			table.sort(order, function(a: string, b: string): boolean
+				return packAt[a] < packAt[b]
+			end)
+			local first = table.remove(order, 1) :: string
+			return { pack = first, file = by[first].file, patched = order }
+		elseif plural == nil or type(name) ~= "string" or made[plural][name] == nil then
+			return nil
+		end
+		return { pack = made[plural][name], file = madeIn[plural][name], patched = table.clone(patched[plural][name]) }
 	end
 	return content
 end

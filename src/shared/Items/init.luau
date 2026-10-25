@@ -16,14 +16,13 @@
 	    the clicked face).
 	  * What breaking a block gives: `drops` (by a survival player, with the tool in hand: nothing
 	    without a good enough tool; Shears harvest what BlockList's `shearDrops` says, `shearCount`
-	    of it: grass, ferns, dead bushes, leaves and glow lichen) and `blockDrops` (breaking by
-	    itself, no tool), and now and then something else: a block's `loot` (a loot table of the
-	    packs, or its pools: `lootDrop` rolls them in order, the first item a pool gives, in place
-	    of the usual drop when a player breaks it without Shears, and when it drops by itself:
-	    decaying, blown up, `leafDrop`), and the side rules for the blocks with no `loot` yet
-	    (`randomDrop`: gravel's flint; `leafDrop`: leaves' saplings and sticks; `strawDrop`:
-	    grass's Straw; a block with `loot` may not have one of these too). Creative only blocks
-	    (structure blocks, structure voids, jigsaws; `isCreativeOnly`) never drop.
+	    of it: grass, ferns, dead bushes, leaves and glow lichen; `sheared`) and `blockDrops`
+	    (breaking by itself, no tool), and now and then something else: a block's `loot` (a loot
+	    table of the packs, or its pools: `lootDrop` rolls them in order, the first item a pool
+	    gives, in place of the usual drop when a player breaks it, unless Shears harvested its
+	    `shearDrops`, and when it drops by itself: decaying, blown up). So leaves give a sapling
+	    or sticks now and then, gravel Flint and grass Straw. Creative only blocks (structure
+	    blocks, structure voids, jigsaws; `isCreativeOnly`) never drop.
 
 	Ids come from the content packs' order (Shared/Content), the same on every machine, so they can
 	be sent over the network. `Items.list` is the creative inventory's order: blocks in id order,
@@ -505,6 +504,18 @@ function Items.isShears(item: number?): boolean
 	return data ~= nil and data.kind == "shears"
 end
 
+-- What Shears `tool` harvest of `block` (see `drops`), nil when `tool` is no Shears or `block`
+-- has no `shearDrops`.
+local function shearStack(block: number, tool: number?): Stack?
+	local def = Blocks.get(block)
+	local shear = def.shearDrops
+	if shear == nil or not Items.isShears(tool) then
+		return nil
+	end
+	local item = if type(shear) == "string" then rawget(ids :: any, shear) else Items.ofBlock(block)
+	return if item ~= nil then { item = item, count = def.shearCount } else nil
+end
+
 --[[
 	What breaking `block` with `tool` (nil = bare hands) gives a survival player (nil = nothing):
 	nothing when the tool can't harvest it (`canHarvest`); with Shears, what the block's
@@ -515,75 +526,33 @@ function Items.drops(block: number, tool: number?): Stack?
 	if not Blocks.isValid(block) or Blocks.isCreativeOnly(block) or not Items.canHarvest(block, tool) then
 		return nil
 	end
-	local def = Blocks.get(block)
-	local shear = def.shearDrops
-	if shear ~= nil and Items.isShears(tool) then
-		local item = if type(shear) == "string" then rawget(ids :: any, shear) else Items.ofBlock(block)
-		if item ~= nil then
-			return { item = item, count = def.shearCount }
-		end
-	end
-	return Items.blockDrops(block)
+	return shearStack(block, tool) or Items.blockDrops(block)
 end
 
 --[[
-	What a block drops by itself now and then: when leaves decay (server Behaviours/Leaves), a
-	blast takes it (World/Explosions) or a player breaks leaves without Shears. Its `loot`
-	(Items.lootDrop: the leaves' entries carry Minecraft's leaves loot table, their sapling one time
-	in 20, jungle 40, else 1 or 2 sticks one time in 50). `random` rolls in [0, 1). nil: nothing
-	rolled, or it has no loot.
+	Did Shears `tool` harvest `block`'s `shearDrops` (what `drops` gives then)? A block's `loot`
+	stands aside for them (server Network/EditRules): leaves broken with Shears are leaves, never a
+	sapling, while gravel broken with Shears, which keeps nothing for them, still gives its Flint.
 ]]
-function Items.leafDrop(block: number, random: () -> number): Stack?
-	if not Blocks.isValid(block) then
-		return nil
-	end
-	-- (A block with `loot` drops that by itself instead: Items.lootDrop.)
-	if Items.hasLoot(block) then
-		return Items.lootDrop(block, random)
-	end
-	return nil
-end
-
---[[
-	The side rule for a block's drop now and then in place of its usual one when a player breaks it
-	(`random` rolls in [0, 1)), for blocks with no `loot` yet: none is left (Gravel's Flint, one
-	time in 10, is its entry's `loot` now). nil: the usual drop (Items.drops).
-]]
-function Items.randomDrop(_block: number, _random: () -> number): Stack?
-	return nil
-end
-
--- The chance (0..1) that grass broken without Shears gives Straw (`strawDrop`), by block: the side
--- table for grass whose entry has no `loot` yet.
-Items.STRAW_CHANCE = table.freeze({} :: { [number]: number })
-
---[[
-	What grass with a STRAW_CHANCE gives when a player breaks it without Shears (`random` rolls in
-	[0, 1)): one Straw at that chance. nil: nothing (the rest, an unlucky roll). (Short and tall
-	grass carry their Straw as `loot` now: the Minecraft pack's blocks/plants.)
-]]
-function Items.strawDrop(block: number, random: () -> number): Stack?
-	local chance = Items.STRAW_CHANCE[block]
-	if chance and random() < chance then
-		return { item = ids.Straw, count = 1 }
-	end
-	return nil
+function Items.sheared(block: number, tool: number?): boolean
+	return Blocks.isValid(block) and not Blocks.isCreativeOnly(block) and shearStack(block, tool) ~= nil
 end
 
 --[[
 	A block's own loot (its entry's `loot`, Content/Schema: a loot table's name, the packs' `loot`,
 	or the pools themselves; { rolls = { min, max }, entries = { { item | false, weight, min, max }
 	} }), what it gives now and then in place of its usual drop: when a player breaks it by hand or
-	with a tool that harvests it, but not with Shears (server Network/EditRules), and when it drops
-	by itself (leaves decaying, a blast: `leafDrop`). Minecraft's block loot tables, in short.
+	with a tool that harvests it, unless Shears harvested its `shearDrops` (`sheared`; server
+	Network/EditRules), and when it drops by itself (leaves decaying, server Behaviours/Leaves; a
+	blast, World/Explosions). Minecraft's block loot tables, in short.
 
 	`lootDrop` rolls the pools in order with `random` (in [0, 1)) and gives the first item one
 	rolls (nil: none did, the usual drop stands): a pool rolls rolls[1]..rolls[2] times (a draw only
 	when they differ), each roll an entry by weight (the first whose running sum passes random() x
 	the total), `min`..`max` of its item (a draw only when they differ). So { { "Flint", 1, 1, 1 },
-	{ false, 9, 0, 0 } } gives Flint when random() < 0.1 (Gravel's); leaves' sapling-then-sticks
-	loot is two pools, grass's Straw one. A block with `loot` may not be one the side rule
-	(STRAW_CHANCE) covers too.
+	{ false, 9, 0, 0 } } gives Flint when random() < 0.1 (Gravel's); the leaves' loot is two pools
+	(Minecraft's leaves loot table: their sapling one time in 20, jungle 40, else 1 or 2 sticks one
+	time in 50), grass's Straw one.
 ]]
 local lootOf: { [number]: { Schema.Pool } } = {}
 do
@@ -593,10 +562,6 @@ do
 		local loot = spec and spec.loot
 		if loot then
 			local where = content.where("block", spec.name)
-			assert(
-				Items.STRAW_CHANCE[id] == nil,
-				`Items: {where} has loot, and a side rule (STRAW_CHANCE) drops for it too`
-			)
 			local pools: { Schema.Pool } = if type(loot) == "string" then content.loot[loot] else loot :: any
 			for _, pool in pools do
 				for _, entry in pool.entries do

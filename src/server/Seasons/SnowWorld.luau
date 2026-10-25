@@ -218,8 +218,8 @@ end
 
 --[[
 	Does the heat source `block` at (x, y, z) heat now? Players/Climate's: a block it counts as
-	heating (Config.ToughAsNails.HeatingBlocks, and what Players/ToughAsNails registers) whose
-	check, if it has one, says so (a lit furnace, a working generator or heater).
+	heating (the blocks with `heats` on their entries, and what Players/ToughAsNails registers)
+	whose check, if it has one, says so (a lit furnace, a working generator or heater).
 ]]
 local probeBlock = AIR
 local probe = {

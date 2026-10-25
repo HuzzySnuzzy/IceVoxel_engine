@@ -16,9 +16,9 @@
 
 	`recipes()` and `fuels()` list the same recipes and fuels for recipe browsers (Ui/Jei).
 
-	Fuels are Recipes.fuel's, plus the buckets of the fluids that burn (Shared/Fluids `furnaceFuel`:
-	Minecraft's Lava Bucket, 20 000 ticks). Oil and fuel are no furnace fuel: furnaces burn solid
-	fuels only, as in Minecraft.
+	Fuels are Recipes.fuel's (an item's own beating its tag's), plus the buckets of the fluids that
+	burn (Shared/Fluids `furnaceFuel`: Minecraft's Lava Bucket, 20 000 ticks). Oil and fuel are no
+	furnace fuel: furnaces burn solid fuels only, as in Minecraft.
 ]]
 
 local FluidList = require(script.Parent.Parent.Fluids.FluidList)
@@ -70,9 +70,22 @@ for _, recipe in Recipes.smelting do
 	end
 	table.insert(recipeList, { inputs = inputs, result = { item = result, count = recipe.count or 1 } })
 end
-for name, ticks in Recipes.fuel :: { [string]: number } do
-	for _, id in namesOf(name) do
-		fuels[id] = ticks
+do
+	-- (The tags first, by name, then the items: an item's own fuel beats its tag's, and the same
+	-- on every machine.)
+	local names: { string } = {}
+	for name in Recipes.fuel :: { [string]: number } do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	for _, byTag in { true, false } do
+		for _, name in names do
+			if (string.sub(name, 1, 1) == "#") == byTag then
+				for _, id in namesOf(name) do
+					fuels[id] = (Recipes.fuel :: { [string]: number })[name]
+				end
+			end
+		end
 	end
 end
 for _, fluid in FluidList do

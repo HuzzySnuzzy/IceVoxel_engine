@@ -15,8 +15,9 @@
 	             its data and wear the same way (mint curing a part-drunk canteen).
 	  smelting   furnace recipes: one `input` cooks into `result` (200 ticks).
 	  tags       the packs' tags (Core's base tags and every pack's, each a union).
-	  fuel       burn time in ticks of furnace fuel: an entry's `fuel`, and LEGACY_FUEL below (by
-	             item name or "#tag") for what has none yet; an item in both is an error.
+	  fuel       burn time in ticks of furnace fuel, by item name or "#tag": the packs' `fuel` (by
+	             tag: Core's logs and planks) and every entry's own `fuel`, which beats its tag's
+	             (Shared/Crafting/Smelting burns the tags' first).
 
 	An ingredient is an item name or "#tag" (Minecraft's item tags). Shared/Crafting compiles these
 	into ids and matches them.
@@ -69,34 +70,17 @@ Recipes.shapeless = shapeless
 Recipes.smelting = smelting
 
 -- Burn time (ticks) of furnace fuel (Minecraft's AbstractFurnaceBlockEntity.getFuel), by item name
--- or "#tag": the side table, for what has no `fuel` on its entry yet.
-local LEGACY_FUEL: { [string]: number } = {
-	["#logs"] = 300,
-	["#planks"] = 300,
-}
-
--- Every fuel: the side table's, and every entry's `fuel` (an entry the side table burns, by name or
--- through a tag, may not have one).
-local fuel: { [string]: number } = table.clone(LEGACY_FUEL)
-do
-	local legacy: { [string]: string } = {}
-	for name in LEGACY_FUEL do
-		local tag = if string.sub(name, 1, 1) == "#" then content.tags[string.sub(name, 2)] else nil
-		for _, member in (tag or { name }) :: { string } do
-			legacy[member] = name
-		end
-	end
-	for _, entry in content.entries do
-		local ticks = entry.fuel
-		if ticks then
-			local kind = if content.block(entry.name) then "block" else "item"
-			assert(
-				legacy[entry.name] == nil,
-				`Recipes: {content.where(kind, entry.name)} has its fuel both on its entry and in LEGACY_FUEL ({legacy[entry.name]})`
-			)
-			assert(ticks > 0, `Recipes: {content.where(kind, entry.name)} burns for {ticks} ticks`)
-			fuel[entry.name] = ticks
-		end
+-- or "#tag": the packs' fuel tags, then every entry's own `fuel`.
+local fuel: { [string]: number } = {}
+for tag, ticks in content.fuel do
+	fuel[`#{tag}`] = ticks
+end
+for _, entry in content.entries do
+	local ticks = entry.fuel
+	if ticks then
+		local kind = if content.block(entry.name) then "block" else "item"
+		assert(ticks > 0, `Recipes: {content.where(kind, entry.name)} burns for {ticks} ticks`)
+		fuel[entry.name] = ticks
 	end
 end
 Recipes.fuel = fuel

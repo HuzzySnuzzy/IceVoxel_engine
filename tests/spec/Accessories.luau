@@ -111,7 +111,7 @@ return function(t, shared, require, server, client)
 		t.eq(Items.icon(nil), nil)
 	end)
 
-	-- (The Terraria pack's entries say all of this themselves: no side table names them.)
+	-- (The Terraria pack's entries say all of this themselves.)
 	t.test("accessories: each item's entry carries its lore, its blank icon and its Age", function()
 		local content = require(shared.Content).default
 		local LoreList = require(shared.Items.LoreList)

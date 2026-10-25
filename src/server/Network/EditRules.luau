@@ -51,10 +51,10 @@
 	  Drops     survival breaks drop Items.drops(block, tool): blocks that need a tool (stone,
 	            ores) drop nothing without a good enough one, Shears harvest what a block's
 	            `shearDrops` names, a block with `loot` its loot now and then instead (Items
-	            .lootDrop: by hand or a tool that harvests it, not Shears), gravel gives flint one
-	            time in 10 (Items.randomDrop), grass without Shears Straw now and then
-	            (Items.strawDrop). A container's contents drop in both modes (Minecraft's
-	            Containers.dropContents runs whatever the game mode).
+	            .lootDrop: by hand or a tool that harvests it, but not when Shears harvested its
+	            `shearDrops`, Items.sheared): leaves a sapling or sticks, gravel Flint one time in
+	            10 (with Shears too, as Minecraft's), grass Straw. A container's contents drop in
+	            both modes (Minecraft's Containers.dropContents runs whatever the game mode).
 	  Wear      a survival break wears the tool in hand (Mining.wear: 1, 2 for swords, nothing on
 	            blocks that break at once, but Shears 1 on every block); creative players never
 	            wear their tools.
@@ -397,21 +397,12 @@ function EditRules.drops(block: number, creative: boolean, tool: number?): Items
 		return nil
 	end
 	local stack = Items.drops(block, tool)
-	if Items.hasLoot(block) then
-		-- (Its loot, now and then, in place of the usual drop: not with Shears, nor with a tool
-		-- that can't harvest it.)
-		if Items.isShears(tool) or not Items.canHarvest(block, tool) then
-			return stack
-		end
+	-- (Its loot, now and then, in place of the usual drop: not with a tool that can't harvest it,
+	-- nor when Shears harvested what the block keeps for them, the leaves themselves.)
+	if Items.hasLoot(block) and Items.canHarvest(block, tool) and not Items.sheared(block, tool) then
 		return Items.lootDrop(block, math.random) or stack
 	end
-	if stack == nil and not Items.isShears(tool) then
-		-- (Leaves by hand or with a tool: now and then a sapling or sticks, Items.leafDrop; grass:
-		-- Straw, Items.strawDrop.)
-		return Items.leafDrop(block, math.random) or Items.strawDrop(block, math.random)
-	end
-	-- (Gravel: Flint one time in 10.)
-	return if stack then Items.randomDrop(block, math.random) or stack else nil
+	return stack
 end
 
 -- Wear the held `tool` takes from breaking `block` (0: creative (instabuild), not a tool, or an

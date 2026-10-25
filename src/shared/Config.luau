@@ -1594,16 +1594,13 @@ local Config = {
 		-- Ticks the player stays wet after leaving water (being wet cools by 3 steps).
 		WetTicks = 100,
 		-- Blocks around the player (a cube this many blocks out each way) searched for heat and
-		-- cold sources, once a second.
+		-- cold sources, once a second. The content packs' block entries say which blocks are
+		-- sources (Shared/Content): `heats` warms the player within this (3 steps; 5 within 2
+		-- blocks; a fluid's source every level and its cave twin: lava), `cools` cools them by 3
+		-- steps. Lit furnaces and working Heat and Combustion Generators warm too (server
+		-- Players/ToughAsNails registers them). Within 2 blocks of a heat source, cold sources no
+		-- longer cool (a fire beats the snow around it).
 		ProximityRadius = 5,
-		-- Blocks that warm the player within ProximityRadius (3 steps; 5 within 2 blocks): fluid
-		-- names (every level and the cave twin) or block names. A name no block has is skipped
-		-- with a warning, so a block may be listed here before it exists. Lit furnaces and working
-		-- Heat and Combustion Generators warm too (server Players/ToughAsNails registers them).
-		-- Within 2 blocks of one, cold sources no longer cool (a fire beats the snow around it).
-		HeatingBlocks = {},
-		-- Blocks that cool the player by 3 steps within ProximityRadius.
-		CoolingBlocks = {},
 		-- The picture as the extremes build (client Rendering/TemperatureGrade): its Saturation
 		-- goes by Freezing at full hypothermia (colour draining out as the player freezes to
 		-- death) and by Overheating at full hyperthermia (too vivid as they cook), in proportion
@@ -2197,36 +2194,30 @@ local Config = {
 		dose's bands bring Radiation Sickness I, II and III. A Hazmat suit keeps it out, and the
 		client clicks like a Geiger counter while the player is exposed. Survival and adventure
 		players only: creative and spectator players are never exposed (their dose only decays).
+		What is radioactive is the content packs' entries' to say (Shared/Content): `radiation`,
+		Sv/h a block away or nearer, or carried (a block's item as the block, times the stack's
+		count; uranium's ore, blocks, lump, ingot and nugget in the Ores pack, which says why they
+		are what they are), `shielding`, the share a piece of armor worn keeps out (the Hazmat
+		suit's, Mekanism's: the whole suit all of it), and `radiationShield`, a block's own share
+		let through (lead's).
 	]]
 	Radiation = {
 		-- false: nothing is radioactive (no exposure, sickness or clicks); a saved dose is kept as
 		-- it is, for when it is back.
 		Enabled = true,
-		-- Sv/h a source gives a block away or nearer, or carried, by block or item name (a block's
-		-- item radiates as the block, by the stack's count): the side table, for sources whose
-		-- content pack entries carry no `radiation` yet (Shared/Content; uranium's ore, blocks,
-		-- lump, ingot and nugget carry theirs in the Ores pack, which says why they are what they
-		-- are). A name both here and on its entry is an error.
-		Sources = {},
 		-- Blocks are looked for within this many blocks of the body (a sphere). Exposure falls off
 		-- with the square of the distance from a block away in (Mekanism's magnitude /
 		-- max(1, d^2)), less its value at this radius, so it fades to nothing there.
 		Radius = 8,
 		-- The share of radiation each block between a source and the body lets through: any full
-		-- solid block (rock, earth, wood, metal) `Solid`, these by name (the side table, for blocks
-		-- whose entries carry no `radiationShield` yet: lead's blocks carry theirs, 0.02 and 0.1:
-		-- lead stops nearly all). Glass, plants and fluids let it all through (leaves are solid:
-		-- Solid).
+		-- solid block (rock, earth, wood, metal) `Solid`, unless its content pack entry gives its
+		-- own `radiationShield` (lead's blocks, 0.02 and 0.1: lead stops nearly all). Glass,
+		-- plants and fluids let it all through (leaves are solid: Solid).
 		Shielding = { Solid = 0.5 },
 		-- The most sources traced for shielding in one look, nearest first (the rest take the
 		-- mean of those traced in their octant of directions, unshielded in one with none): a
 		-- look reads at most the sphere and this many rays.
 		MaxRays = 32,
-		-- The share of radiation each piece of armor worn keeps out, by item name: the side table,
-		-- for armor whose entries carry no `shielding` yet (the Hazmat suit's pieces carry
-		-- Mekanism's mask, gown, pants and boots: the whole suit keeps out all of it), carried
-		-- uranium's too.
-		Hazmat = {},
 		-- Seconds for a dose to halve (Mekanism's 0.9995 a second is 23 minutes: a game's pace
 		-- is quicker).
 		HalfLife = 600,
@@ -2608,18 +2599,15 @@ local Config = {
 
 	--[[
 		The Metal Miner (Machines/Kinds/Miner, Machines/MinerRules): on an ore block it makes that
-		ore's drop forever for energy. Per ore: ticks an item takes, J a tick, and the least J an
-		item costs whatever its cards (`floor`: coal is never worth more energy than it burns for).
+		ore's drop forever for energy. Per ore, on its content pack entry (`miner`, Shared/Content):
+		ticks an item takes, J a tick, and the least J an item costs whatever its cards (`floor`:
+		coal is never worth more energy than it burns for).
 	]]
 	Miner = {
 		-- false: the miner ticks inert and has no recipe (its block stays registered).
 		Enabled = true,
 		-- Its energy store (J; the network may fill it in a tick), before Energy Upgrades.
 		Capacity = 200000,
-		-- Per ore, by block name: the side table, for ores whose content pack entries carry no
-		-- `miner` yet (Machines/MinerRules; the Ores pack's carry theirs: the metals as iron, the
-		-- powders between iron and gold, uranium as rare as emerald).
-		Ores = {},
 	},
 
 	--[[

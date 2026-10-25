@@ -1,15 +1,14 @@
 --[[
 	The content tool's workings (tests/content), pure: given a View of the game (lib/ContentGame:
-	the merged content packs, each pack's own data and what the registries make of them) it finds
-	what a pack's author likely forgot, lists and shows entries, and writes a new pack's modules
-	as text. It reads no file and prints nothing: tests/content does that, and tests/spec/
-	ContentTool runs it on fixture packs.
+	the merged content packs, where each entry came from and what the registries make of them)
+	it finds what a pack's author likely forgot, lists and shows entries, and writes a new pack's
+	modules as text. It reads no file and prints nothing: tests/content does that, and
+	tests/spec/ContentTool runs it on fixture packs.
 
 	  check(view)       the findings (Finding: pack, level, check, subject, text), pack by pack in
 	                    load order:
 	    lore      warning  a block that is an item, or an item, without a lore line where the game
-	                       finds one (Items/LoreList: its entry's `lore`, a pack's `lore`, the side
-	                       table)
+	                       finds one (Items/LoreList: its entry's `lore`, a pack's `lore`)
 	    faces     warning  a block that can carry a texture without texture-pack faces (its own
 	                       entry, its cave twin's or its variant group's, as Blocks resolves them).
 	                       Never textured, as the TexturePack spec has it: undrawn blocks, fluids,
@@ -30,9 +29,11 @@
 	                       fits (every shaped one before any shapeless one)
 	    survival  info     an item survival play never gives (`reach`): no recipe, loot table,
 	                       drop, mob drop, structure or other way the game has, or only recipes
-	                       needing such items. Creative only items, fluids' blocks (buckets carry
-	                       those) and blocks the world makes (found there, even when they break
-	                       into something else: ores, grass, ice) are left out
+	                       needing such items. Creative only items, the creative tier's machines
+	                       (a machine kind with `creative`: Mekanism's creative energy cube, which
+	                       no recipe makes by design), fluids' blocks (buckets carry those) and
+	                       blocks the world makes (found there, even when they break into
+	                       something else: ores, grass, ice) are left out
 	  report(view, findings)    the check's lines: a summary per pack, the findings, the counts
 	  summary(view)             a line per pack: its order and how much of each kind it holds
 	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack
@@ -49,10 +50,11 @@
 
 	The View (lib/ContentGame makes it from the game; a spec may make one of its own):
 	  content          the merged packs (Shared/Content's)
-	  packs, kinds     each pack's own data { name, manifest, kinds }, in load order; Schema.KINDS
+	  packs, kinds     content.packs ({ name, order, ... }, in load order); Schema.KINDS
 	  suggest          Schema.suggest (the nearest name)
-	  lore, isItem, creativeOnly   Items/LoreList; every item's name (placeable blocks too); the
-	                   creative only ones
+	  lore, isItem, creativeOnly, creativeMachines   Items/LoreList; every item's name (placeable
+	                   blocks too); the creative only ones; the blocks whose machine kind is
+	                   creative (Machines `creative`)
 	  faces, textured, icons, missingTexture   TexturePack.Blocks; the blocks Blocks gives faces
 	                   (their own entry's, a cave twin's, a variant group's); TexturePack.Icons and
 	                   .Missing
@@ -64,10 +66,9 @@
 	                   ToughAsNails/Drinks give it (effects by name, the empty container's name,
 	                   a canteen's sips; nil: none), for `show`
 
-	Where an entry comes from is read off the packs' own data (`view.packs`, in load order): the
-	first pack giving the name made it, later ones with `override = true` patched it; recipes,
-	ore features and Ages come in load order. A name the packs' data lacks falls back on the
-	merged content's `where`.
+	Where an entry comes from is the loader's own record (content.origin): the pack and file that
+	made it, the packs whose overrides patched it, a recipe's place in its file, the packs that
+	put names in a tag.
 ]]
 
 local ContentTool = {}
@@ -127,21 +128,6 @@ local function isList(value: any): boolean
 		end
 	end
 	return true
-end
-
--- How many entries a kind's data holds (a list's length, a table's names).
-local function countOf(value: any): number
-	if type(value) ~= "table" then
-		return 0
-	end
-	if isList(value) then
-		return #value
-	end
-	local n = 0
-	for _ in value do
-		n += 1
-	end
-	return n
 end
 
 local function quote(text: string): string
@@ -254,149 +240,59 @@ end
 
 --[[ Where things come from ]]
 
-export type Origins = {
-	-- kind -> name -> the pack that made it; kind -> name -> the packs that patched it.
-	made: { [string]: { [string]: string } },
-	patched: { [string]: { [string]: { string } } },
-	-- Per merged recipe (content.recipes' index): its pack and its place in the pack's list.
-	recipes: { { pack: string, index: number } },
-	-- Tag -> the packs that put names in it (their `tags`, their entries' `tags`).
-	tagPacks: { [string]: { string } },
-	-- Pack name -> its place in load order.
-	packIndex: { [string]: number },
-}
-
-local function origins(view: any): Origins
-	if view.__origins then
-		return view.__origins
-	end
-	local made: { [string]: { [string]: string } } = {}
-	local patched: { [string]: { [string]: { string } } } = {}
-	for _, kind in view.kinds do
-		made[kind] = {}
-		patched[kind] = {}
-	end
-	local recipes = {}
-	local tagPacks: { [string]: { string } } = {}
-	local packIndex: { [string]: number } = {}
-	local function tagged(tag: any, pack: string)
-		if type(tag) ~= "string" then
-			return
-		end
-		local list = tagPacks[tag] or {}
-		tagPacks[tag] = list
-		if not table.find(list, pack) then
-			table.insert(list, pack)
-		end
-	end
-	local function patch(kind: string, name: string, pack: string)
-		local list = patched[kind][name] or {}
-		patched[kind][name] = list
-		if not table.find(list, pack) then
-			table.insert(list, pack)
-		end
-	end
-	for index, pack in view.packs do
-		local name = pack.name
-		packIndex[name] = index
-		local kinds = pack.kinds
-		for _, kind in { "blocks", "items" } do
-			local list = kinds[kind]
-			if type(list) == "table" then
-				for _, entry in list do
-					if type(entry) == "table" and type(entry.name) == "string" then
-						if entry.override then
-							patch(kind, entry.name, name)
-						elseif made[kind][entry.name] == nil then
-							made[kind][entry.name] = name
-						end
-						if type(entry.tags) == "table" then
-							for _, tag in entry.tags do
-								tagged(tag, name)
-							end
-						end
-					end
-				end
-			end
-		end
-		for _, kind in { "textures", "loot", "lore", "tags" } do
-			local map = kinds[kind]
-			if type(map) == "table" then
-				for key, value in map do
-					if type(key) ~= "string" then
-						continue
-					end
-					if kind == "tags" then
-						tagged(key, name)
-					elseif kind == "textures" and type(value) == "table" and value.override then
-						patch(kind, key, name)
-					elseif made[kind][key] == nil then
-						made[kind][key] = name
-					end
-				end
-			end
-		end
-		for _, kind in { "ores", "ages" } do
-			local list = kinds[kind]
-			if type(list) == "table" then
-				for _, entry in list do
-					local key = if type(entry) ~= "table" then nil elseif kind == "ages" then entry.id else entry.name
-					if type(key) == "string" and made[kind][key] == nil then
-						made[kind][key] = name
-					end
-				end
-			end
-		end
-		if type(kinds.recipes) == "table" then
-			for place in kinds.recipes do
-				table.insert(recipes, { pack = name, index = place })
-			end
-		end
-	end
-	-- (Packs laid out in a way this did not read: no recipe is put down to the wrong pack.)
-	if #recipes ~= #view.content.recipes then
-		recipes = {}
-	end
-	local result = {
-		made = made,
-		patched = patched,
-		recipes = recipes,
-		tagPacks = tagPacks,
-		packIndex = packIndex,
-	}
-	view.__origins = result
-	return result
-end
-
--- The pack that made `name` of `kind` ("blocks", "textures"...), else the merged content's word.
+-- The pack that made `name` of `kind` ("blocks", "textures"...: content.origin's), else "?".
 local function packOf(view: any, kind: string, name: string): string
-	local pack = origins(view).made[kind] and origins(view).made[kind][name]
-	if pack then
-		return pack
-	end
-	local where = view.content.where(kind, name)
-	return string.match(where, "^pack ([^%s,(]+)") or "?"
+	local origin = view.content.origin(kind, name)
+	return if origin then origin.pack else "?"
 end
 ContentTool.packOf = packOf
 
 -- The packs whose overrides patched `name` of `kind`, in load order.
 local function patchedBy(view: any, kind: string, name: string): { string }
-	return origins(view).patched[kind] and origins(view).patched[kind][name] or {}
+	local origin = view.content.origin(kind, name)
+	return if origin then origin.patched else {}
 end
 
--- Merged recipe `index`'s pack and its place there ("?" and the merged index when unknown).
-local function recipeFrom(view: any, index: number): (string, number)
-	local from = origins(view).recipes[index]
-	if from then
-		return from.pack, from.index
+-- The packs that put names in tag `tag`, in load order.
+local function tagPacks(view: any, tag: string): { string }
+	local origin = view.content.origin("tags", tag)
+	if origin == nil then
+		return {}
 	end
-	return "?", index
+	local packs = { origin.pack }
+	for _, pack in origin.patched do
+		table.insert(packs, pack)
+	end
+	return packs
 end
 
--- "recipe #3 (Torch)": as the loader names it, by the recipe's place in its pack.
+-- Pack name -> its place in load order.
+local function packIndexOf(view: any): { [string]: number }
+	local index: { [string]: number } = {}
+	for at, pack in view.packs do
+		index[pack.name] = at
+	end
+	return index
+end
+
+--[[
+	Merged recipe `index`'s pack and the loader's name for it in there: "recipe #3" (its place in
+	its pack's recipes), "recipes/tools, recipe #3" for a kind folder's file; "?" and the merged
+	place when unknown.
+]]
+local function recipeFrom(view: any, index: number): (string, string)
+	local origin = view.content.origin("recipe", index)
+	if origin == nil then
+		return "?", `recipe #{index}`
+	end
+	local name = `recipe #{origin.index}`
+	return origin.pack, if origin.file then `{origin.file}, {name}` else name
+end
+
+-- "recipe #3 (Torch)": as the loader names it, by the recipe's place in its pack (or file).
 local function recipeSubject(view: any, index: number): string
 	local _, place = recipeFrom(view, index)
-	return `recipe #{place} ({view.content.recipes[index].result})`
+	return `{place} ({view.content.recipes[index].result})`
 end
 
 -- What a recipe is, in short: "shaped Torch x4", "smelting RawIron -> IronIngot".
@@ -536,7 +432,7 @@ function ContentTool.reach(view: any): Reach
 			end
 			if at < INF then
 				local pack, place = recipeFrom(view, index)
-				if give(recipe.result, at, `pack {pack}, recipe #{place} ({recipeText(recipe)})`) then
+				if give(recipe.result, at, `pack {pack}, {place} ({recipeText(recipe)})`) then
 					changed = true
 				end
 			end
@@ -772,7 +668,7 @@ function ContentTool.check(view: any): { Finding }
 			local winner = "another recipe"
 			if #winners == 1 then
 				local otherPack, otherPlace = recipeFrom(view, winners[1])
-				winner = `pack {otherPack}'s recipe #{otherPlace}`
+				winner = `pack {otherPack}'s {otherPlace}`
 			elseif #winners > 1 then
 				winner = `one of the {#winners} recipes for {made}`
 			end
@@ -791,7 +687,7 @@ function ContentTool.check(view: any): { Finding }
 	-- Survival's reach.
 	for _, entry in content.entries do
 		local name = entry.name
-		if not view.isItem[name] or view.creativeOnly[name] or reach.age[name] then
+		if not view.isItem[name] or view.creativeOnly[name] or view.creativeMachines[name] or reach.age[name] then
 			continue
 		end
 		local block = content.block(name)
@@ -816,7 +712,7 @@ function ContentTool.check(view: any): { Finding }
 	end
 
 	-- Pack by pack in load order (each check's own order within a pack).
-	local packIndex = origins(view).packIndex
+	local packIndex = packIndexOf(view)
 	local position: { [Finding]: number } = {}
 	for index, finding in findings do
 		position[finding] = index
@@ -839,39 +735,73 @@ end
 
 --[[ Reports ]]
 
--- A line per pack: "Core  order 0    blocks 2, tags 7, ages 5" (overrides counted apart).
+-- The names of every `kind` the content holds (a recipe's: its merged place).
+local function namesOf(content: any, kind: string): { any }
+	local names = {}
+	if kind == "blocks" or kind == "items" or kind == "ores" then
+		for _, entry in content[kind] do
+			table.insert(names, entry.name)
+		end
+	elseif kind == "ages" then
+		for _, age in content.ages do
+			table.insert(names, age.id)
+		end
+	elseif kind == "recipes" then
+		for index in content.recipes do
+			table.insert(names, index)
+		end
+	else
+		for name in content[kind] or {} do
+			table.insert(names, name)
+		end
+	end
+	return names
+end
+
+--[[
+	A line per pack: "Core  order 0    blocks 2, tags 7, ages 5", what each pack made of each kind
+	(content.origin), its overrides counted apart; a tag counts for every pack putting names in it.
+]]
 function ContentTool.summary(view: any): { string }
+	local content = view.content
+	-- Pack -> kind -> how many it made, and how many it patched.
+	local made: { [string]: { [string]: number } } = {}
+	local patched: { [string]: { [string]: number } } = {}
+	for _, pack in view.packs do
+		made[pack.name], patched[pack.name] = {}, {}
+	end
+	local function count(into: { [string]: { [string]: number } }, pack: string, kind: string)
+		local byKind = into[pack]
+		if byKind then
+			byKind[kind] = (byKind[kind] or 0) + 1
+		end
+	end
+	for _, kind in view.kinds do
+		for _, name in namesOf(content, kind) do
+			local origin = content.origin(kind, name)
+			if origin then
+				count(made, origin.pack, kind)
+				for _, pack in origin.patched do
+					count(if kind == "tags" then made else patched, pack, kind)
+				end
+			end
+		end
+	end
 	local rows = {}
 	for _, pack in view.packs do
 		local parts = {}
 		for _, kind in view.kinds do
-			local data = pack.kinds[kind]
-			if data ~= nil then
-				local n = countOf(data)
-				local overrides = 0
-				if (kind == "blocks" or kind == "items") and type(data) == "table" then
-					for _, entry in data do
-						if type(entry) == "table" and entry.override then
-							overrides += 1
-						end
-					end
-				elseif kind == "textures" and type(data) == "table" then
-					for _, texture in data do
-						if type(texture) == "table" and texture.override then
-							overrides += 1
-						end
-					end
-				end
+			local n, overrides = made[pack.name][kind] or 0, patched[pack.name][kind] or 0
+			if n + overrides > 0 then
 				local extra = if overrides > 0
 					then ` ({overrides} override{if overrides == 1 then "" else "s"})`
 					else ""
-				table.insert(parts, `{kind} {n - overrides}{extra}`)
+				table.insert(parts, `{kind} {n}{extra}`)
 			end
 		end
-		local order = pack.manifest.order
 		table.insert(rows, {
 			pack.name,
-			`order {if type(order) == "number" then number(order) else "?"}`,
+			`order {number(pack.order)}`,
 			if #parts > 0 then table.concat(parts, ", ") else "nothing yet",
 		})
 	end
@@ -960,7 +890,7 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 	if kind and not table.find(view.kinds, kind) then
 		return nil, `no kind {kind} (kinds: {table.concat(view.kinds, ", ")})`
 	end
-	if pack and origins(view).packIndex[pack] == nil then
+	if pack and packIndexOf(view)[pack] == nil then
 		local names = {}
 		for _, info in view.packs do
 			table.insert(names, info.name)
@@ -987,7 +917,7 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 			for index, recipe in content.recipes do
 				local from, place = recipeFrom(view, index)
 				if pack == nil or from == pack then
-					table.insert(rows, { `#{index}`, recipeText(recipe), `{from} #{place}` })
+					table.insert(rows, { `#{index}`, recipeText(recipe), `{from}, {place}` })
 				end
 			end
 		elseif each == "ores" then
@@ -1005,7 +935,7 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 			end
 		elseif each == "tags" then
 			for _, tag in sortedKeys(content.tags) do
-				local packs = origins(view).tagPacks[tag] or {}
+				local packs = tagPacks(view, tag)
 				if pack == nil or table.find(packs, pack) then
 					local n = #content.tags[tag]
 					table.insert(rows, { `#{tag}`, `{n} name{if n == 1 then "" else "s"}`, table.concat(packs, ", ") })
@@ -1047,7 +977,7 @@ local function recipeLines(view: any, name: string): { string }
 	local makes, uses = {}, {}
 	for index, recipe in content.recipes do
 		local from, place = recipeFrom(view, index)
-		local text = `pack {from}, recipe #{place}: {recipeText(recipe)}`
+		local text = `pack {from}, {place}: {recipeText(recipe)}`
 		if recipe.result == name then
 			table.insert(makes, text)
 		end
@@ -1351,10 +1281,14 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	local tagName = if string.sub(name, 1, 1) == "#" then string.sub(name, 2) else name
 	local tag = content.tags[tagName]
 	if tag then
-		local packs = origins(view).tagPacks[tagName] or {}
+		local packs = tagPacks(view, tagName)
 		section(`tag #{tagName}: from {table.concat(packs, ", ")}`)
 		for _, line in wrap("  names: ", tag) do
 			table.insert(lines, line)
+		end
+		local ticks = content.fuel and content.fuel[tagName]
+		if ticks then
+			table.insert(lines, `  fuel: {ticks} ticks (pack {packOf(view, "fuel", tagName)})`)
 		end
 	end
 	for _, ore in content.ores do
@@ -1459,7 +1393,7 @@ end
 function ContentTool.nextOrder(view: any): number
 	local highest = 0
 	for _, pack in view.packs do
-		local order = pack.manifest.order
+		local order = pack.order
 		if type(order) == "number" then
 			highest = math.max(highest, order)
 		end

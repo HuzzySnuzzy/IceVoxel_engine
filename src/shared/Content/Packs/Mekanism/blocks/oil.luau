@@ -41,6 +41,7 @@ return function(define: Define.Context): { BlockSpec }
 		material = "Glass",
 		transparency = 0.1,
 		reflectance = 0.2,
+		lore = "Crude oil from underground wells. Refine it into Fuel.",
 	}, 20)
 	define.append(list, oil)
 	local fuel = define.fluid("Fuel", {
@@ -50,13 +51,10 @@ return function(define: Define.Context): { BlockSpec }
 		transparency = 0.4,
 		reflectance = 0.05,
 		blastResistance = 0,
+		lore = "Refined oil. Burns in a Combustion Generator.",
 	}, 5, { flammable = { ignite = 100, burn = 100 } })
 	define.append(list, fuel)
 	table.insert(list, define.caveFluid(oil[1]))
-	-- (The lore is the sources', the Oil and Fuel items' blocks; given after CaveOil is copied from
-	-- Oil's, as its item is Oil's and it has no line of its own.)
-	oil[1].lore = "Crude oil from underground wells. Refine it into Fuel."
-	fuel[1].lore = "Refined oil. Burns in a Combustion Generator."
 	define.append(list, {
 		{
 			name = "OilRefinery",

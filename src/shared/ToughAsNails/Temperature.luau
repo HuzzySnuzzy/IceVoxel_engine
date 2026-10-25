@@ -188,27 +188,20 @@ Temperature.ZONES = table.freeze({
 
 --[[
 	The blocks that warm and cool a player near them (server Players/Climate's sources, the
-	tooltips' lines), by name (a fluid's name means every level of it and its cave twin):
-	Config.ToughAsNails.HeatingBlocks / CoolingBlocks, the side lists, then every content pack
-	block entry with `heats` / `cools` (Shared/Content). A block in both is an error.
+	tooltips' lines), by name (a fluid's name means every level of it and its cave twin): every
+	content pack block entry with `heats` / `cools` (Shared/Content), in id order.
 ]]
-local function sources(field: string, legacy: { string }, side: string): { string }
-	local names = table.clone(legacy)
-	local content = Content.default
-	for _, spec in content.blocks do
+local function sources(field: string): { string }
+	local names: { string } = {}
+	for _, spec in Content.default.blocks do
 		if (spec :: any)[field] then
-			local where = content.where("block", spec.name)
-			assert(
-				not table.find(legacy, spec.name),
-				`Temperature: {where} {field}, and Config.ToughAsNails.{side} too`
-			)
 			table.insert(names, spec.name)
 		end
 	end
 	return table.freeze(names)
 end
-Temperature.HEATING_BLOCKS = sources("heats", Config.ToughAsNails.HeatingBlocks, "HeatingBlocks")
-Temperature.COOLING_BLOCKS = sources("cools", Config.ToughAsNails.CoolingBlocks, "CoolingBlocks")
+Temperature.HEATING_BLOCKS = sources("heats")
+Temperature.COOLING_BLOCKS = sources("cools")
 
 -- The climate's borders between the zones and where they land on the scale (see the header).
 Temperature.CLIMATE = table.freeze({ -0.55, -0.25, 0.4, 0.7 })

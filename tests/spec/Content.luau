@@ -6,10 +6,10 @@
 	overriding both), their order, ids, overrides and merged tags; kind folders
 	(tests/fixtures/content/folders: Delta, Luau, a folder inside a kind folder; Epsilon, JSON),
 	their modules' order and the files every message names; every per-entry field reaching its
-	registry (the Fields fixture pack grafted into a fresh game); and every check: the schema's
-	(unknown fields with their "did you mean", wrong types, missing fields), names and overrides,
-	manifests and `requires`, every cross-reference, discovery's, and a value both on an entry and
-	in a registry's side table.
+	registry (the Fields fixture pack grafted into a fresh game); where each thing came from
+	(`origin`); and every check: the schema's (unknown fields with their "did you mean", wrong
+	types, missing fields), names and overrides, manifests and `requires`, every cross-reference,
+	discovery's, and the registries' own checks on the entries' values.
 
 	Nothing here pins an id or a total: the game's content may grow.
 ]]
@@ -109,7 +109,7 @@ return function(t, shared, require, _server, _client)
 		t.eq(content.entry("NoSuchThing"), nil)
 	end)
 
-	t.test("content: the Ores pack carries its own fields, and the side tables no longer name it", function()
+	t.test("content: the Ores pack carries its own fields", function()
 		local content = Content.default
 		local ore = content.block("UraniumOre") :: any
 		t.eq(ore.texture.All, "uranium ore", "its texture")
@@ -124,10 +124,6 @@ return function(t, shared, require, _server, _client)
 		t.eq(content.where("ores", "copper"), "pack Ores, ore feature copper", "where: by kind")
 		t.eq(content.where("ore feature", "copper"), "pack Ores, ore feature copper", "or by its word")
 		t.eq(content.where("texture", "copper ore"), "pack Ores, texture copper ore")
-		-- (The side tables keep the rest only.)
-		t.eq((Config.Miner.Ores :: any).UraniumOre, nil, "not in Config.Miner.Ores")
-		t.eq((Config.Radiation.Sources :: any).UraniumOre, nil, "not in Config.Radiation.Sources")
-		t.eq((Config.Radiation.Hazmat :: any).HazmatHelmet, nil)
 		-- Define.metal made its set: storage both ways and smelting.
 		local Recipes = require(shared.Crafting.Recipes)
 		local packs, unpacks, smelts = 0, 0, 0
@@ -151,77 +147,67 @@ return function(t, shared, require, _server, _client)
 		t.eq(smelts, 2, "the ore and the raw lump smelt")
 	end)
 
-	t.test(
-		"content: the Minecraft pack's items carry their own fields, and the side tables no longer name them",
-		function()
-			local content = Content.default
-			local LoreList = require(shared.Items.LoreList)
-			local TexturePack = require(shared.TexturePack)
-			local Ages = require(shared.Progression.Ages)
-			local Skills = require(shared.Progression.Skills)
-			local Knowledge = require(shared.Progression.Knowledge)
-			local Recipes = require(shared.Crafting.Recipes)
-			local Sounds = require(shared.Sounds)
-			local SoundList = require(shared.Sounds.SoundList)
-			local PotionList = require(shared.Effects.PotionList)
-			local function item(name: string): any
-				return content.item(name)
-			end
-			-- Every item of the pack: its lore line and its icon (blank until made) on its entry.
-			local seen = 0
-			for _, spec in content.items do
-				if string.find(content.where("item", spec.name), "pack Minecraft", 1, true) then
-					seen += 1
-					t.ok(type(spec.lore) == "string" and LoreList[spec.name] == spec.lore, `{spec.name}'s lore`)
-					t.eq(spec.icon, "", `{spec.name}'s icon on its entry`)
-					t.eq(TexturePack.Icons[spec.name], "", `{spec.name}: TexturePack.Icons`)
-				end
-			end
-			t.ok(seen > 0, "the pack has items")
-			-- The armor sets: each material's equip sound, lore and Age on all four pieces.
-			local iron = Ages.byId("iron") :: any
-			local industrial = Ages.byId("industrial") :: any
-			for name, sound in
-				{ LeatherBoots = "leather", ChainmailHelmet = "chain", IronHelmet = "iron", GoldLeggings = "gold" }
-			do
-				t.eq(item(name).equipSound, `item.armor.equip_{sound}`, `{name}'s equipSound`)
-				t.eq(Sounds.armorEquip(Items.id[name]), Sounds.id[`item.armor.equip_{sound}`], `{name} sounds its own`)
-			end
-			t.eq(item("DiamondChestplate").age, "industrial")
-			t.eq(Ages.ofName("GoldBoots"), iron.index, "gold armor: the Iron Age")
-			t.eq(item("LeatherHelmet").age, nil, "leather: the first Age")
-			t.eq(item("IronBoots").lore, "Solid iron protection.")
-			-- The tool sets: each tool's lore, the tier's Age and the wooden ones' fuel.
-			t.eq(item("WoodenPickaxe").fuel, 200)
-			t.eq(Recipes.fuel.WoodenSword, 200, "-> Recipes.fuel")
-			t.eq(item("StonePickaxe").fuel, nil, "only wood burns")
-			t.eq(Ages.ofName("GoldenHoe"), iron.index)
-			t.eq(Ages.ofName("DiamondAxe"), industrial.index)
-			t.eq(item("IronPickaxe").lore, "Mines gold, diamond, emerald and uranium ore.", "a tool's own line")
-			-- Hand-written entries: fuel, knowledge, Age and skill.
-			t.eq(item("Coal").fuel, 1600)
-			t.eq(Recipes.fuel.Stick, 100)
-			t.eq(Knowledge.SMELTED.IronIngot, 0.7, "knowledge.smelt -> Knowledge.SMELTED")
-			t.eq(Knowledge.SMELTED.CookedChicken, 0.35)
-			t.eq(item("Gunpowder").skill, "demolition")
-			t.eq((Skills.ofName("Gunpowder") :: any).id, "demolition", "-> the skill's recipes")
-			t.eq(Ages.ofName("Gunpowder"), industrial.index)
-			t.eq(Ages.ofName("Shears"), iron.index)
-			-- Potions: a base potion the Iron Age's, its strong and long variants the Industrial Age's.
-			for _, variant in PotionList.all() do
-				local age = if variant.from == PotionList.BASE then iron else industrial
-				t.eq(Ages.ofName(variant.item), age.index, `{variant.item}'s Age`)
-				t.ok(type(item(variant.item).lore) == "string", `{variant.item}'s lore`)
-			end
-			t.eq(item("LongPotionOfSwiftness").lore, "Brewed longer with coal. Run faster.")
-			-- (SoundList.ARMOR keeps only other packs' prefixes.)
-			for _, row in SoundList.ARMOR do
-				for _, material in { "Leather", "Chainmail", "Iron", "Gold", "Diamond" } do
-					t.ok(row.prefix ~= material, `SoundList.ARMOR no longer names {material}`)
-				end
+	t.test("content: the Minecraft pack's items carry their own fields", function()
+		local content = Content.default
+		local LoreList = require(shared.Items.LoreList)
+		local TexturePack = require(shared.TexturePack)
+		local Ages = require(shared.Progression.Ages)
+		local Skills = require(shared.Progression.Skills)
+		local Knowledge = require(shared.Progression.Knowledge)
+		local Recipes = require(shared.Crafting.Recipes)
+		local Sounds = require(shared.Sounds)
+		local PotionList = require(shared.Effects.PotionList)
+		local function item(name: string): any
+			return content.item(name)
+		end
+		-- Every item of the pack: its lore line and its icon (blank until made) on its entry.
+		local seen = 0
+		for _, spec in content.items do
+			if string.find(content.where("item", spec.name), "pack Minecraft", 1, true) then
+				seen += 1
+				t.ok(type(spec.lore) == "string" and LoreList[spec.name] == spec.lore, `{spec.name}'s lore`)
+				t.eq(spec.icon, "", `{spec.name}'s icon on its entry`)
+				t.eq(TexturePack.Icons[spec.name], "", `{spec.name}: TexturePack.Icons`)
 			end
 		end
-	)
+		t.ok(seen > 0, "the pack has items")
+		-- The armor sets: each material's equip sound, lore and Age on all four pieces.
+		local iron = Ages.byId("iron") :: any
+		local industrial = Ages.byId("industrial") :: any
+		for name, sound in
+			{ LeatherBoots = "leather", ChainmailHelmet = "chain", IronHelmet = "iron", GoldLeggings = "gold" }
+		do
+			t.eq(item(name).equipSound, `item.armor.equip_{sound}`, `{name}'s equipSound`)
+			t.eq(Sounds.armorEquip(Items.id[name]), Sounds.id[`item.armor.equip_{sound}`], `{name} sounds its own`)
+		end
+		t.eq(item("DiamondChestplate").age, "industrial")
+		t.eq(Ages.ofName("GoldBoots"), iron.index, "gold armor: the Iron Age")
+		t.eq(item("LeatherHelmet").age, nil, "leather: the first Age")
+		t.eq(item("IronBoots").lore, "Solid iron protection.")
+		-- The tool sets: each tool's lore, the tier's Age and the wooden ones' fuel.
+		t.eq(item("WoodenPickaxe").fuel, 200)
+		t.eq(Recipes.fuel.WoodenSword, 200, "-> Recipes.fuel")
+		t.eq(item("StonePickaxe").fuel, nil, "only wood burns")
+		t.eq(Ages.ofName("GoldenHoe"), iron.index)
+		t.eq(Ages.ofName("DiamondAxe"), industrial.index)
+		t.eq(item("IronPickaxe").lore, "Mines gold, diamond, emerald and uranium ore.", "a tool's own line")
+		-- Hand-written entries: fuel, knowledge, Age and skill.
+		t.eq(item("Coal").fuel, 1600)
+		t.eq(Recipes.fuel.Stick, 100)
+		t.eq(Knowledge.SMELTED.IronIngot, 0.7, "knowledge.smelt -> Knowledge.SMELTED")
+		t.eq(Knowledge.SMELTED.CookedChicken, 0.35)
+		t.eq(item("Gunpowder").skill, "demolition")
+		t.eq((Skills.ofName("Gunpowder") :: any).id, "demolition", "-> the skill's recipes")
+		t.eq(Ages.ofName("Gunpowder"), industrial.index)
+		t.eq(Ages.ofName("Shears"), iron.index)
+		-- Potions: a base potion the Iron Age's, its strong and long variants the Industrial Age's.
+		for _, variant in PotionList.all() do
+			local age = if variant.from == PotionList.BASE then iron else industrial
+			t.eq(Ages.ofName(variant.item), age.index, `{variant.item}'s Age`)
+			t.ok(type(item(variant.item).lore) == "string", `{variant.item}'s lore`)
+		end
+		t.eq(item("LongPotionOfSwiftness").lore, "Brewed longer with coal. Run faster.")
+	end)
 
 	t.test("content: a potion PotionList makes needs its line in the Minecraft pack, and a line its potion", function()
 		-- (A fresh game, PotionList edited before the packs load.)
@@ -357,6 +343,45 @@ return function(t, shared, require, _server, _client)
 		t.eq(content.where("texture", "delta stone"), "pack Delta, textures/ground, texture delta stone")
 	end)
 
+	t.test("content: origin: the pack that made each thing, the packs that patched it, a recipe's place", function()
+		local content = fixtures()
+		local function says(origin: Content.Origin?): string
+			if origin == nil then
+				return "nil"
+			end
+			local text = `{origin.pack} [{table.concat(origin.patched, " ")}]`
+			text ..= if origin.file then ` {origin.file}` else ""
+			return text .. if origin.index then ` #{origin.index}` else ""
+		end
+		t.eq(says(content.origin("block", "AlphaStone")), "Alpha [Gamma]", "made, then patched")
+		t.eq(says(content.origin("blocks", "GammaGlass")), "Gamma []", "by kind or by its word")
+		t.eq(says(content.origin("item", "BetaGem")), "Beta [Gamma]")
+		t.eq(says(content.origin("texture", "beta stone")), "Beta [Gamma]", "a texture's override")
+		-- (Beta, order 10, first; then Alpha's.)
+		t.eq(says(content.origin("recipe", 1)), "Beta [] #1", "a recipe: its place in its pack")
+		t.eq(says(content.origin("recipe", 3)), "Alpha [] #1")
+		t.eq(
+			says(content.origin("tag", "fixture_stones")),
+			"Beta [Alpha Gamma]",
+			"a tag: its first pack, the packs adding to it (a module's or an entry's tags) in load order"
+		)
+		t.eq(content.origin("block", "Nothing"), nil)
+		t.eq(content.origin("recipe", #content.recipes + 1), nil)
+		t.eq(content.origin("spell", "AlphaStone"), nil, "no such kind")
+		local origin = content.origin("block", "AlphaStone") :: Content.Origin
+		table.insert(origin.patched, "Mine")
+		t.eq(says(content.origin("block", "AlphaStone")), "Alpha [Gamma]", "a copy each time")
+		-- A kind folder's file.
+		local folders = folderFixtures()
+		t.eq(says(folders.origin("block", "DeltaFlower")), "Delta [] blocks/plants/flower")
+		t.eq(says(folders.origin("recipe", 3)), "Delta [] recipes/b_gems #2", "its place in its file")
+		t.eq(says(folders.origin("tag", "delta")), "Delta [] tags/a", "the file its first names came from")
+		t.eq(says(folders.origin("loot table", "epsilon_crate")), "Epsilon [] loot/crate")
+		-- The game's: Core's fuel tags.
+		t.eq(says(Content.default.origin("fuel tag", "planks")), "Core []")
+		t.eq(Content.default.fuel.planks, 300)
+	end)
+
 	--[[ Every per-entry field reaching its registry (the Fields pack in a fresh game) ]]
 
 	t.test("content: every per-entry field reaches its registry", function()
@@ -375,7 +400,8 @@ return function(t, shared, require, _server, _client)
 		local B, I = FreshBlocks.id, FreshItems.id
 		local content = need({ "Content" }).default
 		t.eq(content.packs[#content.packs].name, "Fields", "grafted last")
-		t.eq(B.FixtureOre, FreshBlocks.count - 2, "its blocks after every other")
+		-- (FixtureOre, FixtureFrost and FixturePlanks; its override of Planks moves no id.)
+		t.eq(B.FixtureOre, FreshBlocks.count - 3, "its blocks after every other")
 		-- Textures and icons.
 		local TexturePack = need({ "TexturePack" })
 		t.eq(TexturePack.Blocks.FixtureOre.All, "fixture ore", "texture -> TexturePack.Blocks")
@@ -440,6 +466,11 @@ return function(t, shared, require, _server, _client)
 		t.ok(smelted and smelted.item == I.FixtureGem and smelted.count == 2, "smelting")
 		t.eq(Smelting.fuel(I.FixtureGem), 120, "fuel, an item")
 		t.eq(Smelting.fuel(B.FixtureOre), 50, "and a block")
+		-- Fuel by tag (the packs' `fuel`: Core's planks), and an entry's own beating its tag's.
+		t.eq(Recipes.fuel["#planks"], 300, "a fuel tag -> Recipes.fuel")
+		t.eq(Smelting.fuel(B.BirchPlanks), 300, "every item in the tag burns")
+		t.eq(Smelting.fuel(B.FixturePlanks), 300, "another pack's planks in #planks too")
+		t.eq(Smelting.fuel(B.Planks), 100, "an entry's own fuel beats its tag's")
 		-- Ore features and loot tables.
 		local Ores = need({ "Generation", "Ores" })
 		local feature = Ores.FEATURES[#Ores.FEATURES]
@@ -470,8 +501,6 @@ return function(t, shared, require, _server, _client)
 		t.eq(FreshItems.lootDrop(B.FixtureOre, rolls({ 0.5 })), nil, "nothing rolled: the usual drop")
 		local snow = FreshItems.lootDrop(B.FixtureFrost, rolls({ 0.2 }))
 		t.ok(snow and snow.item == I.Snowball and snow.count == 2, "inline pools")
-		local fallen = FreshItems.leafDrop(B.FixtureFrost, rolls({ 0.2 }))
-		t.ok(fallen and fallen.item == I.Snowball, "and when it drops by itself")
 		local EditRules = need({ "Network", "EditRules" }, serverRoot)
 		t.eq(EditRules.drops(B.FixtureOre, false, nil), nil, "no loot without a tool that harvests it")
 		local snowballs, frost = 0, 0
@@ -484,10 +513,15 @@ return function(t, shared, require, _server, _client)
 			end
 		end
 		t.ok(snowballs > 0 and frost > 0 and snowballs + frost == 200, "broken by hand: its loot or itself")
-		for _ = 1, 20 do
+		-- (With Shears too: it keeps nothing for them, `shearDrops`, as gravel keeps its flint.)
+		local sheared = 0
+		for _ = 1, 200 do
 			local stack = EditRules.drops(B.FixtureFrost, false, I.Shears)
-			t.eq(stack and stack.item, B.FixtureFrost, "with Shears: never its loot")
+			if stack and stack.item == I.Snowball then
+				sheared += 1
+			end
 		end
+		t.ok(sheared > 0 and sheared < 200, `with Shears: its loot or itself ({sheared} of 200)`)
 		-- Sounds.
 		local Sounds = need({ "Sounds" })
 		t.eq(Sounds.block(B.FixtureOre, "break"), Sounds.id["block.fire.extinguish"], "sounds")
@@ -853,6 +887,17 @@ return function(t, shared, require, _server, _client)
 			{ "pack P, block A: its lore is pack P's lore too" },
 			"lore twice for one item"
 		)
+		fails(
+			with({ tags = { t = { "Stone" } }, fuel = { u = 300 } }),
+			{ "pack P, fuel tag u: names unknown tag #u (did you mean t?)" },
+			"a fuel tag"
+		)
+		fails(
+			with({ tags = { t = { "Stone" } }, fuel = { t = 0 } }),
+			{ "pack P, fuel tag t: burns for 0 ticks" },
+			"a fuel tag's ticks"
+		)
+		fails(with({ fuel = { t = "long" } }), { "pack P, fuel tag t: it must be a number" }, "a fuel tag's type")
 		t.ok(
 			pcall(Content.build, with({ recipes = { { type = "smelting", input = "Stone", result = "Stone" } } })),
 			"a good pack loads"
@@ -1001,20 +1046,17 @@ return function(t, shared, require, _server, _client)
 		t.eq(message, "(it loaded)", "a function manifest, a helper and a function kind")
 	end)
 
-	--[[ Checks: a value both on an entry and in a registry's side table ]]
+	--[[ Checks: the registries' own, on the entries' values ]]
 
-	-- Requiring `path` in a fresh game with a pack Clash (`kinds`) fails with `parts`.
-	local function clash(kinds: { [string]: any }, path: { string }, parts: { string }, before: ((any, any) -> ())?)
+	-- Requiring `path` in a fresh game with a pack Patch (`kinds`) fails with `parts`.
+	local function refused(kinds: { [string]: any }, path: { string }, parts: { string })
 		local env, root = fresh(function(env, packs)
-			local folder = env.folder(packs, "Clash")
+			local folder = env.folder(packs, "Patch")
 			env.module(folder, "pack", { order = 900, requires = { "Minecraft", "Terraria" } })
 			for kind, value in kinds do
 				env.module(folder, kind, value)
 			end
 		end)
-		if before then
-			before(env, root)
-		end
 		local node = root
 		for _, name in path do
 			node = node[name]
@@ -1023,7 +1065,8 @@ return function(t, shared, require, _server, _client)
 		local message = if ok then "(it loaded)" else tostring(err)
 		t.ok(has(message, parts), `{table.concat(path, ".")}: {message}`)
 	end
-	local STONE = "pack Minecraft (patched by Clash), blocks/terrain, block Stone"
+	local STONE = "pack Minecraft (patched by Patch), blocks/terrain, block Stone"
+	local HELMET = "pack Minecraft (patched by Patch), items/armor, item IronHelmet"
 
 	t.test("content: food and drink: their schema, unknown effects and containers, ones that do nothing", function()
 		fails(
@@ -1041,7 +1084,7 @@ return function(t, shared, require, _server, _client)
 			{ "pack P, item I: drink.emtpy is no field it may have (did you mean empty?)" },
 			"a drink's field"
 		)
-		local SNACK = "pack Clash, item ClashSnack"
+		local SNACK = "pack Patch, item ClashSnack"
 		local function item(fields: { [string]: any }): { [string]: any }
 			local entry: { [string]: any } = { name = "ClashSnack", model = MODEL }
 			for key, value in fields do
@@ -1049,107 +1092,86 @@ return function(t, shared, require, _server, _client)
 			end
 			return { items = { entry } }
 		end
-		clash(
+		refused(
 			item({ food = { heal = 1, effects = { { effect = "Sped", ticks = 20 } } } }),
 			{ "Items", "Foods" },
 			{ `Foods: {SNACK} gives an unknown effect Sped` }
 		)
-		clash(
+		refused(
 			item({ food = { heal = 1, cures = { "Bleding" } } }),
 			{ "Items", "Foods" },
 			{ `Foods: {SNACK} cures an unknown effect Bleding` }
 		)
-		clash(
+		refused(
 			item({ food = { heal = 0, aftermath = { effect = "Weakness", ticks = 20, stage = 1 } } }),
 			{ "Items", "Foods" },
 			{ `Foods: {SNACK}'s aftermath needs an infection cure` }
 		)
-		clash(item({ food = { heal = 0 } }), { "Items", "Foods" }, { `Foods: {SNACK} does nothing` })
-		clash(
+		refused(item({ food = { heal = 0 } }), { "Items", "Foods" }, { `Foods: {SNACK} does nothing` })
+		refused(
 			item({ food = { heal = 1, nutrition = 30, saturation = 0.1 } }),
 			{ "Items", "Foods" },
 			{ `Foods: {SNACK} has bad nutrition` }
 		)
-		clash(
+		refused(
 			item({ drink = { effects = { { effect = "Sped", ticks = 20 } } } }),
 			{ "ToughAsNails", "Drinks" },
 			{ `Drinks: {SNACK} gives an unknown effect Sped` }
 		)
-		clash(
+		refused(
 			item({ drink = { thirst = 2, empty = "GlassBotle" } }),
 			{ "ToughAsNails", "Drinks" },
 			{ `Drinks: {SNACK}'s empty container GlassBotle is no item` }
 		)
-		clash(
+		refused(
 			item({ drink = { thirst = 2, sips = true } }),
 			{ "ToughAsNails", "Drinks" },
 			{ `Drinks: {SNACK} is drunk in sips but has no durability` }
 		)
-		clash(item({ drink = { hydration = 0.5 } }), { "ToughAsNails", "Drinks" }, { `Drinks: {SNACK} does nothing` })
+		refused(item({ drink = { hydration = 0.5 } }), { "ToughAsNails", "Drinks" }, { `Drinks: {SNACK} does nothing` })
 	end)
 
-	t.test("content: a value both on an entry and in a registry's side table is an error", function()
-		-- (The Minecraft pack's blocks carry their own lore, faces, Ages, skills, knowledge, miner
-		-- numbers and loot now, and those side tables are their modules' own, so no clash of a
-		-- Minecraft block with them can be set up here: Stone's lore and texture, TNT's skill,
-		-- Coal Ore's knowledge, Iron Ore's miner numbers and Gravel's loot were the examples. The
-		-- side tables, and their checks, go once every pack's entries carry their values.)
-		-- (An item LEGACY_ICONS still names: one with an icon its entry doesn't give. It was the
-		-- Hermes Boots until the Terraria pack's items carried their own icons; the packs move
-		-- theirs onto their entries, so the side table empties, and the check goes with it.)
-		local TexturePack = require(shared.TexturePack)
-		local legacy: string? = nil
-		for _, spec in Content.default.items do
-			if spec.icon == nil and TexturePack.Icons[spec.name] ~= nil then
-				legacy = spec.name
-				break
-			end
-		end
-		if legacy then
-			clash({ items = { { name = legacy, override = true, icon = "" } } }, { "TexturePack" }, {
-				"TexturePack: pack ",
-				"(patched by Clash)",
-				`item {legacy} has its icon both on its entry and in LEGACY_ICONS`,
-			})
-		end
-		clash(
+	t.test("content: a registry refuses a value only it can check, naming the entry", function()
+		-- (Content checks the names entries give; what a value means is the registry's to check.)
+		refused(
 			{ blocks = { { name = "Stone", override = true, skill = "juggling" } } },
 			{ "Progression", "Skills" },
 			{ `Skills: {STONE} names an unknown skill juggling` }
 		)
-		clash(
-			{ blocks = { { name = "Stone", override = true, radiation = 2 } } },
-			{ "Radiation" },
-			{ `Radiation: {STONE} has its radiation, and Config.Radiation.Sources too` },
-			function(env, root)
-				env.require(root.Config).Radiation.Sources.Stone = 1
-			end
-		)
-		-- (Fire's own sounds are on its entry: a side table naming it too, as a pack's old data.)
-		clash({}, { "Sounds" }, {
-			"Sounds: pack Minecraft, blocks/fire, block Fire has its sounds, and SoundList.BLOCK_SOUNDS too",
-		}, function(env, root)
-			env.require(root.Sounds.SoundList).BLOCK_SOUNDS.Fire = { ["break"] = "block.fire.extinguish" }
-		end)
-		clash(
+		refused(
 			{ blocks = { { name = "Stone", override = true, sounds = { ["break"] = "block.stone.shatter" } } } },
 			{ "Sounds" },
 			{ `Sounds: {STONE}'s break plays unknown event block.stone.shatter` }
 		)
-		clash(
+		refused(
 			{ blocks = { { name = "Stone", override = true, sounds = { smash = "block.stone.break" } } } },
 			{ "Sounds" },
 			{ `Sounds: {STONE} has unknown action smash` }
 		)
-		-- (SoundList.ARMOR names no prefix any more: every armor piece names its own `equipSound`.)
-		-- (Ice cools on its entry: Config naming it too.)
-		clash({}, { "ToughAsNails", "Temperature" }, {
-			"Temperature: pack Minecraft, blocks/terrain, block Ice cools, and Config.ToughAsNails.CoolingBlocks too",
-		}, function(env, root)
-			table.insert(env.require(root.Config).ToughAsNails.CoolingBlocks, "Ice")
-		end)
-		clash({ blocks = { { name = "Planks", override = true, fuel = 300 } } }, { "Crafting", "Recipes" }, {
-			"Recipes: pack Minecraft (patched by Clash), blocks/wood, block Planks has its fuel both on its entry and in LEGACY_FUEL (#planks)",
-		})
+		refused(
+			{ items = { { name = "IronHelmet", override = true, equipSound = "item.armor.equip_tin" } } },
+			{ "Sounds" },
+			{ `Sounds: {HELMET}'s equipSound is unknown event item.armor.equip_tin` }
+		)
+		refused(
+			{ blocks = { { name = "Stone", override = true, radiation = 0 } } },
+			{ "Radiation" },
+			{ `Radiation: {STONE}'s radiation must be a positive number` }
+		)
+		refused(
+			{ items = { { name = "IronHelmet", override = true, shielding = 2 } } },
+			{ "Radiation" },
+			{ `Radiation: {HELMET}'s shielding must be 0..1` }
+		)
+		refused(
+			{ blocks = { { name = "Stone", override = true, miner = { ticks = 1.5, joules = 10 } } } },
+			{ "Machines", "MinerRules" },
+			{ `MinerRules: {STONE} needs whole ticks and J a tick` }
+		)
+		refused(
+			{ blocks = { { name = "Stone", override = true, fuel = 0 } } },
+			{ "Crafting", "Recipes" },
+			{ `Recipes: {STONE} burns for 0 ticks` }
+		)
 	end)
 end
