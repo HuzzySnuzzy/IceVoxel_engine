@@ -999,10 +999,10 @@ return function(t, shared, require, _server, _client)
 		clash({ items = { { name = "HermesBoots", override = true, icon = "" } } }, { "TexturePack" }, {
 			"TexturePack: pack Terraria (patched by Clash), item HermesBoots has its icon both on its entry and in LEGACY_ICONS",
 		})
-		-- (The Canteen: an item the side lists still name. The Shears named their Age there until the
-		-- Minecraft pack's items took theirs onto their entries.)
-		clash({ items = { { name = "Canteen", override = true, age = "iron" } } }, { "Progression", "Ages" }, {
-			"Ages: pack Survival (patched by Clash), items/drinks, item Canteen names its Age, and the side lists name one for it too (iron)",
+		-- (The Block of Iron: a block the side lists still name. The Shears and then the Canteen named
+		-- their Ages there until their packs took them onto their entries.)
+		clash({ blocks = { { name = "IronBlock", override = true, age = "iron" } } }, { "Progression", "Ages" }, {
+			"Ages: pack Minecraft (patched by Clash), blocks/ores, block IronBlock names its Age, and the side lists name one for it too (iron)",
 		})
 		clash({ blocks = { { name = "Tnt", override = true, skill = "demolition" } } }, { "Progression", "Skills" }, {
 			"Skills: pack Minecraft (patched by Clash), blocks/fire, block Tnt names its skill, and demolition's recipes name it too",
@@ -1051,15 +1051,7 @@ return function(t, shared, require, _server, _client)
 			{ "Sounds" },
 			{ `Sounds: {STONE} has unknown action smash` }
 		)
-		-- (Straw armor: SoundList.ARMOR still names it by prefix. Iron's was there until the Minecraft
-		-- pack's armor named its sounds on its entries.)
-		clash(
-			{ items = { { name = "StrawHelmet", override = true, equipSound = "item.armor.equip_gold" } } },
-			{ "Sounds" },
-			{
-				"Sounds: pack Survival (patched by Clash), items/gear, item StrawHelmet has its equip sound, and SoundList.ARMOR's Straw names it too",
-			}
-		)
+		-- (SoundList.ARMOR names no prefix any more: every armor piece names its own `equipSound`.)
 		clash({ blocks = { { name = "Ice", override = true, cools = true } } }, { "ToughAsNails", "Temperature" }, {
 			"Temperature: pack Minecraft (patched by Clash), blocks/terrain, block Ice cools, and Config.ToughAsNails.CoolingBlocks too",
 		})

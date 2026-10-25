@@ -161,8 +161,15 @@ return function(t, shared, require, _server, _client)
 		t.ok(has(lines, { "info", "pack Lint, item LintLost:" }), "an info")
 		local counts = lines[#lines]
 		t.ok(string.find(counts, "warnings (", 1, true) and string.find(counts, "1 never crafted", 1, true), counts)
-		t.ok(ContentTool.count(findings, "warning") >= 7, "--strict fails on these")
-		t.ok(ContentTool.count(findings, "info") >= 2)
+		-- (The fixture's own: the game's packs carry no warnings.)
+		local lint: { any } = {}
+		for _, finding in findings do
+			if finding.pack == "Lint" or finding.pack == "LintPatch" then
+				table.insert(lint, finding)
+			end
+		end
+		t.ok(ContentTool.count(lint, "warning") >= 6, `--strict fails on these ({ContentTool.count(lint, "warning")})`)
+		t.ok(ContentTool.count(lint, "info") >= 2)
 	end)
 
 	--[[ The game's packs ]]
