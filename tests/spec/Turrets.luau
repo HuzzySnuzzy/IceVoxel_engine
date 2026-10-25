@@ -2,7 +2,8 @@
 	Turrets and the Metal Miner, the foundation (Shared/Turrets, Shared/Turrets/TurretRules,
 	Machines/Kinds/Turret, Miner and AmmoPress, Machines/MinerRules, the Turrets message,
 	WeaponSync's `plain` in Weapons): the registries by name (blocks, items, lore, icons, sounds,
-	Ages), the twelve Specs against their blocks, calibres, stand-in guns and fits; the
+	Ages; the lore, icons and Ages on the pack's own entries), the twelve Specs against their
+	blocks, calibres, stand-in guns and fits; the
 	pure maths (aim, muzzle, turning the short way and never past, the exact cadence and the two
 	ways to get it wrong, the packed state, spread, range and noise with every attachment, a
 	Ruined one and NoiseScale); the turret kind on a fake service (idle, tracking and shot energy,
@@ -151,6 +152,45 @@ return function(t, shared, require, server, client)
 			end
 		end
 	)
+
+	-- (The Turrets pack's entries say all of this themselves: no side table names them.)
+	t.test("turrets: each entry carries its lore, icon and Age; a feature switched off, its entries no Age", function()
+		local function entries(content: any): { [string]: any }
+			local found: { [string]: any } = {}
+			for _, typeName in TYPES do
+				for _, tierName in TIERS do
+					local name = `{tierName}{typeName}Turret`
+					found[name] = content.block(name)
+				end
+			end
+			found.MetalMiner = content.block("MetalMiner")
+			found.AmmoPress = content.block("AmmoPress")
+			for _, name in PARTS do
+				found[name] = content.item(name)
+			end
+			return found
+		end
+		local content = require(shared.Content).default
+		for name, entry in entries(content) do
+			local kind = if content.block(name) then "block" else "item"
+			t.eq(content.where(kind, name), `pack Turrets, {kind} {name}`, `{name} is the pack's`)
+			t.ok(type(entry.lore) == "string" and entry.lore == LoreList[name], `{name}'s lore is its entry's`)
+			t.eq(entry.age, if string.sub(name, 1, 8) == "Ultimate" then "atomic" else "electric", `{name}'s Age`)
+			if content.item(name) then
+				t.eq(entry.icon, "", `{name}'s icon is its entry's, blank`)
+			end
+		end
+		-- Only the press on: the servo it takes and the press keep the Electric Age, the rest none.
+		local env = Loader.new()
+		local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
+		local PressConfig = env.require(root.Config)
+		PressConfig.Turrets.Enabled = false
+		PressConfig.Miner.Enabled = false
+		for name, entry in entries(env.require(root.Content).default) do
+			local kept = name == "ServoMotor" or name == "AmmoPress"
+			t.eq(entry.age, if kept then "electric" else nil, `{name}'s Age with the press alone on`)
+		end
+	end)
 
 	--[[ The Specs ]]
 

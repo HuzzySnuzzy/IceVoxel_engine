@@ -2,7 +2,11 @@
 --[[
 	Terraria's things (Config.Characters, Accessories, Mana): its early accessories, mana (Fallen
 	Stars, Mana Crystals, mana potions), magic weapons and vanity clothes. Box models in their
-	colours until their icons are made (TexturePack's LEGACY_ICONS still names them, blank).
+	colours until their icons are made (each one's `icon`, blank), and a lore line each (what it
+	does, as Terraria's tooltips say). The Aglet, the Anklet of the Wind, the Band of Starpower and
+	the Emerald Staff (of iron, gold and emerald), the Obsidian Skull, the Tuxedo and the Mana
+	Potion (brewing) are the Iron Age's (`age`); the rest are the Stone Age's (of what is crafted,
+	the Mana Crystal, the Lesser Mana Potion and the Top Hat).
 
 	  * Accessories (`accessory`, Items/Accessories): Hermes Boots (winged boots), Cloud in a Bottle
 	    (a bottle with a white puff), Shiny Red Balloon, Lucky Horseshoe (gold), Aglet (a lace's
@@ -91,6 +95,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 2.6, 1, 0.6 }, offset = { -6.4, 1.2, -1 }, rotation = 12, color = WHITE },
 				{ size = { 2.6, 1, 0.6 }, offset = { 6.4, 1.2, -1 }, rotation = -12, color = WHITE },
 			},
+			icon = "",
+			lore = "The wearer can run super fast.",
 		},
 		{
 			name = "CloudInABottle",
@@ -100,6 +106,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = CLOUD,
 			material = "Glass",
 			model = cloudBottle,
+			icon = "",
+			lore = "Allows the holder to double jump.",
 		},
 		{
 			name = "ShinyRedBalloon",
@@ -113,6 +121,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 1.4, 1.2, 1.4 }, offset = { 0, -2.3, 0 }, color = shade(BALLOON, 0.75) },
 				{ size = { 0.4, 5, 0.4 }, offset = { 0.3, -5.4, 0 }, rotation = -8, color = WHITE },
 			},
+			icon = "",
+			lore = "Increases jump height.",
 		},
 		{
 			name = "LuckyHorseshoe",
@@ -131,6 +141,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 0.8, 0.8, 0.4 }, offset = { -4, 1, 1.1 }, color = shade(GOLD, 0.5) },
 				{ size = { 0.8, 0.8, 0.4 }, offset = { 4, 1, 1.1 }, color = shade(GOLD, 0.5) },
 			},
+			icon = "",
+			lore = "Negates fall damage.",
 		},
 		{
 			name = "Aglet",
@@ -143,6 +155,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 2.4, 1, 2.4 }, offset = { 0.4, 0, 0 }, rotation = -35, color = shade(IRON, 0.7) },
 				{ size = { 1, 9, 1 }, offset = { -2, 4, 0 }, rotation = -35, color = LACE, material = "Fabric" },
 			},
+			icon = "",
+			lore = "The wearer moves a little faster.",
+			age = "iron",
 		},
 		{
 			name = "AnkletOfTheWind",
@@ -158,6 +173,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 2, 7, 0.6 }, offset = { 3, 4.5, 0.6 }, rotation = -20, color = FEATHER },
 				{ size = { 1.6, 6, 0.6 }, offset = { 0, 5, 0.4 }, color = shade(FEATHER, 0.85) },
 			},
+			icon = "",
+			lore = "The wearer moves faster.",
+			age = "iron",
 		},
 		{
 			name = "BandOfRegeneration",
@@ -175,6 +193,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 					material = "Glass",
 				},
 			}),
+			icon = "",
+			lore = "Slowly heals the wearer.",
 		},
 		{
 			name = "BandOfStarpower",
@@ -187,6 +207,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 3.4, 3.4, 3 }, offset = { 0, 4.8, 0 }, rotation = 36, color = STAR, material = "Neon" },
 				{ size = { 1.5, 2.6, 2.8 }, offset = { 0, 6.6, 0 }, color = STAR, material = "Neon" },
 			}),
+			icon = "",
+			lore = "Increases maximum mana.",
+			age = "iron",
 		},
 		{
 			name = "ObsidianSkull",
@@ -203,6 +226,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 5, 0.5, 0.4 }, offset = { 0, -3.6, 3.85 }, color = DARK },
 				{ size = { 3, 1.5, 0.4 }, offset = { -2.5, 4.2, 4.1 }, color = shade(OBSIDIAN, 1.5) },
 			},
+			icon = "",
+			lore = "Walk over campfires unhurt.",
+			age = "iron",
 		},
 		{
 			name = "Flipper",
@@ -218,6 +244,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 0.6, 6, 1.2 }, offset = { -3.4, -2.5, 0 }, rotation = -8, color = shade(FLIPPER, 0.7) },
 				{ size = { 0.6, 6, 1.2 }, offset = { 3.4, -2.5, 0 }, rotation = 8, color = shade(FLIPPER, 0.7) },
 			},
+			icon = "",
+			lore = "Swim faster.",
 		},
 		{
 			name = "CobaltShield",
@@ -230,6 +258,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 10, 10, 1.7 }, offset = { 0, 0, 0 }, shape = "Cylinder", color = shade(COBALT, 1.25) },
 				{ size = { 3.5, 3.5, 2.5 }, offset = { 0, 0, 0.5 }, shape = "Cylinder", color = IRON },
 			},
+			icon = "",
+			lore = "Absorbs knockback.",
 		},
 		{
 			name = "FeralClaws",
@@ -245,6 +275,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 1.2, 4, 1.2 }, offset = { 2.6, 3.6, 0.6 }, rotation = -10, color = WHITE },
 				{ size = { 8.2, 1.2, 3.6 }, offset = { 0, -5, 0 }, color = shade(CLAWS, 0.65) },
 			},
+			icon = "",
+			lore = "Swing melee weapons faster. Found in ruins and bunkers.",
 		},
 
 		--[[ Mana ]]
@@ -253,12 +285,16 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = STAR,
 			material = "Neon",
 			model = star(STAR, 5, "Neon"),
+			icon = "",
+			lore = "Falls from the night sky. Five make a Mana Crystal.",
 		},
 		{
 			name = "ManaCrystal",
 			color = MANA_BLUE,
 			material = "Glass",
 			model = crystal,
+			icon = "",
+			lore = "Use it to raise your maximum mana for good.",
 		},
 		{
 			name = "LesserManaPotion",
@@ -266,6 +302,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = LESSER_MANA,
 			material = "Glass",
 			model = define.bottle(LESSER_MANA),
+			icon = "",
+			lore = "Restores a little mana, with a moment of Mana Sickness.",
 		},
 		{
 			name = "ManaPotion",
@@ -273,6 +311,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = MANA,
 			material = "Glass",
 			model = define.bottle(MANA),
+			icon = "",
+			lore = "Restores mana, with a moment of Mana Sickness.",
+			age = "iron",
 		},
 
 		--[[ Magic weapons ]]
@@ -289,6 +330,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 2.6, 2.6, 2.6 }, offset = { 0, 6.8, 0 }, rotation = 45, material = "Neon" },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "Shoots a small spark that may set foes alight.",
 		},
 		{
 			name = "EmeraldStaff",
@@ -304,6 +347,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 1, 1.4, 0.4 }, offset = { -0.6, 8, 1.3 }, color = { 170, 255, 190 }, material = "Neon" },
 			},
 			tilt = -45,
+			icon = "",
+			lore = "Shoots an emerald bolt.",
+			age = "iron",
 		},
 		{
 			name = "WaterBolt",
@@ -329,6 +375,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 					material = "Neon",
 				},
 			},
+			icon = "",
+			lore = "Casts a bolt of water.",
 		},
 
 		--[[ Vanity clothes ]]
@@ -343,6 +391,8 @@ return function(define: Define.Context): { Schema.ItemSpec }
 				{ size = { 8, 9, 6 }, offset = { 0, 0.75, 0 } },
 				{ size = { 8.2, 1.5, 6.2 }, offset = { 0, -3.2, 0 }, color = SUIT_RED },
 			},
+			icon = "",
+			lore = "A dapper hat. Wear it in a vanity slot.",
 		},
 		{
 			name = "TuxedoShirt",
@@ -351,6 +401,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = SUIT,
 			material = "Fabric",
 			model = shirt,
+			icon = "",
+			lore = "Formal wear. Wear it in a vanity slot.",
+			age = "iron",
 		},
 		{
 			name = "TuxedoPants",
@@ -359,6 +412,9 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			color = SUIT,
 			material = "Fabric",
 			model = define.LEGGINGS,
+			icon = "",
+			lore = "Formal wear. Wear it in a vanity slot.",
+			age = "iron",
 		},
 	}
 end

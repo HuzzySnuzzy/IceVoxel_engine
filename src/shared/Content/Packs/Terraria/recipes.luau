@@ -14,8 +14,8 @@
 	mushroom) two Mana Potions. The Emerald Staff: three Emeralds at the head of two Sticks on the
 	diagonal (Terraria's gem staves). Vanity clothes: a Top Hat of five Leather (" L ", " L ",
 	"LLL": crown and brim), a Tuxedo Shirt of two White Wool, two Leather and a String, Tuxedo
-	Pants of three Leather and a String. Progression/Ages opens the ones of iron, gold and emerald
-	in the Iron Age.
+	Pants of three Leather and a String. The ones of iron, gold and emerald are the Iron Age's (the
+	items' `age`).
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Define)

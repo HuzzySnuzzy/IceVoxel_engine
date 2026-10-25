@@ -1,6 +1,7 @@
 --[[
 	Terraria's equipment (Config.Accessories): the accessory, vanity and weapon items (ItemList
-	`accessory`, `vanity`, `magic`, their checks), their blank icons (TexturePack.Icons), the
+	`accessory`, `vanity`, `magic`, their checks), their blank icons (TexturePack.Icons; the lore,
+	icons and Ages on the Terraria pack's own entries), the
 	inventory's new stores (Inventory/Types: slots, window numbers, save places; copies; the
 	server's restoreEquipment), what worn accessories add up to (Items/Accessories: sums, the
 	largest, each once, open slots only, hidden ones still working, slots by Age, armor points),
@@ -108,6 +109,29 @@ return function(t, shared, require, server, client)
 			t.ok(Items.find(name) ~= nil, `the icon {name} is an item's`)
 		end
 		t.eq(Items.icon(nil), nil)
+	end)
+
+	-- (The Terraria pack's entries say all of this themselves: no side table names them.)
+	t.test("accessories: each item's entry carries its lore, its blank icon and its Age", function()
+		local content = require(shared.Content).default
+		local LoreList = require(shared.Items.LoreList)
+		local iron = {
+			Aglet = true,
+			AnkletOfTheWind = true,
+			BandOfStarpower = true,
+			ObsidianSkull = true,
+			EmeraldStaff = true,
+			ManaPotion = true,
+			TuxedoShirt = true,
+			TuxedoPants = true,
+		}
+		for _, name in NEW_ITEMS do
+			local entry = content.item(name) :: any
+			t.eq(content.where("item", name), `pack Terraria, item {name}`, `{name} is the pack's`)
+			t.ok(type(entry.lore) == "string" and entry.lore == LoreList[name], `{name}'s lore is its entry's`)
+			t.eq(entry.icon, "", `{name}'s icon is its entry's, blank`)
+			t.eq(entry.age, if iron[name] then "iron" else nil, `{name}'s Age`)
+		end
 	end)
 
 	t.test("accessories: the inventory's equipment stores and their numbers", function()

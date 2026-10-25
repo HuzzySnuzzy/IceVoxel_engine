@@ -13,8 +13,8 @@
 
 	Calls made here: the accessories found in chests are rolled by the Minecraft pack's mineshaft
 	loot table (its fourth pool) and the Apocalypse pack's (Feral Claws): a loot table is one
-	pack's, so the tables stay whole there and name these items. Their icons are still
-	TexturePack's LEGACY_ICONS (blank).
+	pack's, so the tables stay whole there and name these items. Their lore, their icons (blank)
+	and their Ages are fields on their entries.
 ]]
 return {
 	order = 400,

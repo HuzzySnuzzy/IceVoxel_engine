@@ -269,44 +269,7 @@ local LEGACY_BLOCKS: { [string]: Faces } = {
 
 -- Item name -> its inventory icon ("" = not made yet; see the header): the side table, for
 -- items whose entries have no `icon` yet (naming both is an error).
-local LEGACY_ICONS: { [string]: string } = {
-	-- Terraria's accessories.
-	HermesBoots = "",
-	CloudInABottle = "",
-	ShinyRedBalloon = "",
-	LuckyHorseshoe = "",
-	Aglet = "",
-	AnkletOfTheWind = "",
-	BandOfRegeneration = "",
-	BandOfStarpower = "",
-	ObsidianSkull = "",
-	Flipper = "",
-	CobaltShield = "",
-	FeralClaws = "",
-	-- Mana.
-	FallenStar = "",
-	ManaCrystal = "",
-	LesserManaPotion = "",
-	ManaPotion = "",
-	-- Magic weapons.
-	WandOfSparking = "",
-	EmeraldStaff = "",
-	WaterBolt = "",
-	-- Vanity clothes.
-	TopHat = "",
-	TuxedoShirt = "",
-	TuxedoPants = "",
-	-- Turret parts and the Laser Sight (Shared/Turrets; the turrets, the Metal Miner and the Ammo
-	-- Press are machines, drawn with BlockDecor faces: never textured).
-	SmgBarrel = "",
-	RifleBarrel = "",
-	SniperBarrel = "",
-	BeltFeeder = "",
-	Receiver = "",
-	ServoMotor = "",
-	TargetingModule = "",
-	LaserSight = "",
-}
+local LEGACY_ICONS: { [string]: string } = {}
 
 local content = Content.default
 

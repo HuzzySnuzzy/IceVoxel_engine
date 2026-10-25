@@ -1,10 +1,10 @@
 --!strict
 --[[
 	Turrets, the Metal Miner and the Ammo Press (Shared/Turrets, Config.Turrets / Miner / AmmoPress;
-	Progression/Ages: the parts, the Laser Sight, the Basic, Advanced and Elite turrets, the Metal
-	Miner and the Ammo Press are the Electric Age's, the Ultimate turrets the Atomic Age's). Each
-	feature's recipes are left out when its `Enabled` is false (its blocks and items stay
-	registered), the Servo Motor's only when neither turrets nor the press take it:
+	their entries' Ages: the parts, the Laser Sight, the Basic, Advanced and Elite turrets, the
+	Metal Miner and the Ammo Press are the Electric Age's, the Ultimate turrets the Atomic Age's).
+	Each feature's recipes are left out when its `Enabled` is false (its blocks and items stay
+	registered, with no Age), the Servo Motor's only when neither turrets nor the press take it:
 	  Servo Motor       iron over osmium round a Universal Cable, iron below: two
 	  Belt Feeder       leather over iron nuggets round an iron ingot
 	  Receiver          iron over an osmium ingot, Nails and Scrap Metal

@@ -86,7 +86,6 @@ export type Age = {
 }
 
 local Content = require(script.Parent.Parent.Content)
-local Config = require(script.Parent.Parent.Config)
 
 -- (The side lists: what each Age opens, by name, for the entries that name no `age` yet.)
 
@@ -99,15 +98,6 @@ for _, name in
 		"RawGoldBlock",
 		"Lantern",
 		"Rail",
-		-- (Terraria's things of iron, gold and emerald, and the Mana Potion: brewing.)
-		"Aglet",
-		"AnkletOfTheWind",
-		"BandOfStarpower",
-		"ObsidianSkull",
-		"EmeraldStaff",
-		"ManaPotion",
-		"TuxedoShirt",
-		"TuxedoPants",
 		-- (The new ores' lead, zinc and brass and the Hazmat suit are too: their entries say so,
 		-- in the Ores pack.)
 	}
@@ -135,38 +125,6 @@ local atomic: { string } = {
 	-- (And uranium's nugget and blocks, on their entries; the ore and Raw Uranium are mined in any
 	-- Age, and the ingot smelted from the Industrial Age.)
 }
-
---[[
-	Turrets and the Metal Miner (Config.Turrets / Miner / AmmoPress: none of a feature whose
-	`Enabled` is false, as Crafting/Recipes leaves its recipes out): the turret parts, the Laser
-	Sight, the Basic, Advanced and Elite turrets, the Metal Miner and the Ammo Press are the Electric
-	Age's (Elite transporters are already), the Ultimate turrets the Atomic Age's (as Ultimate
-	transporters). No skill: the press's gunpowder is behind Demolition already.
-]]
-do
-	local turrets = Config.Turrets.Enabled
-	if turrets or Config.AmmoPress.Enabled then
-		table.insert(electric, "ServoMotor")
-	end
-	if turrets then
-		for _, name in { "BeltFeeder", "Receiver", "TargetingModule", "SmgBarrel", "RifleBarrel", "SniperBarrel" } do
-			table.insert(electric, name)
-		end
-		table.insert(electric, "LaserSight")
-		for _, kind in { "Smg", "Rifle", "Sniper" } do
-			for _, tier in { "Basic", "Advanced", "Elite" } do
-				table.insert(electric, `{tier}{kind}Turret`)
-			end
-			table.insert(atomic, `Ultimate{kind}Turret`)
-		end
-	end
-	if Config.Miner.Enabled then
-		table.insert(electric, "MetalMiner")
-	end
-	if Config.AmmoPress.Enabled then
-		table.insert(electric, "AmmoPress")
-	end
-end
 
 -- The side lists by Age id (the Stone Age opens everything no later Age names).
 local LEGACY: { [string]: { string } } = {

@@ -996,9 +996,24 @@ return function(t, shared, require, _server, _client)
 			{ "TexturePack" },
 			{ `TexturePack: {STONE} has its texture both on its entry and in LEGACY_BLOCKS` }
 		)
-		clash({ items = { { name = "HermesBoots", override = true, icon = "" } } }, { "TexturePack" }, {
-			"TexturePack: pack Terraria (patched by Clash), item HermesBoots has its icon both on its entry and in LEGACY_ICONS",
-		})
+		-- (An item LEGACY_ICONS still names: one with an icon its entry doesn't give. It was the
+		-- Hermes Boots until the Terraria pack's items carried their own icons; the packs move
+		-- theirs onto their entries, so the side table empties, and the check goes with it.)
+		local TexturePack = require(shared.TexturePack)
+		local legacy: string? = nil
+		for _, spec in Content.default.items do
+			if spec.icon == nil and TexturePack.Icons[spec.name] ~= nil then
+				legacy = spec.name
+				break
+			end
+		end
+		if legacy then
+			clash({ items = { { name = legacy, override = true, icon = "" } } }, { "TexturePack" }, {
+				"TexturePack: pack ",
+				"(patched by Clash)",
+				`item {legacy} has its icon both on its entry and in LEGACY_ICONS`,
+			})
+		end
 		-- (The Block of Iron: a block the side lists still name. The Shears and then the Canteen named
 		-- their Ages there until their packs took them onto their entries.)
 		clash({ blocks = { { name = "IronBlock", override = true, age = "iron" } } }, { "Progression", "Ages" }, {

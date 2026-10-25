@@ -9,10 +9,12 @@
 	  Metal Miner  blocks, recipes (Machines/MinerRules, Config.Miner)
 	  Ammo Press   blocks, recipes (Config.AmmoPress; the servo motor is the turrets' and its)
 
-	Each feature stays behind its Config switch (`Enabled`): its recipes are left out when it is
-	off, its blocks and items are always there. Calls made here: the turrets' guns and rounds are
-	the Apocalypse pack's weapons (Shared/Turrets names them through Config.Turrets); the parts'
-	recipes take its Nails and Scrap Metal and Mekanism's cables and osmium.
+	Each feature stays behind its Config switch (`Enabled`): its recipes and its Ages are left out
+	when it is off, its blocks and items are always there. Their lore, the items' icons (blank) and
+	the Ages are fields on their entries (the blocks are drawn with BlockDecor faces, never
+	textured). Calls made here: the turrets' guns and rounds are the Apocalypse pack's weapons
+	(Shared/Turrets names them through Config.Turrets); the parts' recipes take its Nails and Scrap
+	Metal and Mekanism's cables and osmium.
 ]]
 return {
 	order = 600,

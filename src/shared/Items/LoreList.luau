@@ -18,7 +18,7 @@
 
 local Content = require(script.Parent.Parent.Content)
 
--- The side table, by name (the old lists' order; the twelve turrets' from a loop below).
+-- The side table, by name (the old lists' order).
 local lore: { [string]: string } = {
 	-- Blocks (BlockList order) --------------------------------------------------------------------
 	Stone = "Common rock. Breaks into Cobblestone.",
@@ -138,53 +138,11 @@ local lore: { [string]: string } = {
 	BirchDoor = "A birch door with four little windows. Opens with a right click.",
 	JungleDoor = "A jungle wood door with small windows. Opens with a right click.",
 	AcaciaDoor = "An acacia door with one window. Opens with a right click.",
-	-- (The twelve turrets: the loop at the end.)
-	MetalMiner = "Copies the ore block under it forever, for power. Pushes it out.",
-	AmmoPress = "Presses brass, lead and gunpowder into 9mm, 5.56 or .308 rounds.",
 
 	-- Mekanism and more -------------------------------------------------------------------------
 
 	-- Terraria ----------------------------------------------------------------------------------
-	HermesBoots = "The wearer can run super fast.",
-	CloudInABottle = "Allows the holder to double jump.",
-	ShinyRedBalloon = "Increases jump height.",
-	LuckyHorseshoe = "Negates fall damage.",
-	Aglet = "The wearer moves a little faster.",
-	AnkletOfTheWind = "The wearer moves faster.",
-	BandOfRegeneration = "Slowly heals the wearer.",
-	BandOfStarpower = "Increases maximum mana.",
-	ObsidianSkull = "Walk over campfires unhurt.",
-	Flipper = "Swim faster.",
-	CobaltShield = "Absorbs knockback.",
-	FeralClaws = "Swing melee weapons faster. Found in ruins and bunkers.",
-	FallenStar = "Falls from the night sky. Five make a Mana Crystal.",
-	ManaCrystal = "Use it to raise your maximum mana for good.",
-	LesserManaPotion = "Restores a little mana, with a moment of Mana Sickness.",
-	ManaPotion = "Restores mana, with a moment of Mana Sickness.",
-	WandOfSparking = "Shoots a small spark that may set foes alight.",
-	EmeraldStaff = "Shoots an emerald bolt.",
-	WaterBolt = "Casts a bolt of water.",
-	TopHat = "A dapper hat. Wear it in a vanity slot.",
-	TuxedoShirt = "Formal wear. Wear it in a vanity slot.",
-	TuxedoPants = "Formal wear. Wear it in a vanity slot.",
-
-	-- Turret parts ------------------------------------------------------------------------------
-	SmgBarrel = "A turret part: an SMG turret's 9mm barrel.",
-	RifleBarrel = "A turret part: a rifle turret's 5.56 barrel.",
-	SniperBarrel = "A turret part: a sniper turret's .308 barrel.",
-	BeltFeeder = "A turret part: takes the rounds a transporter brings into the gun.",
-	Receiver = "A turret part: the action that chambers and fires each round.",
-	ServoMotor = "A turret part: turns the gun towards its target.",
-	TargetingModule = "A turret part: finds targets and tells the gun when to fire.",
-	LaserSight = "Mount it on a turret: tighter shots, quicker to find a target.",
 }
-
--- The twelve turrets (BlockList "<Tier><Type>Turret"): one line for each type's calibre.
-for type, calibre in { Smg = "9mm", Rifle = "5.56", Sniper = ".308" } do
-	for _, tier in { "Basic", "Advanced", "Elite", "Ultimate" } do
-		lore[`{tier}{type}Turret`] = `Shoots zombies with {calibre} rounds a transporter feeds it. Needs power.`
-	end
-end
 
 -- The packs' lines: their `lore`, then each entry's.
 local content = Content.default
