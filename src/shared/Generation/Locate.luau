@@ -12,11 +12,11 @@
 	             ids are shown without a namespace in snake case (`snake`: BirchForest is
 	             "birch_forest"), as Minecraft shows its registry ids. A Registry holds one kind of
 	             thing's ids and tags (`registry`): structures (STRUCTURES, the built-in kinds, plus
-	             the library's structures), biomes (BiomeList's, with Minecraft-like tags: BIOME_TAGS
-	             and one per altitude band) and points of interest (Shared/Poi). A tag's members are
-	             searched together and the answer names the member found, as Minecraft's
-	             "#minecraft:village (minecraft:village_plains)". A biome tag also answers without
-	             its "is_" ("#forest" is "#is_forest").
+	             the library's structures), biomes (the packs', with Minecraft's biome tags: their
+	             `tags`, BIOME_TAGS, and one per altitude band) and points of interest (Shared/Poi).
+	             A tag's members are searched together and the answer names the member found, as
+	             Minecraft's "#minecraft:village (minecraft:village_plains)". A biome tag also
+	             answers without its "is_" ("#forest" is "#is_forest").
 	  Kinds      a locatable structure on a grid of cells (the generator's `locateKinds`,
 	             TerrainGenerator): each cell has at most one candidate, found by a cheap probe that
 	             never touches the generator's caches (a hash and a few terrain columns: 1-21 µs),
@@ -134,17 +134,6 @@ Locate.STRUCTURE_TAGS = table.freeze({
 } :: { [string]: { string } })
 Locate.LIBRARY_TAG = "library"
 
--- Minecraft-like biome tags over BiomeList's biomes (snake case ids); "is_snowy" and the bands'
--- tags ("band_lowland" ...) are worked out from the list.
-Locate.BIOME_TAGS = table.freeze({
-	is_forest = { "forest", "birch_forest", "old_growth_taiga", "grove" },
-	is_taiga = { "taiga", "old_growth_taiga" },
-	is_mountain = { "meadow", "grove", "snowy_slopes", "jagged_peaks", "frozen_peaks", "stony_peaks" },
-	is_hill = { "windswept_hills" },
-	is_savanna = { "savanna", "windswept_savanna" },
-	is_jungle = { "jungle" },
-} :: { [string]: { string } })
-
 --[[ Ids ]]
 
 -- The loose form of an id or tag: lower case, without a "minecraft:" or "icevoxel:" namespace,
@@ -230,7 +219,25 @@ function Locate.structureRegistry(libraryNames: { string }): Registry
 	return Locate.registry("structure", ids, tags)
 end
 
--- Biome index of each biome id ("birch_forest" -> its BiomeList index).
+-- Minecraft's biome tags (tag -> snake case biome ids, in the biomes' order), from the packs'
+-- biomes' own `tags` ("is_forest" ...); "is_snowy" and the bands' tags ("band_lowland" ...) are
+-- worked out from the biomes in `biomeRegistry`.
+Locate.BIOME_TAGS = (function(): { [string]: { string } }
+	local tags: { [string]: { string } } = {}
+	for _, biome in Biomes.list do
+		for _, tag in biome.tags do
+			local members = tags[tag] or {}
+			tags[tag] = members
+			table.insert(members, Locate.snake(biome.name))
+		end
+	end
+	for _, members in tags do
+		table.freeze(members)
+	end
+	return table.freeze(tags)
+end)()
+
+-- Biome index of each biome id ("birch_forest" -> its Biomes index).
 Locate.biomeIndex = {} :: { [string]: number }
 for index, biome in Biomes.list do
 	Locate.biomeIndex[Locate.snake(biome.name)] = index
@@ -241,27 +248,26 @@ function Locate.biomeRegistry(): Registry
 	local ids: { string } = {}
 	local tags: { [string]: { string } } = {}
 	for tag, members in Locate.BIOME_TAGS do
-		tags[tag] = members
+		tags[tag] = table.clone(members)
 	end
-	local snowy: { string } = {}
-	local bands: { { string } } = {}
-	for i in Biomes.bands do
-		bands[i] = {}
+	-- (A worked out tag joins a pack's of the same name, each id once.)
+	local function add(tag: string, id: string)
+		local members = tags[tag] or {}
+		tags[tag] = members
+		if not table.find(members, id) then
+			table.insert(members, id)
+		end
 	end
 	local snow = Blocks.id.Snow
 	for _, biome in Biomes.list do
 		local id = Locate.snake(biome.name)
 		table.insert(ids, id)
 		if biome.frozen or biome.top == snow then
-			table.insert(snowy, id)
+			add("is_snowy", id)
 		end
 		for _, band in biome.bands do
-			table.insert(bands[band], id)
+			add(`band_{Locate.snake(Biomes.bands[band].name)}`, id)
 		end
-	end
-	tags.is_snowy = snowy
-	for i, band in Biomes.bands do
-		tags[`band_{Locate.snake(band.name)}`] = bands[i]
 	end
 	return Locate.registry("biome", ids, tags)
 end

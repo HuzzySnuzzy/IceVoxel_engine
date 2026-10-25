@@ -1,0 +1,17 @@
+[
+	{
+		"name": "BetaDunes",
+		"bands": ["Lowland"],
+		"temperature": 0.8,
+		"humidity": -0.7,
+		"weather": { "temperature": 2, "precipitation": false },
+		"vegetation": 0.03,
+		"top": "BetaStone",
+		"filler": "BetaStone",
+		"fillerDepth": 4,
+		"underwater": "BetaStone",
+		"beach": "BetaStone",
+		"features": [["Cactus", 1]],
+		"tags": ["is_fixture"]
+	}
+]

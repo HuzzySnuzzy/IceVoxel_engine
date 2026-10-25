@@ -1,5 +1,5 @@
 --[[
-	Ground plants in generated terrain (Generation/Foliage, BiomeList `foliage`): determinism across
+	Ground plants in generated terrain (Generation/Foliage, biomes' `foliage`): determinism across
 	chunk borders, Minecraft's placement rules, full detail only, coverage per biome, same-species
 	flower patches, the part budget (per soil column, and all plants drawn around a player) and the
 	cost.

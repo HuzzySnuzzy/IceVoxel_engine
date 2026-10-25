@@ -1,7 +1,7 @@
 --[[
 	Tough As Nails' herbs, bowls and teas: the Mint and Wild Ginger plants (plants placed by their
 	herb items, ItemList `places`; their drops, outlines and models), where generation grows them
-	(BiomeList `foliage.herbs`: rare patches on flat test chunks, and the right herb in the right
+	(biomes' `foliage.herbs`: rare patches on flat test chunks, and the right herb in the right
 	biome in generated terrain), their spreading on random ticks (Behaviours/Herb), placing them
 	back with the herb item (EditRules, InventoryState), the Bowl and its water (Drinks' tables:
 	fill, drink, the empty bowl back), mint's cure for dirty water and the furnace's, the teas

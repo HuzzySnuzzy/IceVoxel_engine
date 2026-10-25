@@ -9,7 +9,7 @@
 	    water        the Glass Bottle, dirty and purified water bottles, the canteen: items/drinks,
 	                 recipes
 	    herbs        Mint and Wild Ginger, Mint Leaves and Ginger Root: blocks/herbs, items/herbs,
-	                 textures
+	                 textures; where they grow: biomes (overrides of the Minecraft pack's)
 	    bowls, teas  the Bowl, dirty and purified water bowls, Mint, Ginger and Herbal Tea:
 	                 items/drinks, recipes
 	    campfire     the Campfire: blocks/campfire, recipes

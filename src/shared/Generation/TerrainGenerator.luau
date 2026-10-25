@@ -10,12 +10,12 @@
 	Terrain shape (Relief.luau): huge mountain ranges, hills, plains, river valleys and enclosed seas
 	in the style of the JJThunder To The Max datapack; one height per column.
 
-	Biomes (Biomes/BiomeList.luau) are picked by altitude band first (lowland, forest, highland,
-	meadow, alpine, snowy slopes, peaks), then by climate (temperature and humidity noise) among
-	the biomes of that band. Islands far out in some seas are mushroom fields. Two options change
-	that (Generation/WorldTypes' Single Biome and Large Biomes; neither touches the terrain's
-	shape): `biome` puts one biome everywhere (Minecraft's single biome source: mountains of
-	desert sand, seas frozen in a tundra), `climateScale` stretches the climate noise (4: biomes
+	Biomes (the packs' biomes, Shared/Biomes) are picked by altitude band first (lowland, forest,
+	highland, meadow, alpine, snowy slopes, peaks), then by climate (temperature and humidity
+	noise) among the biomes of that band. Islands far out in some seas are mushroom fields. Two
+	options change that (Generation/WorldTypes' Single Biome and Large Biomes; neither touches the
+	terrain's shape): `biome` puts one biome everywhere (Minecraft's single biome source: mountains
+	of desert sand, seas frozen in a tundra), `climateScale` stretches the climate noise (4: biomes
 	four times as wide, Minecraft's Large Biomes). Without them a world is exactly what it was.
 
 	Order of a chunk: fill, caves (Caves.luau, cave air), cave entrances and ravines
@@ -112,7 +112,7 @@ local id = Blocks.id
 local BEDROCK, STONE, GRAVEL, SNOW, ICE = id.Bedrock, id.Stone, id.Gravel, id.Snow, id.Ice
 local PACKED_MUD = id.PackedMud
 local WATER = Blocks.fluidId("Water", 0)
-local MUSHROOM = (Biomes.byName("MushroomFields") :: Biomes.Biome).index
+local MUSHROOM = Biomes.need("MushroomFields", "TerrainGenerator (its islands far out at sea)").index
 
 local biomeTemp: { number }, biomeHum: { number } = {}, {}
 -- Patch noise threshold of each biome (the patch noise has a standard deviation of 1/3; the

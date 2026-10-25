@@ -2,7 +2,7 @@
 --!native
 --[[
 	Ground plants: Minecraft 1.20.1's vegetal decoration (short and tall grass, ferns, dead bushes,
-	flowers, tall flowers, mushrooms), grown by each biome's `foliage` (Biomes/BiomeList).
+	flowers, tall flowers, mushrooms), grown by each biome's `foliage` (the packs' biomes).
 
 	TerrainGenerator runs it after structures, in full detail chunks only: LOD cells are 2+ blocks
 	wide and small plants would vanish in them (and every box of a plant is a Part).

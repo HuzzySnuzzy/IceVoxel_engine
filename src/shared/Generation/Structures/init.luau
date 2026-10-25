@@ -10,7 +10,9 @@
 	To add a structure:
 	  1. write a builder `(writer, x, y, z, rng) -> ()` (see Trees.luau),
 	  2. register it in `Structures.registry` with the surface blocks it may grow on,
-	  3. reference it by name from a biome's `features` list in Biomes/BiomeList.luau.
+	  3. reference it by name from a biome's `features` list (a pack's `biomes`: the Minecraft
+	     pack's, or an override of one in a pack of your own). A name no builder has is an error
+	     as this module loads, naming the pack and the biome.
 
 	Large structures (villages, outposts...) use the same idea with a bigger spacing: the structure
 	library's jigsaw structures are placed by Generation/StructureGen (Minecraft's random_spread
@@ -19,6 +21,7 @@
 
 local Blocks = require(script.Parent.Parent.Blocks)
 local Biomes = require(script.Parent.Parent.Biomes)
+local Schema = require(script.Parent.Parent.Content.Schema)
 local Hash = require(script.Parent.Parent.Util.Hash)
 local Trees = require(script.Trees)
 local Writer = require(script.Writer)
@@ -58,12 +61,22 @@ Structures.registry = {
 	Cactus = { build = Trees.cactus, soil = { [id.Sand] = true } },
 } :: { [string]: Structure }
 
--- Fail early on typos in BiomeList, and find the highest vegetation chance for early rejection.
+-- Fail early on typos in the packs' biomes, and find the highest vegetation chance for early
+-- rejection.
 local maxVegetation = 0
 for _, biome in Biomes.list do
 	maxVegetation = math.max(maxVegetation, biome.vegetation)
 	for _, feature in biome.features do
-		assert(Structures.registry[feature.structure], `Biome {biome.name} uses unknown structure {feature.structure}`)
+		local name = feature.structure
+		if Structures.registry[name] == nil then
+			local near = Schema.suggest(name, Structures.registry)
+			error(
+				`Structures: {Biomes.where(biome.name)}: features names unknown tree builder {name}{if near
+					then ` (did you mean {near}?)`
+					else ""}`,
+				0
+			)
+		end
 	end
 end
 

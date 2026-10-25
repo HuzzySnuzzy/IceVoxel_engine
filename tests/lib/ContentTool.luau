@@ -38,9 +38,9 @@
 	  summary(view)             a line per pack: its order and how much of each kind it holds
 	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack
 	  show(view, name)          lines about everything named `name` (a block, item, texture, loot
-	                            table, tag, ore feature or Age): its merged fields, id, pack and the
-	                            packs that patched it, and what the registries made of it; nil and
-	                            the nearest names when nothing has the name
+	                            table, tag, ore feature, Age or biome): its merged fields, id, pack
+	                            and the packs that patched it, and what the registries made of it;
+	                            nil and the nearest names when nothing has the name
 	  reach(view)               when survival play first gives each item (an Age index) and how
 	  scaffold(name, order)     a new pack's modules, { { path, text } }: one block, one item, a
 	                            shaped and a smelting recipe, a texture and a loot table, each field
@@ -738,7 +738,7 @@ end
 -- The names of every `kind` the content holds (a recipe's: its merged place).
 local function namesOf(content: any, kind: string): { any }
 	local names = {}
-	if kind == "blocks" or kind == "items" or kind == "ores" then
+	if kind == "blocks" or kind == "items" or kind == "ores" or kind == "biomes" then
 		for _, entry in content[kind] do
 			table.insert(names, entry.name)
 		end
@@ -882,8 +882,9 @@ end
 
 --[[
 	Lines listing the entries of `kind` (every kind when nil), of `pack` only when given (what it
-	made or patched): blocks and items with their ids, recipes by their merged place, the rest by
-	name; nil and why when the kind or the pack is unknown.
+	made or patched): blocks and items with their ids, recipes by their merged place, biomes by
+	their index (Shared/Biomes) with their bands, the rest by name; nil and why when the kind or
+	the pack is unknown.
 ]]
 function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?, string?)
 	local content = view.content
@@ -931,6 +932,18 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 			for index, age in content.ages do
 				if listed(view, each, age.id, pack) then
 					table.insert(rows, { tostring(index), age.id, age.name, packOf(view, each, age.id) })
+				end
+			end
+		elseif each == "biomes" then
+			right[1] = true
+			for index, biome in content.biomes or {} do
+				if listed(view, each, biome.name, pack) then
+					table.insert(rows, {
+						tostring(index),
+						biome.name,
+						if #biome.bands > 0 then table.concat(biome.bands, ", ") else "(no band)",
+						madeText(view, each, biome.name),
+					})
 				end
 			end
 		elseif each == "tags" then
@@ -1291,6 +1304,19 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 			table.insert(lines, `  fuel: {ticks} ticks (pack {packOf(view, "fuel", tagName)})`)
 		end
 	end
+	-- (A biome tag: the biomes' own `tags`.)
+	local tagged = {}
+	for _, biome in content.biomes or {} do
+		if table.find(biome.tags or {}, tagName) then
+			table.insert(tagged, biome.name)
+		end
+	end
+	if #tagged > 0 then
+		section(`biome tag #{tagName}`)
+		for _, line in wrap("  biomes: ", tagged) do
+			table.insert(lines, line)
+		end
+	end
 	for _, ore in content.ores do
 		if ore.name == name then
 			section(`ore feature {name}: pack {packOf(view, "ores", name)}`)
@@ -1321,6 +1347,21 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 			end
 		end
 	end
+	for index, biome in content.biomes or {} do
+		if biome.name == name then
+			section(`biome {name}: index {index} of {#content.biomes}, pack {packOf(view, "biomes", name)}`)
+			patches("biomes")
+			table.insert(lines, "  fields:")
+			for _, line in fieldLines(biome, { name = true, foliage = true }) do
+				table.insert(lines, line)
+			end
+			-- (Its ground plants a line each: the herbs a pack patched in are seen.)
+			local foliage = biome.foliage
+			for _, key in if foliage then sortedKeys(foliage) else {} do
+				table.insert(lines, cut(`    foliage.{key} = {inline(foliage[key])}`, ContentTool.WIDTH))
+			end
+		end
+	end
 	if #lines > 0 then
 		return lines, nil
 	end
@@ -1339,6 +1380,9 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	end
 	for _, age in content.ages do
 		names[age.id] = true
+	end
+	for _, biome in content.biomes or {} do
+		names[biome.name] = true
 	end
 	local near = view.suggest(name, names)
 	return nil, if near then { near } else {}

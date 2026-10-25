@@ -2180,7 +2180,7 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             (the helpers packs share: models, tools and armor, fluids, plants,
                             doors, recipes, metal()), Packs/ (Core, Minecraft, Mekanism,
                             Survival, Terraria, Apocalypse, Turrets, Ores: every block, item,
-                            recipe, texture and loot table)
+                            recipe, texture, loot table and biome)
   Blocks/  BlockList        the block registry (BlockList: the packs' blocks, merged) -> ids,
                             appearances, lookup tables (hardness, tools, drops, menus, how long
                             zombies take to break them), plants (soil sets, tall halves, foliage
@@ -2310,8 +2310,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             and melting), Rooms (the flood fill, insulation, the air's step, the
                             thermostat), SnowLayers (piling and melting a tile), Foliage (the
                             foliage palettes through the year), HeatStates (the heaters' states)
-  Biomes/  BiomeList        biome definitions and altitude bands (and Minecraft's temperature and
-                            precipitation for the weather)
+  Biomes/                   the biome registry (the packs' biomes, block names resolved, and
+                            Minecraft's temperature and precipitation for the weather) and the
+                            altitude bands
   Generation/
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
     Relief                  terrain heights (JJThunder To The Max style)
@@ -3347,21 +3348,21 @@ screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"voi
 
 ## Extending
 
-**Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages and
-lore lines come from content packs, folders under `src/shared/Content/Packs/` that the game finds
-and checks as it loads, like Minecraft's data packs (docs/ARCHITECTURE.md, "Content packs"). A
+**Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages, lore
+lines and biomes come from content packs, folders under `src/shared/Content/Packs/` that the game
+finds and checks as it loads, like Minecraft's data packs (docs/ARCHITECTURE.md, "Content packs"). A
 pack is a `pack` manifest (`{ order = 300, description = "..." }`) and any of `blocks`, `items`,
-`recipes`, `tags`, `textures`, `loot`, `ores`, `ages` and `lore`, each a Luau module (its data, or
-a function of `define`, the helpers in `Content/Define`) or a `.json` file. An entry carries what
-other registries used to keep in tables of their own: `lore`, `texture`, `icon`, `age`, `skill`,
-`knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`... (`Content/Schema` lists
-them all, and a misspelt field is an error naming the pack and the entry). Ids are given at load
-in pack order, so content may be added anywhere; `override = true` patches another pack's entry.
-A kind may also be a folder of files merged in name order (`Minecraft/blocks/terrain.luau`,
+`recipes`, `tags`, `textures`, `loot`, `ores`, `ages`, `lore` and `biomes`, each a Luau module (its
+data, or a function of `define`, the helpers in `Content/Define`) or a `.json` file. An entry
+carries what other registries used to keep in tables of their own: `lore`, `texture`, `icon`, `age`,
+`skill`, `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`... (`Content/Schema`
+lists them all, and a misspelt field is an error naming the pack and the entry). Ids are given at
+load in pack order, so content may be added anywhere; `override = true` patches another pack's
+entry. A kind may also be a folder of files merged in name order (`Minecraft/blocks/terrain.luau`,
 `blocks/plants.luau`...: a file a feature), so adding content may be adding a file. The game's
-content is feature packs: Core (air, the Ages, the base tags), Minecraft, Mekanism, Survival
-(Tough As Nails and the seasons), Terraria, Apocalypse, Turrets and Ores; each `pack` manifest
-says what is in which file and where its code lives, and the examples below go in any of them.
+content is feature packs: Core (air, the Ages, the base tags), Minecraft, Mekanism, Survival (Tough
+As Nails and the seasons), Terraria, Apocalypse, Turrets and Ores; each `pack` manifest says what is
+in which file and where its code lives, and the examples below go in any of them.
 `Content/Packs/Ores` is a whole feature (the new ores, the Hazmat suit) in a pack of its own, the
 worked example.
 `lune run tests/content new <Pack>` starts a pack with an example of each kind, and
@@ -3630,7 +3631,7 @@ ItemNameBlockItem): the item places it, is its drop and is what pick block takes
 own model (the Survival pack's Mint and MintLeaves). A plant that spreads by itself gets a
 behaviour of its own that keeps Plant's `onTick` and adds `onRandomTick` (`Behaviours/Herb`).
 Generation grows it from a biome's `foliage` lists (`plants`, `flowers`, or `herbs` for rare
-patches of their own; BiomeList).
+patches of their own; a pack's `biomes`, or an override of one: A biome, below).
 
 **An item.** Items that are not blocks (armor, tools, materials) are a pack's `items` (the
 Minecraft pack's `items/tools.luau`, `items/materials.luau`...). They are drawn from boxes measured
@@ -4067,13 +4068,69 @@ call. Names are the world's: "time" (the day clock) and "weather" (`World/Weathe
 `encode` / `decode`) are taken. Block state belongs to the blocks instead: it is in the edits, or in `Players/Containers`
 like a chest's (see `Save/WorldSnapshot` for what else regions carry).
 
-**A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
-in, a climate position (temperature, humidity), surface blocks (optionally patches of another
-block and a block for steep slopes) and vegetation. The terrain shape comes from `Relief`, so a
-biome only decides what grows and what the ground is made of. Its ground plants are `foliage`: an
-average `density`, the share of the ground in patches (`cover`), weighted `plants` and optional
-`flowers` (see the BiomeList header); keep within the parts budget tests/spec/FoliageGeneration
-checks.
+**A biome.** Add an entry to a pack's `biomes` (the vanilla ones are the Minecraft pack's
+`src/shared/Content/Packs/Minecraft/biomes.luau`; Content/Schema's BIOME_FIELDS says what each
+field does) with the altitude bands it appears in (Lowland, Forest, Highland, Meadow, Alpine,
+Slopes, Peaks: the generator's, in `Shared/Biomes`), a climate position (temperature, humidity),
+surface blocks (optionally patches of another block and a block for steep slopes), its trees
+(`features`, Generation/Structures' builders) and vegetation. The terrain shape comes from
+`Relief`, so a biome only decides what grows and what the ground is made of. Its ground plants
+are `foliage`: an average `density`, the share of the ground in patches (`cover`), weighted
+`plants` and optional `flowers` and `herbs`; keep within the parts budget
+tests/spec/FoliageGeneration checks. `tags` are Minecraft's biome tags `/locate` finds it by:
+
+```lua
+-- src/shared/Content/Packs/Wetlands/biomes.luau (with a pack manifest, order 800)
+return {
+	{
+		name = "Marsh",
+		bands = { "Lowland" },
+		temperature = 0.4,
+		humidity = 0.9,
+		vegetation = 0.2,
+		top = "Grass",
+		filler = "Dirt",
+		fillerDepth = 2,
+		underwater = "Dirt",
+		beach = "Dirt",
+		features = { { "OakTree", 1 } },
+		foliage = {
+			density = 0.1,
+			plants = { { "ShortGrass", 3 }, { "Fern", 1 } },
+			flowers = { chance = 0.01, species = { { "BlueOrchid", 1 } } },
+		},
+		tags = { "is_forest" },
+	},
+}
+```
+
+Every block and plant it names, its bands and its trees are checked as the game loads, naming
+the pack and the biome. A biome's index is its place among every pack's biomes, which the
+generator's per-biome arrays and climate picks follow: a pack loading after the Minecraft pack
+(order over 100) adds its biomes after the vanilla ones, which keep their places. A pack may also
+patch another's biome by name with `override = true`: its fields replace the biome's, a table of
+fields (`weather`, `patches`, `foliage` and its `flowers` and `herbs`) is patched field by field,
+and a list is replaced whole, so to add a flower give the species list with it:
+
+```lua
+{
+	name = "Plains",
+	override = true,
+	foliage = {
+		flowers = {
+			species = {
+				{ "Dandelion", 3 }, { "Poppy", 2 }, { "AzureBluet", 2 }, { "OxeyeDaisy", 2 },
+				{ "Cornflower", 2 }, { "RedTulip", 1 }, { "OrangeTulip", 1 }, { "WhiteTulip", 1 },
+				{ "PinkTulip", 1 }, { "Sunflower", 0.4 },
+				{ "BlueOrchid", 1 }, -- the new one
+			},
+		},
+	},
+}
+```
+
+(the plains keep their grass, their flowers' chance and the Survival pack's mint, which is
+itself such an override: `Content/Packs/Survival/biomes.luau`).
 
 **A world type.** Register it in `src/shared/Generation/WorldTypes.luau` (or from your own module
 before the world is created) with an id, a name, a description and `create(seed, options)`
@@ -4090,7 +4147,7 @@ superflat preset is a line in
 
 **A tree or another small feature.** Write a builder in `Generation/Structures/` (see
 `Trees.luau`), register it in `Structures.registry` with the blocks it may grow on, and list it in
-a biome's `features`. Builders write in world coordinates; chunk clipping, cross-chunk consistency
+a biome's `features` (a pack's biome, or an override of one). Builders write in world coordinates; chunk clipping, cross-chunk consistency
 and LOD are handled for you.
 
 **A structure**, from building it to seeing it generate. Structure blocks and jigsaws need
@@ -4153,7 +4210,7 @@ user id in `Config.Structures.Permission`.
    (its header lists the fields: `name`, `startPool`, `size` (jigsaw depth 0..7), `maxDistance`,
    `biomes`, `spacing` / `separation`, `salt`, `startHeight`, `projectToHeightmap`, `onLand`,
    `foundation`). In the place, set the attribute `Generate = true` on the StringValue whose
-   (first) template is the start, and optionally `Biomes` (`"plains, forest"`: BiomeList names;
+   (first) template is the start, and optionally `Biomes` (`"plains, forest"`: biome names;
    case, spaces, underscores and `minecraft:` are ignored), `Spacing` and `Separation` (one start
    per Spacing × Spacing chunks, at least Separation apart; default 34 / 8, Minecraft's villages),
    `Size`, `Foundation`, `OnLand`, `StartHeight` and `MaxDistance`. Problems (an unknown pool,
@@ -4358,7 +4415,9 @@ alone), a crafting recipe whose own grid an earlier recipe takes. Info: items su
 the Creative Energy Cube, which no recipe makes by design, are left out). `--strict` fails on a
 warning.
 `show <name>` gives an entry's merged fields, id, pack, the packs that patched it, its lore,
-faces or icon, Age, how survival gets it and the recipes making and using it; `new <Pack>` writes
+faces or icon, Age, how survival gets it and the recipes making and using it (a biome's fields,
+index and patches; `show #is_forest` a biome tag's biomes; `list biomes` every biome with its
+bands and pack); `new <Pack>` writes
 `src/shared/Content/Packs/<Pack>/` (never over a folder) with a commented block, item, shaped and
 smelting recipe, texture and loot table that load and pass the check as written. The workings are
 `tests/lib/ContentTool` (`tests/spec/ContentTool` runs them on `tests/fixtures/content/tool`) and

@@ -5,8 +5,8 @@
 	its own packs; the game's packs, which load and whose faces rule agrees with the TexturePack
 	spec's; a load error, named; what each entry came from (the loader's record, content.origin:
 	the fixture packs of tests/spec/Content, Gamma's overrides; a kind folder's recipes by their
-	file); the lists and the pages; and a new pack's modules, which load and pass the check as
-	they are made.
+	file); the lists and the pages (biomes and biome tags too); and a new pack's modules, which load
+	and pass the check as they are made.
 
 	Nothing here pins an id or a total: the game's content may grow.
 ]]
@@ -196,6 +196,8 @@ return function(t, shared, require, _server, _client)
 		-- by design, as Mekanism's.)
 		t.ok(view.creativeMachines.CreativeEnergyCube, "a machine of a creative kind")
 		t.eq(finding(ContentTool.check(view), "survival", "block CreativeEnergyCube"), nil, "not out of reach")
+		t.ok(has(summary, { "Minecraft", "biomes" }), "the Minecraft pack's biomes")
+		t.ok(has(summary, { "Survival", "biomes", "overrides)" }), "the Survival pack's herbs, overrides")
 	end)
 
 	t.test("content tool: the faces rule is the TexturePack spec's", function()
@@ -277,6 +279,10 @@ return function(t, shared, require, _server, _client)
 		local tags = assert(ContentTool.list(view, "tags"))
 		t.ok(has(tags, { "#fixture_stones", "Beta, Alpha, Gamma" }), "a tag: every pack adding to it")
 		t.ok(has(ContentTool.summary(view), { "Gamma", "blocks 1 (1 override)", "tags 1" }), "Gamma's summary")
+		local biomes = assert(ContentTool.list(view, "biomes"))
+		t.ok(has(biomes, { "1", "BetaDunes", "Lowland", "Beta (patched by Gamma)" }), "a biome: index, bands, packs")
+		t.ok(has(biomes, { "GammaGlade", "Forest", "Gamma" }))
+		t.ok(has(assert(ContentTool.list(view, "biomes", "Gamma")), { "BetaDunes" }), "what a pack patched")
 	end)
 
 	t.test("content tool: a kind folder's recipe is named by its file, as the loader names it", function()
@@ -352,6 +358,18 @@ return function(t, shared, require, _server, _client)
 		local missing, near = ContentTool.show(view, "LintClaen")
 		t.eq(missing, nil)
 		t.eq((near :: any)[1], "LintClean", "the nearest name")
+		-- Biomes: the game's, patched by the Survival pack's herbs.
+		local biomes = assert(ContentTool.list(view, "biomes", "Survival"))
+		t.ok(has(biomes, { "Taiga", "Minecraft (patched by Survival)" }), "the biomes a pack patched")
+		local taiga = assert(ContentTool.show(view, "Taiga"))
+		t.ok(has(taiga, { "biome Taiga: index ", "pack Minecraft" }), taiga[1])
+		t.ok(has(taiga, { "patched by: Survival" }))
+		t.ok(has(taiga, { "foliage.herbs", "WildGinger" }), "its foliage a line each")
+		t.ok(has(taiga, { 'tags = { "is_taiga" }' }))
+		local tag = assert(ContentTool.show(view, "#is_forest"))
+		t.ok(has(tag, { "biome tag #is_forest" }) and has(tag, { "BirchForest" }), "a biome tag")
+		local _, nearBiome = ContentTool.show(view, "Taigaa")
+		t.eq((nearBiome :: any)[1], "Taiga", "a biome's name is near too")
 	end)
 
 	--[[ A new pack ]]

@@ -57,7 +57,7 @@
 	             grown to hold them; its containers (its buildings' and its wrecks' crates) hold
 	             their loot, the map paints it (`cities`), /locate lists it and `cityAt` marks its
 	             footprint (Players/SafeSpot keeps to its full floors).
-	All Biomes   strips STRIP (16) blocks wide along x, one per biome in BiomeList order and
+	All Biomes   strips STRIP (16) blocks wide along x, one per biome in Biomes order and
 	             again (x // 16 mod the biome count), each a column of the biome's own ground
 	             (stone, its filler, its top block; first air at FLOOR) with its trees and ground
 	             plants, so WAILA's biome line, Tough As Nails' temperatures, foliage tints and the
@@ -109,7 +109,7 @@ DebugWorlds.STRIP = 16
 -- The sample mineshafts' room floor lies this far under the floor of All Structures.
 DebugWorlds.MINESHAFT_DEPTH = 24
 
-local PLAINS = (Biomes.byName("Plains") :: Biomes.Biome).index
+local PLAINS = Biomes.need("Plains", "DebugWorlds (the ground of its worlds, the spawn in All Biomes)").index
 
 --[[ All Blocks ]]
 

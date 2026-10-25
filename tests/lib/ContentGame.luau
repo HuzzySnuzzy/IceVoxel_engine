@@ -13,9 +13,9 @@
 	  scanWorld(dirs?)            the words the world's sources use outside comments (DIRS: the
 	                              terrain, biomes, features and structures, the seasons' snow,
 	                              blocks that grow or spread), so the View can tell which blocks the
-	                              world makes (those named there, the ore features' and the
-	                              structure templates'). Reads the files: run from the repository
-	                              root.
+	                              world makes (those named there, the ore features', the biomes'
+	                              ground and plants, and the structure templates'). Reads the
+	                              files: run from the repository root.
 
 	How the game gives items, as the View says it (ContentTool follows the recipes itself):
 	  * the world: breaking a block it makes gives what Shared/Items says (its drop, what Shears
@@ -112,6 +112,8 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 			{ "Machines", "MinerRules" },
 			{ "Radiation" },
 			{ "Generation", "Ores" },
+			{ "Biomes" },
+			{ "Generation", "Structures" },
 			{ "Sounds" },
 			{ "ToughAsNails", "Temperature" },
 			{ "Items", "Tooltip" },
@@ -183,6 +185,26 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 	end
 	for _, ore in content.ores do
 		world[ore.block] = world[ore.block] or `ore feature {ore.name}`
+	end
+	-- (A biome's ground and the plants it grows.)
+	for _, biome in content.biomes or {} do
+		local function named(name: string?)
+			if name then
+				world[name] = world[name] or `biome {biome.name}`
+			end
+		end
+		for _, field in { "top", "filler", "steep", "underwater", "beach" } do
+			named(biome[field])
+		end
+		named(biome.patches and biome.patches.block)
+		local foliage = biome.foliage or {}
+		for _, list in
+			{ foliage.plants or {}, (foliage.flowers or {}).species or {}, (foliage.herbs or {}).species or {} }
+		do
+			for _, entry in list do
+				named(entry[1])
+			end
+		end
 	end
 	local found: { [string]: string } = {}
 	local library = Library.load({ warn = function() end })

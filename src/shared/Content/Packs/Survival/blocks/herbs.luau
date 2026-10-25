@@ -7,7 +7,7 @@
 	(Mint Leaves, Ginger Root), which plants it back (its `places`, Minecraft's
 	ItemNameBlockItem: sweet berries and their bush), one for one, so nothing is gained by
 	replanting. They spread slowly instead, as Minecraft's mushrooms do (server Behaviours/Herb).
-	Generation grows them in rare patches of their biomes (BiomeList `foliage.herbs`): mint on
+	Generation grows them in rare patches of their biomes (`foliage.herbs`, biomes): mint on
 	plains, meadows and in jungles, wild ginger in forests and taigas, so the cold biomes have their
 	warming herb. Mint: a square stem with pairs of bright, crossed leaves and a pale tuft; wild
 	ginger: two broad, dark heart-shaped leaves low over the ground and a maroon bud at their foot

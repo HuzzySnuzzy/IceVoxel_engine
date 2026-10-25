@@ -291,7 +291,7 @@ local DECORATION: Setting = {
 	default = false,
 	description = "The biome's trees and ground plants on the top layer",
 }
--- Single Biome's biome (BiomeList names).
+-- Single Biome's biome (the packs' biome names).
 local BIOME: Setting = {
 	key = "biome",
 	name = "Biome",
@@ -301,10 +301,13 @@ local BIOME: Setting = {
 	labels = biomeLabels,
 }
 
--- The biome index an option names (BiomeList name), `fallback` when none or unknown.
-local function biomeOption(value: any, fallback: string): number
+-- The void's biome and Single Biome's default (BIOME's).
+local PLAINS = Biomes.need("Plains", "WorldTypes (the void's biome, Single Biome's default)").index
+
+-- The biome index an option names (a biome's name), `fallback` when none or unknown.
+local function biomeOption(value: any, fallback: number): number
 	local biome = if type(value) == "string" then Biomes.byName(value) else nil
-	return (biome or Biomes.byName(fallback) :: Biomes.Biome).index
+	return if biome then biome.index else fallback
 end
 
 WorldTypes.register({
@@ -349,7 +352,7 @@ WorldTypes.register({
 		return LayeredGenerator.new({
 			seed = seed,
 			stack = LayeredGenerator.EMPTY,
-			biome = biomeOption(nil, "Plains"),
+			biome = PLAINS,
 			blocks = placed,
 		})
 	end,
@@ -365,7 +368,7 @@ WorldTypes.register({
 		return TerrainGenerator.new(seed, {
 			structures = options.structures ~= false,
 			ruins = options.ruins ~= false,
-			biome = biomeOption(options.biome, "Plains"),
+			biome = biomeOption(options.biome, PLAINS),
 		})
 	end,
 	settings = { BIOME, STRUCTURES, RUINS },

@@ -1,21 +1,22 @@
 --!strict
 --[[
 	Content packs (Minecraft's data packs): every block, item, recipe, tag, texture, loot table, ore
-	feature, Age, lore line and fuel tag of the game comes from a pack, a folder under
+	feature, Age, lore line, fuel tag and biome of the game comes from a pack, a folder under
 	Content/Packs, and every value about an entry is on the entry. The registries (Blocks, Items,
-	TexturePack, Crafting, Progression, the Metal Miner, Radiation, generation, loot, sounds, Tough
-	As Nails) build themselves from what this module loads; adding content is adding entries to a
-	pack, or a pack.
+	TexturePack, Crafting, Progression, the Metal Miner, Radiation, generation, biomes, loot,
+	sounds, Tough As Nails) build themselves from what this module loads; adding content is adding
+	entries to a pack, or a pack.
 
 	A pack
 	  A folder holding `pack`, its manifest ({ order = n, description = "...", requires = { pack
 	  names }? }), and any of the kinds Content/Schema lists (blocks, items, recipes, tags, textures,
-	  loot, ores, ages, lore, fuel), each a module of the kind's name: a Luau module returning its
-	  data, or `function(define) -> data` (define: Content/Define, the shared helpers and Config,
-	  for packs that build entries or read switches), or a `.json` file holding it (Rojo makes a
-	  JSON file a ModuleScript returning its table, and so does the Lune loader). Any other module
-	  in a pack is an error (a misspelt kind would be ignored otherwise) unless its name starts with
-	  "_": the pack's own helpers, which its kind modules require (at the pack's top only).
+	  loot, ores, ages, lore, fuel, biomes), each a module of the kind's name: a Luau module
+	  returning its data, or `function(define) -> data` (define: Content/Define, the shared helpers
+	  and Config, for packs that build entries or read switches), or a `.json` file holding it (Rojo
+	  makes a JSON file a ModuleScript returning its table, and so does the Lune loader). Any other
+	  module in a pack is an error (a misspelt kind would be ignored otherwise) unless its name
+	  starts with "_": the pack's own helpers, which its kind modules require (at the pack's top
+	  only).
 
 	Kind folders
 	  A kind may also be a folder of the kind's name (`Minecraft/blocks/`), as Minecraft's data
@@ -46,6 +47,11 @@
 	                 block or an item, is an error naming both packs, and so is an override of
 	                 nothing.
 	  textures       by name, the same way (an override patches the texture's fields).
+	  biomes         by name, the same way, keeping their place; an override's table of fields
+	                 (weather, patches, foliage and its flowers and herbs) patches the biome's
+	                 field by field in turn, a list (bands, features, plants, species, tags)
+	                 replaces it whole (Schema's BIOME_FIELDS), and the patched biome is checked
+	                 whole again.
 	  tags           a union: each pack's lists in load order, then every entry's `tags`, each
 	                 name once.
 	  recipes        appended in load order; so are ore features (each with a name of its own)
@@ -61,11 +67,13 @@
 	    tags recipes and fuel name, `drops`, `shearDrops`, `item`, `places`, `caveTwin`, a plant's
 	    other half, a toggle's `to`, a block's loot table, an ore feature's block, the Ages entries
 	    name (`age`), the textures blocks name (`texture`) and the blocks textures are tinted like,
-	    the Ages' milestones' items, every lore line's item, and a lore line both on an entry and in
-	    a pack's `lore`.
+	    the Ages' milestones' items, every lore line's item, a lore line both on an entry and in a
+	    pack's `lore`, and the blocks a biome names (its ground, and its plants: single plants or
+	    lower halves).
 	  The registries check what only they know of an entry's value as they load, naming the pack
 	  too (`where`): a skill, a sound event or action, a machine kind, the miner's numbers, a
-	  radiation or shielding number, a fuel's ticks.
+	  radiation or shielding number, a fuel's ticks, a biome's bands (Biomes) and tree builders
+	  (Generation/Structures).
 
 	API
 	  Content.default             the packs under Content/Packs, loaded once: what the game uses
@@ -75,9 +83,12 @@
 	                              .entries: both, blocks first
 	  content.recipes, .tags, .textures, .loot, .ores, .ages, .lore, .fuel
 	                              the other kinds, merged
+	  content.biomes              the merged biomes, in load order (Schema's BiomeSpec; a biome's
+	                              place is its index in Shared/Biomes)
 	  content.packs               the packs, in load order
 	  content.blockId, .itemId    name -> id (items: those that are no blocks)
-	  content.block(name), .item(name), .entry(name)   an entry by name, nil when there is none
+	  content.block(name), .item(name), .entry(name), .biome(name)
+	                              an entry by name, nil when there is none
 	  content.where(kind, name)   "pack Minecraft, blocks/terrain, block Stone" (kind: Schema
 	                              .SINGULAR's word: "block", "item", "texture"..., or the kind;
 	                              the file only for a kind folder's), for registries' messages
@@ -100,6 +111,7 @@ type Texture = Schema.Texture
 type Pool = Schema.Pool
 type OreFeature = Schema.OreFeature
 type AgeRecord = Schema.AgeRecord
+type BiomeSpec = Schema.BiomeSpec
 
 -- A pack, as loaded: its folder's name, its manifest's numbers.
 export type PackInfo = { name: string, order: number, description: string, requires: { string } }
@@ -132,11 +144,13 @@ export type Content = {
 	ages: { AgeRecord },
 	lore: { [string]: string },
 	fuel: { [string]: number },
+	biomes: { BiomeSpec },
 	blockId: { [string]: number },
 	itemId: { [string]: number },
 	block: (name: string) -> BlockSpec?,
 	item: (name: string) -> ItemSpec?,
 	entry: (name: string) -> Entry?,
+	biome: (name: string) -> BiomeSpec?,
 	where: (kind: string, name: string) -> string,
 	origin: (kind: string, name: string | number) -> Origin?,
 }
@@ -170,6 +184,21 @@ end
 local function hint(name: string, names: { [string]: any }): string
 	local near = Schema.suggest(name, names)
 	return if near then ` (did you mean {near}?)` else ""
+end
+
+-- `base` with `patch`'s fields over it, a new table: where `base` has a table of fields (no list)
+-- `patch` patches it the same way, field by field; anything else (a list, a value) is replaced.
+local function patchFields(base: { [string]: any }, patch: { [string]: any }): { [string]: any }
+	local out = table.clone(base)
+	for field, value in patch do
+		local old = out[field]
+		if type(value) == "table" and type(old) == "table" and next(old) ~= nil and not isList(old) then
+			out[field] = patchFields(old, value)
+		else
+			out[field] = value
+		end
+	end
+	return out
 end
 
 --[[
@@ -251,6 +280,10 @@ function Content.build(input: { PackData }): Content
 	local fuel: { [string]: number } = {}
 	local ores: { OreFeature } = {}
 	local ages: { AgeRecord } = {}
+	local biomes: { BiomeSpec } = {}
+	-- Biome name -> its place in `biomes` (content.biome; what a check of the biomes another kind
+	-- names looks up).
+	local biomeAt: { [string]: number } = {}
 
 	local function whereOf(kind: string, name: string): string
 		local pack = made[kind][name]
@@ -369,6 +402,33 @@ function Content.build(input: { PackData }): Content
 		patched[kind][name] = {}
 	end
 
+	-- A biome of `pack` (checked): appended, or patched onto the earlier one (`patchFields`).
+	local function mergeBiome(pack: string, file: string?, entry: any)
+		local name = entry.name :: string
+		local here = `{placeOf(pack, file)}, biome {name}`
+		local index = biomeAt[name]
+		if entry.override then
+			if index == nil then
+				fail(`{here} overrides a biome no earlier pack makes{hint(name, biomeAt)}`)
+			end
+			local patch = table.clone(entry)
+			patch.override = nil
+			patch.name = nil
+			biomes[index] = patchFields(biomes[index], patch) :: any
+			table.insert(patched.biomes[name], pack)
+		elseif index then
+			fail(
+				`{here}: the name is taken by {whereOf("biomes", name)} (another name, or override = true to patch it)`
+			)
+		else
+			table.insert(biomes, table.clone(entry))
+			biomeAt[name] = #biomes
+			made.biomes[name] = pack
+			madeIn.biomes[name] = file
+			patched.biomes[name] = {}
+		end
+	end
+
 	for _, data in sorted do
 		local pack = data.name
 		local folders: { [string]: { PackFile } } = data.folders or {}
@@ -421,6 +481,8 @@ function Content.build(input: { PackData }): Content
 						end
 						if kind == "blocks" or kind == "items" then
 							mergeEntry(kind, pack, file, entry)
+						elseif kind == "biomes" then
+							mergeBiome(pack, file, entry)
 						elseif kind == "recipes" then
 							table.insert(recipes, table.clone(entry))
 							table.insert(recipeFrom, { from = place, pack = pack, file = file, index = index })
@@ -659,6 +721,42 @@ function Content.build(input: { PackData }): Content
 			fail(`{whereOf("fuel", tag)}: burns for {ticks} ticks`)
 		end
 	end
+	-- A biome's plants: single plants or the lower halves of tall ones.
+	local function needPlants(here: string, what: string, list: { Schema.Weighted }?)
+		for _, entry in (list or {}) :: { Schema.Weighted } do
+			local name = entry[1] :: string
+			needName(here, what, name, true)
+			local plant = blocks[blockAt[name]].plant
+			if plant == nil or plant.bottom ~= nil then
+				fail(`{here}: {what} grows {name}, which is no plant (or the upper half of one)`)
+			end
+		end
+	end
+	for _, biome in biomes do
+		local here = whereOf("biomes", biome.name)
+		-- (A patched biome, whole: its patches may have left out what it needs.)
+		if #patched.biomes[biome.name] > 0 then
+			local problem = Schema.check("biomes", biome)
+			if problem then
+				fail(`{here}: {problem}`)
+			end
+		end
+		for _, field in { "top", "filler", "steep", "underwater", "beach" } do
+			local name = (biome :: any)[field]
+			if name then
+				needName(here, field, name, true)
+			end
+		end
+		if biome.patches then
+			needName(here, "patches", biome.patches.block, true)
+		end
+		local foliage = biome.foliage
+		if foliage then
+			needPlants(here, "foliage.plants", foliage.plants)
+			needPlants(here, "foliage.flowers", foliage.flowers and foliage.flowers.species)
+			needPlants(here, "foliage.herbs", foliage.herbs and foliage.herbs.species)
+		end
+	end
 
 	local content = {
 		packs = packs,
@@ -673,6 +771,7 @@ function Content.build(input: { PackData }): Content
 		ages = ages,
 		lore = lore,
 		fuel = fuel,
+		biomes = biomes,
 		blockId = blockId,
 		itemId = itemId,
 	} :: Content
@@ -686,6 +785,10 @@ function Content.build(input: { PackData }): Content
 	end
 	function content.entry(name: string): Entry?
 		return content.block(name) or content.item(name)
+	end
+	function content.biome(name: string): BiomeSpec?
+		local index = biomeAt[name]
+		return if index then biomes[index] else nil
 	end
 	-- `kind`: Schema.SINGULAR's word ("block", "item", "texture", "loot table"...) or the kind.
 	local kindOfWord: { [string]: string } = {}

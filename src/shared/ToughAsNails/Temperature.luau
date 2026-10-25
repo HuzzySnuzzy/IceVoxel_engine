@@ -14,7 +14,7 @@
 	whatever thinks in zones keeps working. The body drifts a step at a time towards the
 	temperature its surroundings give (the target):
 
-	  1. the climate (`climateValue`): the surface biome's temperature (BiomeList, -0.75 tundra ..
+	  1. the climate (`climateValue`): the surface biome's temperature (Biomes, -0.75 tundra ..
 	     0.8 desert), ALTITUDE_LAPSE (0.001) colder per block above ALTITUDE_START (256: TAN takes
 	     Minecraft's biome temperature at the player's height, which falls with altitude), then
 	       outdoors (nothing opaque above the head) at night: NIGHT (0.3) colder;
@@ -107,7 +107,7 @@ local Content = require(script.Parent.Parent.Content)
 local GameMode = require(script.Parent.Parent.GameMode)
 
 export type Environment = {
-	-- The surface biome's temperature (BiomeList, roughly -1..1).
+	-- The surface biome's temperature (Biomes, roughly -1..1).
 	climate: number,
 	-- Feet height and the terrain height of the column (first air block), blocks.
 	y: number,

@@ -1,19 +1,45 @@
 --!strict
 --[[
-	Biome registry: resolves the block names in BiomeList to ids and exposes flat arrays that the
-	terrain generator reads in its inner loops. A biome's `foliage` (Generation/Foliage) becomes
-	weighted block id lists; its plants must be single plants or lower halves of tall ones.
+	Biome registry: the content packs' biomes (Shared/Content's `biomes`; Content/Schema's
+	BIOME_FIELDS says what each field does) with their block names resolved to ids, as flat records
+	the terrain generator reads in its inner loops. A biome's `foliage` (Generation/Foliage) becomes
+	weighted block id lists. A biome's index is its place among every pack's biomes (the Minecraft
+	pack's in their order, then any later pack's), the same on every machine; it lives in memory
+	only (saves, Single Biome and /locate name biomes), but the generator's per-biome arrays and
+	climate picks go by it: a pack loading after the Minecraft pack adds its biomes after the
+	vanilla ones, which keep their places.
+
+	Biomes are picked by altitude first, as in JJThunder To The Max: the terrain's height (before
+	rivers are dug, so a river bed belongs to its banks) falls into one of the BANDS below, and the
+	biome is the one of that band closest to the column's climate (temperature, humidity, both
+	roughly in [-1, 1]). Band borders and climate borders are dithered a little so they look natural.
+	Islands in the middle of some seas are mushroom fields instead (see TerrainGenerator).
+
+	The bands are the generator's rules, not a pack's data: each is a slice of the terrain's
+	height (the datapack's biome altitudes put through Generation/Relief's scaling), so they move
+	with the relief and not with any biome, and between them they cover every height, so a pack
+	adding or moving one would re-slice where every other pack's biomes grow. A biome names the
+	bands it appears in (`bands`), checked here as the packs load, and every band needs a biome.
+
+	  list, count, get(index), byName(name)   the biomes, by index or by name
+	  need(name, who)    the biome named `name`, which `who` needs (TerrainGenerator's mushroom
+	                     fields, the Plains of the void, Single Biome and the debug worlds): an
+	                     error naming both as the game loads when no pack makes it
+	  where(name)        where a biome came from ("pack Minecraft (patched by Survival), biome
+	                     Taiga"), for messages
+	  bands, inBand, bandAt(height)   the altitude bands, the biomes of each, a height's band
 ]]
 
 local Blocks = require(script.Parent.Blocks)
-local BiomeList = require(script.BiomeList)
+local Content = require(script.Parent.Content)
+local Schema = require(script.Parent.Content.Schema)
 
 export type Feature = { structure: string, weight: number }
 
 -- A weighted list of plant blocks (single plants or lower halves) and its total weight.
 export type PlantList = { blocks: { number }, weights: { number }, total: number }
 
--- Ground plants (BiomeList `foliage`): average chance per soil column and share of the ground in
+-- Ground plants (a biome's `foliage`): average chance per soil column and share of the ground in
 -- patches, for grass-like plants, for flowers (`flowers` nil: none) and for herbs (`herbs` nil:
 -- none).
 export type Foliage = {
@@ -35,7 +61,7 @@ export type Biome = {
 	bands: { number },
 	temperature: number,
 	humidity: number,
-	-- Minecraft's biome temperature and has_precipitation (BiomeList `weather`; Shared/Weather).
+	-- Minecraft's biome temperature and has_precipitation (its `weather`; Shared/Weather).
 	weatherTemperature: number,
 	precipitation: boolean,
 	vegetation: number,
@@ -54,46 +80,53 @@ export type Biome = {
 	features: { Feature },
 	featureWeight: number,
 	foliage: Foliage?,
+	-- Minecraft's biome tags it is in ("is_forest"; Generation/Locate).
+	tags: { string },
 }
 
-export type Band = BiomeList.Band
+export type Band = { name: string, from: number }
 
 local Biomes = {}
 
-local bands = BiomeList.bands
+local content = Content.default
+
+local function fail(text: string): never
+	error(`Biomes: {text}`, 0)
+end
+
+--[[
+	Altitude bands, by the lowest height (blocks) each starts at. These are the datapack's biome
+	altitudes scaled like the terrain (Generation/Relief): 64 + 0.43 (y - 63).
+]]
+local bands: { Band } = {
+	{ name = "Lowland", from = -math.huge },
+	{ name = "Forest", from = 190 },
+	{ name = "Highland", from = 312 },
+	{ name = "Meadow", from = 467 },
+	{ name = "Alpine", from = 553 },
+	{ name = "Slopes", from = 639 },
+	{ name = "Peaks", from = 725 },
+}
 local bandIndex: { [string]: number } = {}
 for i, band in bands do
 	bandIndex[band.name] = i
 end
 
+-- (Content checked every block a biome names, and that its plants are plants.)
 local function block(name: string): number
-	local id = Blocks.id[name]
-	assert(id, `BiomeList uses unknown block {name}`)
-	return id
+	return Blocks.id[name]
 end
 
--- A { { blockName, weight } } list of plants to grow (see BiomeList `foliage`).
-local function plantList(biome: string, entries: { { any } }): PlantList
+-- A { { blockName, weight } } list of plants to grow (a biome's `foliage`).
+local function plantList(entries: { Schema.Weighted }): PlantList
 	local out: PlantList = { blocks = {}, weights = {}, total = 0 }
 	for _, entry in entries do
-		local id = block(entry[1] :: string)
 		local weight = entry[2] :: number
-		assert(
-			Blocks.isPlant(id) and Blocks.plantBottom(id) == nil,
-			`Biome {biome} grows {entry[1]}, which is no plant (or the upper half of one)`
-		)
-		assert(weight > 0, `Biome {biome} gives {entry[1]} no weight`)
-		table.insert(out.blocks, id)
+		table.insert(out.blocks, block(entry[1] :: string))
 		table.insert(out.weights, weight)
 		out.total += weight
 	end
-	assert(#out.blocks > 0, `Biome {biome} has an empty plant list`)
 	return out
-end
-
-local function share(biome: string, what: string, value: number): number
-	assert(value >= 0 and value <= 1, `Biome {biome} has a bad foliage {what} {value}`)
-	return value
 end
 
 local list: { Biome } = {}
@@ -104,7 +137,7 @@ for i in bands do
 	inBand[i] = {}
 end
 
-for index, spec in BiomeList.list do
+for index, spec in content.biomes do
 	local features: { Feature } = {}
 	local total = 0
 	for _, entry in spec.features do
@@ -116,7 +149,14 @@ for index, spec in BiomeList.list do
 	local biomeBands = {}
 	for _, name in spec.bands do
 		local b = bandIndex[name]
-		assert(b, `Biome {spec.name} uses unknown band {name}`)
+		if b == nil then
+			local near = Schema.suggest(name, bandIndex)
+			fail(
+				`{content.where("biome", spec.name)}: bands names unknown band {name}{if near
+					then ` (did you mean {near}?)`
+					else ""}`
+			)
+		end
 		table.insert(biomeBands, b)
 		table.insert(inBand[b], index)
 	end
@@ -128,15 +168,15 @@ for index, spec in BiomeList.list do
 		local flowers = foliageSpec.flowers
 		local herbs = foliageSpec.herbs
 		foliage = {
-			density = share(spec.name, "density", foliageSpec.density),
-			cover = share(spec.name, "cover", foliageSpec.cover or 0.5),
-			plants = plantList(spec.name, foliageSpec.plants),
-			flowerChance = if flowers then share(spec.name, "flower chance", flowers.chance) else 0,
-			flowerCover = if flowers then share(spec.name, "flower cover", flowers.cover or 0.3) else 0.3,
-			flowers = if flowers then plantList(spec.name, flowers.species) else nil,
-			herbChance = if herbs then share(spec.name, "herb chance", herbs.chance) else 0,
-			herbCover = if herbs then share(spec.name, "herb cover", herbs.cover or 0.04) else 0.04,
-			herbs = if herbs then plantList(spec.name, herbs.species) else nil,
+			density = foliageSpec.density,
+			cover = foliageSpec.cover or 0.5,
+			plants = plantList(foliageSpec.plants),
+			flowerChance = if flowers then flowers.chance else 0,
+			flowerCover = if flowers then flowers.cover or 0.3 else 0.3,
+			flowers = if flowers then plantList(flowers.species) else nil,
+			herbChance = if herbs then herbs.chance else 0,
+			herbCover = if herbs then herbs.cover or 0.04 else 0.04,
+			herbs = if herbs then plantList(herbs.species) else nil,
 		}
 	end
 	local weather = spec.weather
@@ -162,13 +202,16 @@ for index, spec in BiomeList.list do
 		features = features,
 		featureWeight = total,
 		foliage = foliage,
+		tags = spec.tags or {},
 	}
 	table.insert(list, biome)
 	byName[spec.name] = biome
 end
 
 for i, band in bands do
-	assert(#inBand[i] > 0, `No biome in band {band.name}`)
+	if #inBand[i] == 0 then
+		fail(`no biome is in band {band.name} (every band needs one: a biome's \`bands\`)`)
+	end
 end
 
 Biomes.list = list
@@ -183,6 +226,25 @@ end
 
 function Biomes.byName(name: string): Biome?
 	return byName[name]
+end
+
+--[[
+	The biome named `name`, which `who` needs ("TerrainGenerator (its mushroom islands)"): for code
+	that looks a biome up as it loads, so a pack without it fails there, naming both, instead of a
+	nil index later.
+]]
+function Biomes.need(name: string, who: string): Biome
+	local biome = byName[name]
+	if biome == nil then
+		local near = Schema.suggest(name, byName)
+		fail(`{who} needs a biome named {name}, which no pack makes{if near then ` (did you mean {near}?)` else ""}`)
+	end
+	return biome :: Biome
+end
+
+-- Where biome `name` came from: "pack Minecraft (patched by Survival), biome Taiga".
+function Biomes.where(name: string): string
+	return content.where("biome", name)
 end
 
 -- Band index of a terrain height (blocks).

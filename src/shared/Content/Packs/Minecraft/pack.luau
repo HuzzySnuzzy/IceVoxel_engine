@@ -1,9 +1,9 @@
 --!strict
 --[[
 	Vanilla Minecraft (1.20.1) as this game has it: the features below, each a file of its kind
-	folders (blocks/, items/, recipes/, textures/), the mineshafts' loot (loot) and the vanilla ore
-	features (ores). The pack's own shape and model helpers are _shapes and _models; the shared
-	ones are Content/Define's.
+	folders (blocks/, items/, recipes/, textures/), the mineshafts' loot (loot), the vanilla ore
+	features (ores) and the biomes (biomes). The pack's own shape and model helpers are _shapes and
+	_models; the shared ones are Content/Define's.
 
 	  terrain     the ground, stones, sand, snow and ice, water and lava (and CaveLava), obsidian:
 	              blocks/terrain, textures/terrain, recipes/stone (and its ice and snow), ores
@@ -40,6 +40,8 @@
 	  mob drops   leather, meat, feathers, rotten flesh, bones and string, cooked meat:
 	              items/mobs, recipes/mobs (_models' meat)
 	  potions     every potion of Shared/Effects/PotionList: items/potions, recipes/potions
+	  biomes      the 18 biomes, their climate, weather, ground, trees, ground plants and biome
+	              tags, in the generator's order: biomes (the Survival pack adds its herbs)
 
 	Calls made here: Glow Dust and glow lichen are the lights' (the Glow Block is the game's
 	glowstone); White Wool is the mob drops' (sheep); the mineshafts' loot table is whole here,
@@ -50,6 +52,6 @@
 ]]
 return {
 	order = 100,
-	description = "Vanilla Minecraft: terrain, stone, ores, wood, plants, lights, doors, tools, armor, food, potions, mineshafts.",
+	description = "Vanilla Minecraft: terrain, stone, ores, wood, plants, lights, doors, tools, armor, food, potions, mineshafts, biomes.",
 	requires = { "Core" },
 }

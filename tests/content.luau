@@ -8,7 +8,7 @@
 	                                                 fails to load; --strict: on a warning too)
 	    lune run tests/content list [kind] [pack]    entries (id, name, pack), of one kind (blocks,
 	                                                 items, recipes, tags, textures, loot, ores,
-	                                                 ages, lore, fuel), of one pack
+	                                                 ages, lore, fuel, biomes), of one pack
 	    lune run tests/content show <name>           an entry's merged fields, its id and pack, the
 	                                                 packs that patched it, and what the registries
 	                                                 made of it (lore, faces or icon, Age, recipes)

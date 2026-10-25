@@ -8,7 +8,7 @@
 	    Bedrock,2*Dirt,Grass;Plains
 
 	the layers from the bottom of the world (y = 0) up, `count*Block` (count 1..MAX_HEIGHT,
-	default 1), then `;` and the biome (BiomeList; default Plains). Names match loosely, as
+	default 1), then `;` and the biome (by name; default Plains). Names match loosely, as
 	structure final states do (Structures/Jigsaw.nameKey: any case, "minecraft:" dropped, no
 	underscores or spaces), and a few of Minecraft's names map onto this game's (grass_block is
 	Grass, snowy_plains is Tundra), so most Minecraft presets paste as they are. Air layers are
@@ -51,6 +51,8 @@ local Superflat = {}
 Superflat.MAX_HEIGHT = Config.WorldHeight - LayeredGenerator.TREE_ROOM
 Superflat.CLASSIC = "Bedrock,2*Dirt,Grass;Plains"
 Superflat.DEFAULT_BIOME = "Plains"
+-- (Classic Flat's biome, which a bad preset falls back on: a load error without it.)
+Biomes.need(Superflat.DEFAULT_BIOME, "Superflat (Classic Flat's biome)")
 
 Superflat.PRESETS = table.freeze({
 	table.freeze({ name = "Classic Flat", value = Superflat.CLASSIC }),

@@ -4,7 +4,7 @@
 	Environment), pure over a world view so the tests give their own (Players/ToughAsNails gives
 	the server's: loaded blocks only, never generating terrain):
 
-	  climate, surface  the column's surface biome (its BiomeList temperature) and terrain height,
+	  climate, surface  the column's surface biome (its Biomes temperature) and terrain height,
 	                    from the generator's column (TerrainGenerator.column: what the world was
 	                    generated with, edits aside)
 	  skyOpen           nothing opaque above the head (Machines/SkyCheck: a roof of glass, leaves

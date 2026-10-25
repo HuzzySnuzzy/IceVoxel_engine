@@ -71,7 +71,7 @@
 	    surface lake, 35 an underground one) and in the rock around oil deposits (20 to 30 blocks
 	    a small well, 35 to 70 a medium one, 85 to 210 a large one);
 	  * saltpetre lies under dry land: 4 veins of 8 a chunk start 4 to 36 blocks under the top
-	    block of columns whose biome never rains (BiomeList's precipitation = false: Desert,
+	    block of columns whose biome never rains (`weather.precipitation = false`: Desert,
 	    Savanna, Windswept Savanna) above the sea, some 24 blocks a dry chunk: as many as coal in
 	    those layers. It replaces stone only, as every ore: a desert's sandstone is just the 5
 	    blocks under its sand (fillerDepth), and keeping "ores only replace stone" keeps

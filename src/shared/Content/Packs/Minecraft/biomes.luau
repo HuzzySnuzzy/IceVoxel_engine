@@ -1,116 +1,21 @@
 --!strict
 --[[
-	Biome definitions.
+	The biomes (Minecraft 1.20.1's names and climates, picked by altitude band as in JJThunder To
+	The Max: Shared/Biomes). Content/Schema's BIOME_FIELDS says what each field does. Their order
+	is their index (the generator's per-biome arrays, the climate picks, Debug: All Biomes' strips),
+	so a biome moved here moves generation; one added at the end of the list, or in a later pack,
+	leaves the others where they are. The Survival pack's biomes add Tough As Nails' herbs to some
+	of them (their `foliage.herbs`).
 
-	Biomes are picked by altitude first, as in JJThunder To The Max: the terrain's height (before
-	rivers are dug, so a river bed belongs to its banks) falls into one of the BANDS below, and the
-	biome is the one of that band closest to the column's climate (temperature, humidity, both
-	roughly in [-1, 1]). Band borders and climate borders are dithered a little so they look natural.
-	Islands in the middle of some seas are mushroom fields instead (see TerrainGenerator).
-
-	  bands          Altitude bands the biome appears in (names from BANDS).
-	  temperature, humidity
-	                 Its place in climate space.
-	  weather        Optional { temperature =, precipitation = }: Minecraft 1.20.1's biome
-	                 temperature (plains 0.8, taiga 0.25, snowy plains 0, desert 2...) and its
-	                 has_precipitation (false: no rain or snow ever falls: deserts and savannas),
-	                 which decide what falls there (Shared/Weather: snow below 0.15, colder with
-	                 altitude, so a mountain top snows while its valley rains). Default: 0 for
-	                 `frozen` biomes, 0.8 otherwise, with precipitation.
-	  vegetation     Chance (0-1) that a vegetation spot (one per 5x5 blocks) grows something.
-	  top / filler / fillerDepth
-	                 Surface block, blocks below it and how deep they go.
-	  patches        Optional { block =, cover = }: `cover` (0-1) of the surface is `block` instead of
-	                 `top`, in blotches a few blocks wide (stone in windswept hills...).
-	  steep          Optional block for slopes steeper than `steepSlope` (blocks per block;
-	                 default Stone and TerrainGenerator's CLIFF_SLOPE).
-	  underwater     Surface block below sea level.
-	  beach          Surface block just above sea level, on coasts and river banks.
-	  frozen         Water freezes to ice at the surface.
-	  features       { { structureName, weight } } picked when vegetation succeeds.
-	  foliage        Optional ground plants (Generation/Foliage; full detail chunks only), Minecraft's
-	                 vegetal decoration. A column grows at most one plant, on its surface block, when
-	                 that block is in the plant's soil set and the block above is air:
-	                   density   Share (0-1) of the biome's soil columns growing a plant, on average.
-	                             They grow in patches: `cover` (0-1, default 0.5) of the ground is
-	                             patches, where the chance is about density / cover, and the rest is
-	                             clearings (a low-frequency noise, like Minecraft's random patches).
-	                   plants    { { blockName, weight } }: what grows. A two block tall plant
-	                             without air above its top falls back to its single form (tall
-	                             grass to short grass, a large fern to a fern) or to nothing.
-	                   flowers   Optional { chance =, cover =, species = { { blockName, weight } } }:
-	                             flowers in their own patches (`chance` and `cover` as density and
-	                             cover above, cover default 0.3). The species follows another
-	                             low-frequency noise, so a patch is one or two species.
-	                   herbs     Optional { chance =, cover =, species = { { blockName, weight } } }:
-	                             Tough As Nails' herbs (BlockList Mint, WildGinger), in rare small
-	                             patches of their own (`chance` and `cover` as above, cover default
-	                             0.04: about 4 herbs a patch), only on columns that grow nothing
-	                             else, so the grass and flowers stay where they were.
-	                 Every box of a plant is a Part: tests/spec/FoliageGeneration keeps the Parts per
-	                 soil column within budget (0.6 in jungles and meadows, 0.45 on plains and
-	                 savannas, 0.35 elsewhere).
+	`tags` are Minecraft's biome tags that /locate searches ("#is_forest"); "is_snowy" and the bands'
+	tags are worked out from the biomes themselves (Generation/Locate).
 ]]
 
-export type BiomeSpec = {
-	name: string,
-	bands: { string },
-	temperature: number,
-	humidity: number,
-	weather: { temperature: number, precipitation: boolean? }?,
-	vegetation: number,
-	top: string,
-	filler: string,
-	fillerDepth: number,
-	patches: { block: string, cover: number }?,
-	steep: string?,
-	steepSlope: number?,
-	underwater: string,
-	beach: string,
-	frozen: boolean?,
-	features: { { any } },
-	foliage: FoliageSpec?,
-}
-
--- Ground plants (see the header): { blockName, weight } lists.
-export type FoliageSpec = {
-	density: number,
-	cover: number?,
-	plants: { { any } },
-	flowers: { chance: number, cover: number?, species: { { any } } }?,
-	herbs: { chance: number, cover: number?, species: { { any } } }?,
-}
-
-export type Band = { name: string, from: number }
-
---[[
-	Altitude bands, by the lowest height (blocks) each starts at. These are the datapack's biome
-	altitudes scaled like the terrain (Generation/Relief): 64 + 0.43 (y - 63).
-]]
-local BANDS: { Band } = {
-	{ name = "Lowland", from = -math.huge },
-	{ name = "Forest", from = 190 },
-	{ name = "Highland", from = 312 },
-	{ name = "Meadow", from = 467 },
-	{ name = "Alpine", from = 553 },
-	{ name = "Slopes", from = 639 },
-	{ name = "Peaks", from = 725 },
-}
-
---[[
-	Herbs (Tough As Nails' water and teas): mint, the cooling herb that also purifies water, on the
-	plains, in meadows and jungles (the warm and temperate grass; the game has no swamps or river
-	biomes for it); wild ginger, the warming one, under the trees of forests and taigas, so the
-	colder biomes have theirs. Rare small patches: 0.4% of the open ground, in patches of 4 or so
-	herbs about 30 blocks apart on open ground (fewer under trees; tests/spec/Herbs counts them).
-]]
-type Herbs = { chance: number, cover: number?, species: { { any } } }
-local MINT: Herbs = { chance = 0.004, cover = 0.04, species = { { "Mint", 1 } } }
-local GINGER: Herbs = { chance = 0.004, cover = 0.04, species = { { "WildGinger", 1 } } }
+local Schema = require(script.Parent.Parent.Parent.Schema)
 
 -- Forest flowers (Minecraft's forest: dandelions and poppies, lilies of the valley and the tall
 -- forest flowers).
-local FOREST_FLOWERS: { { any } } = {
+local FOREST_FLOWERS: { Schema.Weighted } = {
 	{ "Dandelion", 2 },
 	{ "Poppy", 2 },
 	{ "LilyOfTheValley", 1 },
@@ -119,7 +24,7 @@ local FOREST_FLOWERS: { { any } } = {
 	{ "Peony", 1 },
 }
 
-local list: { BiomeSpec } = {
+return {
 	{
 		name = "Tundra",
 		bands = { "Lowland", "Forest" },
@@ -160,8 +65,8 @@ local list: { BiomeSpec } = {
 				{ "RedMushroom", 0.06 },
 			},
 			flowers = { chance = 0.002, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
-			herbs = GINGER,
 		},
+		tags = { "is_taiga" },
 	},
 	{
 		name = "Plains",
@@ -197,7 +102,6 @@ local list: { BiomeSpec } = {
 					{ "Sunflower", 0.4 },
 				},
 			},
-			herbs = MINT,
 		},
 	},
 	{
@@ -218,8 +122,8 @@ local list: { BiomeSpec } = {
 			density = 0.07,
 			plants = { { "ShortGrass", 1 } },
 			flowers = { chance = 0.014, species = FOREST_FLOWERS },
-			herbs = GINGER,
 		},
+		tags = { "is_forest" },
 	},
 	{
 		name = "BirchForest",
@@ -238,8 +142,8 @@ local list: { BiomeSpec } = {
 			density = 0.07,
 			plants = { { "ShortGrass", 1 } },
 			flowers = { chance = 0.014, species = FOREST_FLOWERS },
-			herbs = GINGER,
 		},
+		tags = { "is_forest" },
 	},
 	{
 		name = "Savanna",
@@ -261,6 +165,7 @@ local list: { BiomeSpec } = {
 			plants = { { "ShortGrass", 3 }, { "TallGrass", 1 } },
 			flowers = { chance = 0.004, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
 		},
+		tags = { "is_savanna" },
 	},
 	{
 		name = "Desert",
@@ -298,8 +203,8 @@ local list: { BiomeSpec } = {
 			cover = 0.8,
 			plants = { { "ShortGrass", 6 }, { "Fern", 3 }, { "TallGrass", 1 }, { "LargeFern", 1 } },
 			flowers = { chance = 0.008, species = { { "Dandelion", 2 }, { "Poppy", 2 }, { "BlueOrchid", 1 } } },
-			herbs = MINT,
 		},
+		tags = { "is_jungle" },
 	},
 	{
 		name = "WindsweptHills",
@@ -320,6 +225,7 @@ local list: { BiomeSpec } = {
 			plants = { { "ShortGrass", 1 } },
 			flowers = { chance = 0.002, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
 		},
+		tags = { "is_hill" },
 	},
 	{
 		name = "OldGrowthTaiga",
@@ -347,8 +253,8 @@ local list: { BiomeSpec } = {
 				{ "BrownMushroom", 0.5 },
 				{ "RedMushroom", 0.3 },
 			},
-			herbs = GINGER,
 		},
+		tags = { "is_forest", "is_taiga" },
 	},
 	{
 		name = "WindsweptSavanna",
@@ -370,6 +276,7 @@ local list: { BiomeSpec } = {
 			plants = { { "ShortGrass", 3 }, { "TallGrass", 1 } },
 			flowers = { chance = 0.004, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
 		},
+		tags = { "is_savanna" },
 	},
 	{
 		name = "Meadow",
@@ -401,8 +308,8 @@ local list: { BiomeSpec } = {
 					{ "Poppy", 1 },
 				},
 			},
-			herbs = MINT,
 		},
+		tags = { "is_mountain" },
 	},
 	{
 		name = "Grove",
@@ -418,6 +325,7 @@ local list: { BiomeSpec } = {
 		beach = "Gravel",
 		frozen = true,
 		features = { { "SpruceTree", 1 } },
+		tags = { "is_forest", "is_mountain" },
 	},
 	{
 		name = "StonyPeaks",
@@ -433,6 +341,7 @@ local list: { BiomeSpec } = {
 		underwater = "Gravel",
 		beach = "Gravel",
 		features = {},
+		tags = { "is_mountain" },
 	},
 	{
 		name = "SnowySlopes",
@@ -449,6 +358,7 @@ local list: { BiomeSpec } = {
 		beach = "Gravel",
 		frozen = true,
 		features = {},
+		tags = { "is_mountain" },
 	},
 	{
 		name = "JaggedPeaks",
@@ -465,6 +375,7 @@ local list: { BiomeSpec } = {
 		beach = "Gravel",
 		frozen = true,
 		features = {},
+		tags = { "is_mountain" },
 	},
 	{
 		name = "FrozenPeaks",
@@ -483,6 +394,7 @@ local list: { BiomeSpec } = {
 		beach = "Gravel",
 		frozen = true,
 		features = {},
+		tags = { "is_mountain" },
 	},
 	{
 		-- Islands far out in some seas (TerrainGenerator picks it; it belongs to no band).
@@ -503,9 +415,4 @@ local list: { BiomeSpec } = {
 			plants = { { "BrownMushroom", 1 }, { "RedMushroom", 1 } },
 		},
 	},
-}
-
-return {
-	bands = BANDS,
-	list = list,
-}
+} :: { Schema.BiomeSpec }

@@ -19,13 +19,14 @@ thousands of parts from the server is slow. IceVoxel never does either:
 
 ## Content packs (`Content/`, `Content/Schema`, `Content/Define`, `Content/Packs/`)
 
-Every block, item, recipe, item tag, texture, loot table, ore feature, Age, lore line and fuel
-tag comes from a content pack, a folder under `Content/Packs` the game finds as it loads
+Every block, item, recipe, item tag, texture, loot table, ore feature, Age, lore line, fuel tag
+and biome comes from a content pack, a folder under `Content/Packs` the game finds as it loads
 (Minecraft's data packs). The registries build themselves from what `Shared/Content` loads; none
 keeps a list of content of its own, nor any value about an entry by its name:
 
 ```
-Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, lore, fuel
+Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, lore, fuel,
+   │                   biomes
    │                   (each a .luau module, its data or function(define) -> data, or a .json
    │                   file; or a kind folder of them: Minecraft/blocks/terrain, .../plants...)
    │  Content.load: find the packs, sort by (order, name), require each kind (a kind folder's
@@ -40,14 +41,16 @@ Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePa
                 ─► Generation/ScavengeLoot, Mineshafts  ─► Sounds (block sounds, equip sounds)
                 ─► ToughAsNails/Temperature (heating, cooling) ─► server Players/Climate, Tooltip
                 ─► Items/Foods, ToughAsNails/Drinks (food, drink) ─► eating, drinking, Tooltip
+                ─► Biomes (the generator's biomes) ─► Generation/Structures (features), Locate (tags)
 ```
 
 **A pack** is a folder holding `pack`, its manifest (`{ order, description, requires? }`), and
 any of the kinds: `blocks` and `items` (entries, Schema's BlockSpec and ItemSpec), `recipes`
 (`{ type = "shaped" | "shapeless" | "smelting", ... }`), `tags` (tag -> names), `textures` (name
 -> Texture), `loot` (table name -> pools, ScavengeLoot's format), `ores` (ore features, the block
-by name), `ages` (the Age records), `lore` (name -> line) and `fuel` (tag -> burn ticks: Core's
-logs and planks). Each is a module of the kind's name:
+by name), `ages` (the Age records), `lore` (name -> line), `fuel` (tag -> burn ticks: Core's
+logs and planks) and `biomes` (Schema's BiomeSpec: bands, climate, weather, ground, trees,
+plants, tags). Each is a module of the kind's name:
 a Luau module returning its data, or a function the loader calls with `Content/Define` (the shared
 helpers and Config, for packs that build entries or read switches), or a `.json` file (Rojo 7
 makes one a ModuleScript returning its table; the Lune loader does the same and skips Rojo's
@@ -87,12 +90,16 @@ error naming both packs, and so is an override of nothing. Textures merge the sa
 override patches a texture's fields: a resource pack's new picture). Tags are a union: each pack's
 lists in load order, then every entry's `tags`, each name once (an entry's `tags = { "coals" }`
 joins Core's tag). Recipes, ore features (each named once) and Ages (each id once) append in load
-order; loot tables, lore lines and fuel tags are named once. `content.where(kind, name)` says where
-a thing came from ("pack Minecraft (patched by Patch), blocks/terrain, block Stone") for every
-message, and `content.origin(kind, name)` gives it as data: the pack and kind folder file that
-made it, the packs that patched it in load order (a tag's: the first pack putting names in it and
-the packs adding to it), a recipe's (`name` its place in `content.recipes`) pack, file and place
-in that file's list (the content tool reads where things came from this way).
+order; loot tables, lore lines and fuel tags are named once. Biomes merge by name like blocks,
+keeping their place, but an override patches a table of fields (`weather`, `patches`, `foliage`
+and its `flowers` and `herbs`) field by field in turn, and replaces a list (`bands`, `features`,
+`plants`, `species`, `tags`) whole; the patched biome is checked whole again.
+`content.where(kind, name)` says where a thing came from ("pack Minecraft (patched by Patch),
+blocks/terrain, block Stone") for every message, and `content.origin(kind, name)` gives it as
+data: the pack and kind folder file that made it, the packs that patched it in load order (a
+biome's overrides too; a tag's: the first pack putting names in it and the packs adding to it), a
+recipe's (`name` its place in `content.recipes`) pack, file and place in that file's list (the
+content tool reads where things came from this way).
 
 **Per-entry fields.** Every value about an entry is on the entry, and each registry reads it
 from there (`tests/spec/Content` follows each one end to end):
@@ -147,11 +154,13 @@ pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `
   name; `drops`, `shearDrops`, `item`, `places`, `caveTwin`, a plant's other half, a toggle's `to`;
   a block's loot table; an ore feature's block; `age`; a block's textures and the blocks textures
   are tinted like; the Ages' milestones; every lore line's item; a line given both by an entry
-  and by a pack's `lore`; a fuel tag's tag (and its ticks, above 0). Unknown names come with a
-  hint too (`Stnoe` -> Stone).
+  and by a pack's `lore`; a fuel tag's tag (and its ticks, above 0); a biome's blocks (top,
+  filler, steep, underwater, beach, patches) and plants (single plants or lower halves). Unknown
+  names come with a hint too (`Stnoe` -> Stone).
 - In the registries, as they load (with `where`): what only a registry knows of an entry's
   value: a skill (Skills), a sound event or action (Sounds), the miner's numbers (MinerRules), a
-  radiation or shielding number (Radiation), a fuel's ticks (Recipes).
+  radiation or shielding number (Radiation), a fuel's ticks (Recipes), a biome's bands and that
+  every band has one (Biomes), its tree builders (Generation/Structures).
 
 **The packs.** Each manifest's header says what the pack adds, file by file, where the code
 for it lives, and the calls made placing things (what went where when a feature's things are
@@ -167,14 +176,16 @@ another's too); every feature is behind the same switches as before.
   fences, the mineshafts' blocks and loot table, structure blocks and jigsaws, tools, armor,
   buckets, mob drops and every potion of `Effects/PotionList` (a loop: the potions' items and
   recipes follow PotionList, nothing counts their places), plus the stone varieties' and vanilla
-  ores' features.
+  ores' features and the biomes (`biomes`, in the generator's order, with Minecraft's biome tags).
 - **Mekanism** (200): osmium (its blocks, items, recipes and three ore features), the
   transmitters, Fluid Tanks and Universal Cables, the Configurator, the machines and generators,
   the batteries, the upgrade cards, and the oil and fuel (BuildCraft's fluids, with the refinery
   that makes fuel).
 - **Survival** (300): Tough As Nails (the Glass Bottle and water bottles, the canteen, herbs,
   bowls and teas, the campfire, straw and its armor, the thermometer) and the seasons (snow
-  layers, the heaters and coolers, insulated planks, glass and door).
+  layers, the heaters and coolers, insulated planks, glass and door). Its `biomes` are overrides
+  putting the herbs in the Minecraft pack's biomes (`foliage.herbs`), the worked example of a
+  biome override.
 - **Terraria** (400): the accessories, mana (Fallen Stars, Mana Crystals, mana potions), the magic
   weapons and the vanity clothes (items and recipes only; the chests' accessories are rolled by
   the Minecraft and Apocalypse loot tables, a table being one pack's).
@@ -219,6 +230,24 @@ replace stone, so where two features' veins cross the earlier one keeps the cell
 pack's ores only take the stone left over (`tests/spec/OreGeneration` places every feature alone
 and among all the others).
 
+**Biomes.** `Shared/Biomes` builds its registry from `content.biomes`: a biome's index is its
+place among every pack's biomes, used in memory only (never sent; saves, Single Biome and
+`/locate` name biomes), but the generator's per-biome arrays, its climate picks and All Biomes'
+strips go by it, so the Minecraft pack's list keeps the old BiomeList order (the pinned
+generation digests did not move) and a later pack's biome goes after it, moving no other. The
+altitude bands stay code in `Biomes` (`bands`, `bandAt`): they are the generator's rules, not
+biome data, each a slice of the terrain's height (the datapack's altitudes through `Relief`'s
+scaling) that moves with the relief, and together they cover every height, so a pack adding or
+moving one would re-slice every other pack's biomes; a biome names the bands it appears in, and
+`Biomes` checks the names and that every band has a biome. Biome tags are the entries' own `tags`
+(`{ "is_forest" }`, Minecraft's biome tag ids), which `Generation/Locate` gathers into
+`BIOME_TAGS` for `/locate biome #is_forest` (with the worked out `is_snowy` and `band_*`): an
+entry says what it is, as blocks' and items' `tags` do, and the `tags` kind stays items' (a
+recipe's `#tag` can't pick up biomes, as Minecraft keeps `tags/item` and
+`tags/worldgen/biome` apart). Code that looks a biome up as it loads (TerrainGenerator's
+MushroomFields, the Plains of the void, Single Biome, Superflat and the debug worlds) uses
+`Biomes.need(name, who)`, an error naming both when no pack makes it.
+
 **Recipe order.** `Crafting.match` answers the first recipe that matches, and recipes merge in
 load order, so a pack's recipe could hide another's with the same grid. `tests/spec/CraftingGrids`
 builds every recipe's own grid (one item a key, a tag's first name; a smelting input in a lit
@@ -233,9 +262,10 @@ the single pack before the split did.
 Gamma, order 20 after Alpha by name, overriding both) and the kind folder ones in
 `tests/fixtures/content/folders` (Delta, Luau, with a folder inside a kind folder, a function-form
 file and a `_` helper at its top; Epsilon, JSON), grafts `tests/fixtures/content/fields/Fields`
-(every per-entry field) into a fresh game to follow each field to its registry, builds packs in
-memory for every check (`Content.build`, and the Lune loader's `folder` / `module` / `graft`), and
-pins no id or total.
+(every per-entry field) into a fresh game to follow each field to its registry, and
+`tests/fixtures/content/biomes/Wilds` (a biome, and an override of Plains) to follow a biome to
+Biomes, Locate and the generator, builds packs in memory for every check (`Content.build`, and the
+Lune loader's `folder` / `module` / `graft`), and pins no id or total.
 
 **The content tool** (`tests/content`: `check`, `list`, `show`, `new`; README, Development) sees
 what the game sees: `tests/lib/ContentGame` mounts `src/shared` with the Lune loader, requires
@@ -243,8 +273,8 @@ Content and every registry built from it (their load-time checks are the game's)
 View: the merged content (where each entry came from is its own record, `content.origin`), and
 what the registries made of each entry (LoreList, TexturePack's faces and icons,
 Blocks' resolved faces, the Ages' names, Crafting.match, Items' drops) and of the world (the
-blocks the generators' sources name, the ore features' and structure templates' blocks, the
-chests' loot tables, mobs' drops, buckets and fills). `tests/lib/ContentTool` is pure over a View:
+blocks the generators' sources name, the ore features', biomes' and structure templates' blocks,
+the chests' loot tables, mobs' drops, buckets and fills). `tests/lib/ContentTool` is pure over a View:
 the checks (lore, faces, icons, unused textures, Ages, recipes Crafting.match never reaches, and
 survival's reach: the least fixed point of the earliest Age each item can be had in, through
 drops, recipes, placing and fills; the creative tier's machines, a machine kind with
@@ -294,7 +324,7 @@ node key) and `posKey(x, y, z)` for block positions.
      overrides the surface (`sample`'s 7th value: the filler under it);
    - the *biome* is picked by altitude first: the height without rivers (so a river bed belongs to
      its banks), dithered by a few blocks, falls into one of seven bands (lowland, forest, highland,
-     meadow, alpine, snowy slopes, peaks; `BiomeList.bands`), and the biome is the one of that band
+     meadow, alpine, snowy slopes, peaks; `Biomes.bands`), and the biome is the one of that band
      nearest to the column's climate (temperature and humidity noise, also slightly jittered).
      Islands far out in some seas (very negative selector) are mushroom fields;
    - the surface: beach blocks just above sea level, gravel deep underwater, packed mud in river
@@ -1216,7 +1246,7 @@ Minecraft's), 95% of it in patches, for ~0.2 ms a chunk (~5% of generation).
 
 ### Foliage (`Foliage.luau`)
 
-Minecraft 1.20.1's vegetal decoration from each biome's `foliage` (BiomeList): grass, ferns and
+Minecraft 1.20.1's vegetal decoration from each biome's `foliage` (the packs'): grass, ferns and
 their tall forms, dead bushes, flowers, tall flowers and mushrooms, and Tough As Nails' herbs
 (`foliage.herbs`: mint, wild ginger). It runs after structures, in
 full detail chunks only: LOD cells are 2+ blocks wide, and every box of a plant is a part.
@@ -1283,7 +1313,7 @@ ground next to its edited chunks, unless `Config.Cities.OldWorlds` (ApocalypseGl
 | Default | TerrainGenerator | `structures` and `ruins` toggles |
 | Superflat | Superflat on LayeredGenerator | `preset` text (layers bottom up, then the biome), `decoration` toggle |
 | The Void | LayeredGenerator | 33 x 33 stone platform at y 64, cobblestone centre; no mobs |
-| Single Biome | TerrainGenerator `biome` | `biome` choice (BiomeList), `structures`, `ruins` |
+| Single Biome | TerrainGenerator `biome` | `biome` choice (the packs' biomes), `structures`, `ruins` |
 | Large Biomes | TerrainGenerator `climateScale = 4` | `structures`, `ruins` |
 | Debug: All Blocks | DebugWorlds on LayeredGenerator | every block id once; no ticks, no mobs, spectator |
 | Debug: All Structures | DebugWorlds, StructureGen fixed layout | every library template and structure, two sample mineshafts, a sample bunker and a sample town, name tags; no ticks, no mobs |
@@ -3448,7 +3478,7 @@ a client never sees half a change. `Weather.momentAt(state, serverTime)` gives a
 override's weights, which `at`, `grid` and `forecastAt` take.
 
 **What falls where** (Minecraft's Biome.getPrecipitationAt):
-- Each biome has Minecraft's temperature and precipitation flag (`BiomeList` `weather`; Biomes
+- Each biome has Minecraft's temperature and precipitation flag (its entry's `weather`; Biomes
   `weatherTemperature`, `precipitation`). Deserts and savannas get none.
 - It snows below 0.15, else it rains.
 - It gets colder with height: 0.05 every 40 blocks above y 80 in Minecraft, which is 0.0029 a
@@ -5337,7 +5367,7 @@ second since the last report (`clamp`; 4 reports a second) and holds the sprint 
 scale) in TAN 1.18+'s five zones, whose ids (`zone`, ICY -2 .. HOT 2) are the levels of before:
 ICY -10..-8, COLD -7..-3, NEUTRAL -2..2, WARM 3..7, HOT 8..10. The target, worked out once a
 second per player from `Players/Climate`:
-1. the climate: the column's surface biome temperature (BiomeList, -0.75 tundra .. 0.8 desert),
+1. the climate: the column's surface biome temperature (Biomes, -0.75 tundra .. 0.8 desert),
    0.001 colder per block above 256, then outdoors at night 0.3 colder, under a roof (day and
    night) 0.15 towards NEUTRAL's middle but never past it (out of the sun in the heat, out of the
    wind in the cold: a roof never chills, so a taiga house is -2 and a desert one 7), and
@@ -8374,14 +8404,15 @@ seed and the full detail terrain, and the generators answer for one cell at a ti
   built-in kinds `mineshaft`, `mineshaft_overgrown`, `mineshaft_entrance`, `oil_geyser`,
   `oil_deposit`, `lava_lake`, `lake`, `cave_entrance`, `ravine`, `city`, `bunker`, then the
   library's structures; a library name clashing with a built-in one is left out), biomes
-  (BiomeList's 18) and points of interest (`Shared/Poi`). Ids show in snake case without a namespace
+  (the packs' 18) and points of interest (`Shared/Poi`). Ids show in snake case without a namespace
   ("birch_forest") and match loosely (`Locate.key`: any case, "minecraft:" or "icevoxel:" dropped,
   no `_`, spaces or dashes). Tags (`#mineshaft`, `#oil_well`, `#lake`, `#cave`, `#ruins` (a city or
-  a bunker), `#library`; `#is_forest`, `#is_taiga`, `#is_mountain`, `#is_hill`, `#is_savanna`,
-  `#is_jungle`, `#is_snowy`, `#band_lowland` .. `#band_peaks`, also without "is_"; `#workstation`,
-  `#machine`, `#generator`, `#container`, `#structure`, `#explosive`, `#scavenge`: chests, supply
-  crates and medicine cabinets) search their members together and answer "#tag (member)". An id in
-  the registry that this world can't have answers not found at once (no probe); an unknown one
+  a bunker), `#library`; the biomes' own `tags`, `#is_forest`, `#is_taiga`, `#is_mountain`,
+  `#is_hill`, `#is_savanna`, `#is_jungle`, and the worked out `#is_snowy`, `#band_lowland` ..
+  `#band_peaks`, also without "is_"; `#workstation`, `#machine`, `#generator`, `#container`,
+  `#structure`, `#explosive`, `#scavenge`: chests, supply crates and medicine cabinets) search
+  their members together and answer "#tag (member)". An id in the registry that this world can't
+  have answers not found at once (no probe); an unknown one
   Minecraft's parse errors.
 - **Kinds** (the generator's `locateKinds`, TerrainGenerator). One kind per locatable structure,
   on a cell grid (`grid`, `origin`): a `probe` that never touches a cache (a library structure's

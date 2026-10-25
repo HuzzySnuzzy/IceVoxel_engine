@@ -19,6 +19,7 @@
 	  lore      { [name]: line }: tooltip lore of items no entry carries its own of
 	  fuel      { [tag]: ticks }: furnace fuel by item tag (Core's logs and planks: every item in
 	            the tag burns this long, unless its entry gives its own `fuel`)
+	  biomes    { BiomeSpec }: biomes, in order (BIOME_FIELDS below; Shared/Biomes)
 	A pack's `pack` module is its manifest (MANIFEST_FIELDS): { order, description, requires? }.
 
 	Per-entry fields that feed other registries (each registry reads them off the entries; see
@@ -58,7 +59,8 @@
 	                                (ToughAsNails/Drinks.ITEMS, whose header says what each does;
 	                                numbers left out are 0); `empty` the container it leaves, by
 	                                name
-	  override         block, item, texture  patches the entry of that name an earlier pack made
+	  override         block, item, texture, biome  patches the entry of that name an earlier pack
+	                   made
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
 	gone: each entry says its own).
@@ -386,6 +388,41 @@ export type AgeRecord = {
 	milestones: { Milestone },
 	reward: number,
 	color: { number },
+}
+
+-- A name and its weight ({ "OakTree", 3 }): a biome's tree builder or plant.
+export type Weighted = { any }
+-- Flowers or herbs growing in patches of their own (a biome's `foliage.flowers`, `.herbs`).
+export type PlantPatches = { chance: number, cover: number?, species: { Weighted } }
+-- A biome's ground plants (`foliage`).
+export type FoliageSpec = {
+	density: number,
+	cover: number?,
+	plants: { Weighted },
+	flowers: PlantPatches?,
+	herbs: PlantPatches?,
+}
+-- A biome (the `biomes` kind; BIOME_FIELDS below says what each field does).
+export type BiomeSpec = {
+	name: string,
+	bands: { string },
+	temperature: number,
+	humidity: number,
+	weather: { temperature: number, precipitation: boolean? }?,
+	vegetation: number,
+	top: string,
+	filler: string,
+	fillerDepth: number,
+	patches: { block: string, cover: number }?,
+	steep: string?,
+	steepSlope: number?,
+	underwater: string,
+	beach: string,
+	frozen: boolean?,
+	features: { Weighted },
+	foliage: FoliageSpec?,
+	tags: { string }?,
+	override: boolean?,
 }
 
 -- A pack's manifest (its `pack` module).
@@ -1235,6 +1272,160 @@ Schema.AGE_FIELDS = {
 	color = RGB,
 } :: { [string]: Check }
 
+--[[
+	Biome fields (the `biomes` kind; Shared/Biomes builds its registry from them and says how a
+	column's biome is picked). Every one is needed but `weather`, `patches`, `steep`,
+	`steepSlope`, `frozen`, `foliage` and `tags`; an override needs only its name:
+	  name           Unique name ("BirchForest"): Single Biome, the biome discoveries and /locate
+	                 ("birch_forest") know it by its name.
+	  bands          The altitude bands it appears in, by name (Shared/Biomes' BANDS: Lowland,
+	                 Forest, Highland, Meadow, Alpine, Slopes, Peaks); none: no band picks it (the
+	                 mushroom fields, which TerrainGenerator puts on islands far out at sea).
+	  temperature, humidity
+	                 Its place in climate space (both roughly -1..1).
+	  weather        Optional { temperature =, precipitation = }: Minecraft 1.20.1's biome
+	                 temperature (plains 0.8, taiga 0.25, snowy plains 0, desert 2...) and its
+	                 has_precipitation (false: no rain or snow ever falls: deserts and savannas),
+	                 which decide what falls there (Shared/Weather: snow below 0.15, colder with
+	                 altitude, so a mountain top snows while its valley rains). Default: 0 for
+	                 `frozen` biomes, 0.8 otherwise, with precipitation.
+	  vegetation     Chance (0-1) that a vegetation spot (one per 5x5 blocks) grows something.
+	  top / filler / fillerDepth
+	                 Surface block, blocks below it and how deep they go.
+	  patches        Optional { block =, cover = }: `cover` (0-1) of the surface is `block` instead
+	                 of `top`, in blotches a few blocks wide (stone in windswept hills...).
+	  steep          Optional block for slopes steeper than `steepSlope` (blocks per block;
+	                 default Stone and TerrainGenerator's CLIFF_SLOPE).
+	  underwater     Surface block below sea level.
+	  beach          Surface block just above sea level, on coasts and river banks.
+	  frozen         Water freezes to ice at the surface.
+	  features       { { builder, weight } } picked when vegetation succeeds: tree builders of
+	                 Generation/Structures' registry (OakTree, BirchTree, SpruceTree, AcaciaTree,
+	                 JungleTree, Cactus); {} for none.
+	  foliage        Optional ground plants (Generation/Foliage; full detail chunks only), Minecraft's
+	                 vegetal decoration. A column grows at most one plant, on its surface block, when
+	                 that block is in the plant's soil set and the block above is air:
+	                   density   Share (0-1) of the biome's soil columns growing a plant, on average.
+	                             They grow in patches: `cover` (0-1, default 0.5) of the ground is
+	                             patches, where the chance is about density / cover, and the rest is
+	                             clearings (a low-frequency noise, like Minecraft's random patches).
+	                   plants    { { block, weight } }: what grows, single plants or the lower halves
+	                             of tall ones. A two block tall plant without air above its top falls
+	                             back to its single form (tall grass to short grass, a large fern to a
+	                             fern) or to nothing.
+	                   flowers   Optional { chance =, cover =, species = { { block, weight } } }:
+	                             flowers in their own patches (`chance` and `cover` as density and
+	                             cover above, cover default 0.3). The species follows another
+	                             low-frequency noise, so a patch is one or two species.
+	                   herbs     Optional { chance =, cover =, species = { { block, weight } } }:
+	                             Tough As Nails' herbs (Mint, WildGinger: the Survival pack's
+	                             `biomes` add them), in rare small patches of their own (`chance` and
+	                             `cover` as above, cover default 0.04: about 4 herbs a patch), only
+	                             on columns that grow nothing else, so the grass and flowers stay
+	                             where they were.
+	                 Every box of a plant is a Part: tests/spec/FoliageGeneration keeps the Parts per
+	                 soil column within budget (0.6 in jungles and meadows, 0.45 on plains and
+	                 savannas, 0.35 elsewhere).
+	  tags           Minecraft's biome tags it is in ({ "is_forest" }: lower case, digits and "_"),
+	                 which /locate searches as one ("#is_forest"; Generation/Locate).
+	  override       true: patches the biome of that name an earlier pack made, keeping its place.
+	                 Its fields replace the biome's, but a table of fields (weather, patches,
+	                 foliage, and foliage's flowers and herbs) is patched field by field in turn:
+	                 { name = "Taiga", override = true, foliage = { herbs = ... } } keeps the
+	                 taiga's grass and flowers. A list (bands, features, plants, species, tags) is
+	                 replaced whole: to add a flower, give the species list with it. Nothing takes a
+	                 field away.
+	Weights are above 0, shares 0..1, and a plant list holds a plant at least. The blocks a biome
+	names are checked as packs load (its plants must be single plants or lower halves); its bands
+	are checked by Shared/Biomes and its features by Generation/Structures as they load.
+]]
+
+-- A share, 0..1.
+local function SHARE(value: any): string?
+	if type(value) ~= "number" or value ~= value or value < 0 or value > 1 then
+		return ` must be a share 0..1, not {describe(value)}`
+	end
+	return nil
+end
+-- { name, weight }: a name and a weight above 0.
+local function WEIGHTED(value: any): string?
+	if not isList(value) or #value ~= 2 then
+		return ` must be (name, weight), not {describe(value)}`
+	end
+	if type(value[1]) ~= "string" then
+		return `[1] must be a name, not {describe(value[1])}`
+	end
+	if type(value[2]) ~= "number" or not (value[2] > 0) then
+		return `[2] must be a weight above 0, not {describe(value[2])}`
+	end
+	return nil
+end
+local WEIGHTS = listOf(WEIGHTED)
+-- Weighted plants, one at least.
+local function PLANTS(value: any): string?
+	local problem = WEIGHTS(value)
+	if problem then
+		return problem
+	end
+	return if #value == 0 then " must name a plant at least" else nil
+end
+-- A biome tag's id, as Minecraft's: lower case letters, digits and "_".
+local function TAG_ID(value: any): string?
+	if type(value) ~= "string" or not string.match(value, "^[%l%d_]+$") then
+		return ` must be a tag id (lower case, digits and _: "is_forest"), not {describe(value)}`
+	end
+	return nil
+end
+
+-- A biome's fields; `patch`: an override's, whose tables of fields need none of theirs (Content
+-- checks the patched biome whole).
+local function biomeFields(patch: boolean): { [string]: Check }
+	local function needs(fields: { string }): { string }?
+		return if patch then nil else fields
+	end
+	local plantPatches = record({ chance = SHARE, cover = SHARE, species = PLANTS }, needs({ "chance", "species" }))
+	return {
+		name = STRING,
+		bands = STRINGS,
+		temperature = NUMBER,
+		humidity = NUMBER,
+		weather = record({ temperature = NUMBER, precipitation = BOOLEAN }, needs({ "temperature" })),
+		vegetation = SHARE,
+		top = STRING,
+		filler = STRING,
+		fillerDepth = NUMBER,
+		patches = record({ block = STRING, cover = SHARE }, needs({ "block", "cover" })),
+		steep = STRING,
+		steepSlope = NUMBER,
+		underwater = STRING,
+		beach = STRING,
+		frozen = BOOLEAN,
+		features = WEIGHTS,
+		foliage = record(
+			{ density = SHARE, cover = SHARE, plants = PLANTS, flowers = plantPatches, herbs = plantPatches },
+			needs({ "density", "plants" })
+		),
+		tags = listOf(TAG_ID),
+		override = BOOLEAN,
+	}
+end
+Schema.BIOME_FIELDS = biomeFields(false)
+local BIOME_PATCH_FIELDS = biomeFields(true)
+-- What a biome needs (an override: its name only).
+Schema.BIOME_NEEDS = table.freeze({
+	"name",
+	"bands",
+	"temperature",
+	"humidity",
+	"vegetation",
+	"top",
+	"filler",
+	"fillerDepth",
+	"underwater",
+	"beach",
+	"features",
+})
+
 Schema.MANIFEST_FIELDS = {
 	order = NUMBER,
 	description = STRING,
@@ -1244,8 +1435,19 @@ Schema.MANIFEST_FIELDS = {
 --[[ The kinds ]]
 
 -- Every kind a pack may hold, in the order a pack's modules load (`pack` first).
-Schema.KINDS =
-	table.freeze({ "blocks", "items", "recipes", "tags", "textures", "loot", "ores", "ages", "lore", "fuel" })
+Schema.KINDS = table.freeze({
+	"blocks",
+	"items",
+	"recipes",
+	"tags",
+	"textures",
+	"loot",
+	"ores",
+	"ages",
+	"lore",
+	"fuel",
+	"biomes",
+})
 -- Each kind's entries' name in messages.
 Schema.SINGULAR = table.freeze({
 	blocks = "block",
@@ -1258,10 +1460,17 @@ Schema.SINGULAR = table.freeze({
 	ages = "Age",
 	lore = "lore",
 	fuel = "fuel tag",
+	biomes = "biome",
 }) :: { [string]: string }
 -- The kinds that are lists of entries (the rest are tables of names).
-Schema.LISTS =
-	table.freeze({ blocks = true, items = true, recipes = true, ores = true, ages = true }) :: { [string]: boolean }
+Schema.LISTS = table.freeze({
+	blocks = true,
+	items = true,
+	recipes = true,
+	ores = true,
+	ages = true,
+	biomes = true,
+}) :: { [string]: boolean }
 
 -- Each kind's entry check, for the kinds whose entries are records.
 local ENTRY_FIELDS: { [string]: { [string]: Check } } = {
@@ -1271,6 +1480,7 @@ local ENTRY_FIELDS: { [string]: { [string]: Check } } = {
 	textures = Schema.TEXTURE_FIELDS,
 	ores = Schema.ORE_FIELDS,
 	ages = Schema.AGE_FIELDS,
+	biomes = Schema.BIOME_FIELDS,
 }
 -- What the other kinds' values must be.
 local VALUE_CHECKS: { [string]: Check } = {
@@ -1295,6 +1505,10 @@ function Schema.check(kind: string, entry: any): string?
 	if type(entry) ~= "table" then
 		return `it must be a table, not {describe(entry)}`
 	end
+	local override = entry.override == true
+	if kind == "biomes" and override then
+		fields = BIOME_PATCH_FIELDS
+	end
 	for key, value in entry do
 		if type(key) ~= "string" then
 			return `it has a key that is no name, {describe(key)}`
@@ -1308,13 +1522,13 @@ function Schema.check(kind: string, entry: any): string?
 			return `{key}{problem}`
 		end
 	end
-	local override = entry.override == true
 	local needs: { string } = if kind == "blocks"
 		then { "name" }
 		elseif kind == "items" then (if override then { "name" } else { "name", "model" })
 		elseif kind == "textures" then (if override then {} else { "Color", "Material" })
 		elseif kind == "ores" then { "name", "block", "veins", "size", "minY", "maxY" }
 		elseif kind == "ages" then { "id", "name", "level", "milestones", "reward", "color" }
+		elseif kind == "biomes" then (if override then { "name" } else Schema.BIOME_NEEDS)
 		else {}
 	if kind == "recipes" then
 		local rule = Schema.RECIPE_TYPES[entry.type]

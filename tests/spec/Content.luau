@@ -7,9 +7,13 @@
 	(tests/fixtures/content/folders: Delta, Luau, a folder inside a kind folder; Epsilon, JSON),
 	their modules' order and the files every message names; every per-entry field reaching its
 	registry (the Fields fixture pack grafted into a fresh game); where each thing came from
-	(`origin`); and every check: the schema's (unknown fields with their "did you mean", wrong
-	types, missing fields), names and overrides, manifests and `requires`, every cross-reference,
-	discovery's, and the registries' own checks on the entries' values.
+	(`origin`); biomes: the game's (the Minecraft pack's, the Survival pack's herbs patched in), the
+	fixture packs' (Beta's in JSON, Gamma's override patching it field by field) and a pack's biome
+	and override reaching Biomes, Locate and the generator (tests/fixtures/content/biomes/Wilds
+	grafted into a fresh game); and every check: the schema's (unknown fields with their "did you
+	mean", wrong types, missing fields), names and overrides, manifests and `requires`, every
+	cross-reference, discovery's, the registries' own checks on the entries' values, and the biome
+	registries' (bands, tree builders, a band without biomes, a biome code needs).
 
 	Nothing here pins an id or a total: the game's content may grow.
 ]]
@@ -19,6 +23,7 @@ local Loader = require("../lib/Loader")
 local PACKS = "tests/fixtures/content/packs"
 local FOLDERS = "tests/fixtures/content/folders"
 local FIELDS = "tests/fixtures/content/fields/Fields"
+local BIOMES = "tests/fixtures/content/biomes/Wilds"
 
 return function(t, shared, require, _server, _client)
 	local Content = require(shared.Content)
@@ -231,6 +236,52 @@ return function(t, shared, require, _server, _client)
 		)
 	end)
 
+	t.test("content: the game's biomes are the Minecraft pack's, in order; the Survival pack adds herbs", function()
+		local content = Content.default
+		local Biomes = require(shared.Biomes)
+		t.ok(#content.biomes > 0, "biomes")
+		t.eq(Biomes.count, #content.biomes, "the registry has every one")
+		for index, spec in content.biomes do
+			t.eq(Biomes.get(index).name, spec.name, `{spec.name}: its index is its place`)
+			t.eq(Biomes.byName(spec.name), Biomes.get(index))
+			t.eq(content.biome(spec.name), spec)
+			t.ok(string.find(content.where("biome", spec.name), "pack Minecraft", 1, true) ~= nil, spec.name)
+		end
+		t.eq(content.biome("Atlantis"), nil)
+		-- (The order the generator's arrays and climate picks follow: the Minecraft pack's list.
+		-- tests/spec/Generation and WorldTypeGenerators pin what it generates.)
+		local function before(a: string, b: string)
+			local x, y = Biomes.byName(a), Biomes.byName(b)
+			t.ok(x and y and x.index < y.index, `{a} before {b}`)
+		end
+		before("Tundra", "Taiga")
+		before("Plains", "Forest")
+		before("FrozenPeaks", "MushroomFields")
+		-- Herbs: the Survival pack's overrides, the rest of the foliage the Minecraft pack's.
+		t.eq(content.where("biome", "Taiga"), "pack Minecraft (patched by Survival), biome Taiga")
+		local taiga = content.biome("Taiga") :: any
+		t.eq(taiga.foliage.herbs.species[1][1], "WildGinger")
+		t.eq(taiga.foliage.plants[1][1], "Fern", "the taiga's own plants kept")
+		t.eq((content.biome("Plains") :: any).foliage.herbs.species[1][1], "Mint")
+		t.eq((content.biome("Desert") :: any).foliage.herbs, nil, "no herbs in the desert")
+		local plains = Biomes.byName("Plains") :: any
+		t.eq(plains.foliage.herbs.blocks[1], Blocks.id.Mint, "-> Biomes")
+		t.eq(plains.foliage.herbChance, 0.004)
+		-- Tags: the entries' own.
+		t.ok(table.find(taiga.tags, "is_taiga") ~= nil, "Minecraft's biome tags on the entries")
+		t.eq(#(Biomes.byName("MushroomFields") :: any).bands, 0, "the islands are no band's")
+		-- (The structure library names biomes too, and Structures/Library warns of one no pack makes.)
+		local unknown = {}
+		require(shared.Structures.Library).load({
+			warn = function(text: string)
+				if string.find(text, "unknown biome", 1, true) then
+					table.insert(unknown, text)
+				end
+			end,
+		})
+		t.eq(table.concat(unknown, "; "), "", "the library's structures name the packs' biomes")
+	end)
+
 	--[[ Discovery, order, ids, overrides, tags (the fixture packs) ]]
 
 	t.test("content: Luau and JSON packs are found, sorted by order then name; ids by place", function()
@@ -304,6 +355,31 @@ return function(t, shared, require, _server, _client)
 		local content = fixtures()
 		t.eq(table.concat(content.tags.fixture_stones, " "), "BetaStone AlphaStone GammaGlass")
 		t.eq(table.concat(content.tags.fixture_metals, " "), "FixiumIngot BetaGem")
+	end)
+
+	t.test("content: biomes by name: a JSON pack's, patched field by field, its lists replaced", function()
+		local content = fixtures()
+		t.eq(names(content.biomes), "BetaDunes GammaGlade", "in load order")
+		local dunes = content.biome("BetaDunes") :: any
+		t.eq(dunes.weather.temperature, 1.5, "patched")
+		t.eq(dunes.weather.precipitation, false, "the rest of its weather kept")
+		t.eq(dunes.top, "BetaStone", "and the rest of it")
+		t.eq(#dunes.features, 1)
+		t.eq(dunes.features[1][1], "OakTree", "a list replaced whole")
+		t.eq(table.concat(dunes.tags, " "), "is_fixture is_patched")
+		t.eq(dunes.override, nil, "no override field left")
+		t.eq(content.where("biome", "BetaDunes"), "pack Beta (patched by Gamma), biome BetaDunes")
+		local origin = content.origin("biome", "BetaDunes") :: any
+		t.ok(
+			origin.pack == "Beta" and origin.file == nil and table.concat(origin.patched, ",") == "Gamma",
+			"its origin: the maker and the override"
+		)
+		t.eq((content.origin("biomes", "GammaGlade") :: any).pack, "Gamma")
+		t.eq(content.origin("biome", "Atlantis"), nil)
+		t.eq((content.biome("GammaGlade") :: any).patches.block, "GammaGlass")
+		t.eq(content.where("biomes", "GammaGlade"), "pack Gamma, biome GammaGlade")
+		-- (Not in the item tags.)
+		t.eq(content.tags.is_fixture, nil)
 	end)
 
 	--[[ Kind folders (the fixture packs in tests/fixtures/content/folders) ]]
@@ -574,6 +650,60 @@ return function(t, shared, require, _server, _client)
 		t.eq(Drinks.sips({ item = I.FixtureFlask, count = 1 }), 2, "its durability")
 		t.eq(flask and flask.drink.chance, 0, "numbers left out are 0")
 		t.eq(flask and flask.drink, Drinks.of(I.PurifiedWaterBottle), "an alike drink is the same Drink")
+	end)
+
+	t.test("content: a pack's biome reaches Biomes, Locate and the generator; its override of Plains", function()
+		local env, root = fresh(function(env, packs)
+			env.graft(BIOMES, packs, "Wilds")
+		end)
+		local FreshBlocks = env.require(root.Blocks)
+		local FreshBiomes = env.require(root.Biomes)
+		local B = FreshBlocks.id
+		local GameBiomes = require(shared.Biomes)
+		-- After every other biome, which keep their places.
+		local marsh = FreshBiomes.byName("Marsh") :: any
+		t.ok(marsh ~= nil, "the Marsh")
+		t.eq(marsh.index, FreshBiomes.count, "last")
+		t.eq(FreshBiomes.count, GameBiomes.count + 1)
+		for index, biome in GameBiomes.list do
+			t.eq(FreshBiomes.get(index).name, biome.name, `{biome.name} where it was`)
+		end
+		-- Its fields, as the registry makes them.
+		t.eq(marsh.top, B.Grass)
+		t.eq(marsh.patch, B.CoarseDirt)
+		t.eq(marsh.patchCover, 0.2)
+		t.eq(marsh.steep, B.Stone, "the default steep block")
+		t.eq(marsh.weatherTemperature, 0.8)
+		t.ok(marsh.precipitation, "it rains")
+		t.eq(table.concat(marsh.bands, ","), tostring(1), "the Lowland band")
+		t.ok(table.find(FreshBiomes.inBand[1], marsh.index) ~= nil, "in the band's list")
+		t.eq(marsh.features[1].structure, "OakTree")
+		t.eq(marsh.featureWeight, 1)
+		t.eq(marsh.foliage.plants.blocks[1], B.ShortGrass)
+		t.eq(marsh.foliage.plants.total, 4)
+		t.eq(marsh.foliage.cover, 0.5, "foliage cover's default")
+		t.eq(marsh.foliage.flowers.blocks[1], B.BlueOrchid)
+		t.eq(marsh.foliage.herbs, nil)
+		-- The override: a list replaced, the rest of the foliage kept (the Survival pack's mint too).
+		local plains = FreshBiomes.byName("Plains") :: any
+		local before = GameBiomes.byName("Plains") :: any
+		t.eq(#plains.foliage.flowers.blocks, 2)
+		t.eq(plains.foliage.flowers.blocks[2], B.Allium, "the new species list")
+		t.eq(plains.foliage.flowerChance, before.foliage.flowerChance, "its chance kept")
+		t.eq(plains.foliage.density, before.foliage.density)
+		t.eq(plains.foliage.herbs.blocks[1], B.Mint, "the Survival pack's herbs kept")
+		t.eq(FreshBiomes.where("Plains"), "pack Minecraft (patched by Survival, Wilds), biome Plains")
+		-- Its tags: /locate's, joining the Minecraft pack's.
+		local Locate = env.require(root.Generation.Locate)
+		t.ok(table.find(Locate.BIOME_TAGS.is_forest, "marsh") ~= nil, "#is_forest")
+		t.ok(table.find(Locate.BIOME_TAGS.is_forest, "birch_forest") ~= nil, "with the others")
+		local wet = Locate.resolve(Locate.biomeRegistry(), "#wet") :: any
+		t.eq(table.concat(wet.members, ","), "marsh", "a tag of its own")
+		t.eq(Locate.biomeIndex.marsh, marsh.index)
+		-- The generator takes it: its features are known builders, its arrays cover it.
+		local Generation = env.require(root.Generation.TerrainGenerator)
+		local single = Generation.new(7, { biome = marsh.index })
+		t.eq(select(2, single.column(10, 10)), marsh.index, "Single Biome of it")
 	end)
 
 	--[[ Checks: Content.build ]]
@@ -904,6 +1034,191 @@ return function(t, shared, require, _server, _client)
 		)
 	end)
 
+	t.test("content: biomes' checks: fields, names, overrides, the blocks and plants they name", function()
+		local GROUND = {
+			{ name = "Stone" },
+			{ name = "Flower", plant = { soil = "dirt" } },
+			{ name = "TallBottom", plant = { soil = "dirt", top = "TallTop" } },
+			{ name = "TallTop", plant = { bottom = "TallBottom" } },
+		}
+		local BASE = {
+			name = "B",
+			bands = { "Lowland" },
+			temperature = 0,
+			humidity = 0,
+			vegetation = 0.1,
+			top = "Stone",
+			filler = "Stone",
+			fillerDepth = 3,
+			underwater = "Stone",
+			beach = "Stone",
+			features = {},
+		}
+		-- A biome: BASE with `fields` over it.
+		local function biome(fields: { [string]: any }): any
+			local out = table.clone(BASE)
+			for key, value in fields do
+				out[key] = value
+			end
+			return out
+		end
+		local function with(list: { any }, more: { Content.PackData }?): { Content.PackData }
+			local packs = { pack("P", { blocks = GROUND, biomes = list }) }
+			for _, other in more or {} do
+				table.insert(packs, other)
+			end
+			return packs
+		end
+		t.ok(pcall(Content.build, with({ biome({}) })), "a good biome loads")
+		-- The schema's.
+		fails(
+			with({ biome({ vegetaton = 0.1 }) }),
+			{ "pack P, biome B: vegetaton is no field it may have (did you mean vegetation?)" },
+			"a typo"
+		)
+		fails(
+			with({ biome({ temperature = "warm" }) }),
+			{ 'pack P, biome B: temperature must be a number, not the string "warm"' },
+			"a wrong type"
+		)
+		local topless = biome({})
+		topless.top = nil
+		fails(with({ topless }), { "pack P, biome B: top is missing" }, "a missing field")
+		fails(with({ biome({ vegetation = 2 }) }), { "vegetation must be a share 0..1, not 2" }, "a share")
+		fails(
+			with({ biome({ features = { { "OakTree", 0 } } }) }),
+			{ "features[1][2] must be a weight above 0, not 0" },
+			"a weight"
+		)
+		fails(
+			with({ biome({ foliage = { density = 0.1, plants = {} } }) }),
+			{ "foliage.plants must name a plant at least" },
+			"an empty plant list"
+		)
+		fails(
+			with({ biome({ foliage = { density = 0.1, plants = { { "Flower", 1 } }, flowers = { chance = 0.1 } } }) }),
+			{ "foliage.flowers.species is missing" },
+			"a nested field"
+		)
+		fails(
+			with({ biome({ tags = { "Is Forest" } }) }),
+			{ 'tags[1] must be a tag id (lower case, digits and _: "is_forest")' },
+			"a tag id"
+		)
+		-- Names and overrides.
+		fails(
+			with({ biome({}) }, { pack("Q", { biomes = { biome({}) } }, { order = 20 }) }),
+			{ "pack Q, biome B: the name is taken by pack P, biome B" },
+			"a name twice"
+		)
+		fails(
+			with({ biome({}), { name = "C", override = true, vegetation = 0.2 } }),
+			{ "pack P, biome C overrides a biome no earlier pack makes" },
+			"an override of nothing"
+		)
+		-- (An override's tables of fields need none of theirs; the patched biome needs them all.)
+		local herbs = { chance = 0.01, species = { { "Flower", 1 } } }
+		fails(
+			with({ biome({}) }, {
+				pack(
+					"Q",
+					{ biomes = { { name = "B", override = true, foliage = { herbs = herbs } } } },
+					{ order = 20 }
+				),
+			}),
+			{ "pack P (patched by Q), biome B: foliage.density is missing" },
+			"an override leaving out what the biome needs"
+		)
+		local base = biome({
+			weather = { temperature = 0.5 },
+			foliage = {
+				density = 0.1,
+				plants = { { "Flower", 1 } },
+				flowers = { chance = 0.1, species = { { "Flower", 1 } } },
+			},
+		})
+		local patched = Content.build(with({ base }, {
+			pack("Q", {
+				biomes = {
+					{
+						name = "B",
+						override = true,
+						weather = { precipitation = false },
+						foliage = { herbs = herbs, flowers = { species = { { "TallBottom", 2 } } } },
+						bands = { "Forest" },
+					},
+				},
+			}, { order = 20 }),
+		})).biome("B") :: any
+		t.eq(patched.weather.temperature, 0.5, "a table of fields patched")
+		t.eq(patched.weather.precipitation, false)
+		t.eq(patched.foliage.flowers.chance, 0.1, "two deep")
+		t.eq(patched.foliage.flowers.species[1][1], "TallBottom", "a list replaced")
+		t.eq(#patched.foliage.flowers.species, 1)
+		t.eq(patched.foliage.herbs, herbs, "a new table of fields")
+		t.eq(patched.foliage.plants[1][1], "Flower", "the rest kept")
+		t.eq(table.concat(patched.bands, ","), "Forest")
+		t.eq(base.foliage.flowers.species[1][1], "Flower", "the earlier pack's data untouched")
+		t.eq(base.weather.precipitation, nil)
+		-- The blocks it names.
+		fails(
+			with({ biome({ top = "Stnoe" }) }),
+			{ "pack P, biome B: top names unknown block Stnoe (did you mean Stone?)" },
+			"its top"
+		)
+		fails(with({ biome({ steep = "Ghost" }) }), { "steep names unknown block Ghost" }, "steep")
+		fails(
+			with({ biome({ patches = { block = "Ghost", cover = 0.2 } }) }),
+			{ "pack P, biome B: patches names unknown block Ghost" },
+			"patches"
+		)
+		fails(
+			with({ biome({ foliage = { density = 0.1, plants = { { "Ghost", 1 } } } }) }),
+			{ "pack P, biome B: foliage.plants names unknown block Ghost" },
+			"a plant"
+		)
+		fails(
+			with({ biome({ foliage = { density = 0.1, plants = { { "Stone", 1 } } } }) }),
+			{ "pack P, biome B: foliage.plants grows Stone, which is no plant (or the upper half of one)" },
+			"no plant"
+		)
+		fails(
+			with({
+				biome({
+					foliage = {
+						density = 0.1,
+						plants = { { "Flower", 1 } },
+						flowers = { chance = 0.1, species = { { "TallTop", 1 } } },
+					},
+				}),
+			}),
+			{ "foliage.flowers grows TallTop, which is no plant (or the upper half of one)" },
+			"an upper half"
+		)
+		fails(
+			with({
+				biome({
+					foliage = {
+						density = 0.1,
+						plants = { { "Flower", 1 } },
+						herbs = { chance = 0.1, species = { { "Ghost", 1 } } },
+					},
+				}),
+			}),
+			{ "foliage.herbs names unknown block Ghost" },
+			"an herb"
+		)
+		-- A kind folder's file.
+		fails({
+			{
+				name = "P",
+				manifest = { order = 10 },
+				kinds = { blocks = GROUND },
+				folders = { biomes = { { file = "biomes/hills", data = { biome({ beach = "Ghost" }) } } } },
+			},
+		}, { "pack P, biomes/hills, biome B: beach names unknown block Ghost" }, "the file named")
+	end)
+
 	t.test("content: kind folders: every message names the file", function()
 		-- A pack whose kinds are kind folders: `folders` is { [kind] = { { file, data } } }.
 		local function filed(name: string, folders: { [string]: any }, kinds: { [string]: any }?): Content.PackData
@@ -1173,5 +1488,65 @@ return function(t, shared, require, _server, _client)
 			{ "Crafting", "Recipes" },
 			{ `Recipes: {STONE} burns for 0 ticks` }
 		)
+	end)
+
+	t.test("content: the biome registries' checks: bands, tree builders, an empty band, a biome code needs", function()
+		local bad = {
+			name = "Bad",
+			bands = { "Lowlnd" },
+			temperature = 0,
+			humidity = 0,
+			vegetation = 0,
+			top = "Stone",
+			filler = "Stone",
+			fillerDepth = 1,
+			underwater = "Stone",
+			beach = "Stone",
+			features = {},
+		}
+		refused({ biomes = { bad } }, { "Biomes" }, {
+			"Biomes: pack Patch, biome Bad: bands names unknown band Lowlnd (did you mean Lowland?)",
+		})
+		local treeless = table.clone(bad)
+		treeless.bands = { "Lowland" }
+		treeless.features = { { "OakTre", 1 } }
+		refused({ biomes = { treeless } }, { "Generation", "Structures" }, {
+			"Structures: pack Patch, biome Bad: features names unknown tree builder OakTre (did you mean OakTree?)",
+		})
+		-- (Overrides moving every biome of the peaks to the slopes leave the Peaks band without one.)
+		local Biomes = require(shared.Biomes)
+		local peaks: number? = nil
+		for index, band in Biomes.bands do
+			if band.name == "Peaks" then
+				peaks = index
+			end
+		end
+		local moved = {}
+		for _, index in Biomes.inBand[peaks :: number] do
+			table.insert(moved, { name = Biomes.get(index).name, override = true, bands = { "Slopes" } })
+		end
+		t.ok(#moved > 0, "the peaks have biomes")
+		refused({ biomes = moved }, { "Biomes" }, { "Biomes: no biome is in band Peaks" })
+		-- A biome code looks up by name: there, or an error naming both as the game loads.
+		t.eq(Biomes.need("Plains", "a spec"), Biomes.byName("Plains"))
+		local ok, err = pcall(Biomes.need, "Plain", "a spec (its check)")
+		t.ok(not ok and has(tostring(err), {
+			"Biomes: a spec (its check) needs a biome named Plain, which no pack makes (did you mean Plains?)",
+		}), tostring(err))
+		-- (No pack takes a biome away: the merged list without it, before the registry loads,
+		-- and Config's puddles without its chance, which Lakes would refuse first.)
+		local env, root = fresh()
+		local list = env.require(root.Content).default.biomes
+		for index, biome in list do
+			if biome.name == "MushroomFields" then
+				table.remove(list, index)
+				break
+			end
+		end
+		env.require(root.Config).Lakes.Puddles.Biomes.MushroomFields = nil
+		local loaded, problem = pcall(env.require, root.Generation.TerrainGenerator)
+		t.ok(not loaded and has(tostring(problem), {
+			"Biomes: TerrainGenerator (its islands far out at sea) needs a biome named MushroomFields, which no pack makes",
+		}), tostring(problem))
 	end)
 end
