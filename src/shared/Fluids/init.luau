@@ -2,7 +2,7 @@
 --[[
 	Fluid registry: water, lava, oil and fuel, by id (FluidList; u8, append only):
 
-	  0 none, 1 water, 2 lava, 3 oil, 4 fuel.
+	  0 none, 1 water, 2 lava, 3 oil, 4 fuel (WATER, LAVA, OIL, FUEL: looked up by name).
 
 	Everything that holds or tells fluids apart asks here instead of naming water: the blocks of each
 	fluid (`ofBlock`, `blockLut`, `isSource`, `sourceOf`, `caveSourceOf`), its bucket (`bucketOf`,
@@ -75,10 +75,6 @@ export type Fluid = {
 local Fluids = {}
 
 Fluids.NONE = 0
-Fluids.WATER = 1
-Fluids.LAVA = 2
-Fluids.OIL = 3
-Fluids.FUEL = 4
 Fluids.COUNT = #FluidList
 -- mB in a bucket (and a source block).
 Fluids.BUCKET = 1000
@@ -176,13 +172,12 @@ for id, spec in FluidList do
 	byBucket[bucket] = id
 end
 
-assert(
-	byName.Water == Fluids.WATER
-		and byName.Lava == Fluids.LAVA
-		and byName.Oil == Fluids.OIL
-		and byName.Fuel == Fluids.FUEL,
-	"FluidList's first four must be water, lava, oil and fuel"
-)
+-- The fluids the code names, by name (their ids are their places in FluidList: 1 .. 4 today).
+assert(byName.Water and byName.Lava and byName.Oil and byName.Fuel, "FluidList must have Water, Lava, Oil and Fuel")
+Fluids.WATER = byName.Water
+Fluids.LAVA = byName.Lava
+Fluids.OIL = byName.Oil
+Fluids.FUEL = byName.Fuel
 
 -- The fluid id of each block (u8 per block id, 0 = none): every level of a group, and the cave
 -- twins of its source. For hot loops (movement, meshing); `ofBlock` answers the same.

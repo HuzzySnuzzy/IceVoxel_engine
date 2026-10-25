@@ -229,18 +229,19 @@ return function(t, shared, require)
 		}
 		local seen: { [number]: number } = {}
 		local relief = Relief.new(12345)
-		-- Mountain chunks (every band, unless the Underlands hollowed it out) and a lowland one.
 		local rng = Hash.rng(11)
-		local spots = {}
-		while #spots < 6 do
-			local x, z = rng:int(-40000, 40000), rng:int(-40000, 40000)
-			local y = relief.height(x, z, 0)
-			if (#spots < 3 and y > 640 and y < 720) or (#spots >= 3 and y > 90 and y < 140) then
-				table.insert(spots, { x // SIZE, z // SIZE })
+		-- A chunk whose surface lies between `low` and `high`.
+		local function spot(low: number, high: number): { number }
+			while true do
+				local x, z = rng:int(-40000, 40000), rng:int(-40000, 40000)
+				local y = relief.height(x, z, 0)
+				if y > low and y < high then
+					return { x // SIZE, z // SIZE }
+				end
 			end
 		end
-		for _, spot in spots do
-			local r = gen.generate(0, spot[1], spot[2])
+		local function scan(chunk: { number })
+			local r = gen.generate(0, chunk[1], chunk[2])
 			for y = 0, r.height - 1 do
 				for z = 0, SIZE - 1 do
 					for x = 0, SIZE - 1 do
@@ -254,6 +255,26 @@ return function(t, shared, require)
 					end
 				end
 			end
+		end
+		local function allSeen(): boolean
+			for id in bands do
+				if seen[id] == nil then
+					return false
+				end
+			end
+			return true
+		end
+		-- Mountain chunks (every band, unless the Underlands hollowed it out, as they often do
+		-- around the andesite's: as many as it takes to see each band, at most 12) and three
+		-- lowland ones.
+		for i = 1, 12 do
+			scan(spot(640, 720))
+			if i >= 3 and allSeen() then
+				break
+			end
+		end
+		for _ = 1, 3 do
+			scan(spot(90, 140))
 		end
 		for id in bands do
 			t.ok((seen[id] or 0) > 0, `no {Blocks.get(id).name}`)
@@ -362,12 +383,13 @@ return function(t, shared, require)
 		t.ok(osmium > 50, `osmium placed: {osmium}`)
 	end)
 
-	t.test("ores: adding osmium moved no earlier ore (saved worlds keep theirs)", function()
-		-- Checksums of every non-osmium ore cell in all-stone chunks, taken before osmium existed:
-		-- the features before it in Ores.FEATURES must keep drawing the same numbers. (The ores
-		-- after osmium only replace stone left over, so they are left out too; OreGeneration pins
-		-- osmium and the rest against them. Each block counts by its name's hash, not its id: ids
-		-- follow the packs.)
+	t.test("ores: the ores before osmium stay where they are (saved worlds keep theirs)", function()
+		-- Checksums of every ore cell before osmium's in all-stone chunks, taken before osmium
+		-- existed, and again when each feature got its own stream (the content packs' split:
+		-- 922:10116833, 921:460687070 and 914:1847593037 with one stream through all the features;
+		-- OreGeneration checks no feature moves another now). (The ores from osmium on only replace
+		-- stone left over, so they are left out; OreGeneration pins osmium and the rest. Each block
+		-- counts by its name's hash, not its id: ids follow the packs.)
 		local later: { [number]: boolean } = {}
 		local after = false
 		for _, ore in Ores.FEATURES do
@@ -377,7 +399,7 @@ return function(t, shared, require)
 			end
 		end
 		local height = 700
-		local expected = { "922:10116833", "921:460687070", "914:1847593037" }
+		local expected = { "859:1764543697", "950:1335128149", "971:1126654623" }
 		for i, chunk in { { 0, 0 }, { 3, -2 }, { -57, 1201 } } do
 			local data = ChunkLayout.create(height)
 			for cell = ChunkLayout.LAYER, ChunkLayout.LAYER * height - 1 do

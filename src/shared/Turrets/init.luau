@@ -17,7 +17,8 @@
 	Shared/Transmitters or Shared/Machines (which load the kinds that require this).
 
 	  SPECS        every turret's Spec, type by type (TYPES' order) and tier by tier within each:
-	               SPECS[(t - 1) x 4 + tier] for the t-th type, the BlockList order of their blocks
+	               SPECS[(t - 1) x 4 + tier] for the t-th type (each found by its block's name:
+	               where the packs put the blocks, and so their ids, does not matter)
 	  spec         the Spec of a turret block (nil for other blocks); isTurret; of(type, tier)
 	  rpm          the rate it may fire at: its type's rate at the lower of its tier and the feed's
 	               (0: fed by hand, its own)
@@ -215,11 +216,6 @@ for _, turretType in TYPES do
 	end
 	table.freeze(list)
 end
--- (Their blocks follow each other in BlockList, in this order.)
-for i, spec in specs do
-	assert(spec.block == specs[1].block + i - 1, `Turrets: {spec.name} is out of BlockList's order`)
-end
-
 Turrets.SPECS = table.freeze(specs)
 
 -- The Spec of the turret `block`, nil for other blocks.

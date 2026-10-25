@@ -590,9 +590,25 @@ local lookKeyOf: { [number]: string } = {}
 local fluidIds: { [string]: { [number]: number } } = {}
 local placeable: { number } = {}
 
+-- The first pass: every block's id by name and its textures (its texture pack entry, else its
+-- variant group's), so a cave twin, which shares its twin's textures, may come before or after the
+-- block it twins.
+local texturesOf: { [string]: TextureFaces } = {}
+for index, spec in BlockList do
+	assert(ids[spec.name] == nil, `Duplicate block name {spec.name}`)
+	ids[spec.name] = index - 1
+	if spec.caveTwin == nil then
+		-- (A door's upper halves take its `<door>Top` entry, the upper half facing North.)
+		local upperDoor = if spec.door and spec.door.upper then packBlocks[(spec.item or spec.name) .. "Top"] else nil
+		local entry = packBlocks[spec.name] or upperDoor or groupEntries[spec.item or spec.name]
+		if entry then
+			texturesOf[spec.name] = resolveFaces(entry)
+		end
+	end
+end
+
 for index, spec in BlockList do
 	local id = index - 1
-	assert(ids[spec.name] == nil, `Duplicate block name {spec.name}`)
 
 	local render = spec.render or (if spec.shape then "Transparent" else "Opaque")
 	local kind = KIND_BY_RENDER[render]
@@ -782,18 +798,10 @@ for index, spec in BlockList do
 		not def.creativeOnly or (breakable and def.drops == false),
 		`Creative only {spec.name} must break and drop nothing`
 	)
-	-- (A twin comes after the block it twins, and looks exactly like it: see below.)
-	local twin = if spec.caveTwin then defs[ids[spec.caveTwin] or -1] else nil
-	assert(spec.caveTwin == nil or twin ~= nil, `Block {spec.name} twins unknown or later block {spec.caveTwin}`)
-	-- Its texture pack entry, else its variant group's; a twin shares its twin's textures.
-	if twin then
-		def.textures = twin.textures
-	else
-		-- (A door's upper halves take its `<door>Top` entry, the upper half facing North.)
-		local upperDoor = if spec.door and spec.door.upper then packBlocks[(spec.item or spec.name) .. "Top"] else nil
-		local entry = packBlocks[spec.name] or upperDoor or groupEntries[spec.item or spec.name]
-		def.textures = if entry then resolveFaces(entry) else nil
-	end
+	-- (A twin looks exactly like the block it twins, wherever that one is: see below.)
+	assert(spec.caveTwin == nil or ids[spec.caveTwin] ~= nil, `Block {spec.name} twins unknown block {spec.caveTwin}`)
+	-- Its textures (the first pass's); a twin shares its twin's.
+	def.textures = texturesOf[spec.caveTwin or spec.name]
 
 	if drawn then
 		local c = def.color
@@ -853,7 +861,6 @@ for index, spec in BlockList do
 	end
 
 	defs[id] = def
-	ids[spec.name] = id
 end
 
 assert(ids.Air == Blocks.AIR and ids.CaveAir == Blocks.CAVE_AIR, "Air and CaveAir must be the first two blocks")

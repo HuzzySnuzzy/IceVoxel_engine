@@ -26,9 +26,9 @@
 	  * middle: Mekanism's 6 veins of 9 per chunk on a trapezoid over the low band (y 5 .. 197,
 	    where diorite is), densest around y 100: "more in the middle";
 	  * upper: veins of 7 above it, 2 per 128 blocks: Mekanism's mountain feature, scaled down.
-	So osmium is about as common as iron below y 197 (1.0 times as many ore blocks over that band:
-	about 1.3 to 1.4 times around y 50 .. 150, 0.6 near bedrock) and about half as common higher up
-	(0.5 to 0.6 times), as Minecraft's iron outnumbers Mekanism's osmium in the mountains.
+	So osmium is about as common as iron below y 197 (1.1 times as many ore blocks over that band:
+	about 1.5 times around y 50 .. 150, 0.5 near bedrock) and about half as common higher up (0.5
+	times), as Minecraft's iron outnumbers Mekanism's osmium in the mountains.
 
 	The newer ores are mapped the same way: the low band is Minecraft's ground under the sea (its
 	y -64 .. 64 is y 5 .. 197 here, one and a half blocks a block: Minecraft's y becomes
@@ -43,26 +43,26 @@
 	                                                          (densest around y 176, where the low
 	                                                          band meets the andesite): 1.6 times
 	                                                          iron over that band, 2.4 times around
-	                                                          y 130 .. 230, 0.3 below y 90
+	                                                          y 130 .. 230, 0.2 below y 90
 	  lead       Mekanism's 8 of 9, trapezoid from 24 below   the same on a trapezoid over y -31 ..
-	             the bottom to 64 (densest 52 over it)        197 (densest around y 83): 0.87 times
+	             the bottom to 64 (densest 52 over it)        197 (densest around y 83): 0.94 times
 	                                                          iron below y 197 (0.9 times osmium),
-	                                                          1.45 times around y 50 .. 120, none
+	                                                          1.24 times around y 50 .. 120, none
 	                                                          in the mountains
 	  zinc       Create's 8 of 12, uniform -63 .. 70          gold's rate instead (brass takes one
 	             (0.7 times Minecraft's iron there)           zinc to three copper): veins of 12,
 	                                                          uniform over the low band (y 5 ..
 	                                                          197): 0.9 times gold over y 48 .. 197,
-	                                                          0.34 times iron
+	                                                          0.31 times iron
 	  uranium    Mekanism's small 4 of 4, trapezoid from      a quarter of Mekanism's veins: small
 	             the bottom to 8; buried 7 of 9 from 24       over y 5 .. 133, buried over -35 .. 93
 	             below the bottom to 56 over it, plateau      (plateau 24: densest at y 17 .. 41),
 	             16, 0.75 of its cells next to air dropped    the same 0.75 of the buried cells next
-	                                                          to air left as stone: rare (0.5 times
-	                                                          iron below y 50, 0.4 below 100; 4
+	                                                          to air left as stone: rare (0.6 times
+	                                                          iron below y 50, 0.45 below 100; 4
 	                                                          times the diamonds), never in the
-	                                                          mountains; its cells touch air 0.4
-	                                                          times as often as lead's
+	                                                          mountains; its cells touch air half
+	                                                          as often as lead's
 
 	Two more are not plain veins:
 	  * sulfur is volcanic: 3 veins of 8 a chunk in the cave lava's band (y 1 .. 33: caves are lava
@@ -80,12 +80,13 @@
 	`biomes`, from TerrainGenerator); without them it draws its numbers and places nothing.
 
 	The features are the content packs' `ores` (Shared/Content: the Minecraft pack's stones and
-	ores, the Mekanism pack's osmium, the Ores pack's copper .. uranium), in load order. Each ore draws from one
-	random stream per chunk, in that order, so new ores go after the others (a pack of a later
-	order): an ore placed earlier never moves, and a later one only replaces the stone left over. A
-	feature that places nothing somewhere (saltpetre under wet land, a buried cell left as stone)
-	still draws the same numbers there, and the vents draw from a stream per lake and per well, so
-	neither moves anything after it.
+	ores, the Mekanism pack's osmium, the Ores pack's copper .. uranium), placed in load order.
+	Each feature draws from a random stream of its own per chunk, from the seed, its name and the
+	chunk, so adding, removing or reordering features (or whole packs) moves no other feature's
+	veins. Ores only replace stone, so where two features' veins cross the earlier one keeps the
+	cell: a new pack's ores (a pack of a later order) only take the stone left over, and taking a
+	feature out only gives its stone to the later ones. The vents draw from a stream per lake and
+	per well.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -117,7 +118,8 @@ local LAKE_CELLS = 16
 local WELL_VEIN = 8
 local WELL_AREA = 64
 
--- Salts of the buried rule's per-cell hash and the vents' streams.
+-- Salts of the buried rule's per-cell hash and the vents' streams (each feature's stream has its
+-- own: FEATURE_SALT, from its name).
 local BURIED_SALT = Hash.string("ores.buried")
 local LAKE_SALT = Hash.string("ores.vents.lake")
 local WELL_SALT = Hash.string("ores.vents.well")
@@ -176,7 +178,11 @@ do
 		})
 	end
 end
+-- Each feature's stream salt, by its name (the packs' ore names are unique).
+local FEATURE_SALT: { [string]: number } = {}
 for _, ore in ORES do
+	assert(FEATURE_SALT[ore.name] == nil, `Ores: two features named {ore.name}`)
+	FEATURE_SALT[ore.name] = Hash.string("ores.feature." .. ore.name)
 	assert(ore.minY < ore.maxY, `Ores: empty height range of {ore.name}`)
 	assert(ore.shape == nil or (ore.shape == "trapezoid" and ore.maxY < math.huge), `Ores: bad shape of {ore.name}`)
 	assert(ore.depth == nil or (ore.shape == nil and ore.maxY < math.huge), `Ores: bad depth range of {ore.name}`)
@@ -235,7 +241,8 @@ end
 	Places every feature's veins into the padded chunk `data` (`heightCells` cells tall) of chunk
 	(cx, cz). Deterministic: the same seed and chunk always give the same ores. `surface` and
 	`biomes` (per padded column, at pz * P + px + 1: the height of its first air block and its
-	biome index; nil: unknown) are what `depth` and `dry` features need.
+	biome index; nil: unknown) are what `depth` and `dry` features need. `features`: only these
+	(of FEATURES), in this order (tests; nil: every feature).
 ]]
 function Ores.place(
 	data: buffer,
@@ -244,14 +251,16 @@ function Ores.place(
 	cz: number,
 	heightCells: number,
 	surface: { number }?,
-	biomes: { number }?
+	biomes: { number }?,
+	features: { Ore }?
 )
 	local stone = STONE
-	local rng = Hash.rng(Hash.hash3(seed, cx, 0x0E5, cz))
 	local buriedSeed = Hash.hash2(seed, BURIED_SALT, 0)
 	local originX, originZ = cx * SIZE, cz * SIZE
 
-	for _, ore in ORES do
+	for _, ore in features or ORES do
+		-- Its own stream: the seed, its name and the chunk (see the header).
+		local rng = Hash.rng(Hash.hash3(Hash.hash2(seed, FEATURE_SALT[ore.name], 0), cx, 0x0E5, cz))
 		local trapezoid = ore.shape == "trapezoid"
 		local depth = ore.depth == true
 		local buried = ore.buried

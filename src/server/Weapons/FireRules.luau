@@ -316,13 +316,13 @@ function FireRules.shotSpec(
 end
 
 -- The round a gun as it was before a shot (`before`) fired: its chambered one; in creative with
--- none, the first round of its calibre. nil: none.
+-- none, its calibre's default round (WeaponList `default`). nil: none.
 function FireRules.round(before: Stack, spec: Weapons.FirearmSpec, creative: boolean): number?
 	local chambered = WeaponState.chamber(before)
 	if chambered ~= nil then
 		return chambered
 	elseif creative then
-		return Weapons.ammoFor(spec.calibre)[1]
+		return Weapons.defaultRound(spec.calibre)
 	end
 	return nil
 end

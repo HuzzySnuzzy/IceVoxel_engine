@@ -81,9 +81,9 @@ return function(t, shared, require, server)
 		CaveHangingRoots = "HangingRoots",
 	}
 
-	-- (By name, not by id or count: content packs number blocks at load. What the ids must keep is
-	-- Blocks' own rule: a twin comes after the block it twins, resolved in one pass.)
-	t.test("mineshaft blocks: the blocks, their cave twins after what they twin, items and variants", function()
+	-- (By name, not by id or count: content packs number blocks at load, and a twin may come before
+	-- or after the block it twins: Blocks resolves them in two passes.)
+	t.test("mineshaft blocks: the blocks, their cave twins, items and variants", function()
 		for _, name in PLAIN do
 			local id = Blocks.find(name)
 			t.ok(id ~= nil and Blocks.get(id).name == name, `{name} is a block`)
@@ -92,7 +92,6 @@ return function(t, shared, require, server)
 		for twin, of in TWINS do
 			local id = B[twin]
 			t.ok(Blocks.isCaveTwin(id), `{twin} is a twin`)
-			t.ok(id > B[of], `{twin} comes after {of}`)
 			t.eq(Blocks.caveTwinOf(id), B[of], `{twin} twins {of}`)
 			t.eq(Blocks.caveTwinFor(B[of]), id)
 			-- (Cave vines keep their green underground, Shared/Seasons/Foliage: the same look in an

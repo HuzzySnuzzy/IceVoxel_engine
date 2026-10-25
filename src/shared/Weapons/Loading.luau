@@ -503,9 +503,9 @@ end
 
 --[[ Weapon actions ]]
 
--- The first ammunition of a calibre (item order).
+-- A calibre's default round (WeaponList `default`).
 local function firstRound(calibre: string): number?
-	return Weapons.ammoFor(calibre)[1]
+	return Weapons.defaultRound(calibre)
 end
 
 -- Op 2 (and op 1 on an internal feed): one round by hand (see the header); nil: nothing changes.

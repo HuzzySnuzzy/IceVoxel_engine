@@ -3,7 +3,8 @@
 	uranium. Their features against Minecraft's, Mekanism's and Create's numbers; what they place
 	over all-stone chunks per height band against iron (the numbers in Ores' header); uranium's
 	buried cells; saltpetre under dry land only; the sulfur vents on lava lakes' barriers and around
-	oil deposits; real chunks of a seed; that no earlier ore moved; and what they cost.
+	oil deposits; real chunks of a seed; that each feature keeps its veins whatever the others (a
+	stream of its own) and the older ores' cells, pinned; and what they cost.
 ]]
 
 return function(t, shared, require)
@@ -56,8 +57,8 @@ return function(t, shared, require)
 	end
 
 	t.test("ore generation: the newer features follow osmium, with their sources' numbers", function()
-		-- (Their order by name, not their places: one random stream runs through the features in
-		-- order, so the older ones come first and the newer after them, in this order.)
+		-- (Their order by name, not their places: features place in load order and an earlier one
+		-- keeps a cell where veins cross, so the older ones come first and the newer after them.)
 		local at: { [string]: number } = {}
 		for index, ore in Ores.FEATURES do
 			at[ore.name] = index
@@ -136,13 +137,55 @@ return function(t, shared, require)
 		end
 	end)
 
-	t.test("ore generation: adding the newer ores moved no earlier ore (osmium included)", function()
+	t.test("ore generation: each feature keeps its veins whatever the others (its own stream)", function()
+		-- Every feature placed alone in an all-stone chunk walks the same veins as among all the
+		-- others: each of its cells among them is its block or an earlier feature's (which took
+		-- that stone first), and (when no other feature places its block) it has no cell there it
+		-- lacks alone. So adding, removing or reordering features or packs moves no other
+		-- feature's veins.
+		local placing: { [number]: number } = {}
+		for _, ore in Ores.FEATURES do
+			placing[ore.block] = (placing[ore.block] or 0) + 1
+		end
+		local height = 400
+		for _, chunk in { { 0, 0 }, { 3, -2 }, { -57, 1201 } } do
+			local all = stoneChunk(height)
+			Ores.place(all, 4242, chunk[1], chunk[2], height)
+			local earlier: { [number]: boolean } = {}
+			for _, ore in Ores.FEATURES do
+				local alone = stoneChunk(height)
+				Ores.place(alone, 4242, chunk[1], chunk[2], height, nil, nil, { ore })
+				local own, taken, stray = 0, 0, 0
+				for cell = 0, buffer.len(alone) // 2 - 1 do
+					local mine = buffer.readu16(alone, cell * 2) == ore.block
+					local there = buffer.readu16(all, cell * 2)
+					if mine and there == ore.block then
+						own += 1
+					elseif mine then
+						taken += if earlier[there] then 1 else 0
+						stray += if earlier[there] then 0 else 1
+					elseif there == ore.block and placing[ore.block] == 1 then
+						stray += 1
+					end
+				end
+				t.eq(
+					stray,
+					0,
+					`{ore.name} in chunk {chunk[1]}, {chunk[2]}: no cell moved ({own} its own, {taken} taken first)`
+				)
+				earlier[ore.block] = true
+			end
+		end
+	end)
+
+	t.test("ore generation: the older ores stay where they are (osmium included)", function()
 		-- Checksums of every cell of the older ores in all-stone chunks (as Generation's for the
-		-- ores before osmium), taken before the newer ores existed: they only replace stone left
-		-- over, so every earlier feature must keep drawing the same numbers. (Each block counts by
-		-- its name's hash, not its id: ids follow the packs.)
+		-- ores before osmium): saved worlds keep theirs. (Each block counts by its name's hash, not
+		-- its id: ids follow the packs.) Taken before the newer ores existed, and again when each
+		-- feature got its own stream (the content packs' split); they were 1061:256719182,
+		-- 1044:1569629523 and 1053:1057389610 with one stream through all the features.
 		local height = 700
-		local expected = { "1061:256719182", "1044:1569629523", "1053:1057389610" }
+		local expected = { "985:504902301", "1091:1779294963", "1111:1533206752" }
 		for i, chunk in { { 0, 0 }, { 3, -2 }, { -57, 1201 } } do
 			local data = stoneChunk(height)
 			Ores.place(data, 4242, chunk[1], chunk[2], height)

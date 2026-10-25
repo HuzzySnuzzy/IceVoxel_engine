@@ -820,8 +820,8 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	                per orientation, Blocks.jigsawOrientation / Blocks.jigsawBlock).
 	  caveTwin      Name of the block this one is the cave twin of (CaveGlowLichen* of GlowLichen*,
 	                CaveLava of Lava, CaveOil of Oil, and the mineshafts' rails, fence posts,
-	                cobwebs, wall torches, moss carpets, vines and hanging roots, at the end of the
-	                list): it looks, drops and behaves exactly like it
+	                cobwebs, wall torches, moss carpets, vines and hanging roots; anywhere in the
+	                list, before or after it): it looks, drops and behaves exactly like it
 	                (a fluid twin is a source of the same group), but generation places it in caves
 	                and the mesher treats it like cave air while caves are hidden
 	                (Blocks.cullLutHiddenCaves, Blocks.caveTwinLut), as CaveAir is to Air. Players

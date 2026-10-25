@@ -13,7 +13,9 @@
 	              the crossbow: only its chamber), its mounts as flags, its fire sound
 	              ("item.firearm.<class>.fire", "item.crossbow.fire" for the crossbow), and the
 	              ids of the attachments that fit it
-	  ammo        a round's (AmmoSpec); `ammoFor(calibre)` lists a calibre's rounds in item order
+	  ammo        a round's (AmmoSpec); `ammoFor(calibre)` lists a calibre's rounds, its default
+	              first (WeaponList `default`), then the others in item order; `defaultRound`
+	              answers the default
 	  magazine    a detachable magazine's (MagazineSpec): calibre, capacity, the guns it fits
 	  attachment  an optic's, a muzzle device's or the weapon light's (AttachmentSpec);
 	              `fits(attachment, firearm)` asks whether it mounts on that gun
@@ -28,10 +30,11 @@
 	magazine of WeaponList's whose calibre is its own and which fits it, or an internal magazine
 	of 0 or more rounds) and ammunition of its calibre; every magazine has a capacity above 0, a
 	durability, and fits only guns that feed from it; every attachment has a known slot and fits
-	only guns with that mount; every melee weapon has an `attack`.
+	only guns with that mount; every melee weapon has an `attack`; a calibre with several rounds
+	has one default.
 
-	Ids are item ids (Items), so lists are in item order. Everything returned is frozen: never
-	change a spec.
+	Ids are item ids (Items), so lists are in item order (which follows the content packs: nothing
+	picks the first by id). Everything returned is frozen: never change a spec.
 ]]
 
 local Items = require(script.Parent.Items)
@@ -208,6 +211,7 @@ for name, data in WeaponList.ammo do
 	assert(wholeAtLeast(data.pellets, 1) and data.pellets <= 12, `Weapons: {name}'s pellets must be 1..12`)
 	assert(data.cone >= 0 and data.falloffMin >= 0 and data.falloffMin <= 1, `Weapons: {name}'s cone or falloff`)
 	assert(data.recover == nil or type(data.recover) == "boolean", `Weapons: {name}'s recover is a switch`)
+	assert(data.default == nil or data.default == true, `Weapons: {name}'s default is true or left out`)
 	assert(Items.maxStack(item) > 1, `Weapons: ammunition {name} must stack`)
 	ammo[item] = table.freeze({
 		item = item,
@@ -228,8 +232,25 @@ for name, data in WeaponList.ammo do
 	end
 	table.insert(list, item)
 end
+-- Each calibre's default round: its only one, else the one WeaponList marks `default` (never the
+-- first by id: ids follow the content packs). It leads the calibre's list, the rest in item order.
+local defaultRounds: { [string]: number } = {}
 for calibre, list in ammoByCalibre do
 	table.sort(list)
+	local marked: { number } = {}
+	for _, item in list do
+		if WeaponList.ammo[ammo[item].name].default then
+			table.insert(marked, item)
+		end
+	end
+	assert(
+		#marked <= 1 and (#list == 1 or #marked == 1),
+		`Weapons: calibre {calibre} has {#list} rounds, so one of them (not {#marked}) must be its default`
+	)
+	local default = marked[1] or list[1]
+	table.remove(list, table.find(list, default) :: number)
+	table.insert(list, 1, default)
+	defaultRounds[calibre] = default
 	ammoByCalibre[calibre] = table.freeze(list)
 end
 
@@ -461,9 +482,14 @@ function Weapons.takes(firearmOrMag: number?, round: number?): boolean
 	return calibre == spec.calibre
 end
 
--- The rounds of a calibre, in item order ({} for none).
+-- The rounds of a calibre: its default first, then the others in item order ({} for none).
 function Weapons.ammoFor(calibre: string): { number }
 	return ammoByCalibre[calibre] or table.freeze({})
+end
+
+-- A calibre's default round (WeaponList `default`, or its only one); nil for no such calibre.
+function Weapons.defaultRound(calibre: string): number?
+	return defaultRounds[calibre]
 end
 
 -- The condition level (1 Pristine .. 5 Ruined) of `fraction` of durability left (see the header).

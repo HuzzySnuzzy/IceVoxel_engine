@@ -25,7 +25,9 @@
 	               lands at once), the range of full damage, the share left at the longest flight
 	               (`falloffMin`), and whether a spent one can be picked up again (`recover`: the
 	               crossbow's bolts; how often is Config.Weapons.BoltRecover's alone, the one place
-	               that chance is tuned)
+	               that chance is tuned), and which is its calibre's default (`default`: the round
+	               a creative player loads and fires with nothing chambered; one of a calibre with
+	               several, Buckshot of 12 gauge)
 	  magazines    detachable magazines: calibre, capacity and the guns they fit
 	  attachments  optics (`zoom`), muzzle devices (`noise` share, `spread` share, `suppressed`
 	               sound and no flash, `glow` false: tracers without glow) and the weapon light
@@ -114,6 +116,9 @@ export type AmmoData = {
 	falloffMin: number,
 	-- A spent one may drop again where it stopped (the chance: Config.Weapons.BoltRecover).
 	recover: boolean?,
+	-- Its calibre's default round (one of a calibre with several; a calibre's only round is its
+	-- default anyway).
+	default: boolean?,
 }
 
 export type MagazineData = { calibre: string, capacity: number, fits: { string } }
@@ -402,7 +407,16 @@ WeaponList.firearms = {
 WeaponList.ammo = {
 	Rounds9mm = { calibre = "9mm", damage = 7, pellets = 1, cone = 0, velocity = 350, range = 40, falloffMin = 0.5 },
 	Rounds357 = { calibre = "357", damage = 10, pellets = 1, cone = 0, velocity = 430, range = 45, falloffMin = 0.5 },
-	Buckshot = { calibre = "12g", damage = 2.5, pellets = 8, cone = 3.5, velocity = 400, range = 10, falloffMin = 0.2 },
+	Buckshot = {
+		calibre = "12g",
+		damage = 2.5,
+		pellets = 8,
+		cone = 3.5,
+		velocity = 400,
+		range = 10,
+		falloffMin = 0.2,
+		default = true,
+	},
 	Slugs = { calibre = "12g", damage = 16, pellets = 1, cone = 0, velocity = 450, range = 60, falloffMin = 0.5 },
 	Rounds22 = { calibre = "22", damage = 5, pellets = 1, cone = 0, velocity = 370, range = 80, falloffMin = 0.5 },
 	Rounds556 = { calibre = "556", damage = 11, pellets = 1, cone = 0, velocity = 900, range = 140, falloffMin = 0.5 },
