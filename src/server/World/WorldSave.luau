@@ -19,12 +19,16 @@
 	  Loading    `prepare` (the title screen's Load World, or the latest world with the menu off
 	             and Config.Save.LoadLatest) takes the world's lock and reads its record and
 	             regions, showing "Loading world: 12 / 40" on every title screen; a world that
-	             can't be read whole is never started (nor written), and one holding what this
-	             version doesn't know is played but not saved. Saves keep names, not ids
-	             (Save/SaveCodec's palettes), so content can change between versions; a region
-	             saved by an older version (before them) is never read: the world there starts
-	             afresh from the seed (said in the output), and the first save writes it anew.
-	             startWorld then makes the world:
+	             can't be read whole is never started (nor written). Saves keep names, not ids
+	             (Save/SaveCodec's palettes), each record written with this server's place
+	             version (PLACE_VERSION), so content can change between versions: names this
+	             version doesn't know in a record this place version or an older one wrote are
+	             content since removed, left out (said in the output, names and counts) and the
+	             world saves as any other (those regions written anew by the first save), while
+	             a world holding them in a region a newer (or an unknown, Studio's) place version
+	             wrote is played but not saved. A region saved by an older codec version (before
+	             palettes) is never read: the world there starts afresh from the seed (said in
+	             the output), and the first save writes it anew. startWorld then makes the world:
 	             `attach` gives it the loaded edits before any chunk is generated (and makes a
 	             new world's handle), `restore` puts containers, machines, pipes, structure
 	             blocks, items, animals, operators and the sections (the clock, and whatever
@@ -53,11 +57,13 @@
 	             placement), health (Characters.restoreHealth), Tough As Nails (and the food bar) and effects; until
 	             a character stands, what they are saved with is the record's (PlayerCodec
 	             .withWaiting: leaving from the title screen keeps their place). A player whose
-	             record could not be read starts afresh, and one whose record holds items this
-	             version doesn't know plays with the rest: neither is written this session (an
-	             outage never replaces a saved inventory with an empty one), and they are told.
-	             One whose record an older version saved (never read) starts afresh too, is told,
-	             and is saved.
+	             record could not be read starts afresh, and one whose record holds items a newer
+	             place version saved plays with the rest: neither is written this session (an
+	             outage never replaces a saved inventory with an empty one), and they are told
+	             (WorldStore.writesBack). Items since removed from the game are left out of a
+	             record this place version or an older one wrote, which saves (the player told,
+	             the output names them). One whose record an older codec version saved (never
+	             read) starts afresh too, is told, and is saved.
 	             Records go out with every save, and at once when a player leaves, each numbered
 	             as it is captured: an older one is never written over a newer
 	             (WorldStore's `order`). Their equipment (accessories, vanity, hidden looks) and
@@ -145,6 +151,7 @@ local CharacterCodec = require(Server.Save.CharacterCodec)
 local CharacterMigration = require(Server.Save.CharacterMigration)
 local PlayerCodec = require(Server.Save.PlayerCodec)
 local RegionCodec = require(Server.Save.RegionCodec)
+local SaveCodec = require(Server.Save.SaveCodec)
 local WorldCharacterCodec = require(Server.Save.WorldCharacterCodec)
 local SaveCommand = require(Server.Save.SaveCommand)
 local SaveScheduler = require(Server.Save.SaveScheduler)
@@ -228,6 +235,17 @@ local importing: { [number]: number } = {}
 local CHARACTERS = Config.Characters.Enabled == true
 -- The next new world's owner (`claim`: the player creating it; 0: the game's).
 local creator = 0
+--[[
+	This server's place version, read once: what every record is written with, and what tells a
+	newer version's names from content since removed (Save/SaveCodec.newerNames). 0 in Studio,
+	whatever game.PlaceVersion says there (Roblox's documentation and developers report 0 in
+	Studio sessions; a Studio session may also run unpublished content under a published
+	version's number): 0 is unknown, so a Studio session never writes back a record that left out
+	names, and a record a Studio session wrote that leaves names out is never written back by a
+	live server either.
+]]
+local PLACE_VERSION: number = if RunService:IsStudio() then 0 else game.PlaceVersion
+WorldSave.PLACE_VERSION = PLACE_VERSION
 
 --[[ Messages ]]
 
@@ -357,6 +375,7 @@ local function newEnv(): WorldStore.Env
 		random = function(): number
 			return random:NextNumber()
 		end,
+		place = PLACE_VERSION,
 	}
 end
 
@@ -494,8 +513,12 @@ function WorldSave.prepare(
 	prepared = loaded
 	if loaded.dropped > 0 then
 		warn(
-			`[IceVoxel] {loaded.dropped} blocks, items, fluids or mobs this version doesn't know were left out of the world: it is not saved this session`
+			`[IceVoxel] {loaded.dropped} blocks, items, fluids or mobs a newer version saved were left out of the world: it is not saved this session`
 		)
+	end
+	if next(loaded.removed) ~= nil then
+		-- (Content since removed: the world saves as any other.)
+		warn(SaveCodec.removedNotice(`world "{loaded.world.meta.name}"`, loaded.removed))
 	end
 	if #loaded.outdated > 0 then
 		warn(
@@ -882,7 +905,10 @@ function WorldSave.enterCharacter(
 			if players[player] ~= ps or not player.Parent or current ~= world then
 				-- (Left meanwhile: nothing taken in.)
 				return leftovers, nil
-			elseif okOld and old and old.dropped == 0 and not GameMode.instabuild(mode) then
+			elseif okOld and old and WorldStore.writesBack(store.env.place, old) and not GameMode.instabuild(mode) then
+				if next(old.unknown) ~= nil then
+					warn(SaveCodec.removedNotice(`the old record of {player.Name}`, old.unknown))
+				end
 				entry = CharacterMigration.entry(entry, old)
 				leftovers = CharacterMigration.import(record, old)
 				CharacterMigration.markCharacter(world.meta, record)
@@ -890,8 +916,8 @@ function WorldSave.enterCharacter(
 				imported = world.id
 				print(`[IceVoxel] {player.Name}'s things in this world went to their character "{record.name}"`)
 				notify(player, "Your things in this world from before characters are now this character's")
-			elseif okOld and old and old.dropped > 0 then
-				warn(`[IceVoxel] the old record of {player.Name} holds items this version doesn't know: not taken in`)
+			elseif okOld and old and not WorldStore.writesBack(store.env.place, old) then
+				warn(`[IceVoxel] the old record of {player.Name} holds items of a newer version: not taken in`)
 			end
 		end
 	end
@@ -988,7 +1014,7 @@ local function track(player: Player)
 			return
 		end
 		ps.loaded = true
-		ps.canSave = ok and (record == nil or record.dropped == 0)
+		ps.canSave = ok and WorldStore.writesBack(store.env.place, record)
 		if not ok then
 			warn(`[IceVoxel] the record of {player.Name} in this world could not be read`)
 			notify(
@@ -1004,12 +1030,18 @@ local function track(player: Player)
 				"Your things in this world were saved by an older version and could not be kept: you start afresh"
 			)
 		elseif record then
-			if record.dropped > 0 then
-				warn(`[IceVoxel] the record of {player.Name} holds items this version doesn't know`)
+			if not ps.canSave then
+				warn(`[IceVoxel] the record of {player.Name} holds items a newer version saved`)
 				notify(
 					player,
-					"Your things in this world include items this version doesn't know: this visit is not saved for you"
+					"Your things in this world include items of a newer version of the game: this visit is not saved for you"
 				)
+			elseif next(record.unknown) ~= nil then
+				-- (Content since removed: they are saved without it.)
+				warn(SaveCodec.removedNotice(`{player.Name}'s things in world "{world.meta.name}"`, record.unknown))
+				if record.dropped > 0 then
+					notify(player, "Some of your things in this world were removed from the game since: they are gone")
+				end
 			end
 			applyRecord(player, ps, record)
 		end
@@ -1069,7 +1101,7 @@ local function leave(player: Player)
 		task.spawn(flushDeparted)
 	elseif ps.loaded and ps.canSave and world and world.canSave then
 		local record, order = finalRecord(player, ps)
-		departed[player.UserId] = { text = PlayerCodec.toText(record), order = order }
+		departed[player.UserId] = { text = PlayerCodec.toText(record, PLACE_VERSION), order = order }
 		task.spawn(flushDeparted)
 	end
 end
@@ -1208,6 +1240,10 @@ function WorldSave.restore(parts: WorldSnapshot.Systems)
 		for _, name in loaded.outdated do
 			live[name] = true
 		end
+		-- (And those removed content was left out of, so it is not left out again at every load.)
+		for _, name in loaded.removedFrom do
+			live[name] = true
+		end
 		print(
 			`[IceVoxel] world "{loaded.world.meta.name}" loaded: {#loaded.regions} regions, {report.containers} containers, {report.machines} machines, {report.pipes} pipes and tanks, {report.items} items, {report.mobs} animals`
 		)
@@ -1318,7 +1354,7 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 		local encoded: { [string]: buffer } = {}
 		local empty: { [string]: boolean } = {}
 		for name, region in regions do
-			encoded[name] = RegionCodec.encode(region)
+			encoded[name] = RegionCodec.encode(region, PLACE_VERSION)
 			if RegionCodec.isEmpty(region) then
 				empty[name] = true
 			end
@@ -1342,7 +1378,7 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 				end
 			elseif ps.loaded and ps.canSave then
 				local record, captured = capture(player, ps)
-				records[player.UserId], order[player.UserId] = PlayerCodec.toText(record), captured
+				records[player.UserId], order[player.UserId] = PlayerCodec.toText(record, PLACE_VERSION), captured
 			end
 		end
 		return {

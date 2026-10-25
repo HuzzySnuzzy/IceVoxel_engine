@@ -103,6 +103,7 @@ local ServerNet = require(Server.Network.ServerNet)
 local CharacterCodec = require(Server.Save.CharacterCodec)
 local CharacterMigration = require(Server.Save.CharacterMigration)
 local CharacterSaves = require(Server.Save.CharacterSaves)
+local SaveCodec = require(Server.Save.SaveCodec)
 local SaveScheduler = require(Server.Save.SaveScheduler)
 local WorldStore = require(Server.Save.WorldStore)
 local WorldInfo = require(Server.World.WorldInfo)
@@ -161,7 +162,7 @@ type Selected = {
 	-- Its progress as stored, and whether a newer version's (then written back as it is).
 	progress: unknown?,
 	progressWritable: boolean,
-	-- Its bytes may be written (false: it holds items this version doesn't know).
+	-- Its bytes may be written (false: it holds items a newer place version saved).
 	canSave: boolean,
 	-- Another server took its lock: nothing is written any more.
 	lost: boolean,
@@ -354,6 +355,7 @@ local function newEnv(unlimited: boolean): WorldStore.Env
 		random = function(): number
 			return random:NextNumber()
 		end,
+		place = WorldSave.PLACE_VERSION,
 	}
 end
 
@@ -435,7 +437,7 @@ local function newSelected(record: Record, progress: unknown?): Selected
 		record = record,
 		progress = progress,
 		progressWritable = true,
-		canSave = record.dropped == 0,
+		canSave = WorldStore.writesBack(WorldSave.PLACE_VERSION, record),
 		lost = false,
 		applied = false,
 		enteredAt = os.clock(),
@@ -704,8 +706,14 @@ local function select(player: Player, user: User, id: number): string
 	user.selected = selected
 	user.looks[id] = loaded.appearance
 	user.dressed[id] = dressedOf(loaded)
-	if loaded.dropped > 0 then
-		return `{loaded.name} holds items this version doesn't know: it plays, but is not saved`
+	if not selected.canSave then
+		return `{loaded.name} holds items of a newer version of the game: it plays, but is not saved`
+	elseif next(loaded.unknown) ~= nil then
+		-- (Content since removed: left out, and it saves without it.)
+		warn(SaveCodec.removedNotice(`{player.Name}'s character "{loaded.name}"`, loaded.unknown))
+		if loaded.dropped > 0 then
+			return `{loaded.name} held things since removed from the game: they are gone`
+		end
 	elseif loaded.outdated then
 		-- (Only its head was read: Save/CharacterCodec. Its next save writes it whole.)
 		warn(`[IceVoxel] {player.Name}'s character "{loaded.name}" was saved by an older version: it starts afresh`)

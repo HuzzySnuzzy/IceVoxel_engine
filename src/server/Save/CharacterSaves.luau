@@ -42,8 +42,10 @@
 	  Delete    refused while another server's live lock holds the character; then off the index
 	            first, then the record removed (one left behind is unreachable).
 	  Rename    the record (refused while another server holds it or this one's last save of it
-	            is under way, and for one holding items this version doesn't know: writing it
-	            would lose them), then the index.
+	            is under way, and for one that left out items a newer place version wrote:
+	            writing it would lose them, WorldStore.writesBack; content since removed is no
+	            reason), then the index. Records are written with Env `place`, this server's
+	            place version.
 	  Touch     a character's line in the index written again (name, dead, time played, last
 	            played: what the list shows), and the migration's mark.
 	  Peek      a character read without its lock (its look for the list's preview).
@@ -278,7 +280,7 @@ function CharacterSaves.create(
 			end
 		end
 		local newLock = if lock then SaveLock.acquire(nil, env.job, now, timeout()) else nil
-		return CharacterCodec.value(record, progress, newLock)
+		return CharacterCodec.value(record, progress, newLock, env.place)
 	end)
 	if not okRecord then
 		return nil, `it could not be saved ({err})`
@@ -392,7 +394,7 @@ function CharacterSaves.save(
 ): SaveStatus
 	local env = saves.env
 	local key = CharacterSaves.recordKey(userId, id)
-	local data = if record then CharacterCodec.toText(record) else nil
+	local data = if record then CharacterCodec.toText(record, env.place) else nil
 	local lost = false
 	local skipped = false
 	local job = SaveScheduler.job(key, "update", function(): (boolean, string?)
@@ -531,15 +533,15 @@ function CharacterSaves.rename(saves: Saves, userId: number, id: number, name: s
 		elseif lock and SaveLock.heldByOther(lock, env.job, env.time(), timeout()) then
 			refused = CharacterSaves.ELSEWHERE
 			return nil
-		elseif record.dropped > 0 then
-			refused = "it holds items this version doesn't know"
+		elseif not WorldStore.writesBack(env.place, record) then
+			refused = "it holds items of a newer version"
 			return nil
 		end
 		record.name = name
 		local value = old :: { [string]: any }
 		return {
 			v = CharacterCodec.VALUE_VERSION,
-			data = CharacterCodec.toText(record),
+			data = CharacterCodec.toText(record, env.place),
 			progress = value.progress,
 			lock = value.lock,
 		}

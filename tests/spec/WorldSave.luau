@@ -318,6 +318,8 @@ return function(t, shared, require, server, client)
 			end,
 			job = o.job or "server-a",
 			random = lcg(o.seed or 3),
+			-- (This server's place version: nil, unknown, unless a test gives one.)
+			place = o.place,
 		}
 		return self
 	end
@@ -675,9 +677,9 @@ return function(t, shared, require, server, client)
 		t.eq(clamped.mana, Config.Mana.Max)
 		t.eq(clamped.crystals, Config.Mana.MaxCrystals)
 		record.mana, record.crystals = nil, 0
-		-- No position, nothing held: tiny (16 bytes, 20 characters: it was under 20 before its
-		-- palette's five empty counts came).
-		t.ok(#PlayerCodec.toText(PlayerCodec.new()) <= 20)
+		-- No position, nothing held: tiny (17 bytes, 22 characters: it was under 20 before its
+		-- palette came, the writer's place version and five empty counts).
+		t.ok(#PlayerCodec.toText(PlayerCodec.new(), 7) <= 22)
 		t.eq((PlayerCodec.fromText("not base85 \\")), nil)
 		t.eq((PlayerCodec.fromText(42)), nil)
 		local bytes = PlayerCodec.encode(record)
@@ -1851,64 +1853,112 @@ return function(t, shared, require, server, client)
 		end
 	)
 
-	t.test("world save: what this version doesn't know keeps the world (or player) from being written", function()
-		local backend = newBackend()
-		local fake = fakeStore(backend)
-		local saves = WorldStore.new(fake.store, fake.env)
-		local game = newGame()
-		furnish(game)
-		local world = WorldStore.create(saves, settings())
-		local saved = input(game)
-		-- A block a newer version added, in region 0_0: a name in its palette this version
-		-- doesn't know.
-		local first = SaveNames.regionNames(SaveCodec, saved.regions["0_0"]).block[1]
-		saved.regions["0_0"] = SaveNames.region(SaveCodec, saved.regions["0_0"], function(kind: string, name: string)
-			return if kind == "block" and name == first then "BlockOfANewerVersion" else name
-		end)
-		t.eq(WorldStore.save(saves, world, saved).ok, true)
-		WorldStore.release(saves, world)
-		local b = fakeStore(backend, { job = "b", clock = fake.clock + 10 })
-		local savesB = WorldStore.new(b.store, b.env)
-		local loaded = WorldStore.load(savesB, world.id) :: any
-		t.ok(loaded ~= nil, "it opens")
-		t.ok(loaded.dropped > 0)
-		t.eq(loaded.world.canSave, false, "but is never written")
-		b.advance(10)
-		local writes = #b.writes
-		local result = WorldStore.save(savesB, loaded.world, input(game))
-		t.eq(result.refused, true)
-		t.ok(string.find(result.message or "", "newer version", 1, true) ~= nil, result.message)
-		t.eq(#b.writes, writes)
+	t.test(
+		"world save: names a newer place version saved keep a world from being written; removed ones don't",
+		function()
+			-- Each case: the place version that wrote the world, the one that reads it, whether the
+			-- names it doesn't know are content since removed (the world and the player then save).
+			local cases = {
+				{ "removed since, by this version", 7, 7, true },
+				{ "a newer version's", 8, 7, false },
+				{ "removed since, by an older version", 6, 7, true },
+				{ "written in Studio (unknown)", 0, 7, false },
+				{ "read in Studio (unknown)", 7, 0, false },
+			}
+			for _, case in cases do
+				local what, writer, server, saves = case[1], case[2], case[3], case[4]
+				local backend = newBackend()
+				local fake = fakeStore(backend, { place = writer })
+				local savesA = WorldStore.new(fake.store, fake.env)
+				local game = newGame()
+				furnish(game)
+				local world = WorldStore.create(savesA, settings())
+				local saved = input(game)
+				-- A block of region 0_0 and an item the player held, written by `writer` under
+				-- names the reading version doesn't have.
+				local first = SaveNames.regionNames(SaveCodec, saved.regions["0_0"]).block[1]
+				local function gone(kind: string, name: string): string
+					return if kind == "block" and name == first
+						then "OldBlock"
+						elseif kind == "item" and name == "Sand" then "OldItem"
+						else name
+				end
+				saved.regions["0_0"] = SaveNames.region(SaveCodec, saved.regions["0_0"], gone, writer)
+				local record = PlayerCodec.new()
+				record.slots[1] = Items.newStack(id.Sand, 3)
+				record.slots[2] = Items.newStack(id.Stone, 5)
+				saved.players = {
+					[101] = SaveCodec.toText(SaveNames.record(SaveCodec, PlayerCodec.encode(record, writer), gone)),
+				}
+				t.eq(WorldStore.save(savesA, world, saved).ok, true)
+				WorldStore.release(savesA, world)
+				local b = fakeStore(backend, { job = "b", clock = fake.clock + 10, place = server })
+				local savesB = WorldStore.new(b.store, b.env)
+				local loaded = WorldStore.load(savesB, world.id) :: any
+				t.ok(loaded ~= nil, `{what}: it opens`)
+				local ok, player = WorldStore.loadPlayer(savesB, loaded.world, 101)
+				t.eq(ok, true)
+				t.eq((player :: any).slots[1], nil, `{what}: the item left out`)
+				t.ok(sameStack((player :: any).slots[2], record.slots[2]), `{what}: the rest read`)
+				t.eq(WorldStore.writesBack(b.env.place, player), saves, `{what}: the player's record saves`)
+				t.eq(loaded.world.canSave, saves, `{what}: the world saves`)
+				b.advance(10)
+				local writes = #b.writes
+				local result = WorldStore.save(
+					savesB,
+					loaded.world,
+					input(game, nil, nil, { [101] = PlayerCodec.toText(PlayerCodec.new(), server) })
+				)
+				if saves then
+					t.eq(loaded.dropped, 0)
+					t.ok(loaded.removed.OldBlock > 0, `{what}: counted for the notice`)
+					t.eq(table.concat(loaded.removedFrom, ","), "0_0", "written anew by the first save")
+					t.eq((player :: any).unknown.OldItem, 1)
+					t.eq(
+						SaveCodec.removedNotice(`world "Island"`, { OldBlock = loaded.removed.OldBlock }),
+						`[IceVoxel] removed content left out of world "Island": {loaded.removed.OldBlock} OldBlock`
+					)
+					t.eq(result.ok, true, `{what}: saved ({result.message})`)
+					t.eq(result.playersWritten, 1)
+				else
+					t.ok(loaded.dropped > 0)
+					t.eq(next(loaded.removed), nil, `{what}: no content said to be removed`)
+					t.eq(result.refused, true, `{what}: never written`)
+					t.ok(string.find(result.message or "", "newer version", 1, true) ~= nil, result.message)
+					t.eq(#b.writes, writes)
+				end
+			end
 
-		-- A chest holding an item, and a player record holding one, this version doesn't know.
-		local region = RegionCodec.new(0, 0)
-		table.insert(region.containers, {
-			x = 2,
-			y = FLOOR,
-			z = 2,
-			container = {
-				kind = "chest",
-				block = id.Chest,
-				size = 27,
-				slots = { [1] = Items.newStack(id.Sand, 3), [2] = Items.newStack(id.Stone, 1) },
-			},
-		})
-		local record = PlayerCodec.new()
-		record.slots[1] = Items.newStack(id.Sand, 3)
-		record.slots[2] = Items.newStack(id.Stone, 5)
-		local text = PlayerCodec.toText(record)
-		-- (Saved by a version whose Sand this one doesn't have.)
-		local function newer(kind: string, name: string): string
-			return if kind == "item" and name == "Sand" then "SandOfANewerVersion" else name
+			-- A chest holding an item, and a player record holding one, this version doesn't know.
+			local region = RegionCodec.new(0, 0)
+			table.insert(region.containers, {
+				x = 2,
+				y = FLOOR,
+				z = 2,
+				container = {
+					kind = "chest",
+					block = id.Chest,
+					size = 27,
+					slots = { [1] = Items.newStack(id.Sand, 3), [2] = Items.newStack(id.Stone, 1) },
+				},
+			})
+			local record = PlayerCodec.new()
+			record.slots[1] = Items.newStack(id.Sand, 3)
+			record.slots[2] = Items.newStack(id.Stone, 5)
+			local text = PlayerCodec.toText(record)
+			-- (Saved by a version whose Sand this one doesn't have.)
+			local function newer(kind: string, name: string): string
+				return if kind == "item" and name == "Sand" then "SandOfANewerVersion" else name
+			end
+			local back = RegionCodec.decode(SaveNames.region(SaveCodec, RegionCodec.encode(region), newer), 0, 0)
+			local player =
+				PlayerCodec.decode(SaveNames.record(SaveCodec, PlayerCodec.encode(record), newer)) :: PlayerCodec.Record
+			t.eq(back.dropped, 1, "the chest's unknown stack counts")
+			t.eq(player.dropped, 1, "the record's too")
+			t.ok(sameStack(player.slots[2], record.slots[2]), "the rest is read")
+			t.eq((PlayerCodec.fromText(text) :: PlayerCodec.Record).dropped, 0)
 		end
-		local back = RegionCodec.decode(SaveNames.region(SaveCodec, RegionCodec.encode(region), newer), 0, 0)
-		local player =
-			PlayerCodec.decode(SaveNames.record(SaveCodec, PlayerCodec.encode(record), newer)) :: PlayerCodec.Record
-		t.eq(back.dropped, 1, "the chest's unknown stack counts")
-		t.eq(player.dropped, 1, "the record's too")
-		t.ok(sameStack(player.slots[2], record.slots[2]), "the rest is read")
-		t.eq((PlayerCodec.fromText(text) :: PlayerCodec.Record).dropped, 0)
-	end)
+	)
 
 	t.test("world save: a region or player record an older version saved starts afresh, written anew", function()
 		local backend = newBackend()

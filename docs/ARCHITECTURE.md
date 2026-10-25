@@ -8479,13 +8479,15 @@ its regions and its players.
   their age), farm animals (`Config.Save.Mobs`; monsters despawn anyway), block updates still due
   (`BlockTicker.scheduled`, in ticks from the save) and the seasons' natural and thaw maps (records
   12 and 13). Records are tagged and length-prefixed and read back exactly to their length, the
-  region's palette first (version 3: Names, not ids, below); names this version doesn't know (a
-  newer version's, or content since removed) are left out one by one and counted (`dropped`: an
-  edit of such a block becomes Air, a stack or a mob goes, a pipe's or tank's fluid empties),
-  anything else damaged refuses the region. A world with any dropped is played but never saved
-  (`canSave` false, "saved by a newer version, or since removed" on the title screens): writing
-  it back would lose them for good. Block updates still waiting for their chunk to generate are
-  saved again as they were (`WorldSnapshot.collect`'s `pending`), not lost at the next save.
+  region's palette first (version 3: Names, not ids, below); names this version doesn't know are
+  left out one by one and counted (`dropped`, and by name: an edit of such a block becomes Air, a
+  stack or a mob goes, a pipe's or tank's fluid empties), anything else damaged refuses the
+  region. In a region a newer place version wrote they may be content this version lacks: the
+  world is played but never saved (`canSave` false, "saved by a newer version" on the title
+  screens), as writing it back would lose them for good; in one this version or an older one
+  wrote they are content since removed and the world saves (Names, not ids). Block updates still
+  waiting for their chunk to generate are saved again as they were (`WorldSnapshot.collect`'s
+  `pending`), not lost at the next save.
 - Players (`Save/PlayerCodec`, Minecraft's playerdata): feet and facing (or none: back at the
   spawn), health in half hearts, game mode and the previous one, the selected slot, inventory,
   armor and cursor, Tough As Nails' thirst and temperature (Climate Clemency left included) and
@@ -8496,7 +8498,8 @@ its regions and its players.
   dose (Radiation); version 6 keeps names (its own palette right after the version byte: its
   items, the fluids in their data, its effects). Knowledge, Ages and skills stay in
   Players/ProgressStore, for every world. 100-700 bytes. A record holding items this version
-  doesn't know is applied (what it can read) but never written that session; an effect it
+  doesn't know is applied (what it can read); a newer place version's is never written that
+  session, one holding items since removed saves without them (the player told); an effect it
   doesn't know is skipped. The world's options carry its `ruins` setting; a record from before
   the ruins has no key and reads it as off (World types).
 - Not saved: fire's ages (fire comes back at age 0), a lit TNT's or Nuke's fuse (a lit block
@@ -8522,11 +8525,25 @@ in this version's `MinerRules.ORES` from `mining` (KindSpec `stateOf`), so the o
 change. A name this version doesn't know never refuses a record: a block becomes Air (left out of
 the seasons' maps), an item is dropped (an id in an item's data drops that key), a fluid empties
 its pipe, tank or machine tank, a mob goes, a machine's typed field reads 0 (what it works on
-starts over), an effect is skipped; all but effects are counted, so such a record is played but
-not written back (it may be a newer version's: Roblox runs both during an update). To retire
-content for good, a RENAMED line names what replaces it. So content can be added, reordered and
-renamed between versions with every world, player and character intact (tests/spec/SaveNames:
-round trips through palettes whose names were swapped, renamed and removed). Records from before
+starts over), an effect is skipped; all but effects are counted (`dropped`), and each name with
+how many things of it (`unknown`). Which they are, the place version that wrote the record says:
+the palette starts with it (game.PlaceVersion, read once by World/WorldSave as `PLACE_VERSION`
+and passed in as WorldStore's Env `place`; 0 in Studio, whatever Studio reports: Roblox's
+documentation and developers give 0 there, and a Studio session may run unpublished content).
+From this place version or an older one, both known: content since removed. Left out as above,
+and the record saves as any other (`SaveCodec.newerNames` false, `WorldStore.writesBack`); the
+server warns once with the names and counts (`SaveCodec.removedNotice`: "[IceVoxel] removed
+content left out of world "Island": 12 OldBlock, 3 OldItem"; a player's or a character's
+things likewise, and the player is told the things were removed from the game), and the regions
+it was left out of are written anew by the first save (`Loaded.removedFrom`). From a newer place
+version (Roblox runs old and new servers side by side during an update), or with either version
+unknown (0: Studio): perhaps content this version lacks, so the record is played but never
+written back that session ("saved by a newer version"), so an old server never writes over a
+newer one's record and a Studio test never writes over live data it can't read. The locks, slots
+and gens are untouched by this. So content can be added, removed, reordered and renamed between
+versions with every world, player and character intact (tests/spec/SaveNames: round trips
+through palettes whose names were swapped, renamed and removed; tests/spec/WorldSave and
+CharacterStore: removed content saves, a newer version's record never does). Records from before
 palettes (regions of versions 1 and 2, player records of 1 to 5, characters of 1 to 4: the user
 accepted losing them) are refused, never misread (`SaveCodec.OLDER`): such a region is left out
 (`Loaded.outdated`: the world there is what the seed generates, said in the output, and the first

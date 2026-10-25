@@ -9,9 +9,13 @@
 	before the list (an orphan of a failed list write is taken over), the most a user keeps,
 	deleting and renaming refused while another server has the character, the session-only
 	store in memory, the zombie apocalypse's survivor record and infection and the food bar in the
-	record, and a character an older version saved selected as who it is, its things afresh
-	(CharacterCodec version 5: names, not ids; tests/spec/SaveNames).
+	record, a character an older version saved selected as who it is, its things afresh
+	(CharacterCodec version 5: names, not ids; tests/spec/SaveNames), and names it doesn't know
+	told apart by the place version that wrote it: content since removed saves, a newer version's
+	never does.
 ]]
+
+local SaveNames = require("../lib/SaveNames")
 
 return function(t, shared, require, server)
 	local Appearance = require(shared.Characters.Appearance)
@@ -23,6 +27,7 @@ return function(t, shared, require, server)
 	local CharacterSaves = require(server.Save.CharacterSaves)
 	local SaveCodec = require(server.Save.SaveCodec)
 	local SaveLock = require(server.Save.SaveLock)
+	local WorldStore = require(server.Save.WorldStore)
 
 	-- A character record's flags byte (after the version byte and the record's palette).
 	local function flagsOf(bytes: buffer): number
@@ -158,6 +163,8 @@ return function(t, shared, require, server)
 			random = function(): number
 				return 0.5
 			end,
+			-- (This server's place version: nil, unknown, unless a test gives one.)
+			place = o.place,
 		}
 		self.saves = CharacterSaves.new(self.store, self.env)
 		return self
@@ -371,6 +378,59 @@ return function(t, shared, require, server)
 		t.eq(back.name, "Alice")
 		t.eq(back.deaths, 4)
 		t.eq(back.slots[1].count, 2)
+	end)
+
+	t.test("character store: names a newer place version saved keep a character from being written", function()
+		-- Each case: the place version that wrote the character, the one that reads it, whether
+		-- the names it doesn't know are content since removed (it then saves, and renames).
+		local cases = {
+			{ "removed since, by this version", 7, 7, true },
+			{ "a newer version's", 8, 7, false },
+			{ "removed since, by an older version", 6, 7, true },
+			{ "written in Studio (unknown)", 0, 7, false },
+			{ "read in Studio (unknown)", 7, 0, false },
+		}
+		for _, case in cases do
+			local what, writer, server, saves = case[1], case[2], case[3], case[4]
+			local backend = newBackend()
+			local a = fakeStore(backend, { job = "server-a", place = writer })
+			local made = newRecord(1, "Alice")
+			made.slots[2] = Items.newStack(Items.id.Diamond, 3)
+			CharacterSaves.create(a.saves, USER, made, nil, false)
+			-- Its Sticks (slot 1) under a name the reading version doesn't have.
+			local value = backend.data[CharacterSaves.recordKey(USER, 1)]
+			value.data = SaveCodec.toText(
+				SaveNames.record(
+					SaveCodec,
+					SaveCodec.fromText(value.data) :: buffer,
+					function(kind: string, name: string): string
+						return if kind == "item" and name == "Stick" then "OldItem" else name
+					end
+				)
+			)
+			local b = fakeStore(backend, { job = "server-b", clock = a.clock + 10, place = server })
+			local status, record = CharacterSaves.select(b.saves, USER, 1)
+			t.eq(status, "ok", `{what}: it plays`)
+			local loaded = record :: CharacterCodec.Record
+			t.eq(loaded.placeVersion, writer)
+			t.eq(loaded.slots[1], nil, `{what}: the item left out`)
+			t.eq(loaded.slots[2].item, Items.id.Diamond, `{what}: the rest read`)
+			t.eq(loaded.unknown.OldItem, 1)
+			t.eq(WorldStore.writesBack(server, loaded), saves, `{what}: saved`)
+			b.env.wait(10)
+			local listed, why = CharacterSaves.rename(b.saves, USER, 1, "Bea")
+			if saves then
+				t.ok(listed ~= nil, `{what}: renamed ({why})`)
+				local back = stored(backend, 1) :: CharacterCodec.Record
+				t.eq(back.name, "Bea")
+				t.eq(back.placeVersion, server, "written by the reading version")
+				t.eq(next(back.unknown), nil, "without the removed item now")
+				t.eq(back.slots[2].count, 3)
+			else
+				t.eq(listed, nil, `{what}: never written`)
+				t.eq(why, "it holds items of a newer version")
+			end
+		end
 	end)
 
 	t.test("character store: a released character is taken at once; a lost lock stops saving", function()

@@ -18,10 +18,15 @@
 	           decodes them, renewing the lock every third of its timeout while it reads (a long
 	           load never leaves a running server holding a stale lock). Any failure gives the
 	           lock back and returns nil and why: a world that could not be read whole is never
-	           started, so nothing is ever written over it. A world holding names of blocks,
-	           items, fluids or mobs this version doesn't know (a newer one's, or content since
-	           removed: Save/SaveCodec) opens, but is never saved (`canSave` false): writing it
-	           would lose them. A region saved by an older version (before palettes: ids that
+	           started, so nothing is ever written over it. Names of blocks, items, fluids or
+	           mobs this version doesn't know are left out either way; which they are, the
+	           place version that wrote each region says (SaveCodec.newerNames, against Env
+	           `place`): in a region a newer (or an unknown, Studio's) place version wrote they
+	           may be content this version lacks, so the world opens but is never saved
+	           (`canSave` false, `dropped`): writing it would lose them; in one this version or
+	           an older one wrote they are content since removed (`removed`: name -> how many,
+	           for the server's notice) and the world saves as any other. A region saved by an
+	           older codec version (before palettes: ids that
 	           were that version's, SaveCodec.OLDER) is never read: it is left out (`outdated`:
 	           the world there is what the seed generates) and its key stays listed, so the
 	           next save that writes it puts the new region there.
@@ -37,7 +42,9 @@
 	  players  `loadPlayer` reads one player's record with retries: false when it could not be
 	           read (the caller then never writes that player this session, so an outage can't
 	           replace a saved inventory with an empty one), none and `outdated` for a record
-	           of an older version (the player starts afresh, and is saved); their records go
+	           of an older version (the player starts afresh, and is saved); `writesBack` says
+	           whether one read may be written back (not when it left out names a newer place
+	           version wrote; content since removed saves, as in regions); their records go
 	           out with `save` and `savePlayers`, each with its order (`order`: later captures
 	           are higher), and a record older than one already written (or being written) for
 	           that player is never written: an autosave's retry can't put back what a leaving
@@ -93,6 +100,10 @@ export type Env = {
 	-- This server's lock name (its JobId, or a session GUID in Studio).
 	job: string,
 	random: () -> number,
+	-- This server's place version (game.PlaceVersion; 0 or nil: unknown, as in Studio): what
+	-- records are written with, and what tells a newer version's names from removed content
+	-- (SaveCodec.newerNames).
+	place: number?,
 }
 
 export type RegionState = { parts: { string }, slot: number, gen: number, bytes: number, largest: number }
@@ -123,8 +134,15 @@ export type Loaded = {
 	world: World,
 	settings: WorldSettings.Settings,
 	regions: { RegionCodec.Region },
-	-- What was left out while reading: names this version doesn't know (RegionCodec `dropped`).
+	-- What was left out of regions a newer (or an unknown) place version wrote: names this
+	-- version doesn't know, perhaps a newer version's content (the world is not saved).
 	dropped: number,
+	-- Names left out of regions this place version or an older one wrote (content since
+	-- removed) -> how many things of each (SaveCodec.removedNotice); the world saves.
+	removed: { [string]: number },
+	-- The regions `removed` names were left out of: the first save writes them anew (World/
+	-- WorldSave), so they are not left out again at every load.
+	removedFrom: { string },
 	-- The regions saved by an older version, left out (see the header): the world there starts
 	-- afresh from the seed.
 	outdated: { string },
@@ -555,6 +573,8 @@ function WorldStore.load(
 	}
 	local regions: { RegionCodec.Region } = {}
 	local outdated: { string } = {}
+	local removed: { [string]: number } = {}
+	local removedFrom: { string } = {}
 	local dropped = 0
 	for _, name in names do
 		local head = heads[name]
@@ -566,7 +586,13 @@ function WorldStore.load(
 		end
 		local region, decodeProblem = RegionCodec.tryDecode(bytes, rx, rz)
 		if region then
-			dropped += region.dropped
+			if SaveCodec.newerNames(region.dropped, region.placeVersion, saves.env.place) then
+				dropped += region.dropped
+			elseif next(region.unknown) ~= nil then
+				-- (Content since removed: left out, and the region written anew by the next save.)
+				SaveCodec.addCounts(removed, region.unknown)
+				table.insert(removedFrom, name)
+			end
 			table.insert(regions, region)
 		elseif decodeProblem == SaveCodec.OLDER then
 			-- (Never read: left out, the seed's world there. Its state stays listed, so the next
@@ -587,10 +613,28 @@ function WorldStore.load(
 	if dropped > 0 then
 		-- (Written back, they would be gone for good: a newer version's world is played here, not saved.)
 		world.canSave = false
-		world.reason =
-			"it holds blocks, items, fluids or mobs this version doesn't know (saved by a newer version, or since removed)"
+		world.reason = "it holds blocks, items, fluids or mobs this version doesn't know (saved by a newer version)"
 	end
-	return { world = world, settings = settings, regions = regions, dropped = dropped, outdated = outdated }, nil
+	return {
+		world = world,
+		settings = settings,
+		regions = regions,
+		dropped = dropped,
+		removed = removed,
+		removedFrom = removedFrom,
+		outdated = outdated,
+	},
+		nil
+end
+
+--[[
+	May a server of place version `place` (Env `place`) write back `record` (a player's or a
+	character's, as read: PlayerCodec, CharacterCodec; nil, none read: yes)? Not when it left out
+	names a newer (or an unknown) place version wrote (SaveCodec.newerNames): writing it would
+	lose that content. Content since removed is no reason: such a record saves.
+]]
+function WorldStore.writesBack(place: number?, record: { dropped: number, placeVersion: number }?): boolean
+	return record == nil or not SaveCodec.newerNames(record.dropped, record.placeVersion, place)
 end
 
 --[[ Players ]]

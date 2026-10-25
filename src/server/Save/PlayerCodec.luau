@@ -44,8 +44,11 @@
 	            refuses a newer one, so it never writes over what it can't keep.
 	Decoding checks every number: non-finite ones, unknown modes and slots are a damaged record
 	(nil); names this version doesn't know are left out: items are dropped (SaveCodec.readStack)
-	and counted (`dropped`: such a record is not written back this session, World/WorldSave),
-	effects skipped.
+	and counted (`dropped`), effects skipped, each name counted in `unknown`. The palette carries
+	the writer's place version (`placeVersion`): a record a newer one wrote that left something
+	out is never written back this session, one this version or an older one wrote saves as any
+	other (its unknown names are content since removed: SaveCodec.newerNames, WorldStore
+	.writesBack).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -113,8 +116,12 @@ export type Record = {
 	hunger: Hunger?,
 	-- The radiation dose (Sv; 0: none).
 	radiation: number,
-	-- Stacks of items this version doesn't know, left out while reading (never written).
+	-- Read: stacks of items this version doesn't know, left out (never written), each such name
+	-- (effects' too) with how many things of it, and the place version that wrote the record
+	-- (0: unknown, Studio).
 	dropped: number,
+	unknown: { [string]: number },
+	placeVersion: number,
 }
 
 local PlayerCodec = {}
@@ -162,6 +169,8 @@ function PlayerCodec.new(): Record
 		hunger = nil,
 		radiation = 0,
 		dropped = 0,
+		unknown = {},
+		placeVersion = 0,
 	}
 end
 
@@ -235,11 +244,15 @@ local function stores(record: Record): { { any } }
 end
 
 --[[
-	The record's bytes. `palette`: one to start from (default an empty one), its names keeping
+	The record's bytes, written by place version `place` (this server's game.PlaceVersion;
+	default 0, unknown). `palette`: one to start from (default an empty one), its names keeping
 	their indices: the specs' stand-in for a version whose content came in another order.
 ]]
-function PlayerCodec.encode(record: Record, palette: Palette?): buffer
+function PlayerCodec.encode(record: Record, place: number?, palette: Palette?): buffer
 	local names = palette or SaveCodec.palette()
+	if place then
+		names.place = place
+	end
 	-- (What follows the palette first, gathering it.)
 	local w = SaveCodec.writer(256)
 	local position = record.position and finite(record.x) and finite(record.y) and finite(record.z)
@@ -370,6 +383,8 @@ local function decode(bytes: buffer): Record
 	end
 	local palette = SaveCodec.readPalette(r)
 	local record = PlayerCodec.new()
+	-- (Counted into while the rest is read.)
+	record.placeVersion, record.unknown = palette.place, palette.unknown
 	local flags = SaveCodec.readU8(r)
 	if bit32.btest(flags, 1) then
 		record.position = true
@@ -510,9 +525,9 @@ function PlayerCodec.decode(bytes: buffer): (Record?, string?)
 	return nil, tostring(result)
 end
 
--- The record as the text World/WorldSave stores (base85).
-function PlayerCodec.toText(record: Record): string
-	return SaveCodec.toText(PlayerCodec.encode(record))
+-- The record as the text World/WorldSave stores (base85), written by place version `place`.
+function PlayerCodec.toText(record: Record, place: number?): string
+	return SaveCodec.toText(PlayerCodec.encode(record, place))
 end
 
 -- The record in stored text, or nil and why not.

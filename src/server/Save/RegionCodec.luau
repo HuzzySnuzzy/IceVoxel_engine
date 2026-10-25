@@ -36,7 +36,8 @@
 	removed or reordered between versions without moving a block. A region of version 1 or 2
 	(before palettes: ids that were another version's) is refused, never misread (SaveCodec.OLDER:
 	Save/WorldStore starts it afresh from the seed), and a newer one too (never written over).
-	 14 PALETTE    the palette (SaveCodec.writePalette), first
+	 14 PALETTE    the palette (SaveCodec.writePalette: the writer's place version, then the
+	               names), first
 	  1 EDITS      u16 chunk (lcx x RegionChunks + lcz, its place in the region), varint runs, then
 	               per run: varint gap (cells skipped since the last run's end: local indices are
 	               ChunkLayout's, x then z then y, so a dug tunnel or a wall is a few runs),
@@ -63,10 +64,12 @@
 	 13 THAW       the weather's ice (World/WorldServer's thaw map: what each cell thaws back
 	               to), as EDITS
 	Names this version doesn't know (a newer version's, or content since removed) are counted
-	(`dropped`) one by one: an edit of such a block becomes Air, a natural or thaw entry is left
-	out, a container of such a block goes (its stacks with it), a stack is dropped (or, for an id
-	in its data, that key), a pipe's or tank's fluid empties, a mob goes, an id in a container's
-	data becomes 0 (nothing: what the machine works on starts over).
+	(`dropped`, and by name in `unknown`) one by one: an edit of such a block becomes Air, a
+	natural or thaw entry is left out, a container of such a block goes (its stacks with it), a
+	stack is dropped (or, for an id in its data, that key), a pipe's or tank's fluid empties, a
+	mob goes, an id in a container's data becomes 0 (nothing: what the machine works on starts
+	over). The region's `placeVersion` (its writer's) tells Save/WorldStore which they are
+	(SaveCodec.newerNames).
 
 	Parts (`split` / `join`): a stream longer than a key holds is cut into parts of at most
 	`maxText` characters of base85 text each (4 bytes are 5 characters; the cuts fall anywhere,
@@ -143,8 +146,12 @@ export type Region = {
 	-- `thaw`).
 	thaw: { [number]: { [number]: number } },
 	-- What was left out while reading, one by one: names this version doesn't know (see the
-	-- header).
+	-- header), and each such name with how many things of it.
 	dropped: number,
+	unknown: { [string]: number },
+	-- Read: the place version of the server that wrote it (0: unknown, Studio; SaveCodec's
+	-- `newerNames` says whether what was left out may be a newer version's content).
+	placeVersion: number,
 }
 
 local RegionCodec = {}
@@ -235,6 +242,8 @@ function RegionCodec.new(rx: number, rz: number): Region
 		natural = {},
 		thaw = {},
 		dropped = 0,
+		unknown = {},
+		placeVersion = 0,
 	}
 end
 
@@ -399,11 +408,15 @@ end
 
 --[[
 	The region's bytes (records in a fixed order: the same region always encodes alike), its
-	palette first. `palette`: one to start from (default an empty one), its names keeping their
+	palette first, written by place version `place` (this server's game.PlaceVersion; default
+	0, unknown). `palette`: one to start from (default an empty one), its names keeping their
 	indices: the specs' stand-in for a version whose content came in another order.
 ]]
-function RegionCodec.encode(region: Region, palette: Palette?): buffer
+function RegionCodec.encode(region: Region, place: number?, palette: Palette?): buffer
 	local names = palette or SaveCodec.palette()
+	if place then
+		names.place = place
+	end
 	-- (The records first, gathering the palette, which goes before them.)
 	local w = SaveCodec.writer(4096)
 	local scratch = SaveCodec.writer(1024)
@@ -550,21 +563,21 @@ local function decodeEdits(r: Reader, region: Region, palette: Palette, into: { 
 	end
 	local runs = SaveCodec.readVarint(r)
 	local cell = 0
-	local block: number? = nil
-	local known = false
+	local saved: number? = nil
 	for _ = 1, runs do
 		cell += SaveCodec.readVarint(r)
 		local shape = SaveCodec.readVarint(r)
 		local length = shape // 2 + 1
 		if shape % 2 == 0 then
-			block = SaveCodec.idOf(palette, "block", SaveCodec.readVarint(r))
-			known = true
-		elseif not known then
+			saved = SaveCodec.readVarint(r)
+		elseif saved == nil then
 			error("run repeats no block", 0)
 		end
 		if cell + length > CELLS then
 			error("edit outside its chunk", 0)
 		end
+		-- (Looked up for each run: one this version doesn't know is counted cell by cell.)
+		local block = SaveCodec.idOf(palette, "block", saved :: number, length)
 		local placed = block or (if into == nil then AIR else nil)
 		if block == nil then
 			region.dropped += length
@@ -776,7 +789,11 @@ function RegionCodec.decode(bytes: buffer, rx: number?, rz: number?): Region
 			if palette then
 				error("a second palette in save", 0)
 			end
-			palette = SaveCodec.readPalette(inner)
+			local read = SaveCodec.readPalette(inner)
+			palette = read
+			region.placeVersion = read.place
+			-- (Counted into while the records are read.)
+			region.unknown = read.unknown
 		elseif palette == nil then
 			error(`record {tag} before the palette`, 0)
 		else

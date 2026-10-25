@@ -120,10 +120,13 @@ return function(t, shared, require, server, _client)
 		t.eq(SaveCodec.idOf(back, "mob", 1), COW)
 		t.eq(SaveCodec.idOf(back, "fluid", 1), LAVA)
 		t.ok(not pcall(SaveCodec.idOf, back, "block", 3), "an index past the palette is damage")
-		-- An empty palette is five counts.
+		-- An empty palette is its writer's place version and five counts (a byte each, place
+		-- versions below 128).
 		local empty = SaveCodec.writer()
-		SaveCodec.writePalette(empty, SaveCodec.palette())
-		t.eq(empty.n, #SaveCodec.PALETTE_KINDS)
+		SaveCodec.writePalette(empty, SaveCodec.palette(42))
+		t.eq(empty.n, 1 + #SaveCodec.PALETTE_KINDS)
+		t.eq(SaveCodec.readPalette(SaveCodec.reader(SaveCodec.finish(empty))).place, 42, "the writer's place version")
+		t.eq(back.place, 0, "none given: 0, unknown")
 	end)
 
 	t.test("save names: names are today's ids, renamed ones followed, unknown ones none", function()
@@ -148,6 +151,56 @@ return function(t, shared, require, server, _client)
 		t.eq(SaveCodec.idOf(back, "mob", 2), nil)
 		t.eq(SaveCodec.idOf(back, "effect", 1), Effects.id.Slowness)
 		t.eq(SaveCodec.idOf(back, "effect", 2), nil)
+	end)
+
+	t.test("save names: the writer's place version tells content since removed from a newer one's", function()
+		-- (Nothing left out: always written back.)
+		t.eq(SaveCodec.newerNames(0, 9, 7), false)
+		-- Left out by this place version, or an older one: content since removed (saved).
+		t.eq(SaveCodec.newerNames(3, 7, 7), false, "this version's")
+		t.eq(SaveCodec.newerNames(3, 6, 7), false, "an older version's")
+		-- A newer one's (an old server during an update), or either unknown (0, nil: Studio):
+		-- perhaps content this version lacks (never written back).
+		t.eq(SaveCodec.newerNames(3, 8, 7), true, "a newer version's")
+		t.eq(SaveCodec.newerNames(3, 0, 7), true, "written in Studio")
+		t.eq(SaveCodec.newerNames(3, 7, 0), true, "read in Studio")
+		t.eq(SaveCodec.newerNames(3, 7, nil), true, "read with no place version")
+		t.eq(SaveCodec.newerNames(3, 0, 0), true, "Studio and Studio: still unknown")
+		-- The server's notice: the most first, at most NOTICE_NAMES names.
+		t.eq(
+			SaveCodec.removedNotice(`world "Island"`, { OldItem = 3, OldBlock = 12 }),
+			`[IceVoxel] removed content left out of world "Island": 12 OldBlock, 3 OldItem`
+		)
+		t.eq(SaveCodec.countList({ B = 2, A = 2, C = 5 }), "5 C, 2 A, 2 B", "ties by name")
+		local many: { [string]: number } = {}
+		for i = 1, SaveCodec.NOTICE_NAMES + 3 do
+			many[`Gone{string.format("%02d", i)}`] = 1
+		end
+		t.eq(select(2, string.gsub(SaveCodec.countList(many), ",", ",")), SaveCodec.NOTICE_NAMES, "and 3 more")
+		t.ok(string.find(SaveCodec.countList(many), "and 3 more$") ~= nil)
+		-- Every record keeps its writer's place version and counts what it left out by name.
+		local region = RegionCodec.new(0, 0)
+		region.chunks[KEY] = { [0] = B.Stone, [1] = B.Glass, [2] = B.Glass, [3] = B.Glass }
+		local gone = function(kind: string, name: string): string
+			return if name == "Glass" then "OldGlass" elseif name == "Stick" then "OldStick" else name
+		end
+		local back = RegionCodec.decode(SaveNames.region(SaveCodec, RegionCodec.encode(region, 41), gone), 0, 0)
+		t.eq(back.placeVersion, 41)
+		t.eq(back.unknown.OldGlass, 3, "cell by cell")
+		t.eq(back.dropped, 3)
+		local player = PlayerCodec.new()
+		player.slots[1] = Items.newStack(I.Stick, 4)
+		player.slots[2] = Items.newStack(I.Stick, 1)
+		local read = PlayerCodec.decode(SaveNames.record(SaveCodec, PlayerCodec.encode(player, 42), gone)) :: any
+		t.eq(read.placeVersion, 42)
+		t.eq(read.unknown.OldStick, 2, "a stack each")
+		local character = CharacterCodec.new(1, "Ada", Characters.DEFAULT_DIFFICULTY, Appearance.default(), 0)
+		character.slots[1] = Items.newStack(I.Stick, 4)
+		local loaded =
+			CharacterCodec.decode(SaveNames.record(SaveCodec, CharacterCodec.encode(character, 43), gone)) :: any
+		t.eq(loaded.placeVersion, 43)
+		t.eq(loaded.unknown.OldStick, 1)
+		t.eq((CharacterCodec.decode(CharacterCodec.encode(character)) :: any).placeVersion, 0, "none given: unknown")
 	end)
 
 	--[[ Regions ]]
@@ -205,7 +258,7 @@ return function(t, shared, require, server, _client)
 		t.eq(table.concat(names.block, ","), "Stone,Glass,GlowBlock,Chest", "only what it holds, as first written")
 		t.eq(table.concat(names.mob, ","), "Cow")
 		-- (Content added since is names this save never held: nothing to read for it.)
-		local seeded = RegionCodec.encode(region, backwards())
+		local seeded = RegionCodec.encode(region, nil, backwards())
 		local seededNames = SaveNames.regionNames(SaveCodec, seeded)
 		t.eq(seededNames.block[1], Blocks.get(Blocks.count - 1).name, "numbered in another order than today's ids")
 		t.ok(seededNames.block[B.Stone] ~= "Stone" or B.Stone * 2 == Blocks.count, "Stone's index is not its id")
@@ -338,7 +391,7 @@ return function(t, shared, require, server, _client)
 			slots = {},
 			data = { 120, 1600, 33, 200, I.Stick },
 		})
-		local bytes = RegionCodec.encode(region, backwards())
+		local bytes = RegionCodec.encode(region, nil, backwards())
 		local back = RegionCodec.decode(bytes, 0, 0)
 		t.eq(back.dropped, 0)
 		t.eq(Machines.get(back.containers[1].container, "mining"), B.DiamondOre, "today's id of its name")
@@ -449,7 +502,7 @@ return function(t, shared, require, server, _client)
 		for i, stack in heldStacks() do
 			record.slots[i] = stack
 		end
-		local bytes = PlayerCodec.encode(record, backwards())
+		local bytes = PlayerCodec.encode(record, nil, backwards())
 		local back = PlayerCodec.decode(bytes) :: PlayerCodec.Record
 		t.eq(back.dropped, 0)
 		for i, stack in heldStacks() do

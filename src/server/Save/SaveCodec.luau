@@ -18,17 +18,24 @@
 	            block or an item another one (or none). A record's writer gathers the names of the
 	            blocks, items, fluids, mob kinds and effects it writes (`indexOf`: each id once,
 	            numbered 1.. in the order first written; 0 stays 0 for every kind: Air, no item,
-	            no fluid) and writes them once (`writePalette`: for each of PALETTE_KINDS in order,
-	            varint n + n texts), before what uses them; the reader (`readPalette`) maps each
-	            index to today's id of its name (`idOf`; blocks and items through Blocks.find and
-	            Items.find, so a RENAMED line keeps a renamed one). A name this version doesn't
-	            know (a newer version's, or content since removed) reads as nil: a block becomes
-	            air, an item is `lost`, a fluid or a mob is dropped, an effect skipped (each
-	            decoder says, and counts what is lost: a record holding such a name is never
-	            written back that session, Save/WorldStore), never a refused record. An index the
-	            palette doesn't have is a damaged save. So content can be added, removed and
-	            reordered between versions, and renamed with a RENAMED line; to retire a block or
-	            item for good, a RENAMED line names what it becomes.
+	            no fluid) and writes them once (`writePalette`: varint the writer's place version,
+	            then for each of PALETTE_KINDS in order varint n + n texts), before what uses
+	            them; the reader (`readPalette`) maps each index to today's id of its name
+	            (`idOf`; blocks and items through Blocks.find and Items.find, so a RENAMED line
+	            keeps a renamed one). A name this version doesn't know reads as nil: a block
+	            becomes air, an item is `lost`, a fluid or a mob is dropped, an effect skipped
+	            (each decoder says, and counts what it left out), never a refused record. An
+	            index the palette doesn't have is a damaged save. So content can be added,
+	            removed, renamed (with a RENAMED line) and reordered between versions.
+	  Unknown   which of two a name this version doesn't know is, the place version that wrote
+	            the record says (`newerNames`; the glue reads game.PlaceVersion once, 0 in Studio,
+	            and passes it in: WorldStore's Env `place`). From this place version or an older
+	            one: content since removed, left out, and the record saves as any other (the
+	            server says which names went, and how many: `removedNotice`). From a newer one
+	            (Roblox runs old and new servers side by side during an update) or when either
+	            version is unknown (0: Studio): perhaps content this version lacks, so the record
+	            plays but is never written back that session (Save/WorldStore, World/WorldSave,
+	            Players/CharacterStore): writing it would lose that content for good.
 	  Versions  every record starts with its version: one from a newer version is refused (NEWER:
 	            never written over), and so is one from an older one (OLDER), never misread: its
 	            ids were that version's. The callers start such a region, player or character
@@ -73,12 +80,16 @@ export type Stack = Items.Stack
 -- or "effect".
 export type PaletteKind = string
 export type Palette = {
+	-- The place version of the server that wrote it (game.PlaceVersion; 0: unknown, Studio).
+	place: number,
 	-- Each kind's names, index i the i-th.
 	names: { [PaletteKind]: { string } },
 	-- Today's id -> its index (written ids; a read palette's known names too).
 	index: { [PaletteKind]: { [number]: number } },
 	-- Index -> today's id of its name (false: a name this version doesn't know).
 	ids: { [PaletteKind]: { [number]: number | false } },
+	-- Reading: names this version doesn't know -> how many things were left out (`idOf`).
+	unknown: { [string]: number },
 }
 
 local SaveCodec = {}
@@ -338,9 +349,14 @@ local function findId(kind: PaletteKind, name: string): number?
 	return Effects.id[name]
 end
 
--- An empty palette (a record's writer starts with one).
-function SaveCodec.palette(): Palette
-	local palette: Palette = { names = {}, index = {}, ids = {} }
+-- A place version as kept: a whole number 0.. (anything else: 0, unknown).
+local function placeOf(value: any): number
+	return if type(value) == "number" and value >= 0 and value == math.floor(value) and value < 2 ^ 53 then value else 0
+end
+
+-- An empty palette, written by place version `place` (default 0: unknown).
+function SaveCodec.palette(place: number?): Palette
+	local palette: Palette = { place = placeOf(place), names = {}, index = {}, ids = {}, unknown = {} }
 	for _, kind in SaveCodec.PALETTE_KINDS do
 		palette.names[kind] = {}
 		palette.index[kind] = {}
@@ -377,21 +393,28 @@ end
 
 --[[
 	Today's id of index `index` of `kind` in a read `palette`: 0 for 0, nil for a name this version
-	doesn't know. Errors on an index the palette doesn't have (a damaged save).
+	doesn't know, then counted in the palette's `unknown` as `count` things (default 1) left out.
+	Errors on an index the palette doesn't have (a damaged save).
 ]]
-function SaveCodec.idOf(palette: Palette, kind: PaletteKind, index: number): number?
+function SaveCodec.idOf(palette: Palette, kind: PaletteKind, index: number, count: number?): number?
 	if index == 0 then
 		return 0
 	end
 	local id = palette.ids[kind][index]
 	if id == nil then
 		error("bad palette index in save", 0)
+	elseif type(id) == "number" then
+		return id
 	end
-	return if type(id) == "number" then id else nil
+	local name = palette.names[kind][index]
+	palette.unknown[name] = (palette.unknown[name] or 0) + (count or 1)
+	return nil
 end
 
--- Writes `palette`'s names (for each of PALETTE_KINDS: varint n, then n texts).
+-- Writes `palette`: the writer's place version, then its names (for each of PALETTE_KINDS:
+-- varint n, then n texts).
 function SaveCodec.writePalette(w: Writer, palette: Palette)
+	SaveCodec.varint(w, placeOf(palette.place))
 	for _, kind in SaveCodec.PALETTE_KINDS do
 		local names = palette.names[kind]
 		SaveCodec.varint(w, #names)
@@ -403,7 +426,7 @@ end
 
 -- A palette `writePalette` wrote, each name mapped to today's id (false: none by that name).
 function SaveCodec.readPalette(r: Reader): Palette
-	local palette = SaveCodec.palette()
+	local palette = SaveCodec.palette(SaveCodec.readVarint(r))
 	for _, kind in SaveCodec.PALETTE_KINDS do
 		local names, index, ids = palette.names[kind], palette.index[kind], palette.ids[kind]
 		for i = 1, SaveCodec.readVarint(r) do
@@ -417,6 +440,62 @@ function SaveCodec.readPalette(r: Reader): Palette
 		end
 	end
 	return palette
+end
+
+--[[ Unknown names: content since removed, or a newer version's ]]
+
+--[[
+	Whether the names a record left out may be content this version lacks, so this server must
+	never write the record back this session: it left something out (`dropped` > 0) and was
+	written by place version `writer` that is newer than this server's (`mine`), or either is
+	unknown (0, nil: Studio). Otherwise (`dropped` 0, or written by this place version or an older
+	one) the names are content since removed and the record saves as any other.
+]]
+function SaveCodec.newerNames(dropped: number, writer: number?, mine: number?): boolean
+	if dropped <= 0 then
+		return false
+	end
+	local written, running = placeOf(writer), placeOf(mine)
+	return written == 0 or running == 0 or written > running
+end
+
+-- Most names a notice lists.
+SaveCodec.NOTICE_NAMES = 10
+
+-- `counts` (name -> things left out) as a list, the most first: "12 OldBlock, 3 OldItem".
+function SaveCodec.countList(counts: { [string]: number }): string
+	local names: { string } = {}
+	for name in counts do
+		table.insert(names, name)
+	end
+	table.sort(names, function(a: string, b: string): boolean
+		if counts[a] ~= counts[b] then
+			return counts[a] > counts[b]
+		end
+		return a < b
+	end)
+	local parts: { string } = {}
+	for i = 1, math.min(#names, SaveCodec.NOTICE_NAMES) do
+		table.insert(parts, `{counts[names[i]]} {names[i]}`)
+	end
+	if #names > SaveCodec.NOTICE_NAMES then
+		table.insert(parts, `and {#names - SaveCodec.NOTICE_NAMES} more`)
+	end
+	return table.concat(parts, ", ")
+end
+
+-- The server's output line for content since removed that a load left out of `what` (`world
+-- "Island"`, a player's things): "[IceVoxel] removed content left out of ...: 12 OldBlock,
+-- 3 OldItem".
+function SaveCodec.removedNotice(what: string, counts: { [string]: number }): string
+	return `[IceVoxel] removed content left out of {what}: {SaveCodec.countList(counts)}`
+end
+
+-- Adds `from`'s counts to `into`'s.
+function SaveCodec.addCounts(into: { [string]: number }, from: { [string]: number })
+	for name, count in from do
+		into[name] = (into[name] or 0) + count
+	end
 end
 
 --[[ Stacks ]]

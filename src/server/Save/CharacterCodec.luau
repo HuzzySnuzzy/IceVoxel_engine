@@ -35,8 +35,11 @@
 	            [4 x f32 hunger], [f32 dose] (only above 0). 100 bytes to 3 KB: far below a
 	            key's 4 MB. Decoding checks every number; anything odd is a damaged record (nil);
 	            names this version doesn't know are left out: an item is dropped and counted
-	            (`dropped`, as PlayerCodec's: such a record is not written back this session), an
-	            effect skipped.
+	            (`dropped`), an effect skipped, each name counted in `unknown`; as PlayerCodec's,
+	            the palette carries the writer's place version (`placeVersion`), which says
+	            whether they may be a newer version's content (then the record is not written
+	            back this session) or content since removed (it saves: SaveCodec.newerNames,
+	            Save/CharacterSaves.writesBack).
 	  Versions  5 keeps names (the palette). Versions 1 to 4 (before it: their ids were that
 	            version's) wrote the same head right after the version byte, with no ids in it:
 	            of such a record only the head is read (`outdated`: who the character is, its
@@ -112,8 +115,12 @@ export type Record = {
 	hunger: PlayerCodec.Hunger?,
 	-- The radiation dose (Sv; 0: none).
 	radiation: number,
-	-- Stacks of items this version doesn't know, left out while reading (never written).
+	-- Read: stacks of items this version doesn't know, left out (never written), each such name
+	-- (effects' too) with how many things of it, and the place version that wrote the record
+	-- (0: unknown, Studio, or an older version's record).
 	dropped: number,
+	unknown: { [string]: number },
+	placeVersion: number,
 	-- Read from an older version's record: only its head (who it is) came back, its things
 	-- started afresh (see the header's Versions).
 	outdated: boolean,
@@ -187,6 +194,8 @@ function CharacterCodec.new(
 		hunger = nil,
 		radiation = 0,
 		dropped = 0,
+		unknown = {},
+		placeVersion = 0,
 		outdated = false,
 	}
 end
@@ -257,11 +266,15 @@ local function writeFields(w: SaveCodec.Writer, values: any, fields: { string })
 end
 
 --[[
-	The record's bytes. `palette`: one to start from (default an empty one), its names keeping
+	The record's bytes, written by place version `place` (this server's game.PlaceVersion;
+	default 0, unknown). `palette`: one to start from (default an empty one), its names keeping
 	their indices: the specs' stand-in for a version whose content came in another order.
 ]]
-function CharacterCodec.encode(record: Record, palette: SaveCodec.Palette?): buffer
+function CharacterCodec.encode(record: Record, place: number?, palette: SaveCodec.Palette?): buffer
 	local names = palette or SaveCodec.palette()
+	if place then
+		names.place = place
+	end
 	-- (The head and the rest first, gathering the palette, which goes before them.)
 	local w = SaveCodec.writer(512)
 	local dose = record.radiation
@@ -419,6 +432,8 @@ local function decode(bytes: buffer): Record
 	end
 	local palette = SaveCodec.readPalette(r)
 	local record, flags = readHead(r)
+	-- (Counted into while the rest is read.)
+	record.placeVersion, record.unknown = palette.place, palette.unknown
 	local health, maxHealth, mana = SaveCodec.readF32(r), SaveCodec.readF32(r), SaveCodec.readF32(r)
 	if not (finite(health) and finite(maxHealth) and finite(mana)) then
 		error("bad health or mana", 0)
@@ -515,9 +530,9 @@ function CharacterCodec.decode(bytes: buffer): (Record?, string?)
 	return nil, tostring(result)
 end
 
--- The record as base85 text.
-function CharacterCodec.toText(record: Record): string
-	return SaveCodec.toText(CharacterCodec.encode(record))
+-- The record as base85 text, written by place version `place`.
+function CharacterCodec.toText(record: Record, place: number?): string
+	return SaveCodec.toText(CharacterCodec.encode(record, place))
 end
 
 -- The record in stored text, or nil and why not.
@@ -534,9 +549,20 @@ end
 
 --[[ The DataStore values ]]
 
--- The value of a character's key: its bytes, its progress (Progression.toRecord) and its lock.
-function CharacterCodec.value(record: Record, progress: unknown?, lock: SaveLock.Lock?): { [string]: any }
-	return { v = CharacterCodec.VALUE_VERSION, data = CharacterCodec.toText(record), progress = progress, lock = lock }
+-- The value of a character's key: its bytes (written by place version `place`), its progress
+-- (Progression.toRecord) and its lock.
+function CharacterCodec.value(
+	record: Record,
+	progress: unknown?,
+	lock: SaveLock.Lock?,
+	place: number?
+): { [string]: any }
+	return {
+		v = CharacterCodec.VALUE_VERSION,
+		data = CharacterCodec.toText(record, place),
+		progress = progress,
+		lock = lock,
+	}
 end
 
 --[[

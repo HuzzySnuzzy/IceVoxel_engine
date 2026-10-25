@@ -77,9 +77,15 @@ A fast, Minecraft-style voxel engine for Roblox.
   keep names, not ids, so content can change between versions: each region, player record and
   character lists once the names of the blocks, items, fluids, mobs and effects it holds (and
   those inside machines and items: a miner's ore, a gun's rounds, a tank's fluid), so content
-  added, reordered or renamed (with a `RENAMED` line) loads just as it was saved; a name this
-  version doesn't know (a newer version's, or content removed) loads as air or is left out, never
-  refusing the world, which is then played but not saved. Worlds, players and characters saved
+  added, reordered or renamed (with a `RENAMED` line) loads just as it was saved. A name this
+  version doesn't know loads as air or is left out, never refusing the world; each record also
+  keeps the place version that wrote it, which says what the name is: content removed since (in
+  a record this version or an older one wrote) is simply gone, the world, player or character
+  saves as usual and the server's output names what went ("removed content left out of world
+  "Island": 12 OldBlock, 3 OldItem"); content of a newer version (Roblox runs old and new servers
+  side by side during an update, or the version is unknown, as in Studio) leaves that world,
+  player or character played but not saved, so nothing a newer version wrote is ever lost.
+  Worlds, players and characters saved
   before names were kept are not read: such a world's terrain and chests start afresh from its
   seed (its name, seed, settings and clock stay), a player starts afresh, and a character keeps
   its name, look and progress but not its things; each says so.
