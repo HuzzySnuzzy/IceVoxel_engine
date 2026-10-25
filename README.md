@@ -2175,20 +2175,25 @@ or random ticks; Peaceful spawns no monsters in any world.
 ```
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
-  Content/                  content packs: the loader (discovery, order, ids, overrides, every
-                            check), Schema (each kind's fields and types), Define (the helpers
-                            packs share: metal(), models, recipes), Packs/ (Core, Base, Ores)
-  Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
-                            drops, menus, how long zombies take to break them), plants (soil
-                            sets, tall halves, foliage tints), each block's textures per face
-                            from the pack (`variantTexture`, `alignLut`); Toggles (blocks a use
-                            swaps: the bunker hatch)
+  Content/                  content packs: the loader (discovery, order, ids, overrides, kind
+                            folders, every check), Schema (each kind's fields and types), Define
+                            (the helpers packs share: models, tools and armor, fluids, plants,
+                            doors, recipes, metal()), Packs/ (Core, Minecraft, Mekanism,
+                            Survival, Terraria, Apocalypse, Turrets, Ores: every block, item,
+                            recipe, texture and loot table)
+  Blocks/  BlockList        the block registry (BlockList: the packs' blocks, merged) -> ids,
+                            appearances, lookup tables (hardness, tools, drops, menus, how long
+                            zombies take to break them), plants (soil sets, tall halves, foliage
+                            tints), each block's textures per face from the pack
+                            (`variantTexture`, `alignLut`); Toggles (blocks a use swaps: the
+                            bunker hatch)
   TexturePack               the texture pack: every block texture (maps, Material, Tint, Average)
-                            and the texture of each block's faces; hand-edited, pure data
+                            and the texture of each block's faces, from the packs' textures
   Items/                    the item registry, stacks and item data (validation, tooltip lines,
                             Mekanism's energy and fluid formats, what a full bucket leaves);
-                            ItemList (items that are not blocks); Tooltip (every line of an
-                            item's tooltip) and LoreList (every item's lore line)
+                            ItemList (the packs' items that are not blocks, merged); Tooltip
+                            (every line of an item's tooltip) and LoreList (the lore lines no
+                            entry carries yet)
   Fluids/  FluidList        the fluid registry: water, lava, oil and fuel by id (0 none .. 4 fuel),
                             their blocks and cave twins, buckets, colour, light, movement, harm,
                             furnace fuel, fog and bucket sounds
@@ -2212,9 +2217,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             Conditioner and the Electric Fan; Turret, the twelve turrets; Miner,
                             the Metal Miner; AmmoPress, the Ammo Press), MinerRules (the Metal
                             Miner's ores, their drops and numbers, its state code)
-  Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel; a
-                            recipe may keep an ingredient's data), Crafting (grid matching),
-                            Smelting (the furnace tick; the Lava Bucket's burn time)
+  Crafting/                 Recipes (the packs' recipes, merged: shaped, shapeless, smelting and
+                            fuel; a recipe may keep an ingredient's data), Crafting (grid
+                            matching), Smelting (the furnace tick; the Lava Bucket's burn time)
   Inventory/                Types (inventory, window, action shapes; Terraria's equipment stores
                             and hide bits), Menu (Minecraft's inventory clicks and the equipment
                             slots' rules, used by the server and for client prediction)
@@ -3355,14 +3360,19 @@ other registries used to keep in tables of their own: `lore`, `texture`, `icon`,
 `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`... (`Content/Schema` lists
 them all, and a misspelt field is an error naming the pack and the entry). Ids are given at load
 in pack order, so content may be added anywhere; `override = true` patches another pack's entry.
-What BlockList, ItemList and Recipes held is the Base pack (`Content/Packs/Base/blocks.luau`,
-`items.luau`, `recipes.luau`...), where the examples below still apply; `Content/Packs/Ores` is a
-whole feature (the new ores, the Hazmat suit) in a pack of its own, the worked example.
+A kind may also be a folder of files merged in name order (`Minecraft/blocks/terrain.luau`,
+`blocks/plants.luau`...: a file a feature), so adding content may be adding a file. The game's
+content is feature packs: Core (air, the Ages, the base tags), Minecraft, Mekanism, Survival
+(Tough As Nails and the seasons), Terraria, Apocalypse, Turrets and Ores; each `pack` manifest
+says what is in which file and where its code lives, and the examples below go in any of them.
+`Content/Packs/Ores` is a whole feature (the new ores, the Hazmat suit) in a pack of its own, the
+worked example.
 `lune run tests/content new <Pack>` starts a pack with an example of each kind, and
 `lune run tests/content` says what a pack is missing (the content tool, under Development).
 
-**A block.** Add an entry to a pack's blocks: the Base pack's `src/shared/Content/Packs/Base/
-blocks.luau`, or a pack of your own (above; ids are given at load, so it may go anywhere):
+**A block.** Add an entry to a pack's blocks: a file of the Minecraft pack's `src/shared/Content/
+Packs/Minecraft/blocks/` (`building.luau` for a building block), or a pack of your own (above;
+ids are given at load, so it may go anywhere):
 
 ```lua
 table.insert(list, { name = "Marble", color = { 235, 235, 230 }, material = "Marble" })
@@ -3428,7 +3438,7 @@ recordings (`GENERIC_BREAK`, `GENERIC_PLACE` in SoundList, given to every type a
 volume, pitch and variance, so each material still sounds its own), with the `dig` thud as their
 fallback should one fail to load; glass keeps its shatter for breaking and water its splash. Swap
 them there, or override one type (`block.stone.break`) or all (`block.break`, `block.place`) with
-a Sound. A block's sound type is its `sound` in BlockList (`sound = "metal"`), else its
+a Sound. A block's sound type is its entry's `sound` (`sound = "metal"`), else its
 material's.
 
 Eating and drinking loop the data sheet's recordings (`entity.generic.eating` and
@@ -3520,16 +3530,16 @@ Moods = { "rbxassetid://...", ... },                         -- Minecraft's ambi
   table for the next sheet so the same checks run on it.
 
 **Pipes and tanks.** A transmitter is a block with `transmitter = { kind = "item" | "fluid", tier =
-1..4, restrictive = true? }` and a tank one with `tank = { tier, capacity }` in BlockList; the
+1..4, restrictive = true? }` and a tank one with `tank = { tier, capacity }` on its entry; the
 per-tier numbers are Mekanism's, in `src/shared/Transmitters/Tiers.luau`. Any block with
 `container` slots is an inventory transporters connect to (all slots from every side, unless it is
 a furnace, `menu = "Furnace"`). Pipes and tanks carry every fluid of `Shared/Fluids` whose record
 says `carriable`.
 
 **A fluid.** Append it to `src/shared/Fluids/FluidList.luau` (ids are list positions, sent and
-saved in items: at the end, and at most 255), its blocks with `fluid("<Name>", { color, material,
-... }, tickDelay)` at the end of BlockList (the same colour and light as its record), its full
-bucket at the end of ItemList, and its flow rules to `RULES` in `src/server/Behaviours/Fluid.luau`
+saved in items: at the end, and at most 255), its blocks with `define.fluid("<Name>", { color,
+material, ... }, tickDelay)` in a pack's blocks (the same colour and light as its record), its
+full bucket in the pack's items, and its flow rules to `RULES` in `src/server/Behaviours/Fluid.luau`
 (slope distance, drop off, infinite sources, whether what it washes away burns). The registry and
 the flow rules check they agree when the game loads. Its record decides the rest: `color` (pipes,
 tanks, gauges, JEI), `light` (a lit fluid gets sparse lights and glows in pipes), `physics` /
@@ -3538,7 +3548,7 @@ tanks, gauges, JEI), `light` (a lit fluid gets sparse lights and glows in pipes)
 `fogEnd` (the view from inside it) and its bucket sounds.
 
 **A machine.** A machine is a block with `machine = { kind = "name" }` and `energy = { capacity =
-J, input = J/t?, output = J/t? }` in BlockList (output only: a generator; input only: a machine
+J, input = J/t?, output = J/t? }` on its entry (output only: a generator; input only: a machine
 that uses energy; both: a battery). Its kind is a module in `src/shared/Machines/Kinds/`,
 required from `Machines/init.luau`:
 
@@ -3604,7 +3614,7 @@ checked at load); without `placeable = false` it is an item of its own and drops
 player and lets falling sand land on it; `sturdy = false` keeps torches and lanterns off a solid
 cube (leaves, chests, cactus).
 
-**A plant.** Add it through BlockList's `plant()` helper with `plant = { soil = "dirt" }` (or
+**A plant.** Add it through Content/Define's `plant()` helper with `plant = { soil = "dirt" }` (or
 `"deadbush"`, `"mushroom"`: the soil set it stands on, `Blocks.mayPlaceOn`); the helper fills in
 the rest (not solid, instant, grass sounds, `support = "Down"`, `brokenByFluid`, `behaviour =
 "Plant"`, `scatter`). A tall plant is two entries: the lower half with `plant = { soil = "dirt",
@@ -3618,24 +3628,25 @@ two crossed images instead of its boxes. From your own
 server scripts place a tall plant with `EditRules.setPlaced(world, x, y, z, block)`:
 `world:setBlock` sets only the half you give it, and a half alone pops on the next tick. A plant
 planted by an item that is not itself (seeds, berries, the herbs' leaves and roots) is
-`placeable = false` in BlockList and named by that item's `places` in ItemList (Minecraft's
+`placeable = false` on its entry and named by that item's `places` (Minecraft's
 ItemNameBlockItem): the item places it, is its drop and is what pick block takes, and keeps its
-own model (BlockList Mint and ItemList MintLeaves). A plant that spreads by itself gets a
+own model (the Survival pack's Mint and MintLeaves). A plant that spreads by itself gets a
 behaviour of its own that keeps Plant's `onTick` and adds `onRandomTick` (`Behaviours/Herb`).
 Generation grows it from a biome's `foliage` lists (`plants`, `flowers`, or `herbs` for rare
 patches of their own; BiomeList).
 
-**An item.** Items that are not blocks (armor, tools, materials) live in
-`src/shared/Items/ItemList.luau` (again appended at the end). They are drawn from boxes measured
+**An item.** Items that are not blocks (armor, tools, materials) are a pack's `items` (the
+Minecraft pack's `items/tools.luau`, `items/materials.luau`...). They are drawn from boxes measured
 in pixels (1/16 block), so icons, dropped items and hands show them without any assets.
 
-**A recipe.** `src/shared/Crafting/Recipes.luau` lists them by item name, like Minecraft's data
-files:
+**A recipe.** A pack's `recipes` list them by item name, like Minecraft's data files (the
+Minecraft pack's `recipes/` folder, a file a feature; a function-form module gets the helpers as
+`define.shaped`, `define.shapeless` and `define.smelting`):
 
 ```lua
-shape({ "##", "##" }, { ["#"] = "Marble" }, "MarbleBricks", 4) -- shaped, anywhere in the grid
-mix({ "Marble", "Coal" }, "DarkMarble")                       -- shapeless
-smelt("Marble", "SmoothMarble")                               -- furnace
+define.shaped({ "##", "##" }, { ["#"] = "Marble" }, "MarbleBricks", 4) -- anywhere in the grid
+define.shapeless({ "Marble", "Coal" }, "DarkMarble")
+define.smelting("Marble", "SmoothMarble")                               -- furnace
 ```
 
 **A zombie kind (or any mob).** Append a kind to `src/shared/Entities/MobList.luau` (ids are list
@@ -3797,7 +3808,7 @@ its filled top stands in for them), on blank tops, and on blank plant sprites an
 blank bottom, or blank sides under a filled top, show the block's texture as above unless they are
 drawn as images of their own: bottoms with `Config.Textures.BottomFaces`, sides with `SideImages`.
 
-**Tint** makes a texture take the voxel colour (BlockList `color`):
+**Tint** makes a texture take the voxel colour (the block's `color`):
 - `true` (the default): the colour of the block it is drawn on, so one light image serves every
   wood: `"log"`, `"planks"` and `"leaves"` show oak, birch, spruce, acacia and jungle each in its
   own colour, and dry grass shows the grass top in its own colour;
@@ -4163,7 +4174,7 @@ The example outpost is a complete jigsaw structure to copy: its pieces are built
 later) and/or `onRandomTick(world, ticker, x, y, z, block, random)` (random ticks) and set
 `behaviour = "YourModule"` on the block.
 
-**A flammable block.** Give it `flammable = { ignite = 5, burn = 20 }` in BlockList (Minecraft's
+**A flammable block.** Give its entry `flammable = { ignite = 5, burn = 20 }` (Minecraft's
 FireBlock odds: wooden blocks 5 / 20, wool 30 / 60, plants 60 / 100); fire then clings to it,
 spreads next to it, burns it away and lava sets it alight. From a server script, `Fire.ignite(world,
 x, y, z)` (`ServerScriptService.IceVoxel.Behaviours.Fire`) lights a fire anywhere, and
@@ -4214,9 +4225,9 @@ bowls are:
 [I.Bowl] = I.DirtyWaterBowl,
 -- Drinks.PURIFIED_OF
 [I.DirtyWaterBowl] = I.PurifiedWaterBowl,
--- Crafting/Recipes: the furnace and mint
-smelt("DirtyWaterBowl", "PurifiedWaterBowl")
-mix({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl")
+-- The Survival pack's recipes: the furnace and mint
+define.smelting("DirtyWaterBowl", "PurifiedWaterBowl")
+define.shapeless({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl")
 ```
 
 A drink of its own (the teas, a juice) is an `ITEMS` entry with a `Drink` and the container it
@@ -4227,12 +4238,11 @@ Every `PURIFIED_OF` pair also boils clean on a Campfire (`ToughAsNails/Boiling`)
 JEI's Campfire tab, with nothing more to add.
 
 **Insulating armor (Tough As Nails).** An armor piece's `tan = { warmth = n, cooling = n,
-freezeImmune = true }` in ItemList: `warmth` steps pull a cold target up towards 0, `cooling`
+freezeImmune = true }` on its entry: `warmth` steps pull a cold target up towards 0, `cooling`
 steps pull a hot one down, never past it; `freezeImmune` stops hypothermia (leather has it). A
 full set at 2 a piece keeps a tundra (-10) neutral (-2); straw (warmth 1) and leaf (cooling 1)
-sets are made the same way, from `INSULATING_ARMOR` at the end of ItemList (a material entry:
-name, colour, material, points, toughness and `tan`; new materials go there, never into the
-`ARMOR` table at the top, whose ids must not move).
+sets are made the same way, by Content/Define's `armorSet` in the Survival pack's
+`items/gear.luau` (a material: name, colour, material, points, toughness and `tan`).
 
 **A status effect.** Append it to `src/shared/Effects/EffectList.luau` (ids are list positions,
 sent in the Effects message: at the end) with its name, `/effect` id, colour, category and HUD
@@ -4271,9 +4281,9 @@ add. Leave `seconds` out for an instant effect (`strong = true` for its II).
 "head"` (the eyes in it), `when = "left"` (given on leaving it) and `after = 3` (only after 3 s in
 it without a break). Effects with `washOff` come off in a fluid that `extinguishes` (water).
 
-**Blast resistance.** A block's `blastResistance` in BlockList is Minecraft's explosion resistance;
-leave it out and it is the block's hardness (unbreakable blocks 3,600,000). Minecraft's values
-that differ from the hardness are in `BLAST_RESISTANCE` at the end of BlockList. A fluid other
+**Blast resistance.** A block's `blastResistance` is Minecraft's explosion resistance; leave it
+out and it is the block's hardness (unbreakable blocks 3,600,000). Minecraft's values that differ
+from the hardness are on those entries (the stone family 6, obsidian 1200...). A fluid other
 than fuel resists 100, so blasts in it break nothing. What else sets fuel off is
 `World/FuelBlast.isHot` (fire and lava).
 

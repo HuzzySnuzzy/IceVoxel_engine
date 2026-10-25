@@ -1,14 +1,15 @@
 --[[
 	Content packs (Shared/Content, Content/Schema, Content/Define): the game's packs (Core, the
-	feature packs, Ores last) and the ids they give; discovery of Luau and JSON packs through Content.load (the fixture
-	packs in tests/fixtures/content/packs: Beta, JSON, order 10; Alpha, Luau, order 20, a "_"
-	helper and Define's metal; Gamma, order 20 after Alpha by name, overriding both), their order,
-	ids, overrides and merged tags; kind folders (tests/fixtures/content/folders: Delta, Luau, a
-	folder inside a kind folder; Epsilon, JSON), their modules' order and the files every message
-	names; every per-entry field reaching its registry (the Fields fixture
-	pack grafted into a fresh game); and every check: the schema's (unknown fields with their "did
-	you mean", wrong types, missing fields), names and overrides, manifests and `requires`, every
-	cross-reference, discovery's, and a value both on an entry and in a registry's side table.
+	feature packs, Ores last) and the ids they give; discovery of Luau and JSON packs through
+	Content.load (the fixture packs in tests/fixtures/content/packs: Beta, JSON, order 10; Alpha,
+	Luau, order 20, a "_" helper and Define's metal; Gamma, order 20 after Alpha by name,
+	overriding both), their order, ids, overrides and merged tags; kind folders
+	(tests/fixtures/content/folders: Delta, Luau, a folder inside a kind folder; Epsilon, JSON),
+	their modules' order and the files every message names; every per-entry field reaching its
+	registry (the Fields fixture pack grafted into a fresh game); and every check: the schema's
+	(unknown fields with their "did you mean", wrong types, missing fields), names and overrides,
+	manifests and `requires`, every cross-reference, discovery's, and a value both on an entry and
+	in a registry's side table.
 
 	Nothing here pins an id or a total: the game's content may grow.
 ]]

@@ -26,9 +26,11 @@ content of its own:
 
 ```
 Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, lore
-   │                   (each a .luau module, its data or function(define) -> data, or a .json file)
-   │  Content.load: find the packs, sort by (order, name), require each kind, check it (Schema),
-   │                merge, check every cross-reference, give ids by place
+   │                   (each a .luau module, its data or function(define) -> data, or a .json
+   │                   file; or a kind folder of them: Minecraft/blocks/terrain, .../plants...)
+   │  Content.load: find the packs, sort by (order, name), require each kind (a kind folder's
+   │                files in name order), check it (Schema), merge, check every cross-reference,
+   │                give ids by place
    ▼
 Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePack (textures, faces, icons)
                 ─► Items/ItemList ─► Items (loot)       ─► Items/LoreList ─► Tooltip
@@ -49,7 +51,19 @@ helpers and Config, for packs that build entries or read switches), or a `.json`
 makes one a ModuleScript returning its table; the Lune loader does the same and skips Rojo's
 `.model.json`, `.meta.json` and `.project.json`). Any other module in a pack is an error (a
 misspelt kind would be ignored), unless its name starts with `_`: the pack's own helpers, which its
-modules require (the Ores pack's `_metals`).
+modules require (the Ores pack's `_metals`, the Minecraft pack's `_shapes` and `_models`).
+
+**Kind folders.** A kind may instead be a folder of the kind's name (`Minecraft/blocks/`), as
+Minecraft's data packs keep a file per recipe or loot table: each module in it (Luau, a function
+of `define`, or JSON) holds part of the kind, and they merge in their names' order, a folder
+inside it (`blocks/plants/`) in its place among them, depth first. A list kind's files append to
+each other (so a pack's blocks are its files' in name order); a named kind's (textures, loot,
+lore) may not name one thing twice; tags join as across packs. Every message names the file:
+"pack Minecraft, blocks/plants, block Poppy" (`content.where` too). A pack has a kind as a module
+or as a folder, not both, and a kind folder holds only modules and folders: helpers (`_`) stay at
+the pack's top. The big packs use them, a file a feature (Minecraft's `blocks/terrain`,
+`blocks/wood`, `items/tools`, `recipes/smelting`, `textures/ores`...), so adding content may be
+adding a file.
 
 **Order and ids.** Packs load sorted by `order`, then by name, and a pack's entries keep their
 order; a pack's `requires` must load before it. A block's id is its place among every pack's
@@ -58,7 +72,11 @@ air), an item's ITEM_BASE (4096, now `Content.ITEM_BASE`) + its place among the 
 placeable block is an item with its block's id, as before), dense and given at load: no
 append-only rule, no positions to keep. There must be fewer blocks than ITEM_BASE (checked by
 Content and by Items). Every machine loads the same packs in the same order, so client and server
-agree on every id; saves still hold ids until they keep names (the saves phase).
+agree on every id; saves still hold ids until they keep names (the saves phase). Nothing may lean
+on where an entry stands: ids, the creative order (`Items.list`: blocks by id, then items) and
+JEI's fuel list follow the packs and their files' names, so code finds content by name (the
+turrets' blocks, the fluids Fluids names, a calibre's default round: WeaponList `default`), and a
+cave twin may stand before or after its block (Blocks resolves twins in a second pass).
 
 **Merging.** Blocks and items merge by name: an entry with `override = true` patches the entry of
 that name an earlier pack made, field by field, keeping its place and id (`{ name = "Stone",
@@ -68,7 +86,7 @@ override patches a texture's fields: a resource pack's new picture). Tags are a 
 lists in load order, then every entry's `tags`, each name once (an entry's `tags = { "coals" }`
 joins Core's tag). Recipes, ore features (each named once) and Ages (each id once) append in load
 order; loot tables and lore lines are named once. `content.where(kind, name)` says where a thing
-came from ("pack Base (patched by Gamma), block Stone") for every message.
+came from ("pack Minecraft (patched by Clash), blocks/terrain, block Stone") for every message.
 
 **Per-entry fields.** Each replaces a side table a registry kept by name, and reaches it as
 before (`tests/spec/Content` checks each one end to end):
@@ -91,7 +109,7 @@ before (`tests/spec/Content` checks each one end to end):
 | `sounds = { [action] = event }` | block | Sounds (SoundList.BLOCK_SOUNDS) |
 | `equipSound` | armor item | Sounds.armorEquip (SoundList.ARMOR's prefixes) |
 | `loot` (a loot table's name or pools) | block | Items.lootDrop (Items' leafDrop, randomDrop and STRAW_CHANCE rules) |
-| `blastResistance`, `zombieBreak`, `flammable` | block | (already fields; the Base pack's BLAST_RESISTANCE, ZOMBIE_BREAK and fire odds set them by name) |
+| `blastResistance`, `zombieBreak`, `flammable` | block | (already fields; each entry gives its own now: BlockList's old BLAST_RESISTANCE, ZOMBIE_BREAK and fire odds by name suffix are gone) |
 
 A block's `loot` is Minecraft's block loot table in short: when a player breaks it by hand or
 with a tool that harvests it (not Shears; server Network/EditRules) and when it drops by itself
@@ -125,43 +143,88 @@ yet; naming a thing both there and on its entry is an error): LoreList's table; 
 Knowledge.ORES and SMELTED; MinerRules' `NAMES` with Config.Miner.Ores; Config.Radiation.Sources,
 Shielding (by name) and Hazmat (all empty now but Solid); Recipes' `LEGACY_FUEL`;
 Config.ToughAsNails.HeatingBlocks and CoolingBlocks; SoundList.BLOCK_SOUNDS and ARMOR; Items'
-leafDrop / randomDrop / STRAW_CHANCE rules; and inside the Base pack its BLAST_RESISTANCE,
-ZOMBIE_BREAK and fire odds (which touch only Base's own blocks; a block both in BLAST_RESISTANCE or
-ZOMBIE_BREAK and with the field on its entry is an error) and its generators.
+leafDrop / randomDrop / STRAW_CHANCE rules.
 
-**The packs.**
-- **Core** (order 0): Air and Cave Air, the Ages (`ages`: stone, iron, industrial, electric,
-  atomic) and the base tags (planks, logs, leaves, coals, tulips, stone tool and crafting
-  materials).
-- **Base** (order 100, requires Core): everything the game had before packs, as it was:
-  BlockList's, ItemList's and Recipes' lists are its `blocks`, `items` and `recipes` (unchanged,
-  in their old order, so no id moved), TexturePack's sheet its `textures`, ScavengeLoot's tables and
-  the mineshafts' its `loot` (`mineshaft`), Generation/Ores' stones, vanilla ores and osmium its
-  `ores`. `Blocks.BlockList`, `Items.ItemList` and `Crafting.Recipes` remain, as the merged lists
-  (BlockList and ItemList re-export the types from Schema). Its features move out into packs of
-  their own (Minecraft, Mekanism, the seasons, the apocalypse, turrets...).
-- **Ores** (order 200, requires Core and Base): the new ores, the worked example of a feature in
+**The packs.** Each manifest's header says what the pack adds, file by file, where the code
+for it lives, and the calls made placing things (what went where when a feature's things are
+another's too); every feature is behind the same switches as before.
+- **Core** (order 0): Air and Cave Air (ids 0 and 1), the Ages (`ages`: stone, iron, industrial,
+  electric, atomic), the base tags (planks, logs, leaves, coals, tulips, stone tool and crafting
+  materials) and the texture pack's missing texture.
+- **Minecraft** (100, requires Core): vanilla 1.20.1 as the game has it, kind folders a feature a
+  file: terrain (the ground, stones, sand, snow, ice, water and lava), building blocks, the ores
+  and their storage, raw metals, ingots and gems, wood (logs, leaves, planks, the stick), plants,
+  lights (torches, lanterns, glow lichen, the Glow Block and Glow Dust), the chest, crafting table
+  and furnace, fire, TNT and the Nuke (whose uranium core is the Ores pack's recipe), wool, doors,
+  fences, the mineshafts' blocks and loot table, structure blocks and jigsaws, tools, armor,
+  buckets, mob drops and every potion of `Effects/PotionList` (a loop: the potions' items and
+  recipes follow PotionList, nothing counts their places), plus the stone varieties' and vanilla
+  ores' features.
+- **Mekanism** (200): osmium (its blocks, items, recipes and three ore features), the
+  transmitters, Fluid Tanks and Universal Cables, the Configurator, the machines and generators,
+  the batteries, the upgrade cards, and the oil and fuel (BuildCraft's fluids, with the refinery
+  that makes fuel).
+- **Survival** (300): Tough As Nails (the Glass Bottle and water bottles, the canteen, herbs,
+  bowls and teas, the campfire, straw and its armor, the thermometer) and the seasons (snow
+  layers, the heaters and coolers, insulated planks, glass and door).
+- **Terraria** (400): the accessories, mana (Fallen Stars, Mana Crystals, mana potions), the magic
+  weapons and the vanity clothes (items and recipes only; the chests' accessories are rolled by
+  the Minecraft and Apocalypse loot tables, a table being one pack's).
+- **Apocalypse** (500): cities' and roads' blocks, the scavenging crates and the ruins' loot,
+  bunkers (barricades, the hatch, the ceiling lamp, their loot), medical supplies, DayZ's items,
+  and the firearms, magazines, rounds, attachments and melee weapons (`Weapons/WeaponList` keeps
+  their numbers).
+- **Turrets** (600): the twelve turrets and their parts, the Metal Miner and the Ammo Press, each
+  feature's recipes behind its Config switch (`Enabled`; the blocks and items always there).
+- **Ores** (700, requires Core and Minecraft): the new ores, the worked example of a feature in
   one pack: copper, lead, zinc, brass, sulfur, saltpetre, uranium and the Hazmat suit, their
   blocks, items, recipes (the metals' storage and smelting, brass, black powder, the Nuke's uranium
   core, the Hazmat suit), textures and ore features, each entry with its lore, texture, icon, Age,
   knowledge, miner numbers, radiation and shielding; none of them is in a side table any more.
-  `_metals` holds the five metals for `define.metal`. After Base, so their ids stay the last.
+  `_metals` holds the five metals for `define.metal`. Last, so its ids come last.
 
-**Define** (`Content/Define`, what a function-form module gets; pure): `Config`; the model helpers
-(`shade`, `lump`, `ingot`, `nugget`) and armor shapes (`HELMET` .. `BOOTS`, `ARMOR_PIECES`) that
-were ItemList's; recipe records (`shaped`, `shapeless`, `smelting`, `storage`); `append`; and
-`metal(spec)`: a metal's ore, storage block and raw block, raw lump, ingot and nugget, their
-storage recipes both ways and smelting, and their blank textures, as `{ blocks, items, recipes,
-textures }` for each kind module to take its part of (`ore = false` for an alloy: brass), each
-piece's own fields (lore, Age, numbers) given in the spec. The rest of BlockList's and ItemList's
-generators move here as their features become packs.
+`Blocks.BlockList`, `Items.ItemList` and `Crafting.Recipes` remain as the merged lists (BlockList
+and ItemList re-export Schema's types); no content lives in them. A pack's textures are the ones
+its blocks use (the hand-edited sheets are the Minecraft pack's `textures/` and the Apocalypse
+pack's), and its loot tables the ones its features roll.
+
+**Define** (`Content/Define`, what a function-form module gets, and what any pack module may
+require; pure): a folder whose `init` gives every helper as `define.<name>` and whose header lists
+them, one line each. `Config` and `append`; `Define/Items`, ItemList's old generators (the model
+helpers `shade`, `lump`, `ingot`, `nugget`, the armor shapes and `armorSet`, the tool shapes and
+`toolSet`, the bottle, the buckets, `potion`); `Define/Blocks`, BlockList's (`fluid`, `caveTwin`
+and `caveFluid`, torches and lanterns, Mekanism's frames, `transmitter`, `cable`, `tank`, `door`,
+`fence`, `layers`, `machine`, wall boxes); `Define/Plants` (the plant boxes, `plant`, `flower`,
+`tulip`, `tallFlower`, `tallPlant`, `mushroom`, `sapling`, `herb`, Minecraft's outlines);
+`Define/Recipes` (`shaped`, `shapeless`, `smelting`, `storage`); `Define/Metal` (`metal(spec)`: a
+metal's ore, storage block and raw block, raw lump, ingot and nugget, their storage recipes both
+ways and smelting, and their blank textures, as `{ blocks, items, recipes, textures }` for each
+kind module to take its part of; `ore = false` for an alloy: brass). A helper only one pack uses
+is that pack's `_` module instead (the Minecraft pack's grass and lichen shapes, the turrets'
+part boxes, the Apocalypse pack's barricades' boards). `tests/spec/ContentDefine` checks each
+generator's entries and that every helper the header lists is there.
+
+**Ore features.** Each pack's `ores` append in load order, and Generation/Ores places them in that
+order, but each draws from a random stream of its own per chunk, from the seed, its name and the
+chunk: adding, removing or reordering features or packs moves no other feature's veins. Ores only
+replace stone, so where two features' veins cross the earlier one keeps the cell, and a later
+pack's ores only take the stone left over (`tests/spec/OreGeneration` places every feature alone
+and among all the others).
+
+**Recipe order.** `Crafting.match` answers the first recipe that matches, and recipes merge in
+load order, so a pack's recipe could hide another's with the same grid. `tests/spec/CraftingGrids`
+builds every recipe's own grid (one item a key, a tag's first name; a smelting input in a lit
+furnace) and checks it makes that recipe's result: none is hidden.
 
 **Cost.** Content loads once (`Content.default`); merging and checking every pack takes about
-10 ms in Lune, besides compiling the pack modules the old lists cost anyway.
+5 to 10 ms in Lune, and the first load, compiling and running every pack module, about 0.2 s, as
+the single pack before the split did.
 
 **Specs.** `tests/spec/Content` loads the fixture packs in `tests/fixtures/content/packs` through
 `Content.load` (Beta, JSON, order 10; Alpha, Luau, order 20, with a `_` helper and `define.metal`;
-Gamma, order 20 after Alpha by name, overriding both), grafts `tests/fixtures/content/fields/Fields`
+Gamma, order 20 after Alpha by name, overriding both) and the kind folder ones in
+`tests/fixtures/content/folders` (Delta, Luau, with a folder inside a kind folder, a function-form
+file and a `_` helper at its top; Epsilon, JSON), grafts `tests/fixtures/content/fields/Fields`
 (every per-entry field) into a fresh game to follow each field to its registry, builds packs in
 memory for every check (`Content.build`, and the Lune loader's `folder` / `module` / `graft`), and
 pins no id or total.
@@ -261,20 +324,22 @@ node key) and `posKey(x, y, z)` for block positions.
    onto this world's bands: small veins of 4 in all rock from y 5 (3 per 128 blocks), 6 veins of 9
    per chunk on a trapezoid over y 5..197 ("more in the middle", densest near y 100), and veins of
    7 above y 197 (2 per 128 blocks). Osmium is about as common as iron below y 197 and about half
-   as common above. Every feature draws from one random stream per chunk, in list order: new
-   features go at the end, so earlier ores never move (a Generation test pins them).
+   as common above. Features place in list order (the packs' load order), each from a random
+   stream of its own per chunk (the seed, its name and the chunk), so adding, removing or
+   reordering features moves no other's veins; where veins cross, the earlier feature keeps the
+   cell (Generation and OreGeneration pin the ores' cells).
    The newer ores follow, mapped the same way (Minecraft's ground under the sea, y -64..64, is the
    low band y 5..197: 1.5 blocks a block; measured in `tests/spec/OreGeneration` over 48 all-stone
    chunks, against iron in the same band):
    - **copper**: Minecraft's 16 veins of 10 per chunk on a trapezoid over y 48..304 (its -16..112),
-     densest near y 176: 1.6 times iron over that band, 2.4 around y 130..230, 0.3 below y 90;
+     densest near y 176: 1.6 times iron over that band, 2.4 around y 130..230, 0.2 below y 90;
    - **lead**: Mekanism's 8 of 9 on a trapezoid from below bedrock to the top of the low band
-     (y -31..197, densest near y 83): 0.87 times iron below y 197 (0.9 times osmium), none above;
+     (y -31..197, densest near y 83): 0.94 times iron below y 197 (0.9 times osmium), none above;
    - **zinc**: Create's veins of 12 (uniform, its -63..70: the low band) at gold's rate instead of
-     Create's (brass takes one zinc to three copper): 0.9 times gold, 0.34 times iron;
+     Create's (brass takes one zinc to three copper): 0.9 times gold, 0.31 times iron;
    - **uranium**: Mekanism's small (veins of 4, y 5..133) and buried (veins of 9, y -35..93,
-     plateau 24) features at a quarter of Mekanism's counts (1 and 1.75 a chunk): 0.5 times iron
-     below y 50, 0.4 below 100, never in the mountains. `buried = 0.75` is Minecraft's
+     plateau 24) features at a quarter of Mekanism's counts (1 and 1.75 a chunk): 0.6 times iron
+     below y 50, 0.45 below 100, never in the mountains. `buried = 0.75` is Minecraft's
      discardChanceOnAirExposure: that share of the cells next to air or cave air stays stone (a
      per-cell hash, so the stream is unchanged), so uranium rarely shows on a cave wall;
    - **sulfur**: 3 veins of 8 a chunk in the cave lava's band (y 1..33, 1.9 times iron there),
@@ -2722,23 +2787,23 @@ tests/build_textures ─► src/textures/*.model.json ─► Rojo 7.7.1 ─► M
                                      (the variants and prototypes TextureLooks draws with)
 ```
 
-**The pack** (`Shared/TexturePack`): pure data built from the content packs (Content packs,
-above: `Textures` is their `textures`, the Base pack's the hand-edited sheet; `Blocks` each block
-entry's `texture` and `LEGACY_BLOCKS` for the rest; `Icons` each item entry's `icon` and
-`LEGACY_ICONS`), so the server, clients, worker Actors and Lune all load it, and it is the only
-place textures are set (BlockList's old `tint` and `faces` fields are gone; a block's `texture` is
-its faces). `Textures` maps a name (lower case with spaces, as
-Minecraft names them) to a colour map (`""` until made), optional normal, roughness and metalness
-maps, the `Material` its MaterialVariant is based on, `Tint` (true, the default: the drawn block's
-voxel colour; false: the image's own; a block name: that block's colour), `Average` and `Align`.
-`Blocks` maps a block name to its faces (`All`, `Sides`, `Top`, `Bottom`, `Front`, `Sprite`).
-`StudsPerTile` is 3 (a block face), `ShowMissing` swaps blank textures for `Missing`. Entries may
-share maps, as the data sheets do on purpose: one picture reads as several blocks through their
-tints (cracked and mossy bricks and concrete in their own colours), and a block-name tint keeps a
-shared texture in one block's colour wherever it is drawn (`"asphalt"`'s `Tint = "Asphalt"`: a
-road line's sides stay road-dark while its top, `"road line"`, is asphalt's picture in the line's
-own white or yellow; a blank top would show the sides' texture, `variantTexture` below, and the
-line would vanish). `tests/spec/DataSheet` lists a sheet's ids and where each one goes.
+**The pack** (`Shared/TexturePack`): pure data built from the content packs (Content packs, above:
+`Textures` is their `textures`, the Minecraft pack's `textures/` the hand-edited sheet's part for
+its blocks, each pack's for its own; `Blocks` each block entry's `texture` and `LEGACY_BLOCKS` for
+the rest; `Icons` each item entry's `icon` and `LEGACY_ICONS`), so the server, clients, worker
+Actors and Lune all load it, and it is the only place textures are set (BlockList's old `tint` and
+`faces` fields are gone; a block's `texture` is its faces). `Textures` maps a name (lower case with
+spaces, as Minecraft names them) to a colour map (`""` until made), optional normal, roughness and
+metalness maps, the `Material` its MaterialVariant is based on, `Tint` (true, the default: the drawn
+block's voxel colour; false: the image's own; a block name: that block's colour), `Average` and
+`Align`. `Blocks` maps a block name to its faces (`All`, `Sides`, `Top`, `Bottom`, `Front`,
+`Sprite`). `StudsPerTile` is 3 (a block face), `ShowMissing` swaps blank textures for `Missing`.
+Entries may share maps, as the data sheets do on purpose: one picture reads as several blocks
+through their tints (cracked and mossy bricks and concrete in their own colours), and a block-name
+tint keeps a shared texture in one block's colour wherever it is drawn (`"asphalt"`'s `Tint =
+"Asphalt"`: a road line's sides stay road-dark while its top, `"road line"`, is asphalt's picture in
+the line's own white or yellow; a blank top would show the sides' texture, `variantTexture` below,
+and the line would vanish). `tests/spec/DataSheet` lists a sheet's ids and where each one goes.
 
 **Resolution** (`Blocks`, when it loads). Every def gets `textures` (`TextureFaces`: `top`,
 `bottom`, `north`, `south`, `east`, `west`, `front`, `sprite`, texture names, blank ones too; nil
@@ -4402,7 +4467,7 @@ grass, are `brokenByFluid` and stand through the attached-block machinery:
   adds room for a tall plant's top (y + 1 below `Config.WorldHeight` and replaceable), and
   `placementFor` and `EditRules.supported` use it. Upper halves have no `support`, so
   `placementFor` never returns one.
-- Herbs (Tough As Nails' Mint and Wild Ginger, appended after the TNT and the Nuke) are plants
+- Herbs (Tough As Nails' Mint and Wild Ginger, the Survival pack's `blocks/herbs`) are plants
   on the dirt set like the flowers, but `placeable = false`: no item of their own. The herb item
   places them (ItemList `places`, Minecraft's ItemNameBlockItem, below) and is their drop, and
   they spread (`Behaviours/Herb`).
@@ -4793,11 +4858,11 @@ bucket item of its own.
 | Oil   | 2, 1, no, 20 (flows 7)          | 0     | lava (0.5, 0.0023)        | -                            | 0..2            | -             |
 | Fuel  | 4, 1, no, 5 (flows 7)           | 0     | water (0.8, 0.014), swims | -                            | -8..32          | -             |
 
-**Blocks.** BlockList's `fluid(group, spec, tickDelay)` makes a group's nine blocks with one
-appearance: lava Neon orange, light 15 in every level; oil nearly black glass that barely shows
-through and shines; fuel translucent amber. Then `caveFluid` adds the cave twins CaveLava and
-CaveOil (see Items and inventories: Cave twins), and Obsidian follows. The fluid blocks are 167 to
-195 and Obsidian 196 (ids are list positions: append only).
+**Blocks.** Content/Define's `fluid(group, spec, tickDelay)` makes a group's nine blocks with one
+appearance (water and lava in the Minecraft pack's `blocks/terrain`, oil and fuel in the Mekanism
+pack's `blocks/oil`): lava Neon orange, light 15 in every level; oil nearly black glass that
+barely shows through and shines; fuel translucent amber. Then `caveFluid` adds the cave twins
+CaveLava and CaveOil (see Items and inventories: Cave twins).
 
 **Flow** (`Behaviours/Fluid`; `RULES` per group: slope distance, drop off, infinite sources and
 whether what it washes away burns; the tick delay is BlockList's). Every group runs water's
@@ -4895,8 +4960,8 @@ getSeenPercent):
 - Blast resistance is BlockList's `blastResistance` (Blocks `blastResistance`, f32
   `blastResistanceLut`): the hardness unless given (Minecraft's `strength(f)` sets both),
   3,600,000 for unbreakable and creative only blocks, 0 for air, Minecraft's values where they
-  differ (`BLAST_RESISTANCE` at the end of BlockList: the stone family and bricks 6, planks 3,
-  metal and gem blocks 6, packed mud 3, obsidian 1200). Fluids resist 100 (their hardness), so TNT
+  differ (on those entries: the stone family and bricks 6, planks 3, metal and gem blocks 6,
+  packed mud 3, obsidian 1200). Fluids resist 100 (their hardness), so TNT
   in water breaks nothing (the first step costs 30); fuel 0: it is the explosive.
 - Entities (`hit`): within 2 × power of the centre (measured to the feet), impact =
   (1 − distance / (2 × power)) × seen, damage = ⌊(impact² + impact) / 2 × 7 × 2 × power + 1⌋ half
@@ -4978,11 +5043,11 @@ burns away.
 ## The new ores (`Content/Packs/Ores`, `Machines/MinerRules`)
 
 Copper, lead, zinc, brass, sulfur, saltpetre and uranium: the Ores content pack (Content packs,
-above), loading after Base so its ids come after the Ammo Press's (499) and no other id moved; its
+above), loading last (order 700), so its ids come after every other pack's; its
 entries carry their lore, textures, icons, Ages, knowledge, miner numbers, radiation and Hazmat
 shielding, and `define.metal` makes each metal's set. `tests/spec/Ores` checks the registries.
 
-- Blocks 500..514, in this order: Copper Ore, Block of Copper, Block of Raw Copper; Lead Ore and
+- Blocks, in this order: Copper Ore, Block of Copper, Block of Raw Copper; Lead Ore and
   its two; Zinc Ore and its two (zinc is brass's other metal: brass is an alloy, so it needs one);
   Block of Brass; Sulfur Ore; Saltpetre Ore; Uranium Ore and its two. The metal ores are Granite's
   speckled material in the ore's colour (as Osmium Ore), hardness 3, `toolLevel` 1 (uranium 2),
@@ -4990,7 +5055,7 @@ shielding, and `define.metal` makes each metal's set. `tests/spec/Ores` checks t
   saltpetre's white crusts) drop by any pickaxe (`toolLevel` 0, as coal). The storage blocks have
   Minecraft's raw blocks' hardness 5 (the Block of Copper Minecraft's 3) and the ore's tier;
   metal blocks sound "metal", raw ones "stone". Blank texture pack entries ("copper ore" ...).
-- Items after the Laser Sight: each metal's raw lump, ingot and nugget (the iron shapes, `lump`,
+- Items, in this order: each metal's raw lump, ingot and nugget (the iron shapes, `lump`,
   `ingot`, `nugget`, in the metal's colour), Brass Ingot and Nugget, Sulfur and Saltpetre (a heap
   of powder, as Glow Dust's), the uranium three, then the Hazmat suit (`HazmatHelmet` ...
   `HazmatBoots`, shown as Mekanism's Hazmat Mask, Gown, Pants and Boots: armor with Leather's
@@ -5014,16 +5079,16 @@ shielding, and `define.metal` makes each metal's set. `tests/spec/Ores` checks t
 Minecraft 1.20.1's TntBlock and PrimedTnt, and a mod-style Nuke lit the same way. Tested in
 `tests/spec/Tnt`.
 
-**Blocks** (BlockList, at the end): `Tnt` (hardness 0, blast resistance 0, flammable 15 / 100,
-BlockDecor "Tnt": red with the sticks' seams, a white band with TNT; texture pack "tnt side / top /
-bottom", blank) and `Nuke` (the same numbers, BlockDecor "Nuke": dark steel, hazard stripes, the
-radiation sign; "nuke side / top", blank), and their lit blocks `LitTnt` and `LitNuke`: not
+**Blocks** (the Minecraft pack's `blocks/fire`): `Tnt` (hardness 0, blast resistance 0, flammable 15
+/ 100, BlockDecor "Tnt": red with the sticks' seams, a white band with TNT; texture pack "tnt side /
+top / bottom", blank) and `Nuke` (the same numbers, BlockDecor "Nuke": dark steel, hazard stripes,
+the radiation sign; "nuke side / top", blank), and their lit blocks `LitTnt` and `LitNuke`: not
 placeable, unbreakable (Minecraft's primed TNT is an entity no player breaks), blast resistance 0
 (rays pass, as they pass entities), no drops, `item` the unlit block (WAILA's icon, pick block),
 glowing (`light` 9 white, 12 red: drawn one part per block with its PointLight), behaviour "Tnt".
-Gunpowder (ItemList, last) is four of two Saltpetre, a Sulfur and a coal or charcoal (black
-powder), or two of a coal or charcoal and a flint; TNT is Minecraft's recipe (5 gunpowder in an X,
-4 sand); the Nuke is eight TNT around a Block of Uranium.
+Gunpowder (the Minecraft pack's `items/fire`) is four of two Saltpetre, a Sulfur and a coal or
+charcoal (black powder), or two of a coal or charcoal and a flint; TNT is Minecraft's recipe (5
+gunpowder in an X, 4 sand); the Nuke is eight TNT around a Block of Uranium.
 
 **Lit blocks, not entities.** PrimedTnt falls, flashes and explodes where it is. The engine's
 entities are items only (EntityWorld, its own protocol and renderer), so a lit explosive is a
@@ -5211,41 +5276,41 @@ container is topped up there while it has sips missing) and `PURIFIED_OF` (dirty
 is an `ITEMS` entry with a `Drink` of its own and the container it leaves; load-time asserts catch
 entries that name no item or no drink.
 
-Items (appended to ItemList): Glass Bottle (Minecraft's; three glass in a V make three), Dirty and
-Purified Water Bottle (stack 16), Canteen (TAN's leather canteen in iron: a nugget over three
-ingots in a cup), Dirty and Purified Water Canteen (durability 3: a sip wears it, the last leaves
-the empty Canteen; the tool repair recipe skips them). An empty container used at a water source
-(Minecraft's source-only ray; a Dirty canteen with sips missing too) fills with dirty water
-(ItemUtils.createFilledResult: one used, the full one replaces the stack or goes into the
-inventory; creative keeps the empty one); smelting purifies (TAN's original way), in a furnace or
-an Electric Furnace. Drinking an item is Minecraft's 32 tick use: the client sends `Drink` start,
+Items (the Survival pack's `items/drinks`): Glass Bottle (Minecraft's; three glass in a V make
+three), Dirty and Purified Water Bottle (stack 16), Canteen (TAN's leather canteen in iron: a nugget
+over three ingots in a cup), Dirty and Purified Water Canteen (durability 3: a sip wears it, the
+last leaves the empty Canteen; the tool repair recipe skips them). An empty container used at a
+water source (Minecraft's source-only ray; a Dirty canteen with sips missing too) fills with dirty
+water (ItemUtils.createFilledResult: one used, the full one replaces the stack or goes into the
+inventory; creative keeps the empty one); smelting purifies (TAN's original way), in a furnace or an
+Electric Furnace. Drinking an item is Minecraft's 32 tick use: the client sends `Drink` start,
 counts 32 ticks while the button stays down (gulps every 4 ticks from the 7th), then finish; the
 server drinks it only if the same item is still in the same slot 28+ ticks after start and the
-player may drink it (`Drinks.drinkable`: thirsty or creative with thirst on; a drink that tempers,
-a tea, whenever temperature is on, thirsty or not, its water only with thirst on), then uses it up (one drink gives its empty container
-back) and plays the last gulp to everyone else. A sip from a water source with an empty hand is
-instant, at most every 10 ticks (`HandDrinking`). Nothing is predicted: the inventory snapshot and
-the Survival message bring the results.
+player may drink it (`Drinks.drinkable`: thirsty or creative with thirst on; a drink that tempers, a
+tea, whenever temperature is on, thirsty or not, its water only with thirst on), then uses it up
+(one drink gives its empty container back) and plays the last gulp to everyone else. A sip from a
+water source with an empty hand is instant, at most every 10 ticks (`HandDrinking`). Nothing is
+predicted: the inventory snapshot and the Survival message bring the results.
 
 **Herbs, bowls and teas** (BlockList Mint and WildGinger, ItemList MintLeaves, GingerRoot, Bowl,
-DirtyWaterBowl, PurifiedWaterBowl, MintTea, GingerTea, HerbalTea; Crafting/Recipes). Mint and Wild
-Ginger are plants (see Plants) that generation grows in rare patches (see Foliage: mint on plains,
-meadows and in jungles, wild ginger in forests and taigas); breaking one drops one Mint Leaves /
-Ginger Root (Shears too: no shear drop), which plants it back on the dirt set (ItemList `places`,
-see Items), one for one, so replanting gains nothing; they spread instead (`Behaviours/Herb`,
-Minecraft's mushrooms: `Server.HerbSpread` 1/8 a random tick, a try every 9 minutes or so, up to 5
-in 9 x 3 x 9). The Bowl is Minecraft's (three planks of any wood in a V make four; 100 ticks of
-fuel). It is a third container through the tables alone: it fills at water into a Dirty Water Bowl
-(stack 16), which a furnace purifies (a campfire boils it, as any dirty water: Gear, below), and
-drinking a bowl gives the Bowl back. Mint purifies without a fire: a dirty bottle, bowl or canteen
-with Mint Leaves (shapeless, the inventory's 2 x 2 grid too) makes its purified twin, a canteen
-keeping its sips (the shapeless `keep`, see Crafting: a cure never makes water). A Purified
-Water Bowl with a herb brews a tea (stack 1, like stews): Mint Tea gives Internal Chill for 2
-minutes, Ginger Tea Internal Warmth for 2 minutes, Herbal Tea (both herbs) both for 1; a tea keeps
+DirtyWaterBowl, PurifiedWaterBowl, MintTea, GingerTea, HerbalTea; the Survival pack's). Mint and
+Wild Ginger are plants (see Plants) that generation grows in rare patches (see Foliage: mint on
+plains, meadows and in jungles, wild ginger in forests and taigas); breaking one drops one Mint
+Leaves / Ginger Root (Shears too: no shear drop), which plants it back on the dirt set (ItemList
+`places`, see Items), one for one, so replanting gains nothing; they spread instead
+(`Behaviours/Herb`, Minecraft's mushrooms: `Server.HerbSpread` 1/8 a random tick, a try every 9
+minutes or so, up to 5 in 9 x 3 x 9). The Bowl is Minecraft's (three planks of any wood in a V make
+four; 100 ticks of fuel). It is a third container through the tables alone: it fills at water into a
+Dirty Water Bowl (stack 16), which a furnace purifies (a campfire boils it, as any dirty water:
+Gear, below), and drinking a bowl gives the Bowl back. Mint purifies without a fire: a dirty bottle,
+bowl or canteen with Mint Leaves (shapeless, the inventory's 2 x 2 grid too) makes its purified
+twin, a canteen keeping its sips (the shapeless `keep`, see Crafting: a cure never makes water). A
+Purified Water Bowl with a herb brews a tea (stack 1, like stews): Mint Tea gives Internal Chill for
+2 minutes, Ginger Tea Internal Warmth for 2 minutes, Herbal Tea (both herbs) both for 1; a tea keeps
 its water's thirst and adds hydration, and is drunk for its effect whenever temperature is on,
-thirsty or not, thirst on or off (`Drinks.tempers`, `drinkable`). So under ginger tea the tundra's -10 is held at -5 (COLD:
-no freezing), under mint tea the desert's 9 at 4 (WARM). Drinking a bowl uses the drink and fill
-sounds of the bottles. tests/spec/Herbs covers it all.
+thirsty or not, thirst on or off (`Drinks.tempers`, `drinkable`). So under ginger tea the tundra's
+-10 is held at -5 (COLD: no freezing), under mint tea the desert's 9 at 4 (WARM). Drinking a bowl
+uses the drink and fill sounds of the bottles. tests/spec/Herbs covers it all.
 
 **Movement** (`ToughAsNails/Exertion`): Minecraft's server takes the client's sprint flag and
 positions, so the client measures (MovementController hands each tick to `Player/Exertion`):
@@ -5316,13 +5381,14 @@ weather froze) is no cold source, as the season's climate already carries that c
 ice and a frozen biome's still cool.
 
 **Gear** (the climate's tools; tested in `tests/spec/SurvivalGear`):
-- the **Campfire** (BlockList, appended; Minecraft's CampfireBlock, always lit): Minecraft's recipe
-  (" S ", "SCS", "LLL": sticks, a coal or charcoal, any logs) and model (four logs, the glowing bed
-  of embers that carries its light 15, the 7 pixel outline), not solid (the hull has no 7 pixel
-  step) but `obstructs`, strength 2 with an axe, dropping itself (Minecraft drops 2 charcoal
-  without Silk Touch, which the game has no way to get, so it could never be moved). A
-  `HeatingBlocks` heat source; standing in it hurts (Players/Burning, above in Fluids); spawns
-  avoid it (SpawnUnsafeBlocks Body and Hazards); its flames and crackle are fire's (Rendering);
+- the **Campfire** (the Survival pack's `blocks/campfire`; Minecraft's CampfireBlock, always lit):
+  Minecraft's recipe (" S ", "SCS", "LLL": sticks, a coal or charcoal, any logs) and model (four
+  logs, the glowing bed of embers that carries its light 15, the 7 pixel outline), not solid (the
+  hull has no 7 pixel step) but `obstructs`, strength 2 with an axe, dropping itself (Minecraft
+  drops 2 charcoal without Silk Touch, which the game has no way to get, so it could never be
+  moved). A `HeatingBlocks` heat source; standing in it hurts (Players/Burning, above in Fluids);
+  spawns avoid it (SpawnUnsafeBlocks Body and Hazards); its flames and crackle are fire's
+  (Rendering);
 - **boiling** (`ToughAsNails/Boiling`, pure): a right click on a campfire with dirty water
   (`Drinks.isDirty`: anything in PURIFIED_OF, so later containers boil with no code) turns one
   into its purified twin, createFilledResult-style (the last one is replaced, else the purified
@@ -5344,8 +5410,8 @@ ice and a frozen biome's still cool.
   Shears are held: Short Grass gives one half the time, Tall Grass (its lower half answers for a
   break of either) always, where Minecraft's grass gives wheat seeds one time in 8; Shears still
   harvest the grass itself; grass gone by itself (water, fire, a blast) gives nothing;
-- **Straw and Leaf armor** (ItemList `INSULATING_ARMOR`, appended after everything: the `ARMOR`
-  table at the top must not grow, its ids would shift): leather's points (1 / 3 / 2 / 1, no
+- **Straw and Leaf armor** (the Survival pack's `items/gear`, `define.armorSet` of each
+  material): leather's points (1 / 3 / 2 / 1, no
   toughness; armor doesn't wear in this game, so no durability), `tan = { warmth = 1 }` from
   Straw and `tan = { cooling = 1 }` from any leaves (Recipes' `#leaves` tag), the armor shapes.
   The coldest target is -10 day and night (the scale's clamp at each step), so a full straw set
@@ -5489,8 +5555,9 @@ Players/Operators) and Minecraft's answers ("Applied effect Speed to Steve", "Re
 
 **Potions** (`Effects/PotionList`, pure data): twelve potions, each a Purified Water Bottle brewed
 with an ingredient in a crafting grid, with a strong (Glow Dust: level II) and a long (a coal or
-charcoal) variant where Minecraft has them; 29 items (ItemList, stack 1, the effect's colour in a
-bottle), 29 shapeless recipes (Crafting/Recipes; the `tulips` tag) and 29 `Drinks.ITEMS` entries
+charcoal) variant where Minecraft has them; 29 items (the Minecraft pack's `items/potions`, stack
+1, the effect's colour in a bottle), 29 shapeless recipes (its `recipes/potions`; the `tulips` tag),
+both made from PotionList in a loop, and 29 `Drinks.ITEMS` entries
 whose `Drink` carries `effects` (no water; `Drinks.isPotion`: drinkable any time, Tough As Nails on
 or off, so Players/ToughAsNails keeps its Drink listener and records with both switches off,
 without ticking, and bottles fill at water then too). The inventory tooltip lists the effect, its
@@ -6543,7 +6610,7 @@ is the same rule. The kinds: "turret_<type>_<tier>" (twelve, Machines/Kinds/Turr
 (Machines/Kinds/Miner with Machines/MinerRules) and "press" (Machines/Kinds/AmmoPress), their
 layouts frozen.
 
-**A new machine:** a BlockList block with `machine` and `energy`, a module in
+**A new machine:** a pack's block entry with `machine` and `energy`, a module in
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
 `Machines/init`. A kind with fluid tanks gives `tanks`; pipes, buckets, the ejector, gauges,
 records and the item follow from their roles. Tests bind test-only kinds to spare blocks
@@ -7609,8 +7676,8 @@ and machines): nothing new in world saves, their state is their container's slot
 **Shared** (`Shared/Turrets`, pure; requires Config, Blocks, Items, Weapons and
 Transmitters/Tiers, never Shared/Transmitters or Shared/Machines, which load the kinds that
 require it):
-- `init`: the twelve `Spec`s from Config.Turrets (`SPECS`, type by type and tier by tier: the
-  BlockList order of blocks 486..497; `spec(block)`, `isTurret`, `of(type, tier)`), checked as it
+- `init`: the twelve `Spec`s from Config.Turrets (`SPECS`, type by type and tier by tier, each
+  finding its block by name; `spec(block)`, `isTurret`, `of(type, tier)`), checked as it
   loads (blocks and kinds, energy, a stand-in gun of the round's calibre, whole rates, buffers
   within a stack, optics and muzzle devices that exist). A Spec: block, kind, type, tier, name,
   calibre, ammo (the round), firearm (the stand-in gun: the SMG's Smg, the rifle's Assault Rifle,
@@ -7984,17 +8051,17 @@ WAILA shows "Ammo 3 / 4 · 9mm" (red at 0), "Feed: Elite" / "Feed: Basic → 90 
 (the panel's own words), and "Fitted: Laser Sight, Suppressor"; with F3 it adds the target, the aim
 and the flags. F3: "turrets N drawn / M records, K tracking, P parts".
 
-**Recipes, Ages and the rest.** Crafting/Recipes: a Servo Motor (two), a Belt Feeder, a Receiver,
-a Targeting Module, the three barrels and the Laser Sight from iron, osmium, leather, nails, scrap,
-glass, glow dust, cables and diamonds; each type's Basic turret from its barrel, a servo, a
-receiver, a belt feeder, osmium and a targeting module; each next tier round the one below with the
-alloys of the transmitters' upgrades in the corners, a barrel, servos and a module (keeping its data:
-energy and Lure); the Metal Miner round an Electric Furnace over a Diamond Pickaxe, the Ammo Press
-round one over a Block of Iron. Ages: the parts, the Laser Sight, Basic to Elite turrets, the
-miner and the press in the Electric Age, the Ultimates in the Atomic Age. Lore for every new item,
-blank icons for the eight items (the fourteen blocks are machines: never textured), three sounds
-(below). `Config.Turrets.Enabled`, `Miner.Enabled` and `AmmoPress.Enabled` false make each the
-identity: no recipes or Ages for it (the Servo Motor stays while the press needs it), its kinds
+**Recipes, Ages and the rest.** The Turrets pack's recipes: a Servo Motor (two), a Belt Feeder, a
+Receiver, a Targeting Module, the three barrels and the Laser Sight from iron, osmium, leather,
+nails, scrap, glass, glow dust, cables and diamonds; each type's Basic turret from its barrel, a
+servo, a receiver, a belt feeder, osmium and a targeting module; each next tier round the one below
+with the alloys of the transmitters' upgrades in the corners, a barrel, servos and a module (keeping
+its data: energy and Lure); the Metal Miner round an Electric Furnace over a Diamond Pickaxe, the
+Ammo Press round one over a Block of Iron. Ages: the parts, the Laser Sight, Basic to Elite turrets,
+the miner and the press in the Electric Age, the Ultimates in the Atomic Age. Lore for every new
+item, blank icons for the eight items (the fourteen blocks are machines: never textured), three
+sounds (below). `Config.Turrets.Enabled`, `Miner.Enabled` and `AmmoPress.Enabled` false make each
+the identity: no recipes or Ages for it (the Servo Motor stays while the press needs it), its kinds
 inert, no demand rule, no service, no messages; blocks and items stay registered (ids are
 append-only).
 
@@ -9612,8 +9679,8 @@ sends stay in one ordered stream.
     lava burns it, with no drop). Plants are not opaque, so the grass under them stays grass and the
     sun reaches through them (`SkyCheck`), and a spawn may stand in one (`SafeSpot`).
   - `Fire` (Minecraft 1.20.1's FireBlock; the shared rules in Shared/Fire, each block's odds in
-    BlockList `flammable`, Blocks `igniteOdds` / `burnOdds` / `isFlammable`, set by the bootstrap
-    pass at the end of BlockList: planks 5 / 20, logs 5 / 5, leaves 30 / 60, grass, ferns, dead
+    BlockList `flammable`, Blocks `igniteOdds` / `burnOdds` / `isFlammable`, on each entry (the
+    flower helpers set theirs): planks 5 / 20, logs 5 / 5, leaves 30 / 60, grass, ferns, dead
     bushes and flowers (both halves of tall ones) 60 / 100, glow lichen 15 / 100, coal blocks
     5 / 5; no saplings or mushrooms, as in Minecraft). Tested in tests/spec/Fire.
     - Age 0..15 lives in a table by position per world, never in the block: the block stays the
@@ -9859,13 +9926,14 @@ Saving worlds).
   goes through `WorldSave.registerSection`, not new keys.
 - Generation must stay deterministic: use `Util/Hash` (never `math.random` or `Random`) and only
   the seed and coordinates as inputs. Clients and server must agree on every unedited block.
-- Block ids are list positions in `BlockList`: append, never reorder. The same holds for items in
-  `ItemList` (ids from 4096).
+- Block and item ids (items from 4096) are places in the content packs' merged lists (Content
+  packs), given at load: nothing may count on an entry's place (find it by name), and until saves
+  keep names a saved world needs the packs it was made with.
 - Status effect ids are list positions in `Effects/EffectList` (sent as a u8), and potion items
   follow `Effects/PotionList`'s order (and each potion's base, strong, long): append, never
-  reorder. ItemList's potion loop covers the first 12 potions only (Terraria's items come after
-  it): a new potion needs a loop of its own at the end of ItemList (ItemList asserts it). A new
-  item gets a blank `TexturePack.Icons` entry, so its picture is one id to paste later. Every hurt a player takes on the server goes through `Players/Effects.incomingDamage`
+  reorder. The Minecraft pack makes every potion's items and recipes from PotionList in a loop,
+  so a new potion is a PotionList entry. A new item gets a blank `TexturePack.Icons` entry, so its
+  picture is one id to paste later. Every hurt a player takes on the server goes through `Players/Effects.incomingDamage`
   (Resistance), and the mining factor reaches both the client's progress and ServerNet's check
   (`Mining`'s `factor`), or their timings drift apart.
 - `Inventory/Menu` and `Crafting` must stay pure and deterministic: the client predicts every
@@ -9894,11 +9962,10 @@ Saving worlds).
   inventories, never straight into another furnace or machine. A new machine gets this from its
   slots (`output = true` slots are pushed out); `Transmitters/Inventories` is the one place the
   faces are decided.
-- Ore features (`Generation/Ores`) are placed in list order from one random stream per chunk:
-  append new ones, never reorder or change earlier ones, or every unedited world's ores move. A
-  feature that places nothing somewhere (saltpetre under wet land, a buried cell) must still draw
-  the same numbers there, and anything placed by what the chunk holds (`Ores.vents`) draws from a
-  stream of its own.
+- Ore features (`Generation/Ores`) each draw from a stream of their own (the seed, the feature's
+  name, the chunk): a new feature (or pack) moves no other's veins, but changing or renaming a
+  feature moves its own in every unedited world, and one placed earlier takes stone a later one
+  had. Anything placed by what the chunk holds (`Ores.vents`) draws from a stream of its own too.
 - Ground plants (`Generation/Foliage`) decide each column from the seed, its (x, z) and its own
   blocks only, so a chunk's padding grows what its neighbour's core grows; keep it so. A plant's
   shape has at most 4 boxes (each is a part per plant in the world), and a tall plant is placed
