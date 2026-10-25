@@ -14,7 +14,18 @@
 	  that build entries or read switches), or a `.json` file holding it (Rojo makes a JSON file a
 	  ModuleScript returning its table, and so does the Lune loader). Any other module in a pack is
 	  an error (a misspelt kind would be ignored otherwise) unless its name starts with "_": the
-	  pack's own helpers, which its kind modules require.
+	  pack's own helpers, which its kind modules require (at the pack's top only).
+
+	Kind folders
+	  A kind may also be a folder of the kind's name (`Minecraft/blocks/`), as Minecraft's data
+	  packs keep one file per recipe or loot table: each module in it (Luau, a function of define,
+	  or JSON, as above) holds some of that kind's data, and they merge in their names' order,
+	  folders inside it in their place among them (`blocks/plants/flowers` after `blocks/ores`).
+	  So a big pack splits into files (`blocks/terrain`, `blocks/plants`...), and adding content
+	  may be adding a file. A list kind's files are appended to each other; a named kind's
+	  (textures, loot, lore) may not name one thing twice, and tags join as across packs. Messages
+	  name the file: "pack Minecraft, blocks/plants, block Poppy". A pack has a kind as a module or
+	  as a folder, not both; a kind folder holds only modules and folders (no "_" helpers).
 
 	Order and ids
 	  Packs load sorted by (`order`, name), and a pack's entries keep their order. A block's id is
@@ -63,8 +74,9 @@
 	  content.packs               the packs, in load order
 	  content.blockId, .itemId    name -> id (items: those that are no blocks)
 	  content.block(name), .item(name), .entry(name)   an entry by name, nil when there is none
-	  content.where(kind, name)   "pack Base, block Stone" (kind: Schema.SINGULAR's word: "block",
-	                              "item", "texture"...), for registries' messages
+	  content.where(kind, name)   "pack Minecraft, blocks/terrain, block Stone" (kind: Schema
+	                              .SINGULAR's word: "block", "item", "texture"...; the file only
+	                              for a kind folder's), for registries' messages
 ]]
 
 local Define = require(script.Define)
@@ -81,8 +93,16 @@ type AgeRecord = Schema.AgeRecord
 
 -- A pack, as loaded: its folder's name, its manifest's numbers.
 export type PackInfo = { name: string, order: number, description: string, requires: { string } }
--- A pack's data before merging: its name, its manifest and its kinds (kind -> data).
-export type PackData = { name: string, manifest: any, kinds: { [string]: any } }
+-- One module of a kind folder: its path in the pack ("blocks/plants") and its data.
+export type PackFile = { file: string, data: any }
+-- A pack's data before merging: its name, its manifest, its kinds' modules (kind -> data) and its
+-- kind folders (kind -> their modules, in order).
+export type PackData = {
+	name: string,
+	manifest: any,
+	kinds: { [string]: any },
+	folders: { [string]: { PackFile } }?,
+}
 
 export type Content = {
 	packs: { PackInfo },
@@ -189,14 +209,17 @@ function Content.build(input: { PackData }): Content
 	-- Where each named thing comes from, by Schema kind: name -> the pack that made it, and the
 	-- packs that patched it.
 	local made: { [string]: { [string]: string } } = {}
+	-- (The kind folder's file it is in, for a kind folder's.)
+	local madeIn: { [string]: { [string]: string? } } = {}
 	local patched: { [string]: { [string]: { string } } } = {}
 	for kind in SINGULAR do
 		made[kind] = {}
+		madeIn[kind] = {}
 		patched[kind] = {}
 	end
 	local recipes: { Recipe } = {}
-	-- Each recipe's pack and its place in the pack's list.
-	local recipeFrom: { { pack: string, index: number } } = {}
+	-- Each recipe's pack and file ("pack P, recipes/tools") and its place in the file's list.
+	local recipeFrom: { { from: string, index: number } } = {}
 	local tags: { [string]: { string } } = {}
 	local tagHas: { [string]: { [string]: boolean } } = {}
 	-- Who put each name in a tag: tag -> name -> "pack X" or "pack X, block Y".
@@ -214,7 +237,13 @@ function Content.build(input: { PackData }): Content
 		end
 		local by = patched[kind][name]
 		local patches = if by and #by > 0 then ` (patched by {table.concat(by, ", ")})` else ""
-		return `pack {pack}{patches}, {SINGULAR[kind]} {name}`
+		local file = madeIn[kind][name]
+		return `pack {pack}{patches}{if file then `, {file}` else ""}, {SINGULAR[kind]} {name}`
+	end
+
+	-- "pack P", or "pack P, blocks/plants" for a kind folder's file: where a module's data is.
+	local function placeOf(pack: string, file: string?): string
+		return if file then `pack {pack}, {file}` else `pack {pack}`
 	end
 
 	-- The kind and pack that took a block's or item's name, or nil.
@@ -242,12 +271,13 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
-	-- A block or item entry of `pack` (checked): appended, or patched onto the earlier one.
-	local function mergeEntry(kind: string, pack: string, entry: any)
+	-- A block or item entry of `pack` (checked; `file`: its kind folder's file): appended, or
+	-- patched onto the earlier one.
+	local function mergeEntry(kind: string, pack: string, file: string?, entry: any)
 		local name = entry.name :: string
 		local list: { any } = if kind == "blocks" then blocks else items
 		local at = if kind == "blocks" then blockAt else itemAt
-		local here = `pack {pack}, {SINGULAR[kind]} {name}`
+		local here = `{placeOf(pack, file)}, {SINGULAR[kind]} {name}`
 		if entry.override then
 			local index = at[name]
 			if index == nil then
@@ -274,13 +304,21 @@ function Content.build(input: { PackData }): Content
 			table.insert(list, table.clone(entry))
 			at[name] = #list
 			made[kind][name] = pack
+			madeIn[kind][name] = file
 			patched[kind][name] = {}
 		end
 	end
 
 	-- A named kind's entry (textures, loot, lore): once, or a texture's override.
-	local function mergeNamed(kind: string, pack: string, into: { [string]: any }, name: string, value: any)
-		local here = `pack {pack}, {SINGULAR[kind]} {name}`
+	local function mergeNamed(
+		kind: string,
+		pack: string,
+		file: string?,
+		into: { [string]: any },
+		name: string,
+		value: any
+	)
+		local here = `{placeOf(pack, file)}, {SINGULAR[kind]} {name}`
 		local before = made[kind][name]
 		if kind == "textures" and value.override then
 			if before == nil then
@@ -297,94 +335,122 @@ function Content.build(input: { PackData }): Content
 			return
 		end
 		if before then
-			fail(`{here}: pack {before} has one by that name already`)
+			fail(`{here}: {placeOf(before, madeIn[kind][name])} has one by that name already`)
 		end
 		into[name] = if type(value) == "table" then table.clone(value) else value
 		made[kind][name] = pack
+		madeIn[kind][name] = file
 		patched[kind][name] = {}
 	end
 
 	for _, data in sorted do
 		local pack = data.name
+		local folders: { [string]: { PackFile } } = data.folders or {}
 		for kind in data.kinds do
 			if SINGULAR[kind] == nil then
 				fail(`pack {pack} has a module {kind}, which is no kind{hint(kind, SINGULAR)}`)
 			end
 		end
+		for kind in folders do
+			if SINGULAR[kind] == nil then
+				fail(`pack {pack} has a folder {kind}, which is no kind{hint(kind, SINGULAR)}`)
+			elseif data.kinds[kind] ~= nil then
+				fail(`pack {pack} has its {kind} both as a module and as a folder`)
+			end
+		end
 		for _, kind in Schema.KINDS do
-			local value = data.kinds[kind]
-			if value == nil then
+			-- The kind's module, or its kind folder's modules in order.
+			local parts: { { file: string?, data: any } }? = if data.kinds[kind] ~= nil
+				then { { data = data.kinds[kind] } }
+				else folders[kind]
+			if parts == nil then
 				continue
 			end
-			if Schema.LISTS[kind] then
-				if not isList(value) then
-					fail(`pack {pack}'s {kind} must be a list of entries`)
+			for _, part in parts do
+				local value, file = part.data, part.file
+				local place = placeOf(pack, file)
+				-- (The whole module: "pack P's blocks", or "pack P, blocks/plants".)
+				local whole = if file then place else `pack {pack}'s {kind}`
+				if Schema.LISTS[kind] then
+					if not isList(value) then
+						fail(`{whole} must be a list of entries`)
+					end
+				elseif type(value) ~= "table" or (next(value) ~= nil and isList(value)) then
+					fail(`{whole} must be a table of names`)
 				end
-			elseif type(value) ~= "table" or (next(value) ~= nil and isList(value)) then
-				fail(`pack {pack}'s {kind} must be a table of names`)
-			end
-			if Schema.LISTS[kind] then
-				for index, entry in value do
-					local name = if type(entry) ~= "table" then nil elseif kind == "ages" then entry.id else entry.name
-					local label = if type(name) == "string" then name else `#{index}`
-					if kind == "recipes" then
-						local result = if type(entry) == "table" then entry.result else nil
-						label = `#{index}{if type(result) == "string" then ` ({result})` else ""}`
+				if Schema.LISTS[kind] then
+					for index, entry in value do
+						local name = if type(entry) ~= "table"
+							then nil
+							elseif kind == "ages" then entry.id
+							else entry.name
+						local label = if type(name) == "string" then name else `#{index}`
+						if kind == "recipes" then
+							local result = if type(entry) == "table" then entry.result else nil
+							label = `#{index}{if type(result) == "string" then ` ({result})` else ""}`
+						end
+						local problem = Schema.check(kind, entry)
+						if problem then
+							fail(`{place}, {SINGULAR[kind]} {label}: {problem}`)
+						end
+						if kind == "blocks" or kind == "items" then
+							mergeEntry(kind, pack, file, entry)
+						elseif kind == "recipes" then
+							table.insert(recipes, table.clone(entry))
+							table.insert(recipeFrom, { from = place, index = index })
+						elseif kind == "ores" then
+							local before = made.ores[entry.name]
+							if before then
+								fail(
+									`{place}, ore feature {entry.name}: {placeOf(before, madeIn.ores[entry.name])} has one by that name`
+								)
+							end
+							made.ores[entry.name] = pack
+							madeIn.ores[entry.name] = file
+							patched.ores[entry.name] = {}
+							table.insert(ores, table.clone(entry))
+						elseif kind == "ages" then
+							local before = made.ages[entry.id]
+							if before then
+								fail(
+									`{place}, Age {entry.id}: {placeOf(before, madeIn.ages[entry.id])} has an Age with that id`
+								)
+							end
+							made.ages[entry.id] = pack
+							madeIn.ages[entry.id] = file
+							patched.ages[entry.id] = {}
+							table.insert(ages, table.clone(entry))
+						end
 					end
-					local problem = Schema.check(kind, entry)
-					if problem then
-						fail(`pack {pack}, {SINGULAR[kind]} {label}: {problem}`)
+				else
+					local names: { string } = {}
+					for name in value do
+						if type(name) ~= "string" then
+							fail(`{whole} has a key that is no name`)
+						end
+						table.insert(names, name)
 					end
-					if kind == "blocks" or kind == "items" then
-						mergeEntry(kind, pack, entry)
-					elseif kind == "recipes" then
-						table.insert(recipes, table.clone(entry))
-						table.insert(recipeFrom, { pack = pack, index = index })
-					elseif kind == "ores" then
-						if made.ores[entry.name] then
-							fail(
-								`pack {pack}, ore feature {entry.name}: pack {made.ores[entry.name]} has one by that name`
+					-- (Sorted, so a pack's tag lists and errors come out the same everywhere.)
+					table.sort(names)
+					for _, name in names do
+						local problem = Schema.check(kind, value[name])
+						if problem then
+							fail(`{place}, {SINGULAR[kind]} {name}: {problem}`)
+						end
+						if kind == "tags" then
+							for _, member in value[name] do
+								addToTag(name, member, place)
+							end
+						else
+							mergeNamed(
+								kind,
+								pack,
+								file,
+								if kind == "textures" then textures elseif kind == "loot" then loot else lore,
+								name,
+								value[name]
 							)
 						end
-						made.ores[entry.name] = pack
-						patched.ores[entry.name] = {}
-						table.insert(ores, table.clone(entry))
-					elseif kind == "ages" then
-						if made.ages[entry.id] then
-							fail(`pack {pack}, Age {entry.id}: pack {made.ages[entry.id]} has an Age with that id`)
-						end
-						made.ages[entry.id] = pack
-						patched.ages[entry.id] = {}
-						table.insert(ages, table.clone(entry))
-					end
-				end
-			else
-				local names: { string } = {}
-				for name in value do
-					if type(name) ~= "string" then
-						fail(`pack {pack}'s {kind} has a key that is no name`)
-					end
-					table.insert(names, name)
-				end
-				-- (Sorted, so a pack's tag lists and errors come out the same everywhere.)
-				table.sort(names)
-				for _, name in names do
-					local problem = Schema.check(kind, value[name])
-					if problem then
-						fail(`pack {pack}, {SINGULAR[kind]} {name}: {problem}`)
-					end
-					if kind == "tags" then
-						for _, member in value[name] do
-							addToTag(name, member, `pack {pack}`)
-						end
-					else
-						mergeNamed(
-							kind,
-							pack,
-							if kind == "textures" then textures elseif kind == "loot" then loot else lore,
-							name,
-							value[name]
-						)
 					end
 				end
 			end
@@ -518,7 +584,7 @@ function Content.build(input: { PackData }): Content
 	end
 	for index, recipe in recipes do
 		local from = recipeFrom[index]
-		local here = `pack {from.pack}, recipe #{from.index} ({recipe.result})`
+		local here = `{from.from}, recipe #{from.index} ({recipe.result})`
 		needName(here, "result", recipe.result)
 		for _, name in (recipe.ingredients or {}) :: { string } do
 			needIngredient(here, "ingredients", name)
@@ -619,9 +685,28 @@ local function loadModule(module: Instance): any
 end
 
 --[[
+	A kind folder's modules (`folder`, at `path` in pack `pack`: "blocks"), loaded in their names'
+	order, the folders inside it in their place among them (depth first), into `into`.
+]]
+local function loadFolder(pack: string, folder: Instance, path: string, into: { PackFile })
+	for _, child in sortedChildren(folder) do
+		local file = `{path}/{child.Name}`
+		if string.sub(child.Name, 1, 1) == "_" then
+			fail(`pack {pack} has {file}: a helper goes at the pack's top, not in a kind folder`)
+		elseif child:IsA("ModuleScript") then
+			table.insert(into, { file = file, data = loadModule(child) })
+		elseif child:IsA("Folder") then
+			loadFolder(pack, child, file, into)
+		else
+			fail(`pack {pack} has {file}, which is no module or folder`)
+		end
+	end
+end
+
+--[[
 	The packs in `root` (a folder of pack folders), loaded and merged (`build`). A pack folder holds
-	its `pack` manifest and its kind modules (Luau or JSON); modules named "_..." are its own
-	helpers, left alone.
+	its `pack` manifest and its kinds, each a module (Luau or JSON) or a kind folder of them;
+	modules named "_..." are its own helpers, left alone.
 ]]
 function Content.load(root: Instance): Content
 	local packs: { PackData } = {}
@@ -631,12 +716,20 @@ function Content.load(root: Instance): Content
 		end
 		local manifest: any = nil
 		local kinds: { [string]: any } = {}
+		local folders: { [string]: { PackFile } } = {}
 		for _, module in sortedChildren(folder) do
 			local name = module.Name
 			if string.sub(name, 1, 1) == "_" then
 				continue
 			end
-			if not module:IsA("ModuleScript") then
+			if module:IsA("Folder") then
+				if SINGULAR[name] == nil then
+					fail(`pack {folder.Name} has a folder {name}, which is no kind{hint(name, SINGULAR)}`)
+				end
+				local files: { PackFile } = {}
+				loadFolder(folder.Name, module, name, files)
+				folders[name] = files
+			elseif not module:IsA("ModuleScript") then
 				fail(`pack {folder.Name} has {name}, which is no module (a helper's name starts with "_")`)
 			elseif name == "pack" then
 				manifest = loadModule(module)
@@ -651,7 +744,7 @@ function Content.load(root: Instance): Content
 		if manifest == nil then
 			fail(`pack {folder.Name} has no manifest (a module named pack)`)
 		end
-		table.insert(packs, { name = folder.Name, manifest = manifest, kinds = kinds })
+		table.insert(packs, { name = folder.Name, manifest = manifest, kinds = kinds, folders = folders })
 	end
 	return Content.build(packs)
 end

@@ -3,7 +3,9 @@
 	Ores) and the ids they give; discovery of Luau and JSON packs through Content.load (the fixture
 	packs in tests/fixtures/content/packs: Beta, JSON, order 10; Alpha, Luau, order 20, a "_"
 	helper and Define's metal; Gamma, order 20 after Alpha by name, overriding both), their order,
-	ids, overrides and merged tags; every per-entry field reaching its registry (the Fields fixture
+	ids, overrides and merged tags; kind folders (tests/fixtures/content/folders: Delta, Luau, a
+	folder inside a kind folder; Epsilon, JSON), their modules' order and the files every message
+	names; every per-entry field reaching its registry (the Fields fixture
 	pack grafted into a fresh game); and every check: the schema's (unknown fields with their "did
 	you mean", wrong types, missing fields), names and overrides, manifests and `requires`, every
 	cross-reference, discovery's, and a value both on an entry and in a registry's side table.
@@ -14,6 +16,7 @@
 local Loader = require("../lib/Loader")
 
 local PACKS = "tests/fixtures/content/packs"
+local FOLDERS = "tests/fixtures/content/folders"
 local FIELDS = "tests/fixtures/content/fields/Fields"
 
 return function(t, shared, require, _server, _client)
@@ -216,6 +219,43 @@ return function(t, shared, require, _server, _client)
 		local content = fixtures()
 		t.eq(table.concat(content.tags.fixture_stones, " "), "BetaStone AlphaStone GammaGlass")
 		t.eq(table.concat(content.tags.fixture_metals, " "), "FixiumIngot BetaGem")
+	end)
+
+	--[[ Kind folders (the fixture packs in tests/fixtures/content/folders) ]]
+
+	-- The kind folder fixture packs (Delta, Luau, order 10; Epsilon, JSON, order 20), through
+	-- Content.load in a fresh environment.
+	local function folderFixtures(): Content.Content
+		local env, root = fresh()
+		local packs = env.mount(FOLDERS, "ReplicatedStorage", "ContentFolders")
+		return env.require(root.Content).load(packs)
+	end
+
+	t.test("content: kind folders merge their modules in name order, folders in place, Luau and JSON", function()
+		local content = folderFixtures()
+		t.eq(names(content.packs), "Delta Epsilon")
+		t.eq(
+			names(content.blocks),
+			"DeltaFlower DeltaGrass DeltaStone DeltaBrick DeltaZebra EpsilonOne EpsilonTwo",
+			"blocks/plants (flower, grass), blocks/stone, blocks/zebra, then Epsilon's one and two"
+		)
+		for index, spec in content.blocks do
+			t.eq(content.blockId[spec.name], index - 1, "ids by place")
+		end
+		t.eq(names(content.items), "DeltaGem")
+		t.eq(names(content.recipes, "type"), "smelting shaped shapeless shapeless", "a_smelting, b_gems, Epsilon's")
+		t.eq(content.recipes[#content.recipes].count, 3, "the JSON pack's recipe last")
+		t.eq(table.concat(content.tags.delta, " "), "DeltaStone DeltaBrick", "tags/a's and tags/b's, joined")
+		t.eq(content.textures["delta stone"].Material, "Slate", "textures from two files")
+		t.eq(content.textures["delta flower"].Tint, false)
+		t.eq(content.loot.epsilon_chest[1].entries[2][1], false, "loot from two JSON files")
+		t.eq(content.loot.epsilon_crate[1].entries[1][1], "EpsilonOne")
+		t.eq((content.block("DeltaFlower") :: any).color[1], 200, "a function module got define")
+		t.eq((content.block("DeltaStone") :: any).color[3], 120, "and the pack's helper at its top")
+		t.eq(content.where("block", "DeltaFlower"), "pack Delta, blocks/plants/flower, block DeltaFlower")
+		t.eq(content.where("block", "EpsilonTwo"), "pack Epsilon, blocks/two, block EpsilonTwo")
+		t.eq(content.where("loot table", "epsilon_crate"), "pack Epsilon, loot/crate, loot table epsilon_crate")
+		t.eq(content.where("texture", "delta stone"), "pack Delta, textures/ground, texture delta stone")
 	end)
 
 	--[[ Every per-entry field reaching its registry (the Fields pack in a fresh game) ]]
@@ -678,6 +718,107 @@ return function(t, shared, require, _server, _client)
 			pcall(Content.build, with({ recipes = { { type = "smelting", input = "Stone", result = "Stone" } } })),
 			"a good pack loads"
 		)
+	end)
+
+	t.test("content: kind folders: every message names the file", function()
+		-- A pack whose kinds are kind folders: `folders` is { [kind] = { { file, data } } }.
+		local function filed(name: string, folders: { [string]: any }, kinds: { [string]: any }?): Content.PackData
+			return { name = name, manifest = { order = 10 }, kinds = kinds or {}, folders = folders }
+		end
+		local function file(path: string, data: any): Content.PackFile
+			return { file = path, data = data }
+		end
+		local stone = file("blocks/stone", { { name = "Stone" } })
+		fails(
+			{ filed("P", { blocks = { file("blocks/plants", { { name = "Poppy", harndess = 1 } }) } }) },
+			{ "pack P, blocks/plants, block Poppy: harndess is no field it may have (did you mean hardness?)" },
+			"an entry's field"
+		)
+		fails(
+			{ filed("P", { blocks = { stone, file("blocks/plants", { Poppy = {} }) } }) },
+			{ "pack P, blocks/plants must be a list of entries" },
+			"a list kind's file"
+		)
+		fails(
+			{ filed("P", { tags = { file("tags/a", { "Stone" }) } }) },
+			{ "pack P, tags/a must be a table of names" },
+			"a named kind's file"
+		)
+		fails(
+			{ filed("P", { blocks = { stone, file("blocks/more", { { name = "Stone" } }) } }) },
+			{ "pack P, blocks/more, block Stone: the name is taken by pack P, blocks/stone, block Stone" },
+			"a name in two files"
+		)
+		local texture = { Color = "", Material = "Rock" }
+		fails(
+			{ filed("P", { textures = { file("textures/a", { t = texture }), file("textures/b", { t = texture }) } }) },
+			{ "pack P, textures/b, texture t: pack P, textures/a has one by that name already" },
+			"a texture in two files"
+		)
+		fails({
+			filed("P", {
+				blocks = { stone },
+				recipes = {
+					file("recipes/tools", {
+						{ type = "smelting", input = "Stone", result = "Stone" },
+						{ type = "shaped", pattern = { "X" }, key = { X = "Stnoe" }, result = "Stone" },
+					}),
+				},
+			}),
+		}, { "pack P, recipes/tools, recipe #2 (Stone): key X names unknown item Stnoe" }, "a recipe")
+		fails(
+			{ filed("P", { blocks = { stone, file("blocks/ore", { { name = "Ore", drops = "Ghost" } }) } }) },
+			{ "pack P, blocks/ore, block Ore: drops names unknown item Ghost" },
+			"a cross-reference"
+		)
+		fails(
+			{ filed("P", { blocks = { stone }, tags = { file("tags/a", { t = { "Ghost" } }) } }) },
+			{ "pack P, tags/a: tag t names unknown item Ghost" },
+			"a tag's member"
+		)
+		fails(
+			{ filed("P", { blocks = { stone } }, { blocks = {} }) },
+			{ "pack P has its blocks both as a module and as a folder" },
+			"a kind both ways"
+		)
+		fails(
+			{ filed("P", { block = { stone } }) },
+			{ "pack P has a folder block, which is no kind (did you mean blocks?)" },
+			"a folder's name"
+		)
+		-- Discovery: what Content.load finds in a pack's folders.
+		local env, root = fresh()
+		local Fresh = env.require(root.Content)
+		local made = 0
+		local function load(build: (pack: Loader.Node) -> ()): string
+			made += 1
+			local packs = env.folder(root, `Folders{made}`)
+			local p = env.folder(packs, "P")
+			env.module(p, "pack", { order = 1 })
+			build(p)
+			local ok, err = pcall(Fresh.load, packs)
+			return if ok then "(it loaded)" else tostring(err)
+		end
+		local message = load(function(p)
+			env.module(env.folder(p, "blocks"), "_shapes", {})
+		end)
+		t.ok(has(message, { "pack P has blocks/_shapes: a helper goes at the pack's top" }), message)
+		message = load(function(p)
+			env.folder(p, "bloks")
+		end)
+		t.ok(has(message, { "pack P has a folder bloks, which is no kind (did you mean blocks?)" }), message)
+		message = load(function(p)
+			local blocks = env.folder(p, "blocks")
+			env.module(env.folder(blocks, "deep"), "stone", { { name = "Stone", harndess = 1 } })
+		end)
+		t.ok(has(message, { "pack P, blocks/deep/stone, block Stone: harndess is no field" }), message)
+		message = load(function(p)
+			local blocks = env.folder(p, "blocks")
+			env.module(blocks, "b", { { name = "B" } })
+			env.module(blocks, "a", { { name = "A" } })
+			env.folder(blocks, "empty")
+		end)
+		t.eq(message, "(it loaded)", "modules and an empty folder")
 	end)
 
 	--[[ Checks: discovery (Content.load) ]]

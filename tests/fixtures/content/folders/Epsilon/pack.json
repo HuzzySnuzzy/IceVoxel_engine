@@ -1,0 +1,5 @@
+{
+	"order": 20,
+	"description": "The JSON kind folder fixture pack (tests/spec/Content).",
+	"requires": ["Delta"]
+}
