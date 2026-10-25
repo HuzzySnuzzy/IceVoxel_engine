@@ -44,16 +44,23 @@ return function(t, shared, require, server, client)
 
 	--[[ The registry ]]
 
-	t.test("fluids: ids 0 none, 1 water, 2 lava, 3 oil, 4 fuel, each a BlockList group", function()
+	-- (By name, not by number: fluids are numbered in list order, which content may change. What
+	-- the numbers must keep is computed: 0 is none, the fluids 1..COUNT with no gaps, a u8, and
+	-- the constants the code names are the fluids of their names.)
+	t.test("fluids: 0 none, then water, lava, oil and fuel, each a BlockList group", function()
 		t.eq(Fluids.NONE, 0)
-		t.eq(Fluids.WATER, 1)
-		t.eq(Fluids.LAVA, 2)
-		t.eq(Fluids.OIL, 3)
-		t.eq(Fluids.FUEL, 4)
-		t.eq(Fluids.COUNT, 4)
-		t.eq(#Fluids.list, 4)
+		t.eq(Fluids.find("Water"), Fluids.WATER)
+		t.eq(Fluids.find("Lava"), Fluids.LAVA)
+		t.eq(Fluids.find("Oil"), Fluids.OIL)
+		t.eq(Fluids.find("Fuel"), Fluids.FUEL)
+		t.eq(#Fluids.list, Fluids.COUNT)
+		t.ok(Fluids.COUNT < 256, "fluid ids fit a u8")
+		for id = 1, Fluids.COUNT do
+			t.eq((Fluids.get(id) :: any).id, id, `fluid {id} is its own`)
+		end
 		t.eq(Fluids.BUCKET, 1000)
-		for id, name in GROUPS do
+		for _, name in GROUPS do
+			local id = Fluids.find(name) :: number
 			local fluid = Fluids.get(id)
 			assert(fluid, name)
 			t.eq(fluid.id, id)
@@ -74,7 +81,7 @@ return function(t, shared, require, server, client)
 			t.eq(Fluids.ofBucket(I[`{name}Bucket`]), id)
 			t.ok(table.isfrozen(fluid), "records are read only")
 		end
-		for _, bad in { 0, 5, -1, 1.5, 0 / 0, math.huge } do
+		for _, bad in { 0, Fluids.COUNT + 1, -1, 1.5, 0 / 0, math.huge } do
 			t.ok(not Fluids.isValid(bad), `{bad} is no fluid`)
 			t.eq(Fluids.get(bad), nil)
 			t.eq(Fluids.name(bad), "Empty")
@@ -381,11 +388,14 @@ return function(t, shared, require, server, client)
 			t.eq(decoded[i].amount, record.amount)
 		end
 		-- The encoder writes unknown fluids as none; a raw unknown id is malformed.
-		local written = Protocol.decodeTanks(Protocol.encodeTanks({ { x = 0, y = 0, z = 0, fluid = 9, amount = 5 } }))
+		-- (Unknown: past the last fluid, whatever content there is.)
+		local unknown = Fluids.COUNT + 1
+		local written =
+			Protocol.decodeTanks(Protocol.encodeTanks({ { x = 0, y = 0, z = 0, fluid = unknown, amount = 5 } }))
 		t.eq(written and written[1].fluid, 0)
-		local raw = Protocol.encodeTanks({ { x = 0, y = 0, z = 0, fluid = 1, amount = 5 } })
-		buffer.writeu8(raw, 4 + 10, Fluids.COUNT + 1)
-		t.eq(Protocol.decodeTanks(raw), nil, "fluid 5")
+		local raw = Protocol.encodeTanks({ { x = 0, y = 0, z = 0, fluid = Fluids.WATER, amount = 5 } })
+		buffer.writeu8(raw, 4 + 10, unknown)
+		t.eq(Protocol.decodeTanks(raw), nil, "a fluid past the last")
 
 		t.eq(Protocol.TRANSMITTER_BYTES, 15)
 		local records = {
@@ -400,13 +410,13 @@ return function(t, shared, require, server, client)
 		t.eq(pipes[2].fluidId, Fluids.FUEL)
 		t.eq(pipes[3].fluidId, 0, "no fluid id: none")
 		t.eq(pipes[3].colour, 3)
-		local unknown = Protocol.decodeTransmitters(
-			Protocol.encodeTransmitters({ { x = 0, y = 0, z = 0, modes = 0, colour = 0, fluid = 1, fluidId = 77 } })
-		)
+		local unknown = Protocol.decodeTransmitters(Protocol.encodeTransmitters({
+			{ x = 0, y = 0, z = 0, modes = 0, colour = 0, fluid = 1, fluidId = Fluids.COUNT + 1 },
+		}))
 		t.eq(unknown and unknown[1].fluidId, 0, "written as none")
 		local bad = Protocol.encodeTransmitters({ records[1] })
 		buffer.writeu8(bad, 4 + 14, Fluids.COUNT + 1)
-		t.eq(Protocol.decodeTransmitters(bad), nil, "fluid id 5")
+		t.eq(Protocol.decodeTransmitters(bad), nil, "a fluid id past the last")
 	end)
 
 	t.test("protocol: Machines records carry their tanks, and WAILA shows them from the wire", function()
@@ -456,14 +466,14 @@ return function(t, shared, require, server, client)
 		local empty = Protocol.decodeMachines(Protocol.encodeMachines({ record(0, {}) }))
 		t.eq(empty and empty[1].tanks, nil)
 		local unknown = Protocol.decodeMachines(
-			Protocol.encodeMachines({ record(0, { { fluid = 77, amount = 5, capacity = 10 } }) })
+			Protocol.encodeMachines({ record(0, { { fluid = Fluids.COUNT + 1, amount = 5, capacity = 10 } }) })
 		)
 		t.eq(unknown and (unknown[1].tanks :: any)[1].fluid, 0, "written as none")
 		-- Malformed: an unknown raw fluid id, a tank count beyond the bytes, bytes left over.
 		local raw = Protocol.encodeMachines({ records[3] })
 		local bad = buffer.fromstring(buffer.tostring(raw))
 		buffer.writeu8(bad, 4 + Protocol.MACHINE_BYTES + 1, Fluids.COUNT + 1)
-		t.eq(Protocol.decodeMachines(bad), nil, "fluid id 5")
+		t.eq(Protocol.decodeMachines(bad), nil, "a fluid id past the last")
 		local short = buffer.fromstring(buffer.tostring(raw))
 		buffer.writeu8(short, 4 + Protocol.MACHINE_BYTES, 2)
 		t.eq(Protocol.decodeMachines(short), nil, "two tanks said, one sent")

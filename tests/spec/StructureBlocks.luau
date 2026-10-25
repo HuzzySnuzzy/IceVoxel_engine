@@ -1,5 +1,5 @@
 --[[
-	Structure blocks, structure voids, jigsaw blocks and glow lichen as blocks: their place in
+	Structure blocks, structure voids, jigsaw blocks and glow lichen as blocks: their names in
 	BlockList, creative only rules (no survival mining, no drops), structure block modes, jigsaw
 	orientations and Minecraft's placement rule, turning blocks with a structure (Blocks.rotate),
 	glow lichen and its cave twins (variants, light, shears, cave air for the mesher), their faces
@@ -38,7 +38,8 @@ return function(t, shared, require, _server, client)
 
 	--[[ Blocks ]]
 
-	t.test("structure blocks: appended after the plants in Minecraft's order", function()
+	-- (By name, not by id: content packs number blocks at load.)
+	t.test("structure blocks: the blocks, in Minecraft's names", function()
 		local names =
 			{ "StructureBlock", "StructureBlockLoad", "StructureBlockCorner", "StructureBlockData", "StructureVoid" }
 		table.insert(names, "Jigsaw")
@@ -54,12 +55,10 @@ return function(t, shared, require, _server, client)
 				table.insert(names, prefix .. side)
 			end
 		end
-		local first = id.RedMushroom + 1
-		for i, name in names do
-			t.eq(find(name), first + i - 1, name)
+		for _, name in names do
+			local block = find(name)
+			t.ok(block ~= nil and Blocks.get(block).name == name, `{name} is a block`)
 		end
-		-- (Then lava, oil and fuel: tests/spec/LavaOil.)
-		t.eq(find("Lava"), first + #names, "the fluids come next")
 		t.eq(Blocks.find("NoSuchBlock"), nil)
 		t.eq(Blocks.find(42 :: any), nil)
 	end)
@@ -306,13 +305,13 @@ return function(t, shared, require, _server, client)
 	end)
 
 	t.test("cave twins: look and drop like their twin, are cave air for hidden caves, never placed", function()
-		local twins, fluids = 0, 0
+		local twins: { [string]: boolean }, fluids: { [string]: boolean } = {}, {}
 		for block = 0, Blocks.count - 1 do
 			local twin = Blocks.caveTwinOf(block)
 			t.eq(buffer.readu8(Blocks.caveTwinLut, block), if twin then 1 else 0)
 			if twin then
-				twins += 1
 				local def, twinDef = Blocks.get(block), Blocks.get(twin)
+				twins[def.name] = true
 				t.eq(Blocks.caveTwinFor(twin), block)
 				t.ok(Blocks.isCaveTwin(block) and not Blocks.isCaveTwin(twin))
 				if def.seasonless then
@@ -334,7 +333,7 @@ return function(t, shared, require, _server, client)
 				t.eq(Blocks.placementFor(block, 0, 1, 0, 0, -1, 0, world(), 0, 10, 0), nil, "nothing places it")
 				if def.fluid then
 					-- (CaveLava, CaveOil: tests/spec/LavaOil.)
-					fluids += 1
+					fluids[def.name] = true
 					t.eq(Items.drops(block, Items.id.Shears), nil, "fluids drop nothing")
 				else
 					-- (Shears get what they get from the twin: glow lichen, a cobweb, vines, roots;
@@ -353,11 +352,17 @@ return function(t, shared, require, _server, client)
 				end
 			end
 		end
-		-- (Then the mineshafts' tunnel decorations: four wall torches, two rails, the fence post, the
-		-- cobweb, the moss carpet, four vines and hanging roots; then the zombie apocalypse's
-		-- bunkers' Ceiling Lamp: 22 before it.)
-		t.eq(twins, 23, "six glow lichen sides, lava and oil, fourteen of the mineshafts' and the lamp")
-		t.eq(fluids, 2)
+		-- (By name, not a count, so new content's twins leave it alone: the six glow lichen sides,
+		-- lava and oil, the mineshafts' tunnel decorations (tests/spec/MineshaftBlocks) and the
+		-- bunkers' Ceiling Lamp.)
+		for _, side in { "", "Up", "North", "South", "West", "East" } do
+			t.ok(twins[`CaveGlowLichen{side}`], `CaveGlowLichen{side} is a twin`)
+		end
+		for _, name in { "CaveRail", "CaveWallTorchNorth", "CaveVine", "CaveCeilingLamp" } do
+			t.ok(twins[name], `{name} is a twin`)
+		end
+		t.ok(fluids.CaveLava and fluids.CaveOil, "lava's and oil's, the fluids'")
+		t.eq(Blocks.caveTwinFor(Blocks.fluidId("Water", 0)), nil, "water has no twin")
 		t.eq(Blocks.surfaceForm(Blocks.CAVE_AIR), AIR)
 		t.eq(Blocks.surfaceForm(STONE), STONE)
 		t.eq(Blocks.caveTwinFor(STONE), nil)

@@ -736,11 +736,9 @@ return function(t, shared, require)
 	end)
 
 	t.test("texture pack: appearances are keyed by textures", function()
-		t.eq(
-			#Blocks.appearances,
-			462,
-			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool; then the four ladders, rope, two rails, the fence, the cobweb, moss block and carpet, four vines, hanging roots and mossy cobblestone, and the four vines' cave twins, seasonless; then 32 halves of five doors, then the fence's 15 variants with arms; then the zombie apocalypse's 19 blocks, 367 before them: its Ceiling Lamp's cave twin shares the lamp's; then the seasons' 47, 386 before them: 8 snow layer heights, 5 heaters, insulated planks and glass, the Insulated Door's 32 halves; then the turrets' 14, 433 before them: twelve turrets, the Metal Miner and the Ammo Press, each its own decor; then the new ores' 15, 447 before them)"
-		)
+		-- (No total: content adds appearances. What it guarded, none split or merged, is checked
+		-- by what shares one; the limit is Blocks' own.)
+		t.ok(#Blocks.appearances < 1024, "at most 1023 appearances")
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin
 		-- (not a seasonless one: the same look in an appearance of its own).
 		local members: { [number]: { number } } = {}
@@ -749,6 +747,20 @@ return function(t, shared, require)
 				members[def.appearance] = members[def.appearance] or {}
 				table.insert(members[def.appearance], id)
 			end
+		end
+		-- None split: a fluid's levels share its source's, a cave twin its twin's (unless
+		-- seasonless); and every appearance is some block's.
+		for id, def in Blocks.defs do
+			local twin = Blocks.caveTwinOf(id)
+			if def.fluid and twin == nil then
+				local source = Blocks.get(Blocks.fluidId(def.fluid.group, 0))
+				t.eq(def.appearance, source.appearance, `{def.name} looks like its source`)
+			elseif twin and not def.seasonless then
+				t.eq(def.appearance, Blocks.get(twin).appearance, `{def.name} looks like its twin`)
+			end
+		end
+		for appearance = 1, #Blocks.appearances do
+			t.ok(members[appearance] ~= nil, `appearance {appearance} is a block's`)
 		end
 		for appearance, ids in members do
 			local info = Blocks.appearances[appearance]

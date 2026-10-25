@@ -1,8 +1,8 @@
 --[[
 	Turrets and the Metal Miner, the foundation (Shared/Turrets, Shared/Turrets/TurretRules,
 	Machines/Kinds/Turret, Miner and AmmoPress, Machines/MinerRules, the Turrets message,
-	WeaponSync's `plain` in Weapons): the registries in their order (blocks, items, lore, icons,
-	sounds, Ages), the twelve Specs against their blocks, calibres, stand-in guns and fits; the
+	WeaponSync's `plain` in Weapons): the registries by name (blocks, items, lore, icons, sounds,
+	Ages), the twelve Specs against their blocks, calibres, stand-in guns and fits; the
 	pure maths (aim, muzzle, turning the short way and never past, the exact cadence and the two
 	ways to get it wrong, the packed state, spread, range and noise with every attachment, a
 	Ruined one and NoiseScale); the turret kind on a fake service (idle, tracking and shot energy,
@@ -73,12 +73,16 @@ return function(t, shared, require, server, client)
 
 	--[[ The registries ]]
 
-	t.test("turrets: twelve turrets after the seasons, the miner and the press; the parts after the weapons", function()
-		local id = 486
+	-- (By name, not by id: content packs number blocks and items at load, so no id or position
+	-- here is fixed. Each turret block is the turret of its own type and tier.)
+	t.test("turrets: twelve turret blocks, the miner and the press; the eight parts", function()
 		for _, turretType in Turrets.TYPES do
 			for tier, tierName in TIERS do
 				local name = `{tierName}{TYPES[turretType]}Turret`
-				t.eq(B[name], id, `{name}'s id`)
+				local id = Blocks.find(name) :: number
+				t.ok(id ~= nil, `{name} is a block`)
+				t.eq(Turrets.of(turretType, tier).block, id, `{name} is the {turretType} turret of tier {tier}`)
+				t.eq((Turrets.spec(id) :: Turrets.Spec).tier, tier, `{name}'s tier`)
 				local def = Blocks.get(id)
 				t.eq(def.displayName, `{tierName} {LABELS[turretType]} Turret`, `{name}'s name`)
 				t.eq(def.decor, name, `{name}'s decor`)
@@ -92,13 +96,8 @@ return function(t, shared, require, server, client)
 				t.eq(Blocks.zombieBreak(id), 0, "zombies never break machines")
 				t.ok(type(LoreList[name]) == "string", `{name}'s lore`)
 				t.eq(TexturePack.Blocks[name], nil, `{name} is never textured`)
-				id += 1
 			end
 		end
-		t.eq(B.MetalMiner, 498)
-		t.eq(B.AmmoPress, 499)
-		-- (The last blocks then; the new ores' 15 follow: tests/spec/Ores.)
-		t.eq(B.CopperOre, 500, "the last blocks before the new ores")
 		for _, name in { "MetalMiner", "AmmoPress" } do
 			local def = Blocks.get(B[name])
 			t.eq(def.decor, name)
@@ -108,32 +107,29 @@ return function(t, shared, require, server, client)
 		end
 		t.eq(Machines.energyOf(B.MetalMiner).capacity, Config.Miner.Capacity)
 		t.eq(Machines.energyOf(B.AmmoPress).capacity, Config.AmmoPress.Capacity)
-		for index, name in PARTS do
-			t.eq(I[name], 4311 + index, `{name}'s id`)
+		for _, name in PARTS do
+			local item = Items.find(name)
+			t.ok(item ~= nil and (Items.get(item) :: any).block == nil, `{name} is an item, not a block`)
 			t.eq(TexturePack.Icons[name], "", `{name}'s icon is blank until made`)
 			t.ok(type(LoreList[name]) == "string", `{name}'s lore`)
 			t.eq(Items.maxStack(I[name]), if name == "LaserSight" then 1 else 64, `{name}'s stack`)
 		end
-		-- (The last item then; the new ores' follow it.)
-		t.eq(Items.id.RawCopper, Items.id.LaserSight + 1, "the last item before the new ores'")
 		t.eq(Weapons.attachment(I.LaserSight), nil, "the Laser Sight fits no hand-held gun")
 	end)
 
-	t.test("turrets: the sounds after the seasons', the client's; the machines' the fifth sheet's hums", function()
-		local first = Sounds.id["block.turret.servo"]
-		for i, name in { "block.turret.servo", "block.metal_miner.hum", "block.ammo_press.hum" } do
+	-- (By name: event numbers are catalogue positions, which move as content is added.)
+	t.test("turrets: the sounds, the client's; the machines' the fifth sheet's hums", function()
+		for _, name in { "block.turret.servo", "block.metal_miner.hum", "block.ammo_press.hum" } do
 			local event = Sounds.get(name)
 			t.ok(event ~= nil, `{name} is in the catalogue`)
 			assert(event)
-			t.eq(Sounds.id[name], first + i - 1, `{name} in order`)
+			t.eq(Sounds.get(Sounds.id[name]), event, `{name} by its number`)
 			t.eq(event.side, "client", `{name} is the client's`)
 			t.eq(event.source, "blocks")
 		end
 		t.ok(string.find((Sounds.get("block.turret.servo") :: any).id, "^rbxasset://") ~= nil, "the servo's stand-in")
 		t.eq((Sounds.get("block.metal_miner.hum") :: any).category, "machine.heavy_hum", "the miner's heavy hum")
 		t.eq((Sounds.get("block.ammo_press.hum") :: any).category, "machine.hum", "the press's hum")
-		t.eq(Sounds.id["ambient.season.heat_wave"], first - 1, "right after the seasons'")
-		t.eq(Sounds.id["item.firearm.9mm.fire"], first + 3, "then the fifth sheet's")
 	end)
 
 	t.test(
@@ -159,7 +155,8 @@ return function(t, shared, require, server, client)
 	--[[ The Specs ]]
 
 	t.test("turrets: twelve Specs: blocks, calibres, stand-in guns, numbers and fits", function()
-		t.eq(#Turrets.SPECS, 12)
+		-- (A Spec a type and tier, computed: no total pinned.)
+		t.eq(#Turrets.SPECS, #Turrets.TYPES * Turrets.TIERS)
 		local calibres = { smg = "9mm", rifle = "556", sniper = "308" }
 		local rounds = { smg = I.Rounds9mm, rifle = I.Rounds556, sniper = I.Rounds308 }
 		local guns = { smg = I.Smg, rifle = I.AssaultRifle, sniper = I.HuntingRifle }
@@ -1003,31 +1000,38 @@ return function(t, shared, require, server, client)
 		end
 		fields(B.MetalMiner, { "progress", "ticksRequired", "energyPerTick", "mining", "state", "activeDelay" })
 		fields(B.AmmoPress, { "progress", "ticksRequired", "energyPerTick", "calibre", "state", "activeDelay" })
-		-- The miner: its output, its cards, its ores in their frozen order.
+		-- The miner: its output, its cards, its ores (by name: content may add ores anywhere).
 		local miner = Machines.kindOf(B.MetalMiner) :: any
 		t.eq(#miner.slots, 3)
 		t.ok(miner.slots[1].output and miner.slots[1].big and miner.slots[1].x == 116, "the output")
 		t.ok(Machines.mayPlace(B.MetalMiner, 2, I.SpeedUpgrade) and Machines.mayPlace(B.MetalMiner, 3, I.EnergyUpgrade))
 		t.eq(table.concat(Machines.outputSlots(B.MetalMiner), ","), "1", "pushed out")
-		local names = { "CoalOre", "IronOre", "OsmiumOre", "GoldOre", "EmeraldOre", "DiamondOre" }
-		local drops = { "Coal", "RawIron", "RawOsmium", "RawGold", "Emerald", "Diamond" }
-		for index, name in names do
-			local ore = MinerRules.ORES[index]
-			t.eq(ore.name, name, `ore {index}`)
+		local drops = {
+			CoalOre = "Coal",
+			IronOre = "RawIron",
+			OsmiumOre = "RawOsmium",
+			GoldOre = "RawGold",
+			EmeraldOre = "Emerald",
+			DiamondOre = "Diamond",
+		}
+		for name, drop in drops do
+			local ore = MinerRules.ore(B[name]) :: MinerRules.Ore
+			t.ok(ore ~= nil and ore.name == name, `{name} is an ore`)
 			t.eq(ore.block, B[name])
-			t.eq(ore.drop, I[drops[index]], `{name} gives {drops[index]}`)
-			t.eq(MinerRules.ore(B[name]), ore)
+			t.eq(ore.drop, I[drop], `{name} gives {drop}`)
+			t.eq(MinerRules.ORES[ore.index], ore, `{name} in its place`)
 			t.eq(ore.ticks, Config.Miner.Ores[name].ticks)
 		end
-		t.eq(MinerRules.ORES[1].floor, 400000, "coal's floor")
+		local diamond = (MinerRules.ore(B.DiamondOre) :: MinerRules.Ore).index
+		t.eq((MinerRules.ore(B.CoalOre) :: MinerRules.Ore).floor, 400000, "coal's floor")
 		t.eq(MinerRules.ore(B.Stone), nil)
 		local view = Machines.view(Machines.newContainer(B.MetalMiner))
 		local function minerStatus(code: number, index: number): string?
 			view.state = MinerRules.packState(code, index)
 			return Machines.status(B.MetalMiner, view)
 		end
-		t.eq(minerStatus(MinerRules.STATE.MINING, 6), "Mining Diamond Ore")
-		t.eq(minerStatus(MinerRules.STATE.NO_POWER, 6), "No power")
+		t.eq(minerStatus(MinerRules.STATE.MINING, diamond), "Mining Diamond Ore")
+		t.eq(minerStatus(MinerRules.STATE.NO_POWER, diamond), "No power")
 		t.eq(minerStatus(MinerRules.STATE.OUTPUT_FULL, 1), "Output full")
 		t.eq(minerStatus(MinerRules.STATE.NO_ORE, 0), "No ore below")
 		t.eq(minerStatus(MinerRules.STATE.MINING, 0), "Idle")
@@ -1193,14 +1197,42 @@ return function(t, shared, require, server, client)
 		local OffBlocks = env.require(root.Blocks)
 		local OffItems = env.require(root.Items)
 		t.eq(OffBlocks.count, Blocks.count, "the blocks stay")
-		-- (The new ores' 34 come after them.)
-		t.eq(#OffCrafting.recipes, 224 + 34, "the recipes before them")
-		local results: { [number]: boolean } = {}
-		for _, recipe in OffCrafting.recipes do
-			results[recipe.result] = true
+		-- Exactly the features' recipes go, every other stays (counted by result name, so the
+		-- check holds whatever else is added).
+		local gone: { [string]: boolean } = {
+			ServoMotor = true,
+			BeltFeeder = true,
+			Receiver = true,
+			TargetingModule = true,
+			LaserSight = true,
+			MetalMiner = true,
+			AmmoPress = true,
+		}
+		for _, typeName in TYPES do
+			gone[`{typeName}Barrel`] = true
+			for _, tierName in TIERS do
+				gone[`{tierName}{typeName}Turret`] = true
+			end
+		end
+		local function made(recipes: { any }, items: any): { [string]: number }
+			local counts: { [string]: number } = {}
+			for _, recipe in recipes do
+				local name = (items.get(recipe.result) :: any).name
+				counts[name] = (counts[name] or 0) + 1
+			end
+			return counts
+		end
+		local on, off = made(Crafting.recipes, Items), made(OffCrafting.recipes, OffItems)
+		for name, count in on do
+			t.eq(off[name] or 0, if gone[name] then 0 else count, `{name}'s recipes`)
+		end
+		for name in off do
+			t.ok(on[name] ~= nil, `{name}: no recipe only when off`)
+		end
+		for name in gone do
+			t.ok(on[name] ~= nil, `{name} has a recipe when on`)
 		end
 		for _, name in { "ServoMotor", "LaserSight", "SmgBarrel", "BasicSmgTurret", "MetalMiner", "AmmoPress" } do
-			t.ok(not results[OffItems.id[name]], `no recipe for {name}`)
 			t.eq(OffAges.ofName(name), 1, `no Age names {name}`)
 		end
 		t.ok(not OffMachines.demands(OffBlocks.id.BasicSmgTurret), "no demand")

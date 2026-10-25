@@ -185,7 +185,8 @@ return function(t, shared, require, _server, client)
 			},
 			sniper = { range = { 40, 48, 56, 64 }, rpm = { 15, 20, 30, 40 }, buffer = { 1, 1, 2, 2 }, calibre = ".308" },
 		}
-		t.eq(#Turrets.SPECS, 12)
+		-- (A Spec a type and tier, computed: no total pinned.)
+		t.eq(#Turrets.SPECS, #Turrets.TYPES * Turrets.TIERS)
 		for _, spec in Turrets.SPECS do
 			local numbers = expected[spec.type]
 			local want =

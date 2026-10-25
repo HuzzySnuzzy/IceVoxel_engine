@@ -192,8 +192,8 @@ return function(t, shared, require, server, client)
 		-- Black powder: two saltpetre, a sulfur and a coal or charcoal make four.
 		local black = Crafting.match(grid({ I.Saltpetre, I.Sulfur, I.Saltpetre, I.Charcoal }), 2) :: any
 		t.ok(black and black.item == I.Gunpowder and black.count == 4, "saltpetre, sulfur and charcoal")
-		-- (Appended after Flint and Steel; the newest item is pinned in tests/spec/Items.)
-		t.ok(I.Gunpowder > I.FlintAndSteel, "gunpowder came after flint and steel")
+		-- (Gunpowder is an item of its own; by name, not by its place among the ids.)
+		t.ok(I.Gunpowder >= Items.ITEM_BASE, "gunpowder is an item, not a block")
 	end)
 
 	--[[ Lighting ]]

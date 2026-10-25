@@ -16,6 +16,7 @@ return function(t, shared, require, server)
 	local Appearance = require(shared.Characters.Appearance)
 	local Characters = require(shared.Characters)
 	local Config = require(shared.Config)
+	local Effects = require(shared.Effects)
 	local Items = require(shared.Items)
 	local CharacterCodec = require(server.Save.CharacterCodec)
 	local CharacterSaves = require(server.Save.CharacterSaves)
@@ -432,7 +433,7 @@ return function(t, shared, require, server)
 		frozen.vanityArmor[1] = Items.newStack(Items.id.TopHat, 1)
 		frozen.cursor = Items.newStack(Items.id.Stick, 2)
 		frozen.crystals, frozen.mana, frozen.hidden, frozen.selected = 2, 40, 0x0101, 4
-		frozen.effects = { { effect = 1, amplifier = 0, ticks = 200, ambient = false } }
+		frozen.effects = { { effect = Effects.id.Speed, amplifier = 0, ticks = 200, ambient = false } }
 		local kept = CharacterCodec.new(1, "Alice", D.Classic, Appearance.default(), 0)
 		CharacterCodec.keepThings(kept, frozen)
 		frozen.slots[5].count = 64

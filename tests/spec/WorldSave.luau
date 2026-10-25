@@ -20,6 +20,7 @@ return function(t, shared, require, server, client)
 	local ChunkLayout = require(shared.World.ChunkLayout)
 	local Config = require(shared.Config)
 	local Coords = require(shared.World.Coords)
+	local Effects = require(shared.Effects)
 	local GameMode = require(shared.GameMode)
 	local Items = require(shared.Items)
 	local Machines = require(shared.Machines)
@@ -408,8 +409,8 @@ return function(t, shared, require, server, client)
 			SaveCodec.stack(w, stack)
 		end
 		SaveCodec.stack(w, nil)
-		-- An item id this version doesn't know.
-		SaveCodec.u16(w, 65000)
+		-- An item id this version doesn't know (past the last item, whatever content there is).
+		SaveCodec.u16(w, Items.ITEM_BASE + #Items.list)
 		SaveCodec.varint(w, 1)
 		SaveCodec.varint(w, 0)
 		SaveCodec.u8(w, 0)
@@ -554,7 +555,9 @@ return function(t, shared, require, server, client)
 
 	t.test("world save: edits of blocks this version doesn't know are dropped, the rest kept", function()
 		local region = RegionCodec.new(0, 0)
-		region.chunks[Coords.chunkKey(0, 0)] = { [0] = STONE, [1] = 60000, [2] = 60000, [5] = id.Glass }
+		-- (Ids past the last block, whatever content there is.)
+		local unknown = Blocks.count
+		region.chunks[Coords.chunkKey(0, 0)] = { [0] = STONE, [1] = unknown, [2] = unknown + 1000, [5] = id.Glass }
 		local back = RegionCodec.decode(RegionCodec.encode(region))
 		t.eq(back.dropped, 2)
 		t.eq(back.chunks[Coords.chunkKey(0, 0)][0], STONE)
@@ -622,9 +625,10 @@ return function(t, shared, require, server, client)
 			chill = 0,
 			clemency = 4000,
 		}
+		-- (Effects by name: their numbers are list positions, which content may change.)
 		record.effects = {
-			{ effect = 1, amplifier = 1, ticks = 600, ambient = false },
-			{ effect = 2, amplifier = 0, ticks = -1, ambient = true },
+			{ effect = Effects.id.Speed, amplifier = 1, ticks = 600, ambient = false },
+			{ effect = Effects.id.Slowness, amplifier = 0, ticks = -1, ambient = true },
 		}
 		local text = PlayerCodec.toText(record)
 		local back = PlayerCodec.fromText(text) :: any

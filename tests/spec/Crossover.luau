@@ -174,13 +174,16 @@ return function(t, shared, require, server)
 		end
 		-- Potions: brewing is the Iron Age's, the strong and long ones the Industrial Age's.
 		local iron, industrial = Ages.byId("iron") :: Ages.Age, Ages.byId("industrial") :: Ages.Age
-		local count = 0
+		-- (Every potion item, by name: no count, so new potions leave it alone.)
+		local potions: { [string]: boolean } = {}
 		for _, variant in PotionList.all() do
-			count += 1
+			potions[variant.item] = true
 			local expected = if variant.from == PotionList.BASE then iron.index else industrial.index
 			t.eq(Ages.ofName(variant.item), expected, variant.item)
 		end
-		t.eq(count, 29, "every potion item")
+		for _, name in { "PotionOfSwiftness", "StrongPotionOfResistance" } do
+			t.ok(potions[name], `{name} is a potion`)
+		end
 		-- The gate as the windows use it.
 		local stone = Progression.new()
 		local ironAge = Progression.new()

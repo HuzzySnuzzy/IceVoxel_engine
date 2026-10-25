@@ -189,8 +189,19 @@ return function(t, shared, require, _server, client)
 		t.eq(categories(JeiData.recipes(I.OsmiumBlock)), "crafting", "the block is crafted")
 		t.ok(JeiData.has("recipes", I.RawOsmium), "raw osmium unpacks from its block")
 		t.ok(not JeiData.has("recipes", I.OsmiumOre), "the ore is only found")
-		t.eq(#JeiData.filter("osmium"), 6, "the list finds all six")
-		t.eq(#Items.search("Osmium"), 6, "and so does the creative search")
+		-- (The six by name, not a count: content may add more osmium things.)
+		local function names(defs: { Items.ItemDef }): { [string]: boolean }
+			local set = {}
+			for _, def in defs do
+				set[def.name] = true
+			end
+			return set
+		end
+		local listed, searched = names(JeiData.filter("osmium")), names(Items.search("Osmium"))
+		for _, name in { "OsmiumOre", "OsmiumBlock", "RawOsmiumBlock", "RawOsmium", "OsmiumIngot", "OsmiumNugget" } do
+			t.ok(listed[name], `the list finds {name}`)
+			t.ok(searched[name], `and so does the creative search`)
+		end
 
 		local C, X = WailaInfo.CHECK, WailaInfo.CROSS
 		local function texts(held: number?): string

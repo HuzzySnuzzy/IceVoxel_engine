@@ -53,21 +53,31 @@ return function(t, shared, require, server, client)
 
 	--[[ Registry ]]
 
-	t.test("effects: the registry (ids append only, names, Minecraft's colours)", function()
-		t.eq(E.Speed, 1)
-		t.eq(E.Glowing, 18)
-		t.eq(E.OilCoated, 19)
-		t.eq(E.FuelSoaked, 20)
-		t.eq(E.ClimateClemency, 24)
-		t.eq(E.ManaSickness, 25)
-		-- (25 before the zombie apocalypse's Bleeding and Infection.)
-		t.eq(E.Bleeding, 26)
-		t.eq(E.Infection, 27)
-		-- (27 before Minecraft's Hunger, which the food bar brought: Shared/Hunger.)
-		t.eq(E.Hunger, 28)
-		-- (28 before the uranium's Radiation Sickness: Shared/Radiation, tests/spec/Radiation.)
-		t.eq(E.RadiationSickness, 29)
-		t.eq(Effects.COUNT, 29, "the last effect added (Radiation Sickness)")
+	-- (By name, not by id or count: effects are numbered in list order, which content may change;
+	-- what the numbers must keep is computed: 1..COUNT with no gaps, each its own, a u8.)
+	t.test("effects: the registry (ids dense, names, Minecraft's colours)", function()
+		t.ok(Effects.COUNT >= 1 and Effects.COUNT < 256, "ids fit a u8")
+		for id = 1, Effects.COUNT do
+			local effect = Effects.get(id)
+			t.ok(effect ~= nil and effect.id == id and E[effect.name] == id, `effect {id} is its own`)
+		end
+		for _, name in
+			{
+				"Speed",
+				"Glowing",
+				"OilCoated",
+				"FuelSoaked",
+				"ClimateClemency",
+				"ManaSickness",
+				"Bleeding",
+				"Infection",
+				"Hunger",
+				"RadiationSickness",
+			}
+		do
+			local effect = Effects.get(E[name])
+			t.ok(effect ~= nil and effect.name == name, `{name} is an effect`)
+		end
 		t.eq(Effects.get(E.Hunger).colorValue, 5797459, "Minecraft's HUNGER colour")
 		t.ok(Effects.get(E.Hunger).drainsFood and not Effects.get(E.Hunger).external, "a running effect")
 		t.eq(Effects.find("minecraft:hunger"), E.Hunger, "/effect give @s hunger")
@@ -83,8 +93,10 @@ return function(t, shared, require, server, client)
 		t.eq(Effects.find("toughasnails:thirst"), E.Thirst)
 		t.eq(Effects.find("oil_coated"), E.OilCoated)
 		t.eq(Effects.find("levitation"), nil, "not in this game")
-		-- (30: the first id past Radiation Sickness, the last added; 29 before it.)
-		t.ok(Effects.get(0) == nil and Effects.get(30) == nil and Effects.get(1.5) == nil, "unknown ids")
+		t.ok(
+			Effects.get(0) == nil and Effects.get(Effects.COUNT + 1) == nil and Effects.get(1.5) == nil,
+			"unknown ids (past the last too)"
+		)
 		t.ok(Effects.get(E.Speed).beneficial and not Effects.get(E.Poison).beneficial)
 		t.eq(Effects.get(E.Glowing).category, "neutral")
 		for _, name in { "Thirst", "InternalWarmth", "InternalChill", "ClimateClemency" } do
@@ -598,7 +610,14 @@ return function(t, shared, require, server, client)
 			}, 2)
 			t.ok(made and made.item == item, `{variant.item} is brewed`)
 		end
-		local swift = PotionList.variants(PotionList.list[1])
+		-- (Swiftness by name, not by place in the list.)
+		local swiftness: PotionList.PotionSpec? = nil
+		for _, potion in PotionList.list do
+			if potion.name == "Swiftness" then
+				swiftness = potion
+			end
+		end
+		local swift = PotionList.variants(swiftness :: PotionList.PotionSpec)
 		t.eq(swift[1].ticks, 3600, "Swiftness: 3:00")
 		t.eq(swift[2].ticks, 1800, "II: 1:30")
 		t.eq(swift[2].amplifier, 1)
@@ -680,14 +699,16 @@ return function(t, shared, require, server, client)
 			return b
 		end
 		t.eq(Protocol.decodeEffects(with(1, 0)), nil, "effect 0")
-		t.eq(Protocol.decodeEffects(with(1, 99)), nil, "unknown effect")
+		t.eq(Protocol.decodeEffects(with(1, Effects.COUNT + 1)), nil, "unknown effect (past the last)")
 		t.eq(Protocol.decodeEffects(with(1 + Protocol.EFFECT_BYTES, E.Speed)), nil, "the same effect twice")
 		t.eq(Protocol.decodeEffects(with(3, -2, "i32")), nil, "ticks below -1")
 		t.eq(Protocol.decodeEffects(with(7, 4)), nil, "unknown flags")
 		t.eq(Protocol.decodeEffects(with(0, 4)), nil, "a count that doesn't fit the length")
 		t.eq(Protocol.decodeEffects(buffer.create(0)), nil, "empty")
-		local many = buffer.create(1 + 25 * Protocol.EFFECT_BYTES)
-		buffer.writeu8(many, 0, 25)
+		-- (One more than there are, computed: a fixed count would fall below it as effects come.)
+		local tooMany = Effects.COUNT + 1
+		local many = buffer.create(1 + tooMany * Protocol.EFFECT_BYTES)
+		buffer.writeu8(many, 0, tooMany)
 		t.eq(Protocol.decodeEffects(many), nil, "more than there are effects")
 		t.eq(Protocol.ServerMessage.Effects, 19, "appended after Mobs")
 	end)

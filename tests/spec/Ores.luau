@@ -1,6 +1,6 @@
 --[[
 	The new ores: copper, lead, zinc (brass's other metal), brass, sulfur, saltpetre and uranium.
-	Their blocks (ids after the Ammo Press), items, drops and harvest tiers, sounds, storage
+	Their blocks and items (by name), drops and harvest tiers, sounds, storage
 	recipes and smelting, the brass alloy, black powder and the Nuke's uranium core, their Ages,
 	knowledge, lore, blank textures, and the Metal Miner copying every one. Generation, radiation
 	and the Ammo Press's brass and lead are checked in their own specs.
@@ -21,7 +21,6 @@ return function(t, shared, require, _server, _client)
 	local I = Items.id
 
 	local METALS = { "Copper", "Lead", "Zinc", "Uranium" }
-	-- In id order, from 500.
 	local BLOCKS = {
 		"CopperOre",
 		"CopperBlock",
@@ -77,9 +76,11 @@ return function(t, shared, require, _server, _client)
 		return g
 	end
 
-	t.test("ores: fifteen blocks after the Ammo Press, twenty items after the turrets'", function()
-		for index, name in BLOCKS do
-			t.eq(B[name], B.AmmoPress + index, `{name}'s id`)
+	-- (By name, not by id or count: content packs number blocks and items at load.)
+	t.test("ores: fifteen blocks, twenty items", function()
+		for _, name in BLOCKS do
+			local id = Blocks.find(name)
+			t.ok(id ~= nil and Blocks.get(id).name == name, `{name} is a block`)
 			t.eq(I[name], B[name], `{name} is its block's item`)
 			t.ok(type(LoreList[name]) == "string", `{name}'s lore`)
 			local faces = TexturePack.Blocks[name]
@@ -87,13 +88,12 @@ return function(t, shared, require, _server, _client)
 			local texture = faces and TexturePack.Textures[faces.All :: string]
 			t.eq(texture and texture.Color, "", `{name}'s texture is blank until made`)
 		end
-		t.eq(Blocks.count, B.AmmoPress + #BLOCKS + 1, "the last blocks")
-		for index, name in ITEMS do
-			t.eq(I[name], I.LaserSight + index, `{name}'s id`)
+		for _, name in ITEMS do
+			local item = Items.find(name)
+			t.ok(item ~= nil and (Items.get(item) :: any).block == nil, `{name} is an item, not a block`)
 			t.ok(type(LoreList[name]) == "string", `{name}'s lore`)
 			t.eq(TexturePack.Icons[name], "", `{name}'s icon is blank until made`)
 		end
-		t.eq(Items.list[#Items.list].name, "HazmatBoots", "the last item")
 		t.eq(Items.displayName(I.CopperBlock), "Block of Copper")
 		t.eq(Items.displayName(I.RawUraniumBlock), "Block of Raw Uranium")
 		t.eq(Items.displayName(I.SaltpetreOre), "Saltpetre Ore")
@@ -239,19 +239,17 @@ return function(t, shared, require, _server, _client)
 		for _, name in { "CopperOre", "LeadOre", "ZincOre", "SulfurOre", "SaltpetreOre", "UraniumOre" } do
 			t.ok((Knowledge.ORES :: any)[name] ~= nil, `{name} gives knowledge when mined`)
 		end
-		-- The miner: the six old ores first (their order is saved), then the new ones.
-		local names = {}
-		for _, ore in MinerRules.ORES do
-			table.insert(names, ore.name)
+		-- The miner copies the new ores too (by name, not by place in ORES: content may add ores
+		-- anywhere; each ore's index is its place).
+		for _, name in { "CopperOre", "LeadOre", "ZincOre", "SulfurOre", "SaltpetreOre", "UraniumOre" } do
+			t.ok(MinerRules.ore(B[name]) ~= nil, `{name} is the miner's`)
 		end
-		t.eq(
-			table.concat(names, ","),
-			"CoalOre,IronOre,OsmiumOre,GoldOre,EmeraldOre,DiamondOre,CopperOre,LeadOre,ZincOre,SulfurOre,SaltpetreOre,UraniumOre"
-		)
-		for _, ore in MinerRules.ORES do
+		for index, ore in MinerRules.ORES do
 			t.eq(MinerRules.ore(ore.block), ore, `{ore.name} is mined`)
+			t.eq(ore.index, index, `{ore.name}'s index`)
 		end
-		local code, index = MinerRules.unpackState(MinerRules.packState(MinerRules.STATE.MINING, 12))
-		t.ok(code == MinerRules.STATE.MINING and index == 12, "the last ore's index packs and reads back")
+		local last = #MinerRules.ORES
+		local code, index = MinerRules.unpackState(MinerRules.packState(MinerRules.STATE.MINING, last))
+		t.ok(code == MinerRules.STATE.MINING and index == last, "the last ore's index packs and reads back")
 	end)
 end

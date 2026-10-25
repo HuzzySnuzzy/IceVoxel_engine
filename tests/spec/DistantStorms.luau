@@ -608,29 +608,15 @@ return function(t, shared, require, _server, client)
 		t.eq(done, true, "then the louder one starts")
 	end)
 
-	t.test("distant storms: their sounds are in the catalogue, after the rest, played by the client", function()
-		local list = SoundList.EVENTS
-		-- (Terraria's six came after them, then the wind, then the zombie apocalypse's ten, then
-		-- the fourth data sheet's eating and drinking loops, then the weapons' 22:
-		-- Shared/Sounds/SoundList.)
-		local wind = 0
-		for index, event in list do
-			if event.name == "weather.wind" then
-				wind = index
-			end
+	t.test("distant storms: their sounds are in the catalogue, played by the client", function()
+		-- (By name, not by place in Shared/Sounds/SoundList: event numbers move as content is added.)
+		local listed: { [string]: boolean } = {}
+		for _, event in SoundList.EVENTS do
+			listed[event.name] = true
 		end
-		t.eq(list[wind - 8].name, "entity.lightning_bolt.thunder.far")
-		t.eq(list[wind - 7].name, "weather.rain.far")
-		t.eq(list[wind - 6].name, "entity.player.double_jump")
-		t.eq(list[wind + 10].name, "ambient.blood_moon.rise", "the wind, then the apocalypse's ten")
-		t.eq(list[wind + 12].name, "entity.generic.drinking", "then the two loops")
-		-- (Was `wind + 12`, the last, before the weapons' 22.)
-		t.eq(list[wind + 13].name, "item.firearm.pistol.fire", "then the weapons'")
-		-- (Then the seasons' 11, the turrets' 3, then the fifth sheet's 9.)
-		t.eq(list[wind + 12 + 22 + 1].name, "block.electric_heater.hum", "then the seasons'")
-		t.eq(list[wind + 12 + 22 + 11 + 1].name, "block.turret.servo", "then the turrets'")
-		t.eq(list[wind + 12 + 22 + 11 + 3 + 1].name, "item.firearm.9mm.fire", "then the fifth sheet's")
-		t.eq(#list, wind + 12 + 22 + 11 + 3 + 9)
+		for _, name in { "entity.lightning_bolt.thunder.far", "weather.rain.far", "weather.wind" } do
+			t.ok(listed[name], `{name} is SoundList's`)
+		end
 		for _, name in { "entity.lightning_bolt.thunder.far", "weather.rain.far" } do
 			local event = Sounds.get(Sounds.id[name]) :: any
 			t.eq(event.side, "client")

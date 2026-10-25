@@ -422,21 +422,23 @@ return function(t, shared, require, server, client)
 			[I.ChocolateBar] = { 3, 0.3 },
 			[I.MilitaryRation] = { 8, 0.8 },
 		}
-		local count = 0
+		-- (The listed foods by their numbers, every other food at least fills the bar: no count of
+		-- foods, so new content's leave it alone.)
 		for item, food in Foods.ITEMS do
-			local want = expected[item]
 			if Foods.isMedical(food) then
 				t.eq(food.nutrition, nil, `{Items.displayName(item)}: medicine has no nutrition`)
 			else
-				count += 1
-				t.ok(want ~= nil, `{Items.displayName(item)} is listed`)
-				if want then
-					t.eq(food.nutrition, want[1], `{Items.displayName(item)}'s nutrition`)
-					t.eq(food.saturation, want[2], `{Items.displayName(item)}'s saturation`)
-				end
+				t.ok((food.nutrition or 0) > 0, `{Items.displayName(item)} fills the bar`)
 			end
 		end
-		t.eq(count, 14, "every food")
+		for item, want in expected do
+			local food = Foods.ITEMS[item]
+			t.ok(food ~= nil and not Foods.isMedical(food), `{Items.displayName(item)} is a food`)
+			if food then
+				t.eq(food.nutrition, want[1], `{Items.displayName(item)}'s nutrition`)
+				t.eq(food.saturation, want[2], `{Items.displayName(item)}'s saturation`)
+			end
+		end
 		-- A steak on an empty stomach, through Foods.finish's food bar hook (server Players/Eating).
 		local state = bar(4, 0)
 		local healed = 0

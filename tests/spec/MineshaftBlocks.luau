@@ -81,26 +81,18 @@ return function(t, shared, require, server)
 		CaveHangingRoots = "HangingRoots",
 	}
 
-	t.test("mineshaft blocks: appended after White Wool, the twins after them, items and variants", function()
-		local last = B.WhiteWool
-		t.eq(last, 212, "White Wool was the last block")
-		for index, name in PLAIN do
-			t.eq(B[name], last + index, `{name} id`)
+	-- (By name, not by id or count: content packs number blocks at load. What the ids must keep is
+	-- Blocks' own rule: a twin comes after the block it twins, resolved in one pass.)
+	t.test("mineshaft blocks: the blocks, their cave twins after what they twin, items and variants", function()
+		for _, name in PLAIN do
+			local id = Blocks.find(name)
+			t.ok(id ~= nil and Blocks.get(id).name == name, `{name} is a block`)
 			t.ok(not Blocks.isCaveTwin(B[name]), `{name} is no twin`)
 		end
-		-- (Then the five doors' 32 halves each: Doors; then the Oak Fence's 15 variants with arms;
-		-- then the zombie apocalypse's 19 blocks and the Ceiling Lamp's cave twin, ids 419..438;
-		-- then the seasons' 47: 8 snow layers, 5 heaters, 2 insulation blocks, a door's 32 halves;
-		-- then the turrets' 14: twelve turrets, the Metal Miner and the Ammo Press; then the new ores'
-		-- 15.)
-		t.eq(
-			Blocks.count,
-			244 + 5 * 32 + 15 + 20 + 47 + 14 + 15,
-			"17 blocks and 14 twins, then the doors, fence arms and the apocalypse's"
-		)
 		for twin, of in TWINS do
 			local id = B[twin]
-			t.ok(id > B.MossyCobblestone, `{twin} comes after the plain blocks`)
+			t.ok(Blocks.isCaveTwin(id), `{twin} is a twin`)
+			t.ok(id > B[of], `{twin} comes after {of}`)
 			t.eq(Blocks.caveTwinOf(id), B[of], `{twin} twins {of}`)
 			t.eq(Blocks.caveTwinFor(B[of]), id)
 			-- (Cave vines keep their green underground, Shared/Seasons/Foliage: the same look in an

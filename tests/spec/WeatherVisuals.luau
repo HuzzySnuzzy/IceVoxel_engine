@@ -6,7 +6,7 @@
 	planning cost on a real seed), lightning (LightningBolt: Minecraft's shape and timing), the
 	light (WeatherSky), the maps' weather mode (WeatherMap: colours, grids, the forecast cache and
 	forecasts as the field later, the wind, a picture painted in bands as one and its cost), and
-	the settings, key binding and sounds they add (the sounds appended at the list's end).
+	the settings, key binding and sounds they add (the sounds by name).
 ]]
 
 return function(t, shared, require, _server, client)
@@ -928,21 +928,15 @@ return function(t, shared, require, _server, client)
 			t.eq((event :: any).side, "client", "each client by itself")
 			t.eq((event :: any).source, "ambient", "Minecraft's WEATHER source: the ambient volume")
 		end
-		-- Appended at the end of the list (ids of the sounds before them unchanged), the distant
-		-- storms' two after them (tests/spec/DistantStorms), then Terraria's six and the wind, then
-		-- the zombie apocalypse's ten, then the fourth data sheet's eating and drinking loops, then
-		-- the weapons' 22 (was `7 + 10 + 2` after the four), then the seasons' 11, the turrets' 3,
-		-- then the fifth data sheet's 9.
-		local list = SoundList.EVENTS
-		local at = {}
-		for index, entry in list do
-			at[entry.name] = index
+		-- (By name, not by place in the list: event numbers move as content is added.) The
+		-- distant storms' far thunder is SoundList's too (tests/spec/DistantStorms).
+		local listed: { [string]: boolean } = {}
+		for _, entry in SoundList.EVENTS do
+			listed[entry.name] = true
 		end
-		local terraria = 7 + 10 + 2 + 22 + 11 + 3 + 9
-		t.eq(at["weather.rain"], #list - 5 - terraria, "the four come before the distant storms' and Terraria's")
-		t.eq(at["entity.lightning_bolt.impact"], #list - 2 - terraria)
-		t.eq(at["entity.lightning_bolt.thunder.far"], #list - 1 - terraria)
-		t.eq(Sounds.count, #Blocks.SOUND_TYPES * #Sounds.ACTIONS + #list)
+		for _, name in { "weather.rain", "entity.lightning_bolt.impact", "entity.lightning_bolt.thunder.far" } do
+			t.ok(listed[name], `{name} is SoundList's`)
+		end
 		local volume, pitch = Weather.rainSound(1, false)
 		t.near(volume, 0.2, 1e-9, "weather.rain at 0.2")
 		t.eq(pitch, 1)

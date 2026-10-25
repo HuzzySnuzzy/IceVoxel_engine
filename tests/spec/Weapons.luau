@@ -1,6 +1,6 @@
 --[[
 	Weapons in the manner of DayZ (Shared/Weapons; the weapons design's FOUNDATION): the 34 items
-	in their ids, the registry (Weapons/WeaponList through Shared/Weapons' checks), lore and icons,
+	by name, the registry (Weapons/WeaponList through Shared/Weapons' checks), lore and icons,
 	the 22 sounds, the four key bindings, Config.Weapons, the codecs (Net/WeaponSync's Fire, Weapon
 	and Shots, Protocol's weapon action and Attack's heavy flag), the weapon state in item data
 	(Weapons/WeaponState: clamping, firing, the HUD's detail, the icons' count, the look),
@@ -39,7 +39,7 @@ return function(t, shared, require, server, client)
 	local I = Items.id
 	local SURVIVAL, CREATIVE, SPECTATOR = GameMode.SURVIVAL, GameMode.CREATIVE, GameMode.SPECTATOR
 
-	-- The 34 items, in id order (4278..4311).
+	-- The 34 items.
 	local NAMES = {
 		"Pistol",
 		"Revolver",
@@ -96,14 +96,13 @@ return function(t, shared, require, server, client)
 
 	--[[ Items ]]
 
-	t.test("weapons: the 34 items in ids 4278..4311, appended after the apocalypse's", function()
+	-- (By name, not by id: content packs number items at load.)
+	t.test("weapons: the 34 items", function()
 		t.eq(#NAMES, 34)
-		for index, name in NAMES do
-			t.eq(I[name], 4277 + index, `{name}'s id`)
+		for _, name in NAMES do
+			local item = Items.find(name)
+			t.ok(item ~= nil and (Items.get(item) :: Items.ItemDef).block == nil, `{name} is an item, not a block`)
 		end
-		t.eq(I.HerbalPoultice, 4277, "the apocalypse's last item before them")
-		-- (Then the turrets' 8 and the new ores' 20: Sledgehammer was the last item.)
-		t.eq(Items.list[#Items.list - 8 - 20].name, "Sledgehammer", "the last item before the turrets'")
 		local names = {
 			Pistol = "9mm Pistol",
 			Smg = "SMG",
@@ -201,19 +200,35 @@ return function(t, shared, require, server, client)
 	--[[ The registry ]]
 
 	t.test("weapons: the registry lists every weapon in item order with its numbers", function()
-		t.eq(#Weapons.FIREARMS, 11)
-		t.eq(#Weapons.MAGAZINES, 5)
-		t.eq(#Weapons.AMMO, 9)
-		t.eq(#Weapons.ATTACHMENTS, 5)
-		t.eq(#Weapons.MELEE, 9)
-		for _, list in { Weapons.FIREARMS, Weapons.MAGAZINES, Weapons.AMMO, Weapons.ATTACHMENTS, Weapons.MELEE } do
+		-- (Each list is its WeaponList table's, by name: no count or position is pinned, so new
+		-- weapons leave it alone. Each of the 34 is one kind.)
+		local KINDS = {
+			{ Weapons.FIREARMS, WeaponList.firearms, "firearm" },
+			{ Weapons.MAGAZINES, WeaponList.magazines, "magazine" },
+			{ Weapons.AMMO, WeaponList.ammo, "round" },
+			{ Weapons.ATTACHMENTS, WeaponList.attachments, "attachment" },
+			{ Weapons.MELEE, WeaponList.melee, "melee weapon" },
+		}
+		for _, kind in KINDS do
+			local list, listed = kind[1] :: { number }, 0
+			for name in kind[2] :: { [string]: any } do
+				listed += 1
+				t.ok(table.find(list, I[name]) ~= nil, `{name} is a {kind[3]}`)
+			end
+			t.eq(#list, listed, `every {kind[3]} is WeaponList's`)
 			for i = 2, #list do
 				t.ok(list[i - 1] < list[i], "item order")
 			end
 			t.ok(table.isfrozen(list), "frozen")
 		end
-		t.eq(Weapons.FIREARMS[1], I.Pistol)
-		t.eq(Weapons.FIREARMS[11], I.Crossbow)
+		for _, name in NAMES do
+			local kinds = 0
+			for _, kind in KINDS do
+				kinds += if table.find(kind[1] :: { number }, I[name]) then 1 else 0
+			end
+			t.eq(kinds, 1, `{name} is one kind of weapon`)
+		end
+		t.ok(table.find(Weapons.FIREARMS, I.Pistol) and table.find(Weapons.FIREARMS, I.Crossbow), "pistol to crossbow")
 		for name in WeaponList.firearms do
 			t.ok(Weapons.firearm(I[name]), `{name} is a firearm`)
 		end
@@ -363,7 +378,8 @@ return function(t, shared, require, server, client)
 
 	--[[ Sounds, key bindings, Config ]]
 
-	t.test("weapons: the 22 sound events, after the eating and drinking loops", function()
+	-- (By name: event numbers are catalogue positions, which move as content is added.)
+	t.test("weapons: the 22 sound events", function()
 		local SIDES = {
 			["item.firearm.pistol.fire"] = "client",
 			["item.firearm.revolver.fire"] = "client",
@@ -389,21 +405,16 @@ return function(t, shared, require, server, client)
 			["item.melee.block"] = "server",
 		}
 		local count = 0
-		local first = Sounds.id["entity.generic.drinking"] + 1
 		for name, side in SIDES do
 			count += 1
 			local event = Sounds.get(name)
 			t.ok(event ~= nil, `{name} exists`)
 			t.eq(event.side, side, `{name}'s side`)
 			t.eq(event.source, "players", `{name}'s source`)
-			local index = Sounds.id[name]
-			t.ok(index >= first and index < first + 22, `{name} is among the weapons' (after the rest)`)
+			t.eq(Sounds.get(Sounds.id[name]), event, `{name} by its number`)
 			t.eq(NoiseRules.radius(name, Config.Apocalypse.Noise), 0, `{name} is no noise of NoiseRules'`)
 		end
 		t.eq(count, 22)
-		-- (Then the seasons' 11, the turrets' 3, then the fifth sheet's 9: six calibre shots, two
-		-- machine hums and the Geiger click.)
-		t.eq(Sounds.count, first + 21 + 11 + 3 + 9, "the weapons' are the last events before the seasons'")
 		t.eq(Sounds.get("item.firearm.rifle.fire").category, "item.firearm.fire", "a Sound replaces every class")
 		t.eq(Sounds.get("item.firearm.heavy.fire").maxDistance, 224)
 		t.eq(Sounds.get("item.firearm.far").maxDistance, 256)
@@ -1120,11 +1131,19 @@ return function(t, shared, require, server, client)
 	--[[ Recipes and Ages ]]
 
 	t.test("weapons: an improvised suppressor and crossbow bolts are made; bolts in the Iron Age", function()
-		t.eq(
-			#Crafting.recipes,
-			280,
-			"213 and the weapons' two (then the seasons' 9, the turrets' 22, the new ores' 34)"
-		)
+		-- The weapons' two recipes are the only ones making a weapons' item (by result name, not a
+		-- total, so other content's recipes leave it alone).
+		local ours: { [string]: number } = {}
+		for _, recipe in Crafting.recipes do
+			local name = (Items.get(recipe.result) :: Items.ItemDef).name
+			if table.find(NAMES, name) then
+				ours[name] = (ours[name] or 0) + 1
+			end
+		end
+		t.eq(ours.ImprovisedSuppressor, 1, "one recipe for the suppressor")
+		t.eq(ours.CrossbowBolt, 1, "one for bolts")
+		ours.ImprovisedSuppressor, ours.CrossbowBolt = nil, nil
+		t.eq(next(ours), nil, "and none for the rest")
 		local suppressor = Crafting.match({
 			[1] = { item = I.GlassBottle, count = 1 },
 			[2] = { item = I.DuctTape, count = 1 },

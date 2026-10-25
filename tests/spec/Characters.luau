@@ -13,6 +13,7 @@ return function(t, shared, require, server)
 	local CharacterSync = require(shared.Net.CharacterSync)
 	local Characters = require(shared.Characters)
 	local Config = require(shared.Config)
+	local Effects = require(shared.Effects)
 	local GameMode = require(shared.GameMode)
 	local Items = require(shared.Items)
 	local Protocol = require(shared.Net.Protocol)
@@ -282,9 +283,10 @@ return function(t, shared, require, server)
 			chill = 0,
 			clemency = 4000,
 		}
+		-- (Effects by name: their numbers are list positions, which content may change.)
 		record.effects = {
-			{ effect = 1, amplifier = 1, ticks = 600, ambient = false },
-			{ effect = 25, amplifier = 0, ticks = 100, ambient = false },
+			{ effect = Effects.id.Speed, amplifier = 1, ticks = 600, ambient = false },
+			{ effect = Effects.id.ManaSickness, amplifier = 0, ticks = 100, ambient = false },
 		}
 		record.imported = { "w12345678", "wabc" }
 		return record
@@ -323,7 +325,7 @@ return function(t, shared, require, server)
 		t.eq((back.thirst :: any).hydration, 2.5)
 		t.eq((back.temperature :: any).clemency, 4000)
 		t.eq(#back.effects, 2)
-		t.eq(back.effects[2].effect, 25)
+		t.eq(back.effects[2].effect, Effects.id.ManaSickness)
 		t.eq(#back.imported, 2)
 		t.eq(back.imported[2], "wabc")
 		t.eq(#back.appearance.assets, 5)

@@ -57,7 +57,13 @@ return function(t, shared, require, server, client)
 	}
 
 	t.test("melee: every listed weapon's light, heavy, guard and finisher numbers", function()
-		t.eq(#Weapons.MELEE, #TABLE, "nine melee weapons")
+		-- (The nine by name, not a count: content may add melee weapons, each with its numbers.)
+		for _, item in Weapons.MELEE do
+			t.ok(Melee.spec(item) ~= nil, `{Items.displayName(item)} has its numbers`)
+		end
+		for _, row in TABLE do
+			t.ok(table.find(Weapons.MELEE, I[row[1]]) ~= nil, `{row[1]} is a melee weapon`)
+		end
 		for _, row in TABLE do
 			local name, light, speed, heavy, guard, finisher = row[1], row[2], row[3], row[4], row[5], row[6]
 			local item = I[name]

@@ -631,19 +631,20 @@ return function(t, shared, require, _server, client)
 		for _, fluid in Fluids.list do
 			t.ok(Sounds.find(fluid.fillSound) ~= nil and Sounds.find(fluid.emptySound) ~= nil, `{fluid.name}'s buckets`)
 		end
-		-- (Appended after the older events, before the cave moods, which follow, built from
-		-- MusicList; later events, such as explosions', come after them.)
-		local function index(name: string): number
-			for i, event in SoundList.EVENTS do
+		-- (By name, not by place in the list: event numbers move as content is added.) SoundList's
+		-- own events, not the cave moods it builds from MusicList.
+		local function listed(name: string): boolean
+			for _, event in SoundList.EVENTS do
 				if event.name == name then
-					return i
+					return true
 				end
 			end
-			return -1
+			return false
 		end
-		t.ok(index("block.lava.pop") > index("item.configurator.click"), "appended")
-		t.ok(index("entity.generic.extinguish_fire") > index("block.lava.pop"), "in order")
-		t.ok(index("entity.generic.extinguish_fire") <= #SoundList.EVENTS - #SoundList.MOODS, "before the cave moods")
+		for _, name in { "block.lava.pop", "entity.generic.extinguish_fire" } do
+			t.ok(listed(name), `{name} is SoundList's`)
+			t.eq(table.find(SoundList.MOODS, name), nil, `{name} is no cave mood`)
+		end
 
 		-- A lava sea at y 10 under air, and a random that always rolls 0: every sample lands on the
 		-- listener's block, so the sea pops at the odds' first roll.

@@ -56,16 +56,38 @@ return function(t, shared, require)
 	end
 
 	t.test("ore generation: the newer features follow osmium, with their sources' numbers", function()
-		local names = {}
-		for _, ore in Ores.FEATURES do
-			table.insert(names, ore.name)
+		-- (Their order by name, not their places: one random stream runs through the features in
+		-- order, so the older ones come first and the newer after them, in this order.)
+		local at: { [string]: number } = {}
+		for index, ore in Ores.FEATURES do
+			at[ore.name] = index
 		end
-		t.eq(
-			table.concat(names, " ", 12),
-			"copper lead zinc sulfur saltpetre uranium_small uranium_buried",
-			"appended after osmium_upper, in this order"
-		)
-		t.eq(names[11], "osmium_upper", "the older ores keep their places")
+		local order = {
+			"diorite",
+			"andesite",
+			"granite",
+			"coal",
+			"iron",
+			"gold",
+			"diamond",
+			"emerald",
+			"osmium_small",
+			"osmium_middle",
+			"osmium_upper",
+			"copper",
+			"lead",
+			"zinc",
+			"sulfur",
+			"saltpetre",
+			"uranium_small",
+			"uranium_buried",
+		}
+		for i, name in order do
+			t.ok(at[name] ~= nil, `{name} is a feature`)
+			if i > 1 and at[name] and at[order[i - 1]] then
+				t.ok(at[order[i - 1]] < at[name], `{order[i - 1]} before {name}`)
+			end
+		end
 
 		-- Minecraft's copper: 16 veins of 10 per chunk on a trapezoid, densest at y 176.
 		local copper = feature("copper")

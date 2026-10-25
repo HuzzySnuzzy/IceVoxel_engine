@@ -142,9 +142,9 @@ return function(t, shared, require, server)
 	--[[ The kinds ]]
 
 	t.test("mobs: the four animals and the apocalypse's ten zombies, their boxes, health and drops", function()
-		-- (8 before the zombie apocalypse: its ten kinds replaced Minecraft's zombie, skeleton,
-		-- creeper and spider, the Zombie keeping its id 5.)
-		t.eq(MobList.COUNT, 14, "cow, sheep, pig, chicken and ten zombies")
+		-- (By name, not by id or count: kinds are numbered in list order, which content may change.
+		-- The zombie apocalypse's ten replaced Minecraft's zombie, skeleton, creeper and spider.)
+		t.ok(MobList.COUNT < 256, "kinds travel as a u8")
 		local expect = {
 			{ "Cow", 0.9, 1.4, 10, false },
 			{ "Sheep", 0.9, 1.3, 8, false },
@@ -161,7 +161,9 @@ return function(t, shared, require, server)
 			{ "ZombieWorker", 0.6, 1.95, 24, true },
 			{ "ZombieDoctor", 0.6, 1.95, 18, true },
 		}
-		for id, row in expect do
+		for _, row in expect do
+			local id = MobList.find(row[1]) :: number
+			t.ok(id ~= nil, `{row[1]} is a kind`)
 			local kind = MobList.get(id) :: MobList.Kind
 			t.eq(kind.name, row[1], `kind {id}`)
 			t.eq(kind.width, row[2], `{row[1]} width`)
@@ -1379,7 +1381,8 @@ return function(t, shared, require, server)
 			{
 				op = "spawn",
 				id = 1,
-				kind = 200,
+				-- (Past the last kind, whatever content there is.)
+				kind = MobList.COUNT + 1,
 				variant = 0,
 				x = 0,
 				y = 0,

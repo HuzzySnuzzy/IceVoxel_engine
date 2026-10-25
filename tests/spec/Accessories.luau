@@ -64,9 +64,11 @@ return function(t, shared, require, server, client)
 		return { item = id[name], count = 1 }
 	end
 
-	t.test("accessories: the items, appended after the potions, one a slot, no armor", function()
-		for i, name in NEW_ITEMS do
-			t.eq(id[name], id.HermesBoots + i - 1, `{name} in its place`)
+	-- (By name, not by id: content packs number items at load.)
+	t.test("accessories: the items, one a slot, no armor", function()
+		for _, name in NEW_ITEMS do
+			local item = Items.find(name)
+			t.ok(item ~= nil and (Items.get(item) :: Items.ItemDef).block == nil, `{name} is an item, not a block`)
 		end
 		for _, name in ACCESSORIES do
 			local def = Items.get(id[name]) :: Items.ItemDef
@@ -262,9 +264,17 @@ return function(t, shared, require, server, client)
 		for _, name in { "ManaCrystal", "LesserManaPotion", "TopHat" } do
 			t.eq(Ages.ofName(name), 1, `{name} is the Stone Age's`)
 		end
-		-- Mineshafts: a fourth pool after Minecraft's three, its items real.
-		t.eq(#Mineshafts.LOOT, 4)
-		local pool = Mineshafts.LOOT[4]
+		-- Mineshafts: a pool of their own beside Minecraft's three, its items real (found by what
+		-- it holds, not by its place or a count of pools).
+		local pool: any = nil
+		for _, candidate in Mineshafts.LOOT do
+			for _, entry in candidate.entries do
+				if entry[1] == "HermesBoots" then
+					pool = candidate
+				end
+			end
+		end
+		t.ok(pool ~= nil and #Mineshafts.LOOT >= 4, "the accessories' pool and Minecraft's three")
 		t.eq(pool.rolls[1], 1)
 		t.eq(pool.rolls[2], 1)
 		local rewarding: { [string]: boolean } = {}

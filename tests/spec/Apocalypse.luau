@@ -1,9 +1,9 @@
 --[[
-	The zombie apocalypse's foundation, the contract its streams build on: the new blocks (ids
-	419..438, the Ceiling Lamp's cave twin last), items (4257..4277), effects (Bleeding,
-	Infection), sounds, textures and lore; how long a zombie takes to break each block
+	The zombie apocalypse's foundation, the contract its streams build on: the new blocks (the
+	Ceiling Lamp's cave twin among them), items, effects (Bleeding, Infection), sounds, textures
+	and lore, all by name; how long a zombie takes to break each block
 	(Blocks.zombieBreak, cave twins included, hatches and containers never) and the hatch's toggle
-	(Blocks.toggleOf, Blocks/Toggles); the zombie kinds (Shared/Entities/MobList: ids 5..14, looks
+	(Blocks.toggleOf, Blocks/Toggles); the zombie kinds (Shared/Entities/MobList: by name, looks
 	and skin tones packed in a variant, drops, knowledge, sounds, snake case names); the Mobs ops'
 	sizes and flags, the retired arrow op and the move op's deltas, and the Survivor message
 	(Shared/Net/Protocol); the blood moon's schedule (Apocalypse/BloodMoon); which sounds zombies
@@ -119,34 +119,28 @@ return function(t, shared, require, server)
 
 	--[[ The registries ]]
 
-	t.test("apocalypse: the blocks, items, effects, sounds, textures and lore, in their order", function()
-		for index, name in BLOCKS do
-			t.eq(B[name], 418 + index, `{name}'s id`)
+	-- (By name, not by id or count: content packs number blocks, items and the rest at load.)
+	t.test("apocalypse: the blocks, items, effects, sounds, textures and lore", function()
+		for _, name in BLOCKS do
+			local id = Blocks.find(name)
+			t.ok(id ~= nil and Blocks.get(id).name == name, `{name} is a block`)
 		end
-		-- (The seasons' 47 came after: snow layers, heaters, insulation; then the turrets' 14:
-		-- twelve turrets, the Metal Miner and the Ammo Press; then the new ores' 15. Was 439, then
-		-- 486, then 500.)
-		t.eq(B.CaveCeilingLamp, 438, "the Ceiling Lamp's twin was the last block before the seasons")
-		t.eq(Blocks.count, 515)
 		t.eq(Blocks.caveTwinFor(B.CeilingLamp), B.CaveCeilingLamp)
 		t.ok(Blocks.isCaveTwin(B.CaveCeilingLamp), "a cave twin")
-		for index, name in ITEMS do
-			t.eq(I[name], 4256 + index, `{name}'s id`)
+		for _, name in ITEMS do
+			local item = Items.find(name)
+			t.ok(item ~= nil and (Items.get(item) :: any).block == nil, `{name} is an item, not a block`)
 		end
-		-- (The weapons' 34 came after, then the turrets' 8, then the new ores' 20: was
-		-- "HerbalPoultice", then "Sledgehammer", then "LaserSight"; HerbalPoultice is still 4277.)
-		t.eq(Items.list[#Items.list].name, "HazmatBoots", "the last item")
-		t.eq(I.HerbalPoultice, 4277, "the apocalypse's last item")
 		t.eq(Items.maxStack(I.Bandage), 16)
 		t.eq(Items.maxStack(I.Medkit), 4)
 		t.eq(Items.maxStack(I.Rag), 64)
 		t.eq(Items.maxStack(I.BaseballBat), 1)
 		t.eq(Items.get(I.SodaCan).displayName, "Soda")
-		t.eq(Effects.id.Bleeding, 26)
-		t.eq(Effects.id.Infection, 27)
-		-- (Minecraft's Hunger came after the apocalypse's two: 28, Shared/Hunger; then Radiation
-		-- Sickness, 29: Shared/Radiation.)
-		t.eq(Effects.COUNT, 29)
+		for _, name in { "Bleeding", "Infection" } do
+			local effect = Effects.get(Effects.id[name])
+			t.ok(effect ~= nil and effect.name == name, `{name} is an effect`)
+		end
+		t.ok(Effects.COUNT < 256, "effect ids fit a u8")
 		t.eq(Effects.get(Effects.id.Bleeding).lethal, false, "bleeding never kills")
 		t.eq(Effects.get(Effects.id.Infection).external, true, "Survival keeps the infection")
 		for _, name in
@@ -171,7 +165,28 @@ return function(t, shared, require, server)
 		for _, name in { "entity.creeper.primed", "entity.skeleton.shoot", "entity.arrow.hit", "entity.spider.hurt" } do
 			t.eq(Sounds.find(name), nil, `{name} went with its monster`)
 		end
-		t.eq(#Blocks.SOUND_TYPES, 14, "no new block sound type")
+		-- No new block sound type: the blocks sound as Minecraft's and the mineshafts' do (by name,
+		-- not a count of types).
+		local OLD_TYPES = {
+			"stone",
+			"wood",
+			"gravel",
+			"grass",
+			"sand",
+			"glass",
+			"snow",
+			"metal",
+			"wool",
+			"water",
+			"ladder",
+			"rope",
+			"vine",
+			"moss",
+		}
+		for _, name in BLOCKS do
+			local sound = Blocks.soundType(B[name])
+			t.ok(sound == nil or table.find(OLD_TYPES, sound) ~= nil, `{name} sounds as an older block`)
+		end
 		for _, name in
 			{
 				"asphalt",
@@ -193,10 +208,10 @@ return function(t, shared, require, server)
 		do
 			t.ok(Blocks.textureOf(name) ~= nil, `the texture {name}`)
 		end
-		for index, name in BLOCKS do
-			local def = Blocks.get(418 + index)
+		for _, name in BLOCKS do
+			local def = Blocks.get(B[name])
 			local item = def.item or name
-			if def.placeable ~= false and not Blocks.isCaveTwin(418 + index) then
+			if def.placeable ~= false and not Blocks.isCaveTwin(B[name]) then
 				t.ok(LoreList[item] ~= nil, `{item}'s lore`)
 			end
 		end
@@ -322,10 +337,15 @@ return function(t, shared, require, server)
 	--[[ The zombies ]]
 
 	t.test("apocalypse: the zombie kinds, their looks, drops, knowledge and sounds", function()
-		t.eq(MobList.COUNT, 14, "four animals, ten zombies")
-		for index, name in ZOMBIES do
+		-- (By name: kinds are numbered in list order, which content may change.)
+		t.ok(MobList.COUNT < 256, "kinds travel as a u8")
+		for _, name in { "Cow", "Pig", "Sheep", "Chicken" } do
+			local id = MobList.find(name)
+			t.ok(id ~= nil and not MobList.isZombie(id), `{name} is an animal`)
+		end
+		for _, name in ZOMBIES do
 			local id = MobList.find(name) :: number
-			t.eq(id, 4 + index, `{name}'s id`)
+			t.ok(id ~= nil and (MobList.get(id) :: any).name == name, `{name} is a kind`)
 			t.ok(MobList.isZombie(id), `{name} is a zombie`)
 			t.eq(MobList.find(MobList.snake(name)), id, `{MobList.snake(name)} finds {name}`)
 		end

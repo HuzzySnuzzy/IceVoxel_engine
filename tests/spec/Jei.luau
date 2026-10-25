@@ -1084,27 +1084,35 @@ return function(t, shared, require, _server, client)
 		local info = Machines.info(Blocks.id.MetalMiner)
 		local entries = entriesOf("duplicating")
 		t.eq(#entries, #MinerRules.ORES, "one per ore")
+		-- (By ore name, not by place in ORES: content may add ores anywhere.)
 		local drops = {
-			"Coal",
-			"RawIron",
-			"RawOsmium",
-			"RawGold",
-			"Emerald",
-			"Diamond",
-			"RawCopper",
-			"RawLead",
-			"RawZinc",
-			"Sulfur",
-			"Saltpetre",
-			"RawUranium",
+			CoalOre = "Coal",
+			IronOre = "RawIron",
+			OsmiumOre = "RawOsmium",
+			GoldOre = "RawGold",
+			EmeraldOre = "Emerald",
+			DiamondOre = "Diamond",
+			CopperOre = "RawCopper",
+			LeadOre = "RawLead",
+			ZincOre = "RawZinc",
+			SulfurOre = "Sulfur",
+			SaltpetreOre = "Saltpetre",
+			UraniumOre = "RawUranium",
 		}
+		local function entryOf(name: string): any
+			return entries[(MinerRules.ore(id[name]) :: MinerRules.Ore).index]
+		end
+		for name in drops do
+			t.ok(MinerRules.ore(id[name]) ~= nil, `{name} is the miner's`)
+		end
 		for index, ore in MinerRules.ORES do
+			local drop = drops[ore.name] or Items.get(ore.drop).name
 			local entry = entries[index]
 			local numbers = Config.Miner.Ores[ore.name]
 			t.eq(#entry.inputs[1], 1, `{ore.name}: one input`)
 			t.eq(entry.inputs[1][1], id[ore.name], `{ore.name}: the ore block, in MinerRules' order`)
 			t.eq(entry.inputs[2], nil)
-			t.eq(entry.output and entry.output.item, id[drops[index]], `{ore.name} gives its drop`)
+			t.eq(entry.output and entry.output.item, id[drop], `{ore.name} gives its drop`)
 			t.eq(entry.output and entry.output.count, 1, "one at a time")
 			t.eq(entry.ticks, numbers.ticks, `{ore.name}: Config's ticks`)
 			t.eq(entry.ticks, info[`{ore.name}Ticks`], "as its info says")
@@ -1116,7 +1124,7 @@ return function(t, shared, require, _server, client)
 				find(JeiData.recipes(ore.drop), "duplicating", function(e)
 					return e == entry
 				end),
-				`{drops[index]}'s recipes`
+				`{drop}'s recipes`
 			)
 			t.ok(
 				find(JeiData.uses(ore.block), "duplicating", function(e)
@@ -1126,10 +1134,10 @@ return function(t, shared, require, _server, client)
 			)
 		end
 		-- The texts: the time and J an item, J a tick.
-		same(JeiData.machineTexts(entries[6]) :: any, { "240 s, 3.84 MJ", "800 J/t" } :: any, "a diamond")
-		same(JeiData.machineTexts(entries[1]) :: any, { "30 s, 480 kJ", "800 J/t" } :: any, "a coal")
-		same(JeiData.machineTexts(entries[2]) :: any, { "20 s, 80 kJ", "200 J/t" } :: any, "a raw iron")
-		t.ok(entries[1].energy >= 400000, "coal never under its 400 kJ floor")
+		same(JeiData.machineTexts(entryOf("DiamondOre")) :: any, { "240 s, 3.84 MJ", "800 J/t" } :: any, "a diamond")
+		same(JeiData.machineTexts(entryOf("CoalOre")) :: any, { "30 s, 480 kJ", "800 J/t" } :: any, "a coal")
+		same(JeiData.machineTexts(entryOf("IronOre")) :: any, { "20 s, 80 kJ", "200 J/t" } :: any, "a raw iron")
+		t.ok(entryOf("CoalOre").energy >= 400000, "coal never under its 400 kJ floor")
 		-- Its catalyst, title, tab and layout.
 		same(JeiData.CATALYSTS.duplicating :: any, { "MetalMiner" } :: any, "the miner is its catalyst")
 		t.eq(JeiData.TITLES.duplicating, "Duplicating")

@@ -606,12 +606,10 @@ return function(t, shared, require, server)
 				t.ok(table.find(list, Blocks.caveTwinOf(id) :: number) ~= nil, "its twin is there")
 			end
 		end
-		-- (22 before the zombie apocalypse's CaveCeilingLamp.)
-		t.eq(
-			twins,
-			23,
-			"CaveGlowLichen and its five facings, CaveLava, CaveOil, the mineshafts' fourteen, CaveCeilingLamp"
-		)
+		-- (By name, not a count of twins, so new content's twins leave it alone.)
+		for _, name in { "CaveGlowLichen", "CaveGlowLichenUp", "CaveLava", "CaveOil", "CaveRail", "CaveCeilingLamp" } do
+			t.ok(Blocks.isCaveTwin(Blocks.id[name]), `{name} is a twin, left out`)
+		end
 		t.eq(#list, Blocks.count - 2 - twins, "every id but air, cave air and the cave twins")
 		local width = DebugWorlds.gridWidth(#list)
 		t.eq(width, math.ceil(math.sqrt(#list)))

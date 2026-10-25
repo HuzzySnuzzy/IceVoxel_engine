@@ -23,8 +23,25 @@ return function(t, shared, require)
 		t.eq(Items.ofBlock(Blocks.id.WallTorchEast), Items.id.Torch)
 		t.eq(Items.ofBlock(Blocks.id.HangingLantern), Items.id.Lantern)
 		t.eq(Items.ofBlock(Blocks.id.Torch), Items.id.Torch)
-		t.eq(Items.ofBlock(9999), nil, "unknown block")
-		t.eq(Items.id.LeatherHelmet, Items.ITEM_BASE)
+		t.eq(Items.ofBlock(Blocks.count), nil, "unknown block")
+		-- (Computed, not pinned: content packs number blocks and items at load.) Every block item
+		-- is its block, below ITEM_BASE; the other items (some placing a block: Mint) are
+		-- ITEM_BASE on, with no gaps.
+		t.ok(Blocks.count <= Items.ITEM_BASE, "the blocks fit below ITEM_BASE")
+		local others: { number } = {}
+		for _, def in Items.list do
+			if def.id < Items.ITEM_BASE then
+				t.ok(def.block == def.id and Blocks.get(def.id).name == def.name, `{def.name} is its block`)
+			else
+				t.ok(def.block ~= def.id, `{def.name} is no block`)
+				table.insert(others, def.id)
+			end
+		end
+		table.sort(others)
+		for index, id in others do
+			t.eq(id, Items.ITEM_BASE + index - 1, `{Items.get(id).name}: no gap below it`)
+		end
+		t.ok(Items.id.LeatherHelmet >= Items.ITEM_BASE, "armor is an item of its own")
 		t.eq(Items.get(Items.id.DiamondBoots).displayName, "Diamond Boots")
 		t.eq(Items.get(Items.id.OakLog).displayName, "Oak Log")
 		t.eq(Items.maxStack(Items.id.IronChestplate), 1)
@@ -34,16 +51,13 @@ return function(t, shared, require)
 		t.ok(not pcall(function()
 			return Items.id.NoSuchItem
 		end), "unknown names error")
-		-- Creative order: blocks first, then armor, materials and tools.
-		t.eq(Items.list[1].name, "Stone")
-		-- (TuxedoPants, Terraria's vanity clothes, before the zombie apocalypse's 21 items, then the
-		-- weapons' 34, then the turrets' 8, then the new ores' 20. Was "LaserSight", the turrets'
-		-- last, before it "Sledgehammer", the weapons', and "HerbalPoultice", the zombie
-		-- apocalypse's.)
-		t.eq(Items.list[#Items.list].name, "HazmatBoots", "the last item added (the new ores')")
-		t.eq(Items.id.RawCopper, Items.id.LaserSight + 1, "the new ores' items after the turrets'")
-		t.eq(Items.id.SmgBarrel, Items.id.Sledgehammer + 1, "the turrets' items after the weapons'")
-		t.eq(Items.id.StrongPotionOfResistance, Items.id.HermesBoots - 1, "the last potion, then Terraria's things")
+		-- Creative order: blocks first, then armor, materials and tools (the list in id order, the
+		-- blocks' ids below the items').
+		for index = 2, #Items.list do
+			local before, def = Items.list[index - 1], Items.list[index]
+			t.ok(before.id < def.id, `{before.name} before {def.name}`)
+		end
+		t.ok(Items.find("StrongPotionOfResistance") and Items.find("HermesBoots"), "the potions, Terraria's things")
 		t.eq(Items.get(Items.id.Planks).displayName, "Oak Planks", "a block's own display name")
 		t.eq(Items.maxStack(Items.id.IronPickaxe), 1, "tools don't stack")
 		t.eq(Items.get(Items.id.IronPickaxe).durability, 250)
@@ -86,17 +100,44 @@ return function(t, shared, require)
 	end)
 
 	t.test("items: search matches names and display names in any case", function()
-		local found = Items.search("  oak LOG ")
-		t.eq(#found, 1)
-		t.eq(found[1].name, "OakLog")
-		local ores = Items.search("ore")
-		-- (Was 6, the ores alone, before the weapons' Small-Bore Rifle and its .22 Magazine; then 8,
-		-- before the new ores' six.)
-		t.eq(
-			#ores,
-			14,
-			"coal, iron, gold, diamond, emerald, osmium, copper, lead, zinc, sulfur, saltpetre and uranium ore, and the small-bore rifle and magazine"
-		)
+		-- (Trimmed, any case; what it finds by name, not a count, so a new oak log leaves it alone.)
+		local oak = false
+		for _, def in Items.search("  oak LOG ") do
+			oak = oak or def.name == "OakLog"
+			t.ok(string.find(string.lower(def.displayName), "oak log", 1, true) ~= nil, `{def.name} is an oak log`)
+		end
+		t.ok(oak, "the Oak Log")
+		-- (By name, not a count, so new content matching "ore" leaves it alone.) The ores, and the
+		-- small-bore rifle and magazine by their display names; nothing without "ore" in it.
+		local ores: { [string]: boolean } = {}
+		for _, def in Items.search("ore") do
+			ores[def.name] = true
+			t.ok(
+				string.find(string.lower(def.name .. " " .. def.displayName), "ore", 1, true) ~= nil,
+				`{def.name} has "ore" in it`
+			)
+		end
+		for _, name in
+			{
+				"CoalOre",
+				"IronOre",
+				"GoldOre",
+				"DiamondOre",
+				"EmeraldOre",
+				"OsmiumOre",
+				"CopperOre",
+				"LeadOre",
+				"ZincOre",
+				"SulfurOre",
+				"SaltpetreOre",
+				"UraniumOre",
+				"SmallBoreRifle",
+				"SmallBoreMagazine",
+			}
+		do
+			t.ok(ores[name], `"ore" finds {name}`)
+		end
+		t.ok(not ores.Stone and not ores.RawIron, "and not stone or raw iron")
 		t.eq(#Items.search(""), #Items.list)
 		t.eq(#Items.search("zzz"), 0)
 	end)

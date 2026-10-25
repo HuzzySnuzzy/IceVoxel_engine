@@ -6,6 +6,7 @@ return function(t, shared, require)
 	local Items = require(shared.Items)
 	local Crafting = require(shared.Crafting)
 	local Smelting = require(shared.Crafting.Smelting)
+	local Recipes = require(shared.Crafting.Recipes)
 
 	local id = Items.id
 
@@ -169,24 +170,25 @@ return function(t, shared, require)
 			local made = result(cells, 3)
 			t.ok(made ~= nil and made.item == recipe.result, `{Items.get(recipe.result).name} is craftable`)
 		end
-		-- (99 before the four Universal Cables; 105 before the upgrade cards and the Solar Panel;
-		-- 108 before the four Batteries; 112 before Shears; 113 before the Oil Refinery and the
-		-- Combustion Generator; 115 before the Glass Bottle and the Canteen, Tough As Nails; 117 before
-		-- Flint and Steel; 118 before Gunpowder, TNT and the Nuke; 121 before the Bowl, the three
-		-- mint cures and the three teas; 128 before the Campfire, Straw and Leaf armor and the
-		-- Thermometer, Tough As Nails' gear; 138 before the leather armor and White Wool from String,
-		-- the mobs' drops; 143 before the 29 potions, brewed in the grid; 172 before the Ladder,
-		-- two Rope recipes, Rails, the Oak Fence, the Moss Carpet and two of Mossy Cobblestone; 180
-		-- before Terraria's Aglet, Anklet of the Wind, Band of Starpower, Obsidian Skull, Mana
-		-- Crystal, two mana potions, Emerald Staff, Top Hat, Tuxedo Shirt and Tuxedo Pants; 191
-		-- before the five doors; 196 before the zombie apocalypse's medical supplies, barricades,
-		-- bats, blades, the hatch and concrete; 213 before the weapons' Improvised Suppressor and
-		-- Crossbow Bolts; 215 before the seasons' Snow Layer, insulation, stoves, heaters and
-		-- coolers; 224 before the turrets' seven parts, the Laser Sight, twelve turrets, the Metal
-		-- Miner and the Ammo Press; 246 before the new ores' 34: six storage recipes for each of
-		-- copper, lead, zinc and uranium, four for brass, the brass alloy, the new gunpowder and
-		-- the four Hazmat pieces.)
-		t.eq(#Crafting.recipes, 280, "recipes compiled")
+		-- Every recipe of Crafting/Recipes compiles, once, to its own result (counted by result
+		-- name, not a total, so adding recipes leaves it alone).
+		local written: { [string]: number } = {}
+		for _, list in { Recipes.shaped, Recipes.shapeless } do
+			for _, spec in list :: { any } do
+				written[spec.result] = (written[spec.result] or 0) + 1
+			end
+		end
+		local compiled: { [string]: number } = {}
+		for _, recipe in Crafting.recipes do
+			local name = Items.get(recipe.result).name
+			compiled[name] = (compiled[name] or 0) + 1
+		end
+		for name, count in written do
+			t.eq(compiled[name], count, `{name}'s recipes compiled`)
+		end
+		for name in compiled do
+			t.ok(written[name] ~= nil, `{name} is made by a written recipe`)
+		end
 	end)
 
 	t.test("crafting: the turrets' recipes each make only their own result; a tier keeps its data", function()

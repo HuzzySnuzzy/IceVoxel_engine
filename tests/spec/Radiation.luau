@@ -347,7 +347,8 @@ return function(t, shared, require, server)
 
 	t.test("radiation: Radiation Sickness is a harmful effect that hurts by magic on an interval, and kills", function()
 		local def = Effects.get(E.RadiationSickness) :: Effects.Effect
-		t.eq(E.RadiationSickness, 29, "appended after Hunger")
+		-- (By name, not by id: effects are numbered in list order, which content may change.)
+		t.ok(def ~= nil and def.name == "RadiationSickness", "an effect")
 		t.eq(def.displayName, "Radiation Sickness")
 		t.eq(def.category, "harmful")
 		t.eq(def.icon, "radiation")

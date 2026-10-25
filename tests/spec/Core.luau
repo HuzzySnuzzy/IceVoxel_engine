@@ -71,7 +71,11 @@ return function(t, shared, require)
 	end)
 
 	t.test("block registry", function()
+		-- (The two ids the engine fixes, whatever content is added: chunk buffers start as air, and
+		-- the mesher and the horizon read 0 and 1 as the two airs. Every other id moves freely.)
 		t.eq(Blocks.id.Air, 0)
+		t.eq(Blocks.id.CaveAir, Blocks.CAVE_AIR)
+		t.eq(Blocks.CAVE_AIR, 1)
 		t.eq(Blocks.get(Blocks.id.Stone).name, "Stone")
 		t.ok(not pcall(function()
 			return Blocks.id.NotABlock

@@ -28,8 +28,28 @@ return function(t, shared, require, server, client)
 	end
 
 	t.test("sounds: every block sound type has Minecraft's five actions", function()
-		-- (Ten, then ladder, rope, vine and moss for ladders, rope and the overgrown mineshafts.)
-		t.eq(#Blocks.SOUND_TYPES, 14, "fourteen types")
+		-- (Minecraft's ten, then ladder, rope, vine and moss for ladders, rope and the overgrown
+		-- mineshafts; by name, not a count.)
+		for _, typeName in
+			{
+				"stone",
+				"wood",
+				"gravel",
+				"grass",
+				"sand",
+				"glass",
+				"snow",
+				"metal",
+				"wool",
+				"water",
+				"ladder",
+				"rope",
+				"vine",
+				"moss",
+			}
+		do
+			t.ok(table.find(Blocks.SOUND_TYPES, typeName) ~= nil, `{typeName} is a type`)
+		end
 		for _, typeName in Blocks.SOUND_TYPES do
 			for _, action in Sounds.ACTIONS do
 				local event = Sounds.get(`block.{typeName}.{action}`)
@@ -38,10 +58,19 @@ return function(t, shared, require, server, client)
 				t.eq(event.source, "blocks", "source")
 			end
 		end
-		-- Block events come first, in type and action order.
-		t.eq(Sounds.events[1].name, "block.stone.break", "first event")
-		t.eq(Sounds.events[#Blocks.SOUND_TYPES * #Sounds.ACTIONS + 1].name, SoundList.EVENTS[1].name, "then the list")
-		t.eq(Sounds.count, #Blocks.SOUND_TYPES * #Sounds.ACTIONS + #SoundList.EVENTS, "count")
+		-- Block events come first, in type and action order, then SoundList's in its order: the
+		-- numbering every machine builds alike (computed from the lists, not pinned).
+		local blockEvents = #Blocks.SOUND_TYPES * #Sounds.ACTIONS
+		for typeIndex, typeName in Blocks.SOUND_TYPES do
+			for actionIndex, action in Sounds.ACTIONS do
+				local index = (typeIndex - 1) * #Sounds.ACTIONS + actionIndex
+				t.eq(Sounds.events[index].name, `block.{typeName}.{action}`, `event {index}`)
+			end
+		end
+		for index, spec in SoundList.EVENTS do
+			t.eq(Sounds.events[blockEvents + index].name, spec.name, `then {spec.name}`)
+		end
+		t.eq(Sounds.count, blockEvents + #SoundList.EVENTS, "nothing else")
 	end)
 
 	t.test("sounds: Minecraft's event names, numbered in order, unknown names fail loudly", function()

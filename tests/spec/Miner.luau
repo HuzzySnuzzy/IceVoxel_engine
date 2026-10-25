@@ -61,6 +61,15 @@ return function(t, shared, require, server, client)
 		UraniumOre = { drop = I.RawUranium, ticks = 3600, joules = 800, floor = 0, every = "3:00" },
 	}
 
+	-- The miner's Ore of the block `name`, and its place in ORES (by name, not a fixed position:
+	-- content may add ores anywhere).
+	local function oreOf(name: string): MinerRules.Ore
+		return MinerRules.ore(B[name]) :: MinerRules.Ore
+	end
+	local function oreIndex(name: string): number
+		return oreOf(name).index
+	end
+
 	local function S(item: number, count: number)
 		return { item = item, count = count }
 	end
@@ -171,7 +180,8 @@ return function(t, shared, require, server, client)
 		local info = Machines.info(MINER)
 		t.eq(info.capacity, CAPACITY)
 		for _, ore in MinerRules.ORES do
-			local row = TABLE[ore.name]
+			-- (The design's numbers for its ores; any other ore its own.)
+			local row = TABLE[ore.name] or ore
 			t.eq(ore.drop, row.drop, `{ore.name}'s drop`)
 			t.eq(Items.blockDrops(ore.block).item, ore.drop, `{ore.name}: Items.blockDrops`)
 			t.eq(info[`{ore.name}Ticks`], row.ticks)
@@ -192,7 +202,8 @@ return function(t, shared, require, server, client)
 
 	t.test("miner: every ore's drop, time and energy (one item each, its ore's numbers)", function()
 		for _, ore in MinerRules.ORES do
-			local row = TABLE[ore.name]
+			-- (The design's numbers for its ores; any other ore its own, without the design's text.)
+			local row: any = TABLE[ore.name] or ore
 			local container = miner(0)
 			local cell = { block = ore.block }
 			local ticks, used = untilItem(container, cell, row.ticks + 10)
@@ -213,14 +224,26 @@ return function(t, shared, require, server, client)
 			local drop = Items.displayName(row.drop)
 			-- (Raw Uranium's "Makes ..." would run into the arrow: the drop alone.)
 			t.eq(lines[1], if #drop > 10 then drop else `Makes {drop}`)
-			t.eq(lines[2], `{row.every} an item`, `{ore.name}: the design's "an item every"`)
+			if row.every then
+				t.eq(lines[2], `{row.every} an item`, `{ore.name}: the design's "an item every"`)
+			end
 			-- The next one takes as long.
 			local again, usedAgain = untilItem(container, cell, row.ticks + 10)
 			t.eq(again, row.ticks)
 			t.eq(usedAgain, used)
 			t.eq(container.slots[OUTPUT].count, 2)
 		end
-		t.eq(#MinerRules.ORES, 12, "every ore block BlockList has")
+		-- Every ore block BlockList has is the miner's, the design's among them (by name, not a
+		-- count, so new ores leave it alone).
+		for id = 0, Blocks.count - 1 do
+			local def = Blocks.get(id)
+			if string.find(def.name, "Ore$") and not Blocks.isCaveTwin(id) then
+				t.ok(MinerRules.ore(id) ~= nil, `{def.name} is an ore the miner copies`)
+			end
+		end
+		for name in TABLE do
+			t.ok(MinerRules.ore(B[name]) ~= nil, `{name} is the miner's`)
+		end
 	end)
 
 	t.test("miner: Mekanism's card maths at every count, never under an ore's floor", function()
@@ -235,7 +258,8 @@ return function(t, shared, require, server, client)
 					-- What an item really costs: the J a tick rounded up, as Core.use takes it.
 					local item = ticks * Machines.quantiseUp(ept)
 					if ore.floor > 0 and raw * ticks < ore.floor then
-						floored += 1
+						-- (Coal's counted: only ores with a floor get one, whatever others there are.)
+						floored += if ore.name == "CoalOre" then 1 else 0
 						t.eq(ept, Machines.quantiseUp(ore.floor / ticks), "the floor over its ticks, whole quanta")
 						t.ok(item >= ore.floor, `{ore.name} {speed}/{energy}: {item} J an item, at least its floor`)
 						t.ok(item < ore.floor + ticks * QUANTUM, "and at most a quantum a tick more")
@@ -249,7 +273,7 @@ return function(t, shared, require, server, client)
 		end
 		t.eq(floored, 36, "coal's floor holds wherever Energy Upgrades outnumber Speed Upgrades")
 		-- The design's examples: 8 Speed and 8 Energy Upgrades on diamond, 8 Speed alone.
-		local diamond = MinerRules.ORES[6]
+		local diamond = oreOf("DiamondOre")
 		local ticks, ept, capacity = MinerRules.settings(diamond, 8, 8, CAPACITY)
 		t.eq(ticks, 480, "a diamond every 24 s")
 		t.near(ept, 8000, 1e-9, "at 8 kJ/t")
@@ -259,7 +283,7 @@ return function(t, shared, require, server, client)
 		t.near(fast, 80000, 1e-9, "8 Speed alone: 80 kJ/t")
 		t.ok(fast <= CAPACITY, "within the 200 kJ store")
 		-- Iron for the Ammo Press: one Heat Generator's 200 J/t, 3 Raw Iron a minute.
-		local iron = MinerRules.ORES[2]
+		local iron = oreOf("IronOre")
 		local ironTicks, ironJoules = MinerRules.settings(iron, 0, 0, CAPACITY)
 		t.eq(ironJoules, 200)
 		t.eq(60 * 20 / ironTicks, 3)
@@ -872,10 +896,10 @@ return function(t, shared, require, server, client)
 		t.eq(WailaInfo.text(WailaInfo.machineLines(MINER, facts)[1]), "Energy: 0 J / 200 kJ")
 		t.eq(WailaInfo.text(WailaInfo.machineLines(MINER, facts)[2]), "Idle")
 		local states = {
-			[MinerRules.packState(STATE.MINING, 6)] = "Mining Diamond Ore",
-			[MinerRules.packState(STATE.MINING, 1)] = "Mining Coal Ore",
-			[MinerRules.packState(STATE.NO_POWER, 6)] = "No power",
-			[MinerRules.packState(STATE.OUTPUT_FULL, 3)] = "Output full",
+			[MinerRules.packState(STATE.MINING, oreIndex("DiamondOre"))] = "Mining Diamond Ore",
+			[MinerRules.packState(STATE.MINING, oreIndex("CoalOre"))] = "Mining Coal Ore",
+			[MinerRules.packState(STATE.NO_POWER, oreIndex("DiamondOre"))] = "No power",
+			[MinerRules.packState(STATE.OUTPUT_FULL, oreIndex("OsmiumOre"))] = "Output full",
 			[MinerRules.packState(STATE.NO_ORE, 0)] = "No ore below",
 		}
 		for state, text in states do
@@ -883,7 +907,7 @@ return function(t, shared, require, server, client)
 			t.eq(WailaInfo.text(WailaInfo.machineLines(MINER, facts)[2]), text)
 		end
 		t.eq(WailaInfo.text(WailaInfo.machineDetails(MINER, facts)[1]), "Machine miner (consumer)")
-		-- The state travels in Machines records (a byte: at most 3 + 8 x 6).
+		-- The state travels in Machines records (a byte: at most 3 + 8 x the ores).
 		local s = sim()
 		s.set(0, Y - 1, 0, B.EmeraldOre)
 		s.set(0, Y, 0, MINER)
@@ -891,7 +915,7 @@ return function(t, shared, require, server, client)
 		s.step(3)
 		local record = s.record(0, Y, 0)
 		local sent = (Protocol.decodeMachines(Protocol.encodeMachines({ record })) :: any)[1]
-		t.eq(sent.state, MinerRules.packState(STATE.MINING, 5))
+		t.eq(sent.state, MinerRules.packState(STATE.MINING, oreIndex("EmeraldOre")))
 		t.eq(sent.active, true)
 		t.eq(sent.rate, -800)
 		t.ok(MinerRules.packState(STATE.NO_ORE, #MinerRules.ORES) <= Machines.MAX_STATE)

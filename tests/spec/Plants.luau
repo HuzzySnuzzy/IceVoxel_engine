@@ -126,11 +126,11 @@ return function(t, shared, require, server)
 		return out
 	end
 
-	t.test("plants: the 29 blocks, at the end of BlockList in Minecraft's order and names", function()
-		local first = B.ShortGrass
-		for i, entry in PLANTS do
-			local block = B[entry[1]]
-			t.eq(block, first + i - 1, `{entry[1]} id`)
+	-- (By name, not by id: content packs number blocks at load.)
+	t.test("plants: the 29 blocks, in Minecraft's names", function()
+		for _, entry in PLANTS do
+			local block = Blocks.find(entry[1]) :: number
+			t.ok(block ~= nil and Blocks.get(block).name == entry[1], `{entry[1]} is a block`)
 			local def = Blocks.get(block)
 			local shown = if entry[3] == "upper" then def.displayName else Items.displayName(block)
 			t.eq(shown, entry[2], `{entry[1]} name`)
@@ -521,21 +521,37 @@ return function(t, shared, require, server)
 	end)
 
 	t.test("plants: foliage colours, tint lookup tables and appearance flags", function()
-		-- Only DryGrass has a foliage colour: tint 1.
-		t.eq(#Blocks.FOLIAGE_TINTS, 1)
+		-- DryGrass has a foliage colour; Grass (the colour plants are authored in), stone and the
+		-- plants none. (Not a count: any soil may bring one. Each block with one has a tint number
+		-- of its own, 1..#FOLIAGE_TINTS, at most 63 for the mesher's box keys.)
+		local grass = Blocks.get(B.Grass).color
+		t.ok(#Blocks.FOLIAGE_TINTS >= 1 and #Blocks.FOLIAGE_TINTS < 64, "1..63 tints")
 		t.ok(table.isfrozen(Blocks.FOLIAGE_TINTS) and table.isfrozen(Blocks.FOLIAGE_TINTS[1]), "read only")
 		t.eq(buffer.len(Blocks.tintLut), Blocks.count)
+		local numbered: { [number]: boolean } = {}
+		local tinted = 0
 		for block = 0, Blocks.count - 1 do
-			t.eq(buffer.readu8(Blocks.tintLut, block), if block == B.DryGrass then 1 else 0, Blocks.get(block).name)
-			t.eq(Blocks.foliageColorOf(block) ~= nil, block == B.DryGrass, "foliageColorOf")
+			local tint = buffer.readu8(Blocks.tintLut, block)
+			local colour = Blocks.foliageColorOf(block)
+			local name = Blocks.get(block).name
+			t.eq(colour ~= nil, tint > 0, `{name}: a tint number with its foliage colour`)
+			if colour then
+				t.ok(tint <= #Blocks.FOLIAGE_TINTS and not numbered[tint], `{name}'s tint is its own`)
+				numbered[tint] = true
+				tinted += 1
+				for k = 1, 3 do
+					t.near(Blocks.FOLIAGE_TINTS[tint][k], colour[k] / grass[k], 1e-12, `{name}'s multiplier`)
+				end
+			end
+		end
+		t.eq(tinted, #Blocks.FOLIAGE_TINTS, "every tint is a block's")
+		t.ok(buffer.readu8(Blocks.tintLut, B.DryGrass) > 0, "dry grass is tinted")
+		for _, name in { "Grass", "Stone", "ShortGrass", "Dirt" } do
+			t.eq(Blocks.foliageColorOf(B[name]), nil, `{name} has no foliage colour`)
 		end
 		t.eq(Blocks.foliageColorOf(-1), nil)
 		t.eq(Blocks.foliageColorOf(Blocks.count), nil)
 		local dry = Blocks.foliageColorOf(B.DryGrass) :: { number }
-		local grass = Blocks.get(B.Grass).color
-		for k = 1, 3 do
-			t.near(Blocks.FOLIAGE_TINTS[1][k], dry[k] / grass[k], 1e-12, "multiplier")
-		end
 		-- Savanna grass is yellower than plains grass: more red against green.
 		t.ok(dry[1] / dry[2] > grass[1] / grass[2] + 0.3, "yellow-green")
 		-- Per appearance: tinted and foliage, sized for every appearance id.
