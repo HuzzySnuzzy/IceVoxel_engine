@@ -29,6 +29,18 @@ return function(t, shared, require, server)
 
 	local B, I, E = Blocks.id, Items.id, Effects.id
 	local settings = Config.Radiation
+	-- (Uranium's strengths and lead's shielding are on their Ores pack entries, `radiation` and
+	-- `radiationShield`, since content packs; Config keeps Shielding.Solid and the global numbers.)
+	local entry = require(shared.Content).default.entry
+	local sources: { [string]: number } = {}
+	for _, name in { "UraniumOre", "RawUraniumBlock", "UraniumBlock", "RawUranium", "UraniumIngot", "UraniumNugget" } do
+		sources[name] = (entry(name) :: any).radiation
+	end
+	local shielding = {
+		Solid = settings.Shielding.Solid,
+		LeadBlock = (entry("LeadBlock") :: any).radiationShield,
+		RawLeadBlock = (entry("RawLeadBlock") :: any).radiationShield,
+	}
 	local SURVIVAL, CREATIVE, ADVENTURE, SPECTATOR =
 		GameMode.SURVIVAL, GameMode.CREATIVE, GameMode.ADVENTURE, GameMode.SPECTATOR
 
@@ -75,7 +87,6 @@ return function(t, shared, require, server)
 	--[[ Sources ]]
 
 	t.test("radiation: the uranium is radioactive, by block and by count carried", function()
-		local sources = settings.Sources
 		t.eq(Radiation.strength(B.UraniumOre), sources.UraniumOre, "the ore")
 		t.eq(Radiation.strength(B.RawUraniumBlock), sources.RawUraniumBlock)
 		t.eq(Radiation.strength(B.UraniumBlock), sources.UraniumBlock)
@@ -141,20 +152,20 @@ return function(t, shared, require, server)
 			return Radiation.transmission(here.get, 0, 0, 0, 4.5, 0.5, 0.5)
 		end
 		t.eq(Radiation.transmission(w.get, 0, 0, 0, 4.5, 0.5, 0.5), 1, "air")
-		t.eq(through(B.Stone), settings.Shielding.Solid, "rock: Solid")
-		t.eq(through(B.Dirt), settings.Shielding.Solid, "earth")
-		t.eq(through(B.LeadBlock), settings.Shielding.LeadBlock, "a Block of Lead")
-		t.eq(through(B.RawLeadBlock), settings.Shielding.RawLeadBlock)
-		t.ok(settings.Shielding.LeadBlock < settings.Shielding.Solid / 10, "lead stops nearly all")
+		t.eq(through(B.Stone), shielding.Solid, "rock: Solid")
+		t.eq(through(B.Dirt), shielding.Solid, "earth")
+		t.eq(through(B.LeadBlock), shielding.LeadBlock, "a Block of Lead")
+		t.eq(through(B.RawLeadBlock), shielding.RawLeadBlock)
+		t.ok(shielding.LeadBlock < shielding.Solid / 10, "lead stops nearly all")
 		t.eq(through(B.Glass), 1, "glass lets it through")
 		t.eq(through(B.Water), 1, "fluids too")
 		t.eq(through(nil), 1, "an unknown cell is nothing")
-		t.eq(through(B.UraniumOre), settings.Shielding.Solid, "an ore is rock")
+		t.eq(through(B.UraniumOre), shielding.Solid, "an ore is rock")
 		-- Two walls: the shares multiply. The source's own cell and the body's don't count.
 		local walls = world(function(x: number, _y: number, _z: number): number?
 			return if x == 1 or x == 3 or x == 0 or x == 5 then B.Stone else B.Air
 		end)
-		t.near(Radiation.transmission(walls.get, 0, 0, 0, 5.5, 0.5, 0.5), settings.Shielding.Solid ^ 2, 1e-12)
+		t.near(Radiation.transmission(walls.get, 0, 0, 0, 5.5, 0.5, 0.5), shielding.Solid ^ 2, 1e-12)
 		-- Diagonal rays walk the cells between (at most the Manhattan distance).
 		local solid = world(function(): number?
 			return B.Stone
@@ -162,28 +173,23 @@ return function(t, shared, require, server)
 		t.eq(Radiation.transmission(solid.get, 0, 0, 0, 0.5, 0.5, 0.5), 1, "the same cell: nothing between")
 		local share = Radiation.transmission(solid.get, 0, 0, 0, 3.5, 3.5, 0.5)
 		t.ok(solid.reads <= 6, `a diagonal reads at most the Manhattan distance ({solid.reads})`)
-		t.ok(share < 1 and share >= settings.Shielding.Solid ^ 5, "and shields by the cells it crosses")
+		t.ok(share < 1 and share >= shielding.Solid ^ 5, "and shields by the cells it crosses")
 		-- A deep wall stops it.
 		t.eq(Radiation.transmission(solid.get, 0, 0, 0, 30.5, 0.5, 0.5), 0, "thirty blocks of rock")
 	end)
 
 	t.test("radiation: a look reads the sphere around the body, shields the nearest rays, at a bounded cost", function()
-		local block = settings.Sources.UraniumBlock
+		local block = sources.UraniumBlock
 		local open = world(air)
 		open.set(3, 64, 0, B.UraniumBlock)
 		local x, y, z = 0.5, 64.5, 0.5
 		t.near(Radiation.scan(open.get, x, y, z), block * Radiation.falloff(9), 1e-9, "three blocks off in the open")
 		open.set(2, 64, 0, B.Stone)
-		t.near(
-			Radiation.scan(open.get, x, y, z),
-			block * Radiation.falloff(9) * settings.Shielding.Solid,
-			1e-9,
-			"behind rock"
-		)
+		t.near(Radiation.scan(open.get, x, y, z), block * Radiation.falloff(9) * shielding.Solid, 1e-9, "behind rock")
 		open.set(2, 64, 0, B.LeadBlock)
 		t.near(
 			Radiation.scan(open.get, x, y, z),
-			block * Radiation.falloff(9) * settings.Shielding.LeadBlock,
+			block * Radiation.falloff(9) * shielding.LeadBlock,
 			1e-9,
 			"behind lead"
 		)
@@ -215,7 +221,7 @@ return function(t, shared, require, server)
 		t.ok(sources > settings.MaxRays, `{sources} sources, more than the rays`)
 		local behind = Radiation.scan(sheet(true).get, x, y, z)
 		local unshielded = Radiation.scan(sheet(false).get, x, y, z)
-		local lead = settings.Shielding.LeadBlock
+		local lead = shielding.LeadBlock
 		t.ok(behind > 0, "some")
 		t.ok(
 			behind / unshielded <= lead + 1e-9 and behind / unshielded >= lead * lead - 1e-9,
@@ -522,8 +528,8 @@ return function(t, shared, require, server)
 		t.eq(EffectRules.amplifier(effects, E.RadiationSickness), 1, "Radiation Sickness II")
 		t.ok(EffectRules.has(effects, E.Hunger), "with Hunger")
 		-- One lump in a pocket is safe; one ingot (the refined metal) is not.
-		t.ok(Radiation.settled(settings.Sources.RawUranium) < settings.Sickness.Bands[1], "a lump settles below I")
-		t.ok(Radiation.settled(settings.Sources.UraniumIngot) > settings.Sickness.Bands[2], "an ingot above II")
+		t.ok(Radiation.settled(sources.RawUranium) < settings.Sickness.Bands[1], "a lump settles below I")
+		t.ok(Radiation.settled(sources.UraniumIngot) > settings.Sickness.Bands[2], "an ingot above II")
 	end)
 
 	t.test("radiation: standing next to a Block of Uranium is dangerous", function()

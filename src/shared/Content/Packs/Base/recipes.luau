@@ -1,0 +1,623 @@
+--!strict
+--[[
+	The Base pack's recipes (Crafting/Recipes' list, moved here unchanged), by item name: Minecraft
+	Java 1.20's recipes for the items this game has (the ones needing items it doesn't have, such as
+	clay or dyes, are left out), and Mekanism's: osmium's storage blocks and smelting as Mekanism
+	has them, and its transmitters, fluid tanks, Configurator, Universal Cables, machines, upgrade
+	cards and energy cubes adapted to the game's materials (see "Mekanism pipes and buckets",
+	"Universal Cables", "Heat Generator", "Electric Furnace", "upgrade cards", "Solar Generator" and
+	"Energy Cubes" below), and the Oil Refinery and Combustion Generator (BuildCraft's machines made
+	Mekanism's). The recipe types are Content/Schema's (shaped, shapeless, smelting); the tags they
+	name are Core's, furnace fuel is Crafting/Recipes' `fuel` (and entries' `fuel`).
+
+	An ingredient is an item name or "#tag" (a tag of the packs' `tags`, like Minecraft's item
+	tags). Shared/Crafting compiles these into ids and matches them.
+]]
+
+local Schema = require(script.Parent.Parent.Parent.Schema)
+local PotionList = require(script.Parent.Parent.Parent.Parent.Effects.PotionList)
+
+-- Every recipe, in the order this module makes them (each type keeps its order: Crafting/Recipes).
+local list: { Schema.Recipe } = {}
+
+local function shape(pattern: { string }, key: { [string]: string }, result: string, count: number?, keep: string?)
+	table.insert(list, { type = "shaped", pattern = pattern, key = key, result = result, count = count, keep = keep })
+end
+local function mix(ingredients: { string }, result: string, count: number?, keep: string?)
+	table.insert(list, { type = "shapeless", ingredients = ingredients, result = result, count = count, keep = keep })
+end
+local function smelt(input: string, result: string)
+	table.insert(list, { type = "smelting", input = input, result = result })
+end
+-- A 3 x 3 of `item` packs into `block`, which unpacks into 9 again.
+local function storage(item: string, block: string)
+	shape({ "###", "###", "###" }, { ["#"] = item }, block)
+	mix({ block }, item, 9)
+end
+
+--[[ Wood ]]
+
+mix({ "OakLog" }, "Planks", 4)
+mix({ "BirchLog" }, "BirchPlanks", 4)
+mix({ "SpruceLog" }, "SprucePlanks", 4)
+mix({ "AcaciaLog" }, "AcaciaPlanks", 4)
+mix({ "JungleLog" }, "JunglePlanks", 4)
+shape({ "#", "#" }, { ["#"] = "#planks" }, "Stick", 4)
+shape({ "##", "##" }, { ["#"] = "#planks" }, "CraftingTable")
+shape({ "###", "# #", "###" }, { ["#"] = "#planks" }, "Chest")
+
+--[[ Stone ]]
+
+shape({ "###", "# #", "###" }, { ["#"] = "#stone_crafting_materials" }, "Furnace")
+shape({ "##", "##" }, { ["#"] = "Stone" }, "StoneBricks", 4)
+shape({ "##", "##" }, { ["#"] = "Andesite" }, "PolishedAndesite", 4)
+shape({ "##", "##" }, { ["#"] = "Diorite" }, "PolishedDiorite", 4)
+shape({ "##", "##" }, { ["#"] = "Granite" }, "PolishedGranite", 4)
+mix({ "Diorite", "Cobblestone" }, "Andesite", 2)
+shape({ "##", "##" }, { ["#"] = "Sand" }, "Sandstone")
+shape({ "##", "##" }, { ["#"] = "Sandstone" }, "CutSandstone", 4)
+shape({ "DG", "GD" }, { D = "Dirt", G = "Gravel" }, "CoarseDirt", 4)
+
+--[[ Ice and snow ]]
+
+mix({ "Ice", "Ice", "Ice", "Ice", "Ice", "Ice", "Ice", "Ice", "Ice" }, "PackedIce")
+mix({
+	"PackedIce",
+	"PackedIce",
+	"PackedIce",
+	"PackedIce",
+	"PackedIce",
+	"PackedIce",
+	"PackedIce",
+	"PackedIce",
+	"PackedIce",
+}, "BlueIce")
+shape({ "##", "##" }, { ["#"] = "Snowball" }, "Snow")
+
+--[[ Minerals ]]
+
+storage("Coal", "CoalBlock")
+storage("IronIngot", "IronBlock")
+storage("GoldIngot", "GoldBlock")
+storage("Diamond", "DiamondBlock")
+storage("Emerald", "EmeraldBlock")
+storage("RawIron", "RawIronBlock")
+storage("RawGold", "RawGoldBlock")
+storage("IronNugget", "IronIngot")
+storage("GoldNugget", "GoldIngot")
+-- Mekanism's osmium: 9 nuggets <-> an ingot, 9 ingots <-> a block, 9 raw <-> a raw block.
+storage("OsmiumNugget", "OsmiumIngot")
+storage("OsmiumIngot", "OsmiumBlock")
+storage("RawOsmium", "RawOsmiumBlock")
+-- (The new ores' metals and brass are the Ores pack's.)
+
+--[[ Tools: wood, stone, iron, gold and diamond ]]
+
+local TOOL_MATERIALS = {
+	{ "Wooden", "#planks" },
+	{ "Stone", "#stone_tool_materials" },
+	{ "Iron", "IronIngot" },
+	{ "Golden", "GoldIngot" },
+	{ "Diamond", "Diamond" },
+}
+for _, material in TOOL_MATERIALS do
+	local tier, x = material[1], material[2]
+	local key = { X = x, ["#"] = "Stick" }
+	shape({ "XXX", " # ", " # " }, key, tier .. "Pickaxe")
+	shape({ "XX", "X#", " #" }, key, tier .. "Axe")
+	shape({ "X", "#", "#" }, key, tier .. "Shovel")
+	shape({ "XX", " #", " #" }, key, tier .. "Hoe")
+	shape({ "X", "X", "#" }, key, tier .. "Sword")
+end
+
+--[[ Armor: iron, gold and diamond (leather's are with the mobs' drops below; chainmail is not
+craftable, but smelts) ]]
+
+for _, material in { { "Iron", "IronIngot" }, { "Gold", "GoldIngot" }, { "Diamond", "Diamond" } } do
+	local key = { X = material[2] }
+	shape({ "XXX", "X X" }, key, material[1] .. "Helmet")
+	shape({ "X X", "XXX", "XXX" }, key, material[1] .. "Chestplate")
+	shape({ "XXX", "X X", "X X" }, key, material[1] .. "Leggings")
+	shape({ "X X", "X X" }, key, material[1] .. "Boots")
+end
+
+--[[ Shears: two iron ingots on a diagonal (Minecraft's " #", "# "; mirrored works too) ]]
+
+shape({ " #", "# " }, { ["#"] = "IronIngot" }, "Shears")
+
+--[[ Light ]]
+
+shape({ "X", "#" }, { X = "#coals", ["#"] = "Stick" }, "Torch", 4)
+shape({ "XXX", "X#X", "XXX" }, { X = "IronNugget", ["#"] = "Torch" }, "Lantern")
+shape({ "##", "##" }, { ["#"] = "GlowDust" }, "GlowBlock")
+
+--[[ Fire: Flint and Steel, an iron ingot and flint in any slots (Minecraft's) ]]
+
+mix({ "IronIngot", "Flint" }, "FlintAndSteel")
+
+--[[
+	Explosives. Gunpowder has no creeper to drop it here, and ruins hide some (Generation/
+	ScavengeLoot). The old field mix, a coal or charcoal and a flint, makes two (black powder from
+	saltpetre and sulfur, and the Nuke's uranium core, are the Ores pack's). TNT is Minecraft's:
+	gunpowder in an X with sand between (5 gunpowder, 4 sand).
+]]
+mix({ "#coals", "Flint" }, "Gunpowder", 2)
+shape({ "X#X", "#X#", "X#X" }, { X = "Gunpowder", ["#"] = "Sand" }, "Tnt")
+
+--[[
+	Mekanism pipes and buckets. The bucket is Minecraft's. Mekanism's own recipes need steel,
+	control circuits (osmium infused with redstone) and alloys, made in machines this game does not
+	have, so they are adapted:
+	  * Basic Logistical Transporter x 8: iron, glass, iron in a row (Mekanism: steel, a basic
+	    control circuit, steel).
+	  * Basic Mechanical Pipe x 8: iron, a bucket, iron (Mekanism: steel, a bucket, steel).
+	  * Restrictive Transporter x 2: a basic transporter between two iron ingots (Mekanism: between
+	    two iron bars).
+	  * Upgrades, Mekanism's shape: 8 transporters or pipes around an alloy make 8 of the next
+	    tier. A gold ingot stands for the infused alloy (Advanced), a diamond for the reinforced
+	    alloy (Elite) and an emerald for the atomic alloy (Ultimate).
+	  * Basic Fluid Tank: iron at the corners, glass at the sides and an empty middle (Mekanism's
+	    needs a control circuit and alloys). The next tiers put the tank below them in the middle
+	    of 4 gold ingots / diamonds / emeralds, standing for the alloys again.
+	  * Configurator: glow dust over a stick between two iron ingots, a stick below, after
+	    Mekanism's " L ", "AEA", " S " (lapis lazuli over an energy tablet between two infused
+	    alloys, a stick below).
+]]
+shape({ "I I", " I " }, { I = "IronIngot" }, "Bucket")
+shape({ "IGI" }, { I = "IronIngot", G = "Glass" }, "BasicLogisticalTransporter", 8)
+shape({ "IBI" }, { I = "IronIngot", B = "Bucket" }, "BasicMechanicalPipe", 8)
+shape({ "ITI" }, { I = "IronIngot", T = "BasicLogisticalTransporter" }, "RestrictiveTransporter", 2)
+shape({ "IGI", "G G", "IGI" }, { I = "IronIngot", G = "Glass" }, "BasicFluidTank")
+local TIER_NAMES = { "Basic", "Advanced", "Elite", "Ultimate" }
+local ALLOYS = { "GoldIngot", "Diamond", "Emerald" }
+for tier = 2, 4 do
+	local lower, name, alloy = TIER_NAMES[tier - 1], TIER_NAMES[tier], ALLOYS[tier - 1]
+	for _, kind in { "LogisticalTransporter", "MechanicalPipe" } do
+		shape({ "TTT", "TAT", "TTT" }, { T = lower .. kind, A = alloy }, name .. kind, 8)
+	end
+	shape({ " A ", "ATA", " A " }, { T = lower .. "FluidTank", A = alloy }, name .. "FluidTank")
+end
+shape({ " G ", "ISI", " S " }, { G = "GlowDust", I = "IronIngot", S = "Stick" }, "Configurator")
+
+--[[
+	Mekanism's Universal Cables. Mekanism makes 8 Basic Universal Cables from steel, redstone and
+	steel in a row; osmium ingots stand for the steel (Mekanism's steel is made with osmium's
+	help) and glow dust for the redstone, which the game has neither of. The upgrades are
+	Mekanism's shape, as for transporters and pipes: 8 cables around an alloy (gold, diamond,
+	emerald) make 8 of the next tier.
+]]
+shape({ "OGO" }, { O = "OsmiumIngot", G = "GlowDust" }, "BasicUniversalCable", 8)
+for tier = 2, 4 do
+	local lower, name, alloy = TIER_NAMES[tier - 1], TIER_NAMES[tier], ALLOYS[tier - 1]
+	shape({ "CCC", "CAC", "CCC" }, { C = lower .. "UniversalCable", A = alloy }, name .. "UniversalCable", 8)
+end
+
+--[[
+	Mekanism Generators' Heat Generator, in Mekanism's shape: three iron ingots over planks, an
+	osmium ingot and planks, over copper, a furnace and copper ("III", "WOW", "CFC"). The game has
+	no copper, so iron ingots stand for it.
+]]
+shape({ "III", "WOW", "IFI" }, { I = "IronIngot", W = "#planks", O = "OsmiumIngot", F = "Furnace" }, "HeatGenerator")
+
+--[[
+	Mekanism's Energized Smelter (the Electric Furnace), in Mekanism's shape: redstone, a basic
+	control circuit and redstone, over glass, a steel casing and glass, over redstone, a circuit
+	and redstone ("RCR", "GSG", "RCR"). Glow dust stands for the redstone (as in the cables),
+	osmium ingots for the circuits (Mekanism's are osmium and redstone) and a furnace for the
+	casing, the machine it builds on.
+]]
+shape({ "DOD", "GFG", "DOD" }, { D = "GlowDust", O = "OsmiumIngot", G = "Glass", F = "Furnace" }, "ElectricFurnace")
+
+--[[
+	Mekanism's upgrade cards, in Mekanism's shape: glass over an alloy, a dust and an alloy, over
+	glass (" G ", "ADA", " G "), the dust osmium's for the Speed Upgrade and gold's for the Energy
+	Upgrade. The game has neither dusts nor Mekanism's infused alloy, so the ingots stand for the
+	dusts and gold ingots for the alloy (as in the transmitter upgrades): the Speed Upgrade is
+	glass over gold, osmium and gold over glass, the Energy Upgrade glass over three gold ingots
+	over glass.
+]]
+shape({ " G ", "AOA", " G " }, { G = "Glass", A = "GoldIngot", O = "OsmiumIngot" }, "SpeedUpgrade")
+shape({ " G ", "AUA", " G " }, { G = "Glass", A = "GoldIngot", U = "GoldIngot" }, "EnergyUpgrade")
+
+--[[
+	Mekanism Generators' Solar Generator (the Solar Panel), in Mekanism's shape: three solar panels
+	over an alloy, an iron ingot and an alloy, over osmium dust, an energy tablet and osmium dust
+	("SSS", "AIA", "PEP"). Glass stands for the solar panels (Mekanism's are glass panes over
+	redstone, alloy and osmium), gold ingots for the infused alloy, osmium ingots for the dust and
+	glow dust for the energy tablet (redstone, gold and alloy in Mekanism; glow dust stands for
+	redstone, as in the cables).
+]]
+shape(
+	{ "GGG", "AIA", "ODO" },
+	{ G = "Glass", A = "GoldIngot", I = "IronIngot", O = "OsmiumIngot", D = "GlowDust" },
+	"SolarPanel"
+)
+
+--[[
+	Mekanism's Energy Cubes (the Batteries), in Mekanism's shape: an alloy, an energy tablet and an
+	alloy, over an ingot, the casing or the tier below and an ingot, over the top row again ("ATA",
+	"IPI", "ATA"; redstone for the Basic's alloy). Glow dust stands for the redstone (as in
+	the cables), the Glow Block for the energy tablet (Mekanism's is mostly redstone), a block of iron
+	for the steel casing, and gold ingots, diamonds and emeralds for the infused, reinforced and
+	atomic alloys (as in the transmitter upgrades); the ingots are Mekanism's: iron, osmium, gold
+	and a diamond. A tier crafted around the tier below keeps its charge (`keep`, Mekanism's
+	MekDataShapedRecipe).
+]]
+shape({ "DTD", "ICI", "DTD" }, { D = "GlowDust", T = "GlowBlock", I = "IronIngot", C = "IronBlock" }, "BasicBattery")
+local BATTERY_INGOTS = { "OsmiumIngot", "GoldIngot", "Diamond" }
+for tier = 2, 4 do
+	shape(
+		{ "ATA", "IBI", "ATA" },
+		{ A = ALLOYS[tier - 1], T = "GlowBlock", I = BATTERY_INGOTS[tier - 1], B = TIER_NAMES[tier - 1] .. "Battery" },
+		TIER_NAMES[tier] .. "Battery",
+		1,
+		"B"
+	)
+end
+
+--[[
+	The Oil Refinery, Mekanism's machine shape around BuildCraft's refinery: iron, glass and iron
+	(its sight glass) over osmium, a furnace and osmium (the heater in a casing: osmium stands for
+	Mekanism's steel and circuits, as in the Electric Furnace) over iron, a bucket and iron (its
+	fluid outlet) ("IGI", "OFO", "IBI"). BuildCraft's own refinery is tanks and gears around a
+	redstone engine's parts, which the game has none of.
+]]
+shape(
+	{ "IGI", "OFO", "IBI" },
+	{ I = "IronIngot", G = "Glass", O = "OsmiumIngot", F = "Furnace", B = "Bucket" },
+	"OilRefinery"
+)
+
+--[[
+	The Combustion Generator, Mekanism's generator shape around BuildCraft's combustion engine:
+	osmium, a bucket (the fuel inlet) and osmium, over iron, a furnace (the combustion chamber) and
+	iron, over osmium, glow dust and osmium (the power out: glow dust stands for redstone, as in
+	the cables, osmium for Mekanism's steel) ("OBO", "IFI", "ODO"). BuildCraft's engine needs
+	pistons and gears, which the game has none of.
+]]
+shape(
+	{ "OBO", "IFI", "ODO" },
+	{ I = "IronIngot", B = "Bucket", O = "OsmiumIngot", F = "Furnace", D = "GlowDust" },
+	"CombustionGenerator"
+)
+
+--[[ Smelting ]]
+
+smelt("RawIron", "IronIngot")
+smelt("RawGold", "GoldIngot")
+smelt("IronOre", "IronIngot")
+smelt("GoldOre", "GoldIngot")
+smelt("CoalOre", "Coal")
+smelt("DiamondOre", "Diamond")
+smelt("EmeraldOre", "Emerald")
+smelt("RawOsmium", "OsmiumIngot")
+smelt("OsmiumOre", "OsmiumIngot")
+smelt("Sand", "Glass")
+smelt("Cobblestone", "Stone")
+smelt("Stone", "SmoothStone")
+smelt("Sandstone", "SmoothSandstone")
+smelt("StoneBricks", "CrackedStoneBricks")
+smelt("#logs", "Charcoal")
+-- Iron and gold tools and armor melt back into nuggets.
+for _, piece in { "Pickaxe", "Axe", "Shovel", "Hoe", "Sword" } do
+	smelt("Iron" .. piece, "IronNugget")
+	smelt("Golden" .. piece, "GoldNugget")
+end
+for _, piece in { "Helmet", "Chestplate", "Leggings", "Boots" } do
+	smelt("Iron" .. piece, "IronNugget")
+	smelt("Chainmail" .. piece, "IronNugget")
+	smelt("Gold" .. piece, "GoldNugget")
+end
+
+--[[
+	Tough As Nails' water (Shared/ToughAsNails/Drinks). The Glass Bottle is Minecraft's (three glass
+	in a V make three). TAN's leather canteen is made of iron here, as the game has no leather: an
+	iron nugget for the stopper over three iron ingots in a cup (the Bucket's shape, which the
+	nugget's row keeps apart from it). Dirty water is purified by smelting it, TAN's original way
+	(its later Water Purifier is a machine of its own): a Dirty Water Bottle into a Purified Water
+	Bottle, a Dirty Water Canteen into a full Purified Water Canteen (filling a canteen at water
+	fills it anyway, so nothing is gained).
+]]
+shape({ "G G", " G " }, { G = "Glass" }, "GlassBottle", 3)
+shape({ " N ", "I I", " I " }, { N = "IronNugget", I = "IronIngot" }, "Canteen")
+smelt("DirtyWaterBottle", "PurifiedWaterBottle")
+smelt("DirtyWaterCanteen", "PurifiedWaterCanteen")
+
+--[[
+	Herbs, bowls and teas (Tough As Nails' water, Shared/ToughAsNails/Drinks). The Bowl is
+	Minecraft's: three planks of any wood in a V make four. A Dirty Water Bowl smelts into a
+	Purified Water Bowl like the bottle. Mint cures dirty water without a fire: a dirty bottle,
+	bowl or canteen with Mint Leaves in any slots (shapeless) makes its purified twin, in the
+	inventory's own 2 x 2 grid too. The water keeps its wear (`keep`): a part-drunk dirty
+	canteen comes out with the sips it had, as from a campfire (ToughAsNails/Boiling), so a mint
+	leaf cures water and never makes more of it far from any. A Purified Water Bowl brews a tea
+	with a herb: Mint Leaves make Mint Tea (Internal Chill), Ginger Root Ginger Tea (Internal
+	Warmth), both Herbal Tea. A bowl burns 100 ticks as fuel (Minecraft's).
+]]
+shape({ "# #", " # " }, { ["#"] = "#planks" }, "Bowl", 4)
+smelt("DirtyWaterBowl", "PurifiedWaterBowl")
+for _, water in { "Bottle", "Bowl", "Canteen" } do
+	mix({ "DirtyWater" .. water, "MintLeaves" }, "PurifiedWater" .. water, nil, "DirtyWater" .. water)
+end
+mix({ "PurifiedWaterBowl", "MintLeaves" }, "MintTea")
+mix({ "PurifiedWaterBowl", "GingerRoot" }, "GingerTea")
+mix({ "PurifiedWaterBowl", "MintLeaves", "GingerRoot" }, "HerbalTea")
+
+--[[
+	Tough As Nails' gear for the cold and the heat. The Campfire is Minecraft's: a stick on top and
+	one each side of a coal or charcoal, over three logs of any wood (" S ", "SCS", "LLL"). Straw
+	and Leaf armor take the armor shapes with Straw (grass broken by hand gives it) or any leaves
+	(Shears harvest them): 24 for a set, as leather. The Thermometer (TAN's) is an iron nugget over
+	glass over glow dust, the game's redstone (TAN's own uses copper and redstone).
+]]
+shape({ " S ", "SCS", "LLL" }, { S = "Stick", C = "#coals", L = "#logs" }, "Campfire")
+for _, material in { { "Straw", "Straw" }, { "Leaf", "#leaves" } } do
+	local key = { X = material[2] }
+	shape({ "XXX", "X X" }, key, material[1] .. "Helmet")
+	shape({ "X X", "XXX", "XXX" }, key, material[1] .. "Chestplate")
+	shape({ "XXX", "X X", "X X" }, key, material[1] .. "Leggings")
+	shape({ "X X", "X X" }, key, material[1] .. "Boots")
+end
+shape({ "N", "G", "D" }, { N = "IronNugget", G = "Glass", D = "GlowDust" }, "Thermometer")
+
+--[[
+	What mobs drop (Shared/Entities/MobList). Minecraft's: raw meat cooks in a furnace (200 ticks,
+	as everything here), Leather makes the leather armor pieces in the armor shapes (24 for a set;
+	the items were already in, now they can be made) and four String in a square make White Wool.
+]]
+smelt("RawBeef", "CookedBeef")
+smelt("RawMutton", "CookedMutton")
+smelt("RawPorkchop", "CookedPorkchop")
+smelt("RawChicken", "CookedChicken")
+do
+	local key = { X = "Leather" }
+	shape({ "XXX", "X X" }, key, "LeatherHelmet")
+	shape({ "X X", "XXX", "XXX" }, key, "LeatherChestplate")
+	shape({ "XXX", "X X", "X X" }, key, "LeatherLeggings")
+	shape({ "X X", "X X" }, key, "LeatherBoots")
+end
+shape({ "##", "##" }, { ["#"] = "String" }, "WhiteWool")
+
+--[[
+	Climbing and the mineshafts' blocks. Minecraft's: the Ladder (seven sticks, three ladders),
+	Rails (six iron ingots around a stick, sixteen), the Oak Fence (oak planks and sticks, three),
+	the Moss Carpet (two moss blocks, three) and Mossy Cobblestone (cobblestone with a vine or a moss
+	block). Rope is Supplementaries': three flax in a column make three, or three String on a
+	diagonal; Straw (grass broken by hand) is this game's plant fibre, so three Straw in a column.
+	Cobwebs have no recipe (Minecraft 1.20.1 has none).
+]]
+shape({ "S S", "SSS", "S S" }, { S = "Stick" }, "Ladder", 3)
+shape({ "#", "#", "#" }, { ["#"] = "Straw" }, "Rope", 3)
+shape({ "#  ", " # ", "  #" }, { ["#"] = "String" }, "Rope", 3)
+shape({ "I I", "ISI", "I I" }, { I = "IronIngot", S = "Stick" }, "Rail", 16)
+shape({ "PSP", "PSP" }, { P = "Planks", S = "Stick" }, "OakFence", 3)
+shape({ "##" }, { ["#"] = "MossBlock" }, "MossCarpet", 3)
+mix({ "Cobblestone", "Vine" }, "MossyCobblestone")
+mix({ "Cobblestone", "MossBlock" }, "MossyCobblestone")
+
+--[[
+	Potions (Shared/Effects/PotionList), brewed in a crafting grid as the game has no brewing stand
+	(shapeless, the inventory's 2 x 2 too): a Purified Water Bottle with the potion's ingredient
+	makes the potion (Mint Leaves Swiftness, Glow Dust Night Vision...), the potion with Glow Dust
+	its level II and with a coal or charcoal its long variant, where it has them (Minecraft's
+	glowstone and redstone).
+]]
+for _, variant in PotionList.all() do
+	mix({ variant.from, variant.with }, variant.item)
+end
+
+--[[
+	Terraria's things, made from what this game has (Config.Accessories, Mana). Terraria finds most
+	early accessories in chests (here Generation/Mineshafts' fourth loot pool, and the ruins' and
+	bunkers' loot for Feral Claws); the ones made here:
+	  Aglet               a Leather and two Iron Nuggets (the lace's leather, its metal tip)
+	  Anklet of the Wind  three Feathers, a String and an Emerald (Terraria's jungle find)
+	  Band of Starpower   four Gold Ingots around a Fallen Star (" G ", "GSG", " G ")
+	  Obsidian Skull      six Obsidian in a skull ("OOO", "O O", " O "; Terraria's 20 at a
+	                      furnace: obsidian needs a diamond pickaxe here, which is gate enough)
+	Mana (Shared/Mana): five Fallen Stars make a Mana Crystal (Terraria's, by hand: here in a
+	crafting table, five don't fit the 2 x 2); two Purified Water Bottles with a Fallen Star and Glow
+	Dust brew two Lesser Mana Potions, and two of those with Glow Lichen (Terraria's glowing
+	mushroom) two Mana Potions. The Emerald Staff: three Emeralds at the head of two Sticks on the
+	diagonal (Terraria's gem staves). Vanity clothes: a Top Hat of five Leather (" L ", " L ",
+	"LLL": crown and brim), a Tuxedo Shirt of two White Wool, two Leather and a String, Tuxedo
+	Pants of three Leather and a String. Progression/Ages opens the ones of iron, gold and emerald
+	in the Iron Age.
+]]
+mix({ "Leather", "IronNugget", "IronNugget" }, "Aglet")
+mix({ "Feather", "Feather", "Feather", "String", "Emerald" }, "AnkletOfTheWind")
+shape({ " G ", "GSG", " G " }, { G = "GoldIngot", S = "FallenStar" }, "BandOfStarpower")
+shape({ "OOO", "O O", " O " }, { O = "Obsidian" }, "ObsidianSkull")
+mix({ "FallenStar", "FallenStar", "FallenStar", "FallenStar", "FallenStar" }, "ManaCrystal")
+mix({ "PurifiedWaterBottle", "PurifiedWaterBottle", "FallenStar", "GlowDust" }, "LesserManaPotion", 2)
+mix({ "LesserManaPotion", "LesserManaPotion", "GlowLichen" }, "ManaPotion", 2)
+shape({ " EE", " SE", "S  " }, { E = "Emerald", S = "Stick" }, "EmeraldStaff")
+shape({ " L ", " L ", "LLL" }, { L = "Leather" }, "TopHat")
+--[[
+	Doors (Minecraft's): six planks of a wood in two columns of three make three of its doors.
+]]
+shape({ "##", "##", "##" }, { ["#"] = "Planks" }, "OakDoor", 3)
+shape({ "##", "##", "##" }, { ["#"] = "SprucePlanks" }, "SpruceDoor", 3)
+shape({ "##", "##", "##" }, { ["#"] = "BirchPlanks" }, "BirchDoor", 3)
+shape({ "##", "##", "##" }, { ["#"] = "JunglePlanks" }, "JungleDoor", 3)
+shape({ "##", "##", "##" }, { ["#"] = "AcaciaPlanks" }, "AcaciaDoor", 3)
+mix({ "WhiteWool", "WhiteWool", "Leather", "Leather", "String" }, "TuxedoShirt")
+mix({ "Leather", "Leather", "Leather", "String" }, "TuxedoPants")
+
+--[[
+	The apocalypse (Generation/ScavengeLoot hides the rest in the ruins and bunkers: no recipe for
+	the roads' asphalt and lines, rusty metal, the medicine cabinet, antibiotics, painkillers, duct
+	tape, the canned and bottled food and drink, or the Fire Axe):
+	  Rag                   White Wool torn into three
+	  Bandage               two Rags make two
+	  Medkit                two Bandages, Painkillers and Duct Tape
+	  Herbal Poultice       Mint Leaves, a Ginger Root and a Rag: the renewable answer to a bite
+	                        (it sets an infection back a stage; only Antibiotics cure it)
+	  Nails                 two Iron Nuggets make four (an ingot is already nine nuggets)
+	  Barricade             three planks over Nails make four (a barricade beats the planks it
+	                        costs: zombies take 900 ticks for one, 600 for a plank)
+	  Reinforced Barricade  a Barricade, two Scrap Metal and Nails
+	  Baseball Bat          two logs over a Stick (logs: no clash with the wooden sword)
+	  Spiked Bat            a Baseball Bat and three Nails
+	  Machete               two Iron Ingots on the diagonal over a Stick
+	  Crowbar               four Iron Ingots in a hook
+	  Supply Crate          planks and Sticks in a ring
+	  Ceiling Lamp          three Iron Nuggets round Glow Dust make two
+	  Bunker Hatch          four Iron Ingots (Minecraft's iron trapdoor)
+	  Concrete              Gravel and Sand on the diagonals make four
+	  Mossy Concrete, Mossy Bricks   Concrete or Bricks with a Vine
+	Smelting: Concrete cracks into Cracked Concrete, Bricks into Cracked Bricks, and Scrap Metal
+	melts into an Iron Nugget. Progression/Ages keeps the iron ones (and the hatch and lamp) for
+	the Iron Age and concrete for the Industrial Age.
+]]
+mix({ "WhiteWool" }, "Rag", 3)
+mix({ "Rag", "Rag" }, "Bandage", 2)
+mix({ "Bandage", "Bandage", "Painkillers", "DuctTape" }, "Medkit")
+mix({ "MintLeaves", "GingerRoot", "Rag" }, "HerbalPoultice")
+mix({ "IronNugget", "IronNugget" }, "Nails", 4)
+shape({ "PPP", " N " }, { P = "#planks", N = "Nails" }, "Barricade", 4)
+mix({ "Barricade", "ScrapMetal", "ScrapMetal", "Nails" }, "ReinforcedBarricade")
+shape({ "L", "L", "S" }, { L = "#logs", S = "Stick" }, "BaseballBat")
+mix({ "BaseballBat", "Nails", "Nails", "Nails" }, "SpikedBat")
+shape({ "  I", " I ", "S  " }, { I = "IronIngot", S = "Stick" }, "Machete")
+shape({ "II", " I", " I" }, { I = "IronIngot" }, "Crowbar")
+shape({ "SPS", "P P", "SPS" }, { S = "Stick", P = "#planks" }, "SupplyCrate")
+shape({ " N ", "NGN" }, { N = "IronNugget", G = "GlowDust" }, "CeilingLamp", 2)
+shape({ "II", "II" }, { I = "IronIngot" }, "BunkerHatch")
+shape({ "GS", "SG" }, { G = "Gravel", S = "Sand" }, "Concrete", 4)
+mix({ "Concrete", "Vine" }, "MossyConcrete")
+mix({ "Brick", "Vine" }, "MossyBricks")
+smelt("Concrete", "CrackedConcrete")
+smelt("Brick", "CrackedBricks")
+smelt("ScrapMetal", "IronNugget")
+
+--[[
+	Weapons (Shared/Weapons; DayZ makes no gun, magazine or round: the ruins and bunkers hide them,
+	Generation/ScavengeLoot; the turrets' Ammo Press, below, presses rounds from iron and
+	gunpowder):
+	  Improvised Suppressor  a Glass Bottle and Duct Tape (it muffles a few dozen shots)
+	  Crossbow Bolt          an Iron Nugget over a Stick over a Feather make four (the Iron Age's)
+]]
+mix({ "GlassBottle", "DuctTape" }, "ImprovisedSuppressor")
+shape({ "N", "S", "F" }, { N = "IronNugget", S = "Stick", F = "Feather" }, "CrossbowBolt", 4)
+
+--[[
+	The seasons (Shared/Seasons; Progression/Ages: the Snow Layer and Insulated Planks are the Stone
+	Age's, the Wood Stove, Insulated Glass and Insulated Door the Iron Age's, the Oil Heater the
+	Industrial Age's, the Electric Heater, Air Conditioner and Electric Fan the Electric Age's):
+	  Snow Layer       three Snow blocks in a row make six (Minecraft's)
+	  Insulated Planks planks and White Wool in a checker make four
+	  Insulated Glass  glass between Iron Nuggets makes two
+	  Insulated Door   an Oak Door padded with two White Wool
+	  Wood Stove       iron round a Furnace, an iron chimney on top
+	  Oil Heater       a Furnace and a Bucket in iron over osmium and glass
+	  Electric Heater  iron round Glow Dust and a Universal Cable
+	  Air Conditioner  Packed Ice over cables and Glow Dust in iron
+	  Electric Fan     iron blades round a Universal Cable
+]]
+shape({ "SSS" }, { S = "Snow" }, "SnowLayer1", 6)
+shape({ "PW", "WP" }, { P = "#planks", W = "WhiteWool" }, "InsulatedPlanks", 4)
+shape({ "NGN", "NGN" }, { N = "IronNugget", G = "Glass" }, "InsulatedGlass", 2)
+mix({ "OakDoor", "WhiteWool", "WhiteWool" }, "InsulatedDoor")
+shape({ " I ", "IFI", "III" }, { I = "IronIngot", F = "Furnace" }, "WoodStove")
+shape(
+	{ "IBI", "IFI", "OGO" },
+	{ I = "IronIngot", B = "Bucket", F = "Furnace", O = "OsmiumIngot", G = "Glass" },
+	"OilHeater"
+)
+shape({ "ICI", "IDI", "III" }, { I = "IronIngot", C = "BasicUniversalCable", D = "GlowDust" }, "ElectricHeater")
+shape(
+	{ "IPI", "CDC", "III" },
+	{ I = "IronIngot", P = "PackedIce", C = "BasicUniversalCable", D = "GlowDust" },
+	"AirConditioner"
+)
+shape({ "I I", " C ", "I I" }, { I = "IronIngot", C = "BasicUniversalCable" }, "ElectricFan")
+
+--[[
+	Turrets and the Metal Miner (Shared/Turrets, Config.Turrets / Miner / AmmoPress; Progression/
+	Ages: the parts, the Laser Sight, the Basic, Advanced and Elite turrets, the Metal Miner and
+	the Ammo Press are the Electric Age's, the Ultimate turrets the Atomic Age's). Each block is
+	left out when its feature's `Enabled` is false (its items stay registered: ids are
+	append-only), the Servo Motor only when neither turrets nor the press take it:
+	  Servo Motor       iron over osmium round a Universal Cable, iron below: two
+	  Belt Feeder       leather over iron nuggets round an iron ingot
+	  Receiver          iron over an osmium ingot, Nails and Scrap Metal
+	  Targeting Module  glass over glow dust round an osmium ingot, a Universal Cable below
+	  Barrels           SMG three iron; rifle three iron over three osmium; sniper three osmium
+	                    over diamonds round an iron ingot
+	  Laser Sight       iron, glow dust and glass over three iron nuggets
+	  Turrets           the Basic of a type from its barrel over a servo, a receiver and a belt
+	                    feeder over osmium round a targeting module; each next tier round the one
+	                    below (Mekanism's tier shape): the alloys (gold, diamond, emerald, as the
+	                    transmitters' upgrades) in the corners, a barrel over it, servos beside it,
+	                    a targeting module under it, keeping its data (`keep`: its energy and its
+	                    Lure, as a Battery keeps its charge)
+	  Metal Miner       osmium round a Universal Cable over iron blocks round an Electric Furnace
+	                    over diamonds round a Diamond Pickaxe
+	  Ammo Press        iron round a servo over osmium round an Electric Furnace over iron round
+	                    a Block of Iron
+]]
+do
+	local Config = require(script.Parent.Parent.Parent.Parent.Config)
+	local turrets = Config.Turrets.Enabled
+	if turrets or Config.AmmoPress.Enabled then
+		shape(
+			{ " I ", "OCO", " I " },
+			{ I = "IronIngot", O = "OsmiumIngot", C = "BasicUniversalCable" },
+			"ServoMotor",
+			2
+		)
+	end
+	if turrets then
+		shape({ "LLL", "NIN" }, { L = "Leather", N = "IronNugget", I = "IronIngot" }, "BeltFeeder")
+		shape({ "III", "ONS" }, { I = "IronIngot", O = "OsmiumIngot", N = "Nails", S = "ScrapMetal" }, "Receiver")
+		shape(
+			{ " G ", "DOD", " C " },
+			{ G = "Glass", D = "GlowDust", O = "OsmiumIngot", C = "BasicUniversalCable" },
+			"TargetingModule"
+		)
+		shape({ "III" }, { I = "IronIngot" }, "SmgBarrel")
+		shape({ "III", "OOO" }, { I = "IronIngot", O = "OsmiumIngot" }, "RifleBarrel")
+		shape({ "OOO", "DID" }, { O = "OsmiumIngot", D = "Diamond", I = "IronIngot" }, "SniperBarrel")
+		shape({ "IDG", "NNN" }, { I = "IronIngot", D = "GlowDust", G = "Glass", N = "IronNugget" }, "LaserSight")
+		for _, kind in { "Smg", "Rifle", "Sniper" } do
+			local barrel = `{kind}Barrel`
+			shape({ " K ", "SRF", "OMO" }, {
+				K = barrel,
+				S = "ServoMotor",
+				R = "Receiver",
+				F = "BeltFeeder",
+				O = "OsmiumIngot",
+				M = "TargetingModule",
+			}, `Basic{kind}Turret`)
+			for tier = 2, 4 do
+				shape({ "AKA", "STS", "AMA" }, {
+					A = ALLOYS[tier - 1],
+					K = barrel,
+					S = "ServoMotor",
+					T = `{TIER_NAMES[tier - 1]}{kind}Turret`,
+					M = "TargetingModule",
+				}, `{TIER_NAMES[tier]}{kind}Turret`, 1, "T")
+			end
+		end
+	end
+	if Config.Miner.Enabled then
+		shape({ "OCO", "IEI", "DPD" }, {
+			O = "OsmiumIngot",
+			C = "BasicUniversalCable",
+			I = "IronBlock",
+			E = "ElectricFurnace",
+			D = "Diamond",
+			P = "DiamondPickaxe",
+		}, "MetalMiner")
+	end
+	if Config.AmmoPress.Enabled then
+		shape(
+			{ "ISI", "OEO", "IBI" },
+			{ I = "IronIngot", S = "ServoMotor", O = "OsmiumIngot", E = "ElectricFurnace", B = "IronBlock" },
+			"AmmoPress"
+		)
+	end
+end
+
+return list

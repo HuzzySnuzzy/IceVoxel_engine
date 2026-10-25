@@ -8,9 +8,10 @@
 
 	  Sources    by id (`strength`: Sv/h a block away or nearer, or carried): Uranium Ore, the Block
 	             of Raw Uranium and the Block of Uranium in the world; those three as items, Raw
-	             Uranium, the Uranium Ingot and Nugget carried (Config.Radiation.Sources by name: a
-	             block item's id is its block's, so one table holds both). A chest's uranium is not
-	             looked at: only blocks and what the player carries.
+	             Uranium, the Uranium Ingot and Nugget carried (each content pack entry's
+	             `radiation`, Shared/Content: the Ores pack's, and Config.Radiation.Sources by name
+	             for entries without; a block item's id is its block's, so one table holds both). A
+	             chest's uranium is not looked at: only blocks and what the player carries.
 	  Carried    `carried(inventory, extra)`: every stack in the 36 slots, the armor, the cursor and
 	             `extra` (an open personal crafting grid) at its strength times its count.
 	  Falloff    `falloff(d^2)`: Mekanism's magnitude / max(1, d^2) (d from the body's centre to the
@@ -18,15 +19,17 @@
 	             nothing there instead of stopping (continuous as a player walks away).
 	  Shielding  `transmission`: the share a ray from a source to the body gets through, each cell
 	             strictly between them (a voxel walk, Amanatides and Woo's) letting through its
-	             block's `TRANSMISSION` (Config.Radiation.Shielding: any full solid opaque block
-	             `Solid` (leaves too: they are solid and opaque), lead and raw lead blocks their own;
-	             anything else, and unknown cells, all of it). `scan(getBlock, x, y, z)` reads every cell of the sphere (OFFSETS, nearest
+	             block's `TRANSMISSION` (any full solid opaque block Config.Radiation.Shielding
+	             `Solid` (leaves too: they are solid and opaque), lead and raw lead blocks their own
+	             (their entries' `radiationShield`; the rest of Shielding by name for entries
+	             without); anything else, and unknown cells, all of it). `scan(getBlock, x, y, z)` reads every cell of the sphere (OFFSETS, nearest
 	             first) and traces the nearest MaxRays sources it finds; the rest take the mean
 	             share of those traced in their octant of directions from the body, all of it in
 	             an octant with none traced (only a player-built heap has that many within the
 	             radius; a lead wall on one side hides none in the open on the other). Its cost is bounded: #OFFSETS reads and MaxRays rays of at
 	             most 3 x (Radius + 1) cells each (`readsBound`).
-	  Hazmat     `shielding(armor)`: the share the armor worn keeps out (Config.Radiation.Hazmat:
+	  Hazmat     `shielding(armor)`: the share the armor worn keeps out (each piece's `shielding`,
+	             and Config.Radiation.Hazmat by name for entries without: the Hazmat suit's
 	             Mekanism's 0.25, 0.4, 0.2 and 0.15, summed as Mekanism's getRadiationResistance,
 	             at most all of it), of the blocks' radiation and the carried alike; `exposure`
 	             applies it (and MinRate).
@@ -51,6 +54,7 @@
 
 local Blocks = require(script.Parent.Blocks)
 local Config = require(script.Parent.Config)
+local Content = require(script.Parent.Content)
 local Effects = require(script.Parent.Effects)
 local Items = require(script.Parent.Items)
 
@@ -88,12 +92,49 @@ local NO_DOSE = 1e-6
 
 --[[ Sources ]]
 
--- Sv/h by block or item id (block items share their block's id).
-local strength: { [number]: number } = {}
-for name, value in settings.Sources :: { [string]: number } do
-	assert(type(value) == "number" and value > 0, `Config.Radiation.Sources.{name} must be a positive number`)
-	strength[Items.id[name]] = value
+--[[
+	Each content pack entry's own numbers (Shared/Content), by `field`, with the side table `legacy`
+	(Config.Radiation's `side`, by name) for the entries that carry none: id -> number, checked by
+	`valid`. A name both on its entry and in the side table is an error.
+]]
+local content = Content.default
+-- A block's id (a block item's is the same), else an item's.
+local function idOf(name: string): number
+	return Blocks.find(name) or Items.id[name]
 end
+local function merged(
+	field: string,
+	legacy: { [string]: number },
+	side: string,
+	valid: (number) -> boolean,
+	text: string
+): { [number]: number }
+	local byId: { [number]: number } = {}
+	for name, value in legacy do
+		assert(type(value) == "number" and valid(value), `Config.Radiation.{side}.{name} must be {text}`)
+		byId[idOf(name)] = value
+	end
+	for _, entry in content.entries do
+		local value = (entry :: any)[field]
+		if value ~= nil then
+			local where = content.where(if content.block(entry.name) then "block" else "item", entry.name)
+			assert(legacy[entry.name] == nil, `Radiation: {where} has its {field}, and Config.Radiation.{side} too`)
+			assert(valid(value), `Radiation: {where}'s {field} must be {text}`)
+			byId[idOf(entry.name)] = value
+		end
+	end
+	return byId
+end
+local function isPositive(value: number): boolean
+	return value > 0
+end
+local function isShare(value: number): boolean
+	return value >= 0 and value <= 1
+end
+
+-- Sv/h by block or item id (block items share their block's id): entries' `radiation`,
+-- Config.Radiation.Sources.
+local strength = merged("radiation", settings.Sources :: any, "Sources", isPositive, "a positive number")
 Radiation.STRENGTH = table.freeze(strength)
 
 -- Sv/h a source `id` gives a block away or carried (0: none).
@@ -137,12 +178,8 @@ end
 
 --[[ The Hazmat suit ]]
 
--- The share each item worn keeps out, by item id.
-local hazmat: { [number]: number } = {}
-for name, share in settings.Hazmat :: { [string]: number } do
-	assert(type(share) == "number" and share >= 0 and share <= 1, `Config.Radiation.Hazmat.{name} must be 0..1`)
-	hazmat[Items.id[name]] = share
-end
+-- The share each item worn keeps out, by item id: entries' `shielding`, Config.Radiation.Hazmat.
+local hazmat = merged("shielding", settings.Hazmat :: any, "Hazmat", isShare, "0..1")
 Radiation.SHIELDING = table.freeze(hazmat)
 
 -- The share of radiation the armor worn (`armor`, slots 1..4) keeps out: the pieces' summed, at
@@ -177,19 +214,24 @@ function Radiation.falloff(d2: number): number
 	return math.max(0, 1 / math.max(1, d2) - EDGE)
 end
 
--- Share each block lets through (absent: all of it).
+-- Share each block lets through (absent: all of it): Solid for full solid opaque blocks, then
+-- entries' `radiationShield` and the rest of Config.Radiation.Shielding by name.
 local passes: { [number]: number } = {}
 do
-	local shielding = settings.Shielding :: { [string]: number }
-	for id = 0, Blocks.count - 1 do
-		if Blocks.isSolid(id) and Blocks.isOpaque(id) then
-			passes[id] = shielding.Solid
+	local solid = (settings.Shielding :: { [string]: number }).Solid
+	local shielding: { [string]: number } = {}
+	for name, value in settings.Shielding :: { [string]: number } do
+		if name ~= "Solid" then
+			shielding[name] = value
 		end
 	end
-	for name, share in shielding do
-		if name ~= "Solid" then
-			passes[Blocks.id[name]] = share
+	for id = 0, Blocks.count - 1 do
+		if Blocks.isSolid(id) and Blocks.isOpaque(id) then
+			passes[id] = solid
 		end
+	end
+	for id, value in merged("radiationShield", shielding, "Shielding", isShare, "0..1") do
+		passes[id] = value
 	end
 end
 Radiation.TRANSMISSION = table.freeze(passes)

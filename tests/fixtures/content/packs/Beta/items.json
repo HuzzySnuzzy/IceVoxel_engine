@@ -1,0 +1,11 @@
+[
+	{
+		"name": "BetaGem",
+		"color": [90, 140, 200],
+		"material": "Glass",
+		"model": [{ "size": [4, 4, 4], "offset": [0, 0, 0] }],
+		"icon": "",
+		"age": "beta_age",
+		"knowledge": { "smelt": 0.5 }
+	}
+]

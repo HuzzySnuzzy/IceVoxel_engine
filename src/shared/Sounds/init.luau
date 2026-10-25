@@ -6,11 +6,12 @@
 	  * `Sounds.id["block.stone.break"]` -> event number (errors on unknown names, so typos fail
 	    loudly), `find(name)` (nil instead), `get(number or name)` -> Event, `events` (by number).
 	  * `block(block, action)`: the event of a block's sound type (Blocks `sound`) for "break",
-	    "place", "hit", "step" or "fall", or the block's own (SoundList.BLOCK_SOUNDS: punching fire
-	    out hisses).
+	    "place", "hit", "step" or "fall", or the block's own (its content pack entry's `sounds`, or
+	    SoundList.BLOCK_SOUNDS: punching fire out hisses).
 	  * `container(block, opened)`: a chest's lid; `equip(old, new)` / `armorEquip(item)`: armor
-	    put on (`equipment(old, new)`: an equipment slot's, the generic sound for accessories and
-	    vanity clothes); `fall(halfHearts)`: Minecraft's small or big fall.
+	    put on (its entry's `equipSound`, else SoundList.ARMOR's by name; `equipment(old, new)`: an
+	    equipment slot's, the generic sound for accessories and vanity clothes); `fall(halfHearts)`:
+	    Minecraft's small or big fall.
 	  * `lookupNames(sound)`: the names a developer's Sound may have to replace an event, most
 	    specific first (block.stone.break, then its category block.break).
 	  * `contentIds()`: every sound file the catalogue uses (fallbacks too), to preload;
@@ -27,6 +28,7 @@
 ]]
 
 local Blocks = require(script.Parent.Blocks)
+local Content = require(script.Parent.Content)
 local Items = require(script.Parent.Items)
 local SoundList = require(script.SoundList)
 
@@ -204,17 +206,64 @@ end
 
 --[[ Lookups ]]
 
--- Blocks' own action sounds (SoundList.BLOCK_SOUNDS), by block id and action.
+--[[
+	Blocks' own action sounds, by block id and action: each content pack block entry's `sounds` ({
+	[action] = event }, Shared/Content), and SoundList.BLOCK_SOUNDS by name, the side table for
+	blocks whose entries carry none yet (a block in both is an error). Armor's equip sounds: each
+	item entry's `equipSound`, else SoundList.ARMOR's name prefixes (an item with its own that a
+	prefix also matches is an error), else ARMOR_DEFAULT.
+]]
+local content = Content.default
 local ownSounds: { [number]: { [string]: number } } = {}
+local function addOwn(block: number, actions: { [string]: string }, where: string)
+	local map: { [string]: number } = {}
+	for action, event in actions do
+		assert(byAction[action] ~= nil, `Sounds: {where} has unknown action {action}`)
+		local id = rawget(ids :: any, event)
+		assert(id ~= nil, `Sounds: {where}'s {action} plays unknown event {event}`)
+		map[action] = id
+	end
+	ownSounds[block] = map
+end
 for name, actions in SoundList.BLOCK_SOUNDS do
 	local block = Blocks.find(name)
 	assert(block ~= nil, `SoundList.BLOCK_SOUNDS names unknown block {name}`)
-	local map: { [string]: number } = {}
-	for action, event in actions do
-		assert(byAction[action] ~= nil, `SoundList.BLOCK_SOUNDS has unknown action {action} for {name}`)
-		map[action] = Sounds.id[event]
+	addOwn(block, actions, `SoundList.BLOCK_SOUNDS.{name}`)
+end
+for _, spec in content.blocks do
+	if spec.sounds then
+		local where = content.where("block", spec.name)
+		assert(
+			SoundList.BLOCK_SOUNDS[spec.name] == nil,
+			`Sounds: {where} has its sounds, and SoundList.BLOCK_SOUNDS too`
+		)
+		addOwn(Blocks.id[spec.name], spec.sounds, where)
 	end
-	ownSounds[block] = map
+end
+
+-- An armor prefix of SoundList.ARMOR that `name` starts with, or nil.
+local function armorPrefix(name: string): { prefix: string, sound: string }?
+	for _, entry in SoundList.ARMOR do
+		if string.sub(name, 1, #entry.prefix) == entry.prefix then
+			return entry
+		end
+	end
+	return nil
+end
+-- Items' own equip sounds, by item id.
+local equipSounds: { [number]: number } = {}
+for _, spec in content.items do
+	local event = spec.equipSound
+	if event then
+		local where = content.where("item", spec.name)
+		local prefix = armorPrefix(spec.name)
+		if prefix then
+			error(`Sounds: {where} has its equip sound, and SoundList.ARMOR's {prefix.prefix} names it too`)
+		end
+		local id = rawget(ids :: any, event)
+		assert(id ~= nil, `Sounds: {where}'s equipSound is unknown event {event}`)
+		equipSounds[Items.id[spec.name]] = id
+	end
 end
 
 --[[
@@ -253,12 +302,12 @@ function Sounds.armorEquip(item: number): number?
 	if def == nil or def.armor == nil then
 		return nil
 	end
-	for _, entry in SoundList.ARMOR do
-		if string.sub(def.name, 1, #entry.prefix) == entry.prefix then
-			return Sounds.find(entry.sound)
-		end
+	local own = equipSounds[item]
+	if own then
+		return own
 	end
-	return Sounds.find(SoundList.ARMOR_DEFAULT)
+	local prefix = armorPrefix(def.name)
+	return Sounds.find(if prefix then prefix.sound else SoundList.ARMOR_DEFAULT)
 end
 
 --[[

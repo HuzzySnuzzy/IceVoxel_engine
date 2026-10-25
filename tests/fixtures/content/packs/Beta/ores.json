@@ -1,0 +1,3 @@
+[
+	{ "name": "beta", "block": "BetaOre", "veins": 2, "size": 6, "minY": 5, "maxY": 100 }
+]

@@ -2,7 +2,7 @@
 --[[
 	Block registry.
 
-	Turns `BlockList` into:
+	Turns the content packs' blocks (Shared/Content, as `BlockList`) into:
 	  * `Blocks.id.Name -> id` (errors on unknown names, so typos fail loudly),
 	  * `Blocks.get(id) -> BlockDef`,
 	  * "appearances": groups of blocks that look identical when drawn (e.g. all water levels). The

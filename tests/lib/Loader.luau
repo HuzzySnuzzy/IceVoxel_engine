@@ -2,22 +2,30 @@
 	Loads IceVoxel's modules outside of Roblox (under Lune).
 
 	Builds a fake instance tree from source folders, mirroring Rojo's rules (`init.luau` turns a
-	folder into a module, `X.luau` is a module named X), then runs every module with its own
+	folder into a module, `X.luau` is a module named X, and so is `X.json`: Rojo 7's JSON module, a
+	ModuleScript returning the decoded table; `X.model.json`, `X.meta.json` and `X.project.json`
+	are Rojo's own files, no modules, and are skipped), then runs every module with its own
 	`script` and a `require` that accepts those fake instances (passed in as arguments, so Luau's
 	fast builtin calls stay on, as in Roblox: see `withArguments`). Shared modules and the
 	server's world logic only use pure Luau (buffer, bit32, math.noise...), so they behave exactly
 	as in Roblox. `game:GetService(name)` returns the fake service folders mounted with `mount`.
+	Specs may add to a mounted tree before requiring from it: a folder from elsewhere (`graft`: a
+	fixture content pack into Content/Packs), or folders and modules made in memory (`folder`,
+	`module`: a module whose require gives a value).
 ]]
 
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local process = require("@lune/process")
+local serde = require("@lune/serde")
 
 export type Node = {
 	Name: string,
 	Parent: Node?,
 	ClassName: string,
 	__path: string?,
+	-- "json" for a JSON module (requiring it gives the decoded file), nil for a Luau one.
+	__kind: string?,
 	__children: { [string]: Node },
 }
 
@@ -63,12 +71,13 @@ local nodeMeta = {
 	end,
 }
 
-local function newNode(name: string, parent: Node?, path: string?): Node
+local function newNode(name: string, parent: Node?, path: string?, kind: string?): Node
 	local node = setmetatable({
 		Name = name,
 		Parent = parent,
 		ClassName = if path then "ModuleScript" else "Folder",
 		__path = path,
+		__kind = kind,
 		__children = {},
 		__attributes = {},
 	}, nodeMeta) :: any
@@ -90,6 +99,12 @@ local function scan(dir: string, node: Node)
 			-- `.server.luau` / `.client.luau` are scripts, not modules; skip them.
 			if not string.find(name, "%.") then
 				newNode(name, node, full)
+			end
+		elseif string.sub(entry, -5) == ".json" then
+			-- (A JSON module; `.model.json`, `.meta.json` and `.project.json` keep a dot.)
+			local name = string.sub(entry, 1, -6)
+			if not string.find(name, "%.") then
+				newNode(name, node, full, "json")
 			end
 		end
 	end
@@ -120,6 +135,13 @@ end
 export type Environment = {
 	-- Mounts `dir` as `serviceName.folderName`, e.g. ("src/shared", "ReplicatedStorage", "IceVoxel").
 	mount: (dir: string, serviceName: string, folderName: string) -> Node,
+	-- Mounts `dir` as a folder named `name` inside `parent` (a mounted node), as if it were in the
+	-- source tree there: specs add a fixture content pack to Content/Packs this way.
+	graft: (dir: string, parent: Node, name: string) -> Node,
+	-- An empty folder named `name` in `parent`, and a module there whose require gives `value`:
+	-- specs build fixture packs in memory with them.
+	folder: (parent: Node, name: string) -> Node,
+	module: (parent: Node, name: string, value: any) -> Node,
 	require: (Node) -> any,
 }
 
@@ -146,6 +168,14 @@ function Loader.new(): Environment
 		local path = rawget(node :: any, "__path")
 		assert(path, `{node.Name} is not a module`)
 		assert(not loading[node], `Cyclic require of {path}`)
+		if rawget(node :: any, "__kind") == "value" then
+			return rawget(node :: any, "__value")
+		elseif rawget(node :: any, "__kind") == "json" then
+			-- (JSON null is nil, as in Rojo's JSON modules.)
+			local decoded = serde.decode("json", fs.readFile(path))
+			cache[node] = decoded
+			return decoded
+		end
 		loading[node] = true
 
 		local chunk = luau.load(withArguments(fs.readFile(path)), {
@@ -164,6 +194,19 @@ function Loader.new(): Environment
 			local root = newNode(folderName, game:GetService(serviceName), nil)
 			scan(dir, root)
 			return root
+		end,
+		graft = function(dir: string, parent: Node, name: string): Node
+			local folder = newNode(name, parent, nil)
+			scan(dir, folder)
+			return folder
+		end,
+		folder = function(parent: Node, name: string): Node
+			return newNode(name, parent, nil)
+		end,
+		module = function(parent: Node, name: string, value: any): Node
+			local node = newNode(name, parent, `<memory>/{name}`, "value");
+			(node :: any).__value = value
+			return node
 		end,
 		require = requireNode,
 	}

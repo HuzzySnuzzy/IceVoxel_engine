@@ -40,6 +40,8 @@
 	Perks (Progression/Skills: Forager, Prospector, Scholar...) multiply what a SOURCE gives.
 ]]
 
+local Content = require(script.Parent.Parent.Content)
+
 local Knowledge = {}
 
 -- Levels never go past this (the points past it are kept off: `MAX_POINTS`).
@@ -61,39 +63,49 @@ Knowledge.DISCOVERY = table.freeze({
 }) :: { [string]: number }
 Knowledge.DEFAULT_DISCOVERY = 5
 
+--[[
+	ORES and SMELTED: the content packs' entries' `knowledge` ({ mine = points } on an ore block,
+	{ smelt = points } on a smelting result; Shared/Content), and the side tables below for those
+	whose entries carry none yet. A name in both is an error.
+]]
+local content = Content.default
+
+-- `legacy`'s numbers and every entry's `knowledge[field]`, frozen.
+local function merged(legacy: { [string]: number }, field: string, side: string): { [string]: number }
+	local points = table.clone(legacy)
+	for _, entry in content.entries do
+		local value = entry.knowledge and (entry.knowledge :: any)[field]
+		if value then
+			local where = content.where(if content.block(entry.name) then "block" else "item", entry.name)
+			assert(legacy[entry.name] == nil, `Knowledge: {where} has its {field} points, and {side} too`)
+			points[entry.name] = value
+		end
+	end
+	return table.freeze(points)
+end
+
 -- Points for mining an ore again (Minecraft's ore experience: coal 0-2, diamond and emerald 3-7;
--- iron and gold give theirs in the furnace there, a little here too).
-Knowledge.ORES = table.freeze({
+-- iron and gold give theirs in the furnace there, a little here too). (The new ores' are on their
+-- entries: the metals as iron and osmium, the powders as coal, uranium as gold.)
+Knowledge.ORES = merged({
 	CoalOre = 1,
 	IronOre = 2,
 	OsmiumOre = 2,
 	GoldOre = 3,
-	-- (The new ores: the metals as iron and osmium, the powders as coal, uranium as gold.)
-	CopperOre = 2,
-	LeadOre = 2,
-	ZincOre = 2,
-	SulfurOre = 1,
-	SaltpetreOre = 1,
-	UraniumOre = 3,
 	DiamondOre = 5,
 	EmeraldOre = 5,
-}) :: { [string]: number }
+}, "mine", "Knowledge.ORES")
 
 -- Points for chopping a log (blocks whose name ends in "Log").
 Knowledge.LOG = 0.25
 
 -- Points per item smelted (Minecraft's furnace recipe experience), by result; others SMELT_DEFAULT.
-Knowledge.SMELTED = table.freeze({
+-- (The new ores' are on their entries: Minecraft's copper ingot gives 0.7, lead and zinc as it,
+-- uranium as gold, the powders 0.1.)
+Knowledge.SMELTED = merged({
 	IronIngot = 0.7,
 	GoldIngot = 1,
 	OsmiumIngot = 0.7,
-	-- (Minecraft's copper ingot gives 0.7; lead and zinc as it, uranium as gold.)
-	CopperIngot = 0.7,
-	LeadIngot = 0.7,
-	ZincIngot = 0.7,
-	UraniumIngot = 1,
-	Sulfur = 0.1,
-	Saltpetre = 0.1,
 	Diamond = 1,
 	Emerald = 1,
 	Coal = 0.1,
@@ -106,7 +118,7 @@ Knowledge.SMELTED = table.freeze({
 	CookedMutton = 0.35,
 	CookedPorkchop = 0.35,
 	CookedChicken = 0.35,
-}) :: { [string]: number }
+}, "smelt", "Knowledge.SMELTED")
 Knowledge.SMELT_DEFAULT = 0.1
 
 -- Points per craft (a result taken; a shift click's every round).

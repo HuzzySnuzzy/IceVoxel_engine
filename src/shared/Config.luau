@@ -2203,36 +2203,30 @@ local Config = {
 		-- it is, for when it is back.
 		Enabled = true,
 		-- Sv/h a source gives a block away or nearer, or carried, by block or item name (a block's
-		-- item radiates as the block, by the stack's count). An ore's uranium is spread through
-		-- rock, and Raw Uranium is mostly rock too; an ingot is the refined metal (forty lumps'
-		-- worth), a nugget a ninth of it; the storage blocks are nine of their item. So mining a
-		-- vein bare skinned for a few minutes makes you mildly sick (I), a stack of Raw Uranium
-		-- carried for several minutes sick (II), a Block of Uranium beside you is dangerous (II
-		-- within a minute or two, III if you stay), and a vein a few blocks into the rock is safe
-		-- (tests/spec/Radiation plays these out).
-		Sources = {
-			UraniumOre = 1,
-			RawUraniumBlock = 2.7,
-			UraniumBlock = 108,
-			RawUranium = 0.3,
-			UraniumIngot = 12,
-			UraniumNugget = 1.33,
-		},
+		-- item radiates as the block, by the stack's count): the side table, for sources whose
+		-- content pack entries carry no `radiation` yet (Shared/Content; uranium's ore, blocks,
+		-- lump, ingot and nugget carry theirs in the Ores pack, which says why they are what they
+		-- are). A name both here and on its entry is an error.
+		Sources = {},
 		-- Blocks are looked for within this many blocks of the body (a sphere). Exposure falls off
 		-- with the square of the distance from a block away in (Mekanism's magnitude /
 		-- max(1, d^2)), less its value at this radius, so it fades to nothing there.
 		Radius = 8,
 		-- The share of radiation each block between a source and the body lets through: any full
-		-- solid block (rock, earth, wood, metal) `Solid`, these by name (lead stops nearly all).
-		-- Glass, plants and fluids let it all through (leaves are solid: Solid).
-		Shielding = { Solid = 0.5, LeadBlock = 0.02, RawLeadBlock = 0.1 },
+		-- solid block (rock, earth, wood, metal) `Solid`, these by name (the side table, for blocks
+		-- whose entries carry no `radiationShield` yet: lead's blocks carry theirs, 0.02 and 0.1:
+		-- lead stops nearly all). Glass, plants and fluids let it all through (leaves are solid:
+		-- Solid).
+		Shielding = { Solid = 0.5 },
 		-- The most sources traced for shielding in one look, nearest first (the rest take the
 		-- mean of those traced in their octant of directions, unshielded in one with none): a
 		-- look reads at most the sphere and this many rays.
 		MaxRays = 32,
-		-- The share of radiation each Hazmat piece worn keeps out (Mekanism's mask, gown, pants
-		-- and boots; the whole suit keeps out all of it), carried uranium's too.
-		Hazmat = { HazmatHelmet = 0.25, HazmatChestplate = 0.4, HazmatLeggings = 0.2, HazmatBoots = 0.15 },
+		-- The share of radiation each piece of armor worn keeps out, by item name: the side table,
+		-- for armor whose entries carry no `shielding` yet (the Hazmat suit's pieces carry
+		-- Mekanism's mask, gown, pants and boots: the whole suit keeps out all of it), carried
+		-- uranium's too.
+		Hazmat = {},
 		-- Seconds for a dose to halve (Mekanism's 0.9995 a second is 23 minutes: a game's pace
 		-- is quicker).
 		HalfLife = 600,
@@ -2622,6 +2616,9 @@ local Config = {
 		Enabled = true,
 		-- Its energy store (J; the network may fill it in a tick), before Energy Upgrades.
 		Capacity = 200000,
+		-- Per ore, by block name: the side table, for ores whose content pack entries carry no
+		-- `miner` yet (Machines/MinerRules; the Ores pack's carry theirs: the metals as iron, the
+		-- powders between iron and gold, uranium as rare as emerald).
 		Ores = {
 			CoalOre = { ticks = 600, joules = 800, floor = 400000 },
 			IronOre = { ticks = 400, joules = 200 },
@@ -2629,14 +2626,6 @@ local Config = {
 			GoldOre = { ticks = 800, joules = 300 },
 			EmeraldOre = { ticks = 3600, joules = 800 },
 			DiamondOre = { ticks = 4800, joules = 800 },
-			-- (The new ores: the metals as iron, the powders between iron and gold, uranium as
-			-- rare as emerald; Sulfur and Saltpetre make gunpowder, so ammo can be automated.)
-			CopperOre = { ticks = 400, joules = 200 },
-			LeadOre = { ticks = 400, joules = 200 },
-			ZincOre = { ticks = 400, joules = 200 },
-			SulfurOre = { ticks = 600, joules = 200 },
-			SaltpetreOre = { ticks = 600, joules = 200 },
-			UraniumOre = { ticks = 3600, joules = 800 },
 		},
 	},
 

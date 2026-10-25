@@ -1,0 +1,27 @@
+[
+	{
+		"name": "BetaStone",
+		"color": [120, 120, 130],
+		"material": "Slate",
+		"hardness": 1.5,
+		"tool": "pickaxe",
+		"toolLevel": 0,
+		"texture": { "All": "beta stone" },
+		"lore": "The JSON pack's stone.",
+		"tags": ["fixture_stones"]
+	},
+	{
+		"name": "BetaOre",
+		"color": [90, 140, 200],
+		"material": "Granite",
+		"hardness": 3,
+		"tool": "pickaxe",
+		"toolLevel": 1,
+		"drops": "BetaGem",
+		"texture": { "All": "beta stone", "Top": "beta ore top" },
+		"knowledge": { "mine": 3 },
+		"miner": { "ticks": 500, "joules": 250 },
+		"radiation": 0.5,
+		"loot": "beta_chest"
+	}
+]

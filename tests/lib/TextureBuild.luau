@@ -313,7 +313,8 @@ end
 	filled textures still waiting for an Average (when any is).
 ]]
 function TextureBuild.list(result: Result, Blocks: any): { string }
-	local lines = { `{#result.blank} blank textures (fill them in src/shared/TexturePack.luau):` }
+	local lines =
+		{ `{#result.blank} blank textures (fill them in their packs' textures, src/shared/Content/Packs/*/textures):` }
 	local width = 0
 	for _, name in result.blank do
 		width = math.max(width, #name)

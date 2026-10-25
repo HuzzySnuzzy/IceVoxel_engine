@@ -2162,6 +2162,9 @@ or random ticks; Peaceful spawns no monsters in any world.
 ```
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
+  Content/                  content packs: the loader (discovery, order, ids, overrides, every
+                            check), Schema (each kind's fields and types), Define (the helpers
+                            packs share: metal(), models, recipes), Packs/ (Core, Base, Ores)
   Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
                             drops, menus, how long zombies take to break them), plants (soil
                             sets, tall halves, foliage tints), each block's textures per face
@@ -2931,7 +2934,7 @@ for performance:
 | `Turrets.RecordRange` / `RecordTicks` / `RecordAngle` / `RecordRefresh` | 224 / 2 / 3 / 20 | Turrets messages: to players within RecordRange blocks sideways (as far as edit lists go: past every chunk a client keeps records for, 207 blocks at the highest Full Detail; where a player was last seen while respawning), at most every RecordTicks a turret, when its target, flags or rounds change or its aim moved RecordAngle degrees, and every RecordRefresh ticks while it tracks. |
 | `Turrets.Client` | DrawDistance 96, MaxDrawn 48, MaxParts 720, BeamLength 24, ServoLoops 4 | The client: turrets drawn within DrawDistance of the camera, at most MaxDrawn from MaxParts pooled parts; a Laser Sight's beam at most BeamLength; the servo loop at the ServoLoops nearest turning turrets. |
 | `Miner.Enabled` / `Capacity` | true / 200000 | The Metal Miner: false makes it inert with no recipe; its energy store (J, before Energy Upgrades). |
-| `Miner.Ores` | Coal 600 ticks at 800 J/t (floor 400 kJ), Iron and Osmium 400 at 200, Gold 800 at 300, Emerald 3600 at 800, Diamond 4800 at 800 | Per ore block: ticks an item takes and J a tick (Speed and Energy Upgrades change both, Mekanism's maths), and the least J an item costs whatever the cards (`floor`: coal never makes more energy than it took). |
+| `Miner.Ores` | Coal 600 ticks at 800 J/t (floor 400 kJ), Iron and Osmium 400 at 200, Gold 800 at 300, Emerald 3600 at 800, Diamond 4800 at 800 | Per ore block: ticks an item takes and J a tick (Speed and Energy Upgrades change both, Mekanism's maths), and the least J an item costs whatever the cards (`floor`: coal never makes more energy than it took). For ores whose pack entry has no `miner` of its own: the Ores pack's carry theirs (the metals 400 at 200, sulfur and saltpetre 600 at 200, uranium 3600 at 800). |
 | `AmmoPress.Enabled` / `Capacity` / `Ticks` / `Joules` | true / 20000 / 200 / 50 | The Ammo Press: false makes it inert with no recipe; its store; an operation's ticks and J a tick (before upgrade cards). |
 | `AmmoPress.Calibres` | 16 9mm, 10 5.56, 5 .308 | What a Brass Ingot, a Lead Ingot and a Gunpowder make, by the Calibre button's choice (in order). |
 | `Camera.Enabled` | true | The DayZ camera (client `Player/CameraRig`): over the shoulder or from the eyes, freelook, focus, the body facing the aim and drawn in first person. false: Roblox's camera exactly as before (its zoom; shift lock, which the server gives back through `Player.DevEnableMouseLock`; `Weapons.ShoulderOffset` while raised; the body turning where it walks at `Movement.TurnSpeed`; Minecraft's hand; the crosshair for a gamepad only). |
@@ -2960,9 +2963,9 @@ for performance:
 | `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the Distortion Effects setting squared (Minecraft's screenEffectScale). |
 | `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
 | `Radiation.Enabled` | true | Uranium is radioactive: exposure, the dose, Radiation Sickness and the Geiger counter's clicks (false: none of it; a saved dose is kept). |
-| `Radiation.Sources` | Ore 1, Raw Uranium 0.3, Ingot 12, Nugget 1.33, Block of Raw Uranium 2.7, Block of Uranium 108 | Sv/h a block or an item gives a block away or nearer (carried: times the count; a block's item as the block). |
-| `Radiation.Radius` / `Shielding` / `MaxRays` | 8 / Solid 0.5, LeadBlock 0.02, RawLeadBlock 0.1 / 32 | Blocks are looked for within the radius (inverse square, fading to 0 there); the share each block between lets through (any full solid block `Solid`, these by name); the nearest sources traced for shielding in one look (the rest take their octant's mean, unshielded where none was traced). |
-| `Radiation.Hazmat` | 0.25 / 0.4 / 0.2 / 0.15 | The share of radiation each Hazmat piece worn keeps out (Mekanism's: the whole suit all of it). |
+| `Radiation.Sources` | (none) | Sv/h a block or an item gives a block away or nearer (carried: times the count; a block's item as the block), by name, for content whose pack entry has no `radiation` of its own. Uranium's are on its Ores pack entries: Ore 1, Raw Uranium 0.3, Ingot 12, Nugget 1.33, Block of Raw Uranium 2.7, Block of Uranium 108. |
+| `Radiation.Radius` / `Shielding` / `MaxRays` | 8 / Solid 0.5 / 32 | Blocks are looked for within the radius (inverse square, fading to 0 there); the share each block between lets through (any full solid block `Solid`; others by name, or their entry's `radiationShield`: the Block of Lead 0.02, the Block of Raw Lead 0.1); the nearest sources traced for shielding in one look (the rest take their octant's mean, unshielded where none was traced). |
+| `Radiation.Hazmat` | (none) | The share of radiation a piece of armor worn keeps out, by name, for armor whose entry has no `shielding`. The Hazmat pieces carry theirs: 0.25 / 0.4 / 0.2 / 0.15 (Mekanism's: the whole suit all of it). |
 | `Radiation.HalfLife` / `MinRate` / `Interval` | 600 / 0.0005 / 1 | Seconds for a dose to halve; the rate (Sv/h) below which there is none; seconds between two looks at a player. |
 | `Radiation.Sickness` | Bands 0.1 / 1 / 10, Ticks 600, HungerFrom 2, NauseaFrom 3 | The doses (Sv) of Radiation Sickness I, II and III; ticks it lasts after the dose falls below its band; the levels Hunger and Nausea come with. |
 | `Radiation.Clicks` | PerSvh 2.5, Max 16 | The Geiger counter: clicks a second at 1 Sv/h (with the rate's square root), and the most a second. |
@@ -3328,8 +3331,22 @@ screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"voi
 
 ## Extending
 
-**A block.** Append an entry to `src/shared/Blocks/BlockList.luau` (at the end: ids are list
-positions and saved edits depend on them):
+**Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages and
+lore lines come from content packs, folders under `src/shared/Content/Packs/` that the game finds
+and checks as it loads, like Minecraft's data packs (docs/ARCHITECTURE.md, "Content packs"). A
+pack is a `pack` manifest (`{ order = 300, description = "..." }`) and any of `blocks`, `items`,
+`recipes`, `tags`, `textures`, `loot`, `ores`, `ages` and `lore`, each a Luau module (its data, or
+a function of `define`, the helpers in `Content/Define`) or a `.json` file. An entry carries what
+other registries used to keep in tables of their own: `lore`, `texture`, `icon`, `age`, `skill`,
+`knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`... (`Content/Schema` lists
+them all, and a misspelt field is an error naming the pack and the entry). Ids are given at load
+in pack order, so content may be added anywhere; `override = true` patches another pack's entry.
+What BlockList, ItemList and Recipes held is the Base pack (`Content/Packs/Base/blocks.luau`,
+`items.luau`, `recipes.luau`...), where the examples below still apply; `Content/Packs/Ores` is a
+whole feature (the new ores, the Hazmat suit) in a pack of its own, the worked example.
+
+**A block.** Add an entry to a pack's blocks: the Base pack's `src/shared/Content/Packs/Base/
+blocks.luau`, or a pack of your own (above; ids are given at load, so it may go anywhere):
 
 ```lua
 table.insert(list, { name = "Marble", color = { 235, 235, 230 }, material = "Marble" })

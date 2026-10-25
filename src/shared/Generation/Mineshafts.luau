@@ -133,6 +133,7 @@
 
 local Config = require(script.Parent.Parent.Config)
 local Blocks = require(script.Parent.Parent.Blocks)
+local Content = require(script.Parent.Parent.Content)
 local Biomes = require(script.Parent.Parent.Biomes)
 local ChunkLayout = require(script.Parent.Parent.World.ChunkLayout)
 local Hash = require(script.Parent.Parent.Util.Hash)
@@ -421,56 +422,10 @@ Mineshafts.reach = reach
 
 --[[ Loot ]]
 
---[[
-	Minecraft's chests/abandoned_mineshaft on this game's items: { item (false: nothing), weight,
-	fewest, most } per entry. Pool 1: the golden apples, name tag and enchanted book are left out
-	(nothing). Pool 2: redstone -> raw iron, lapis -> raw gold, bread -> cooked porkchop, glow
-	berries -> glow dust, the three seeds -> mint leaves, ginger root and straw. Pool 3: the
-	powered, detector and activator rails -> nothing, and Supplementaries' rope. Pool 4 is
-	Terraria's underground chest find (one roll, after the others so they roll as before): an
-	accessory in about 3 chests of 10 (Hermes Boots, Cloud in a Bottle, Band of Regeneration,
-	Shiny Red Balloon, Lucky Horseshoe, Flipper, Cobalt Shield), a Wand of Sparking or Water Bolt,
-	or Lesser Mana Potions; nothing in more than half.
-]]
-local LOOT: { { rolls: { number }, entries: { { any } } } } = {
-	{ rolls = { 1, 1 }, entries = { { "IronPickaxe", 5, 1, 1 }, { false, 66, 0, 0 } } },
-	{
-		rolls = { 2, 4 },
-		entries = {
-			{ "IronIngot", 10, 1, 5 },
-			{ "GoldIngot", 5, 1, 3 },
-			{ "RawIron", 5, 2, 5 },
-			{ "RawGold", 5, 1, 3 },
-			{ "Diamond", 3, 1, 2 },
-			{ "Coal", 10, 3, 8 },
-			{ "CookedPorkchop", 15, 1, 3 },
-			{ "GlowDust", 15, 2, 4 },
-			{ "MintLeaves", 10, 2, 4 },
-			{ "GingerRoot", 10, 2, 4 },
-			{ "Straw", 10, 2, 4 },
-		},
-	},
-	{
-		rolls = { 3, 3 },
-		entries = { { "Rail", 20, 4, 8 }, { "Torch", 15, 1, 16 }, { "Rope", 10, 4, 8 }, { false, 15, 0, 0 } },
-	},
-	{
-		rolls = { 1, 1 },
-		entries = {
-			{ false, 60, 0, 0 },
-			{ "HermesBoots", 6, 1, 1 },
-			{ "CloudInABottle", 7, 1, 1 },
-			{ "BandOfRegeneration", 6, 1, 1 },
-			{ "ShinyRedBalloon", 3, 1, 1 },
-			{ "LuckyHorseshoe", 3, 1, 1 },
-			{ "Flipper", 4, 1, 1 },
-			{ "CobaltShield", 2, 1, 1 },
-			{ "WandOfSparking", 6, 1, 1 },
-			{ "WaterBolt", 2, 1, 1 },
-			{ "LesserManaPotion", 6, 1, 2 },
-		},
-	},
-}
+-- The chests' loot table: the packs' `mineshaft` (Minecraft's chests/abandoned_mineshaft on this
+-- game's items: the Base pack's loot), { item (false: nothing), weight, fewest, most } per entry.
+local LOOT: { { rolls: { number }, entries: { { any } } } } =
+	assert(Content.default.loot.mineshaft, "Mineshafts: no pack has the loot table mineshaft")
 Mineshafts.LOOT = LOOT
 
 -- The items of a chest at (x, y, z) (`salt`: the seed's loot salt): a fresh table.

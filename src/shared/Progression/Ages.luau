@@ -46,13 +46,15 @@
 	                  tanks, the Ultimate turrets, uranium's nuggets and blocks and the Nuke
 	                  (with the Fission skill too).
 
-	An Age's `recipes` are the results (item names) it opens: crafting and smelting results of a
-	later Age are locked for a player who hasn't reached it (Shared/Progression.allows; how:
-	Inventory/Menu). `milestones` are discoveries (Progression/Knowledge categories): one key
-	("craft" "Furnace": crafted a Furnace at least once), or `count` of a category ("biome" 6).
-	`level` is the knowledge level it needs. Reaching an Age is automatic once all are met (the
-	server checks after every change), Ages one after another; it gives `reward` points (a
-	discovery: Forager's perk counts).
+	The Ages themselves are the content packs' `ages` (Shared/Content: Core's), in order. An Age's
+	`recipes` are the results (item names) it opens: every block and item entry naming it (`age =
+	"iron"`), and the side lists below (by Age id) for the entries that name none yet; a name in
+	both is an error. Crafting and smelting results of a later Age are locked for a player who
+	hasn't reached it (Shared/Progression.allows; how: Inventory/Menu). `milestones` are
+	discoveries (Progression/Knowledge categories): one key ("craft" "Furnace": crafted a Furnace at
+	least once), or `count` of a category ("biome" 6). `level` is the knowledge level it needs.
+	Reaching an Age is automatic once all are met (the server checks after every change), Ages one
+	after another; it gives `reward` points (a discovery: Forager's perk counts).
 
 	Ids (`id`) are what saves keep, so an Age may be renamed or a new one inserted without
 	breaking them; the list's order is the order they come in.
@@ -83,8 +85,11 @@ export type Age = {
 	color: { number },
 }
 
+local Content = require(script.Parent.Parent.Content)
 local PotionList = require(script.Parent.Parent.Effects.PotionList)
 local Config = require(script.Parent.Parent.Config)
+
+-- (The side lists: what each Age opens, by name, for the entries that name no `age` yet.)
 
 local TOOLS = { "Pickaxe", "Axe", "Shovel", "Hoe", "Sword" }
 local ARMOR = { "Helmet", "Chestplate", "Leggings", "Boots" }
@@ -142,23 +147,8 @@ for _, name in
 		"WoodStove",
 		"InsulatedGlass",
 		"InsulatedDoor",
-		-- (The new ores' lead, zinc and brass, and the Hazmat suit's lead; copper, sulfur and
-		-- saltpetre are the Stone Age's.)
-		"LeadIngot",
-		"LeadNugget",
-		"LeadBlock",
-		"RawLeadBlock",
-		"ZincIngot",
-		"ZincNugget",
-		"ZincBlock",
-		"RawZincBlock",
-		"BrassIngot",
-		"BrassNugget",
-		"BrassBlock",
-		"HazmatHelmet",
-		"HazmatChestplate",
-		"HazmatLeggings",
-		"HazmatBoots",
+		-- (The new ores' lead, zinc and brass and the Hazmat suit are too: their entries say so,
+		-- in the Ores pack.)
 	}
 do
 	table.insert(iron, name)
@@ -190,9 +180,8 @@ for _, name in
 		"HeatGenerator",
 		"Gunpowder",
 		"Tnt",
-		-- (Uranium smelting: a smelting result is never of an Age after the transporters', which
-		-- feed furnaces with no window and so no gate.)
-		"UraniumIngot",
+		-- (And uranium smelting, on its ingot's entry: a smelting result is never of an Age after
+		-- the transporters', which feed furnaces with no window and so no gate.)
 		-- (Concrete, and what smelting and vines make of it: the results are gated, not the inputs.)
 		"Concrete",
 		"CrackedConcrete",
@@ -236,11 +225,8 @@ local atomic: { string } = {
 	"UltimateMechanicalPipe",
 	"UltimateFluidTank",
 	"Nuke",
-	-- (Uranium's nugget and blocks; the ore and Raw Uranium are mined in any Age, and the ingot
-	-- smelted from the Industrial Age.)
-	"UraniumNugget",
-	"UraniumBlock",
-	"RawUraniumBlock",
+	-- (And uranium's nugget and blocks, on their entries; the ore and Raw Uranium are mined in any
+	-- Age, and the ingot smelted from the Industrial Age.)
 }
 
 --[[
@@ -275,70 +261,39 @@ do
 	end
 end
 
-local list: { Age } = {
-	{
-		index = 1,
-		id = "stone",
-		name = "Stone Age",
-		level = 0,
-		milestones = {},
-		reward = 0,
-		recipes = {},
-		color = { 150, 150, 150 },
-	},
-	{
-		index = 2,
-		id = "iron",
-		name = "Iron Age",
-		level = 5,
-		milestones = {
-			{ category = "craft", key = "Furnace", text = "Craft a Furnace" },
-			{ category = "smelt", key = "IronIngot", text = "Smelt an Iron Ingot" },
-		},
-		reward = 50,
-		recipes = iron,
-		color = { 216, 216, 216 },
-	},
-	{
-		index = 3,
-		id = "industrial",
-		name = "Industrial Age",
-		level = 15,
-		milestones = {
-			{ category = "smelt", key = "OsmiumIngot", text = "Smelt an Osmium Ingot" },
-			{ category = "craft", key = "Bucket", text = "Craft a Bucket" },
-		},
-		reward = 100,
-		recipes = industrial,
-		color = { 196, 140, 80 },
-	},
-	{
-		index = 4,
-		id = "electric",
-		name = "Electric Age",
-		level = 25,
-		milestones = {
-			{ category = "craft", key = "HeatGenerator", text = "Craft a Heat Generator" },
-			-- (No biome count: biomes are too large for finding six to be fun.)
-		},
-		reward = 150,
-		recipes = electric,
-		color = { 255, 214, 64 },
-	},
-	{
-		index = 5,
-		id = "atomic",
-		name = "Atomic Age",
-		level = 40,
-		milestones = {
-			{ category = "craft", key = "OilRefinery", text = "Craft an Oil Refinery" },
-			{ category = "craft", key = "BasicBattery", text = "Craft a Basic Battery" },
-		},
-		reward = 200,
-		recipes = atomic,
-		color = { 110, 255, 120 },
-	},
+-- The side lists by Age id (the Stone Age opens everything no later Age names).
+local LEGACY: { [string]: { string } } = {
+	iron = iron,
+	industrial = industrial,
+	electric = electric,
+	atomic = atomic,
 }
+
+local content = Content.default
+
+-- The Ages: the packs' records, each with the results it opens (the side list's, then every entry
+-- naming it, in id order).
+local list: { Age } = {}
+for index, record in content.ages do
+	local recipes = table.clone(LEGACY[record.id] or {})
+	table.insert(list, {
+		index = index,
+		id = record.id,
+		name = record.name,
+		level = record.level,
+		milestones = record.milestones,
+		reward = record.reward,
+		recipes = recipes,
+		color = record.color,
+	})
+end
+for id in LEGACY do
+	local found = false
+	for _, age in list do
+		found = found or age.id == id
+	end
+	assert(found, `Ages: the side lists name an Age {id} no pack has`)
+end
 
 local Ages = {}
 
@@ -351,7 +306,6 @@ local ageOfName: { [string]: number } = {}
 -- Every milestone of every Age, in order (the protocol's bits).
 local milestones: { Milestone } = {}
 for index, age in list do
-	assert(age.index == index, `Ages: {age.id} is listed at {index}`)
 	assert(byId[age.id] == nil, `Ages: duplicate id {age.id}`)
 	byId[age.id] = age
 	for _, name in age.recipes do
@@ -361,6 +315,20 @@ for index, age in list do
 	for _, milestone in age.milestones do
 		assert((milestone.key == nil) ~= (milestone.count == nil), `Ages: {age.id} milestone needs a key or a count`)
 		table.insert(milestones, milestone)
+	end
+end
+-- The entries' own Ages (Content checked every id).
+for _, entry in content.entries do
+	local id = entry.age
+	if id then
+		local where = content.where(if content.block(entry.name) then "block" else "item", entry.name)
+		local age = byId[id] :: Age
+		assert(
+			ageOfName[entry.name] == nil,
+			`Ages: {where} names its Age, and the side lists name one for it too ({list[ageOfName[entry.name] or 1].id})`
+		)
+		table.insert(age.recipes, entry.name)
+		ageOfName[entry.name] = age.index
 	end
 end
 Ages.MILESTONES = milestones

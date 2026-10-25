@@ -4,8 +4,9 @@
 
 	  * Every placeable block (BlockList `placeable`) is an item whose id is the block's id, so a
 	    block item places `block = id`.
-	  * Other items (ItemList: crafting materials, tools, armor, the Configurator and buckets)
-	    have ids from ITEM_BASE up.
+	  * Other items (ItemList: the content packs' items, Shared/Content: crafting materials, tools,
+	    armor, the Configurator and buckets) have ids from ITEM_BASE up, which is more than there
+	    are blocks.
 	  * Block variants that are no item of their own (wall torches, the upper halves of tall plants)
 	    name the item that places and drops them (BlockList `item`); `ofBlock` answers it. An item
 	    of ItemList may place a block that is no item of its own (ItemList `places`, Minecraft's
@@ -16,14 +17,17 @@
 	  * What breaking a block gives: `drops` (by a survival player, with the tool in hand: nothing
 	    without a good enough tool; Shears harvest what BlockList's `shearDrops` says, `shearCount`
 	    of it: grass, ferns, dead bushes, leaves and glow lichen) and `blockDrops` (breaking by
-	    itself, no tool), and now and then something else when a player breaks it (`randomDrop`:
-	    gravel's flint; `leafDrop`: leaves' saplings and sticks; `strawDrop`: grass's Straw).
-	    Creative only blocks (structure blocks, structure voids, jigsaws; `isCreativeOnly`) never
-	    drop.
+	    itself, no tool), and now and then something else: a block's `loot` (a loot table of the
+	    packs, or its pools: `lootDrop` rolls them in order, the first item a pool gives, in place
+	    of the usual drop when a player breaks it without Shears, and when it drops by itself:
+	    decaying, blown up, `leafDrop`), and the side rules for the blocks with no `loot` yet
+	    (`randomDrop`: gravel's flint; `leafDrop`: leaves' saplings and sticks; `strawDrop`:
+	    grass's Straw; a block with `loot` may not have one of these too). Creative only blocks
+	    (structure blocks, structure voids, jigsaws; `isCreativeOnly`) never drop.
 
-	Ids are stable as long as both lists only grow at the end, so they can be sent over the network
-	and saved. `Items.list` is the creative inventory's order: blocks in BlockList order, then the
-	other items.
+	Ids come from the content packs' order (Shared/Content), the same on every machine, so they can
+	be sent over the network. `Items.list` is the creative inventory's order: blocks in id order,
+	then the other items.
 
 	A stack is `{ item = id, count = n, damage = d?, data = t? }` with 1 <= n <= maxStack (an item's
 	ItemList `maxStack`, a block's BlockList `maxStack`; 64 by default); empty slots are nil.
@@ -57,9 +61,12 @@
 ]]
 
 local Blocks = require(script.Parent.Blocks)
+local Content = require(script.Parent.Content)
+local Schema = require(script.Parent.Content.Schema)
 -- (The fluids' data only: Shared/Fluids requires Items.)
 local FluidList = require(script.Parent.Fluids.FluidList)
 local TexturePack = require(script.Parent.TexturePack)
+-- (The content packs' items: Content.default.items.)
 local ItemList = require(script.ItemList)
 
 export type ModelBox = ItemList.ModelBox
@@ -113,8 +120,9 @@ export type Describer = (data: Data, stack: Stack) -> string?
 
 local Items = {}
 
--- First id of the items that are not blocks.
-Items.ITEM_BASE = 4096
+-- First id of the items that are not blocks (Content's: the content packs have fewer blocks).
+Items.ITEM_BASE = Content.ITEM_BASE
+assert(Blocks.count < Items.ITEM_BASE, `{Blocks.count} blocks: block ids must stay under ITEM_BASE`)
 -- Names of the armor slots, in slot order.
 Items.ARMOR_SLOTS = { "Head", "Chest", "Legs", "Feet" }
 Items.MAX_STACK = 64
@@ -528,6 +536,10 @@ function Items.leafDrop(block: number, random: () -> number): Stack?
 	if not Blocks.isValid(block) then
 		return nil
 	end
+	-- (A block with `loot` drops that by itself instead: Items.lootDrop.)
+	if Items.hasLoot(block) then
+		return Items.lootDrop(block, random)
+	end
 	local name = Blocks.get(block).name
 	if string.sub(name, -6) ~= "Leaves" then
 		return nil
@@ -575,6 +587,88 @@ function Items.strawDrop(block: number, random: () -> number): Stack?
 	local chance = Items.STRAW_CHANCE[block]
 	if chance and random() < chance then
 		return { item = ids.Straw, count = 1 }
+	end
+	return nil
+end
+
+--[[
+	A block's own loot (its entry's `loot`, Content/Schema: a loot table's name, the packs' `loot`,
+	or the pools themselves; { rolls = { min, max }, entries = { { item | false, weight, min, max }
+	} }), what it gives now and then in place of its usual drop: when a player breaks it by hand or
+	with a tool that harvests it, but not with Shears (server Network/EditRules), and when it drops
+	by itself (leaves decaying, a blast: `leafDrop`). Minecraft's block loot tables, in short.
+
+	`lootDrop` rolls the pools in order with `random` (in [0, 1)) and gives the first item one
+	rolls (nil: none did, the usual drop stands): a pool rolls rolls[1]..rolls[2] times (a draw only
+	when they differ), each roll an entry by weight (the first whose running sum passes random() x
+	the total), `min`..`max` of its item (a draw only when they differ). So { { "Flint", 1, 1, 1 },
+	{ false, 9, 0, 0 } } gives Flint when random() < 0.1, exactly as `randomDrop`'s gravel rule;
+	leaves' sapling-then-sticks rule is two pools, grass's Straw one. A block with `loot` may not be
+	one the side rules (`leafDrop`'s leaves, `randomDrop`'s gravel, STRAW_CHANCE) cover too.
+]]
+local lootOf: { [number]: { Schema.Pool } } = {}
+do
+	local content = Content.default
+	for id = 0, Blocks.count - 1 do
+		local spec = content.blocks[id + 1]
+		local loot = spec and spec.loot
+		if loot then
+			local where = content.where("block", spec.name)
+			local name = spec.name
+			local sapling = string.sub(name, -6) == "Leaves"
+				and rawget(ids :: any, string.sub(name, 1, -7) .. "Sapling")
+			assert(
+				not sapling and id ~= Blocks.find("Gravel") and Items.STRAW_CHANCE[id] == nil,
+				`Items: {where} has loot, and a side rule (leafDrop, randomDrop, STRAW_CHANCE) drops for it too`
+			)
+			local pools: { Schema.Pool } = if type(loot) == "string" then content.loot[loot] else loot :: any
+			for _, pool in pools do
+				for _, entry in pool.entries do
+					assert(
+						entry[1] == false or (rawget(ids :: any, entry[1]) ~= nil and entry[3] >= 1),
+						`Items: {where}'s loot gives {entry[1]}, which is no item (or fewer than one)`
+					)
+				end
+			end
+			lootOf[id] = pools
+		end
+	end
+end
+
+-- Has `block` a `loot` of its own?
+function Items.hasLoot(block: number): boolean
+	return lootOf[block] ~= nil
+end
+
+-- What `block`'s loot gives this time (nil: it has none, or nothing rolled); see above.
+function Items.lootDrop(block: number, random: () -> number): Stack?
+	local pools = lootOf[block]
+	if pools == nil then
+		return nil
+	end
+	for _, pool in pools do
+		local low, high = pool.rolls[1], pool.rolls[2]
+		local rolls = if high > low then low + math.floor(random() * (high - low + 1)) else low
+		local total = 0
+		for _, entry in pool.entries do
+			total += entry[2]
+		end
+		for _ = 1, rolls do
+			local pick = random() * total
+			for _, entry in pool.entries do
+				pick -= entry[2]
+				if pick < 0 then
+					if entry[1] then
+						local fewest, most = entry[3], entry[4]
+						local count = if most > fewest
+							then fewest + math.floor(random() * (most - fewest + 1))
+							else fewest
+						return { item = ids[entry[1]], count = count }
+					end
+					break
+				end
+			end
+		end
 	end
 	return nil
 end

@@ -1,0 +1,4 @@
+[
+	{ "type": "smelting", "input": "BetaOre", "result": "BetaGem" },
+	{ "type": "shapeless", "ingredients": ["BetaGem", "#fixture_stones"], "result": "BetaStone", "count": 2 }
+]

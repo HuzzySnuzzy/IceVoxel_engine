@@ -3,17 +3,22 @@
 	Every item's lore: one short line under its name in the tooltip (Items/Tooltip, Minecraft's
 	dark purple lore), saying what the item is for in this game first and its flavour second, as
 	Terraria's tooltips do ("Allows the holder to double jump"). Data only, keyed by item name
-	(Items.id: blocks' items by their block name, ItemList's by theirs).
+	(Items.id: blocks' items by their block name, the other items by theirs), from the content
+	packs (Shared/Content): each entry's `lore`, the packs' `lore` (lines for items a registry
+	makes), and the side table below, for the items whose entries carry none yet. A name with a
+	line both on its entry (or in a pack's `lore`) and in the side table is an error.
 
 	  * Every item has one (tests/spec/Tooltips checks there are no gaps), and every key is an
 	    item's (Items/Tooltip asserts it as it loads, so a renamed item can't keep stale lore).
 	  * Keep a line short: the tooltip wraps it to a few rows. Numbers belong to the stat lines
 	    (Items/Tooltip works them out from the item's data), so a line here says what no number
 	    says: where the item comes from, what it is made into, what using it does.
-	  * A new item gets its line here, in the same place as in BlockList / ItemList (a run of
-	    blocks named alike may get theirs from a loop just before the freeze: the twelve turrets).
+	  * A new item gets its line on its entry (`lore = "..."`).
 ]]
 
+local Content = require(script.Parent.Parent.Content)
+
+-- The side table, by name (Base pack order; the twelve turrets' from a loop below).
 local lore: { [string]: string } = {
 	-- Blocks (BlockList order) --------------------------------------------------------------------
 	Stone = "Common rock. Breaks into Cobblestone.",
@@ -436,49 +441,28 @@ local lore: { [string]: string } = {
 	ServoMotor = "A turret part: turns the gun towards its target.",
 	TargetingModule = "A turret part: finds targets and tells the gun when to fire.",
 	LaserSight = "Mount it on a turret: tighter shots, quicker to find a target.",
-
-	-- The new ores ------------------------------------------------------------------------------
-	CopperOre = "Gives Raw Copper, brass's main metal.",
-	CopperBlock = "Nine copper ingots in one block.",
-	RawCopperBlock = "Nine Raw Copper, kept compact.",
-	LeadOre = "Gives Raw Lead: bullets and radiation shielding.",
-	LeadBlock = "Nine lead ingots in one block.",
-	RawLeadBlock = "Nine Raw Lead, kept compact.",
-	ZincOre = "Gives Raw Zinc, alloyed with copper into brass.",
-	ZincBlock = "Nine zinc ingots in one block.",
-	RawZincBlock = "Nine Raw Zinc, kept compact.",
-	BrassBlock = "Nine brass ingots in one block.",
-	SulfurOre = "Yellow crusts near lava and oil. Gives Sulfur.",
-	SaltpetreOre = "White crusts of dry lands. Gives Saltpetre.",
-	UraniumOre = "Radioactive. Gives Raw Uranium.",
-	UraniumBlock = "Nine uranium ingots in one block. Very radioactive.",
-	RawUraniumBlock = "Nine Raw Uranium, kept compact. Radioactive.",
-	RawCopper = "Smelt it into a Copper Ingot.",
-	CopperIngot = "Three of them and a zinc ingot make four brass.",
-	CopperNugget = "A ninth of a copper ingot.",
-	RawLead = "Smelt it into a Lead Ingot.",
-	LeadIngot = "Soft, heavy metal: bullets and the Hazmat suit.",
-	LeadNugget = "A ninth of a lead ingot.",
-	RawZinc = "Smelt it into a Zinc Ingot.",
-	ZincIngot = "With three copper ingots it makes four brass.",
-	ZincNugget = "A ninth of a zinc ingot.",
-	BrassIngot = "Copper and zinc: cartridge cases for the Ammo Press.",
-	BrassNugget = "A ninth of a brass ingot.",
-	Sulfur = "Two saltpetre, a sulfur and a coal make four gunpowder.",
-	Saltpetre = "Gunpowder's main part, with sulfur and coal.",
-	RawUranium = "Radioactive. Smelt it into a Uranium Ingot.",
-	UraniumIngot = "Radioactive. Nine make the Block of Uranium, the Nuke's core.",
-	UraniumNugget = "A ninth of a uranium ingot. A little radioactive.",
-	HazmatHelmet = "Keeps out a quarter of radiation.",
-	HazmatChestplate = "Keeps out two fifths of radiation.",
-	HazmatLeggings = "Keeps out a fifth of radiation.",
-	HazmatBoots = "Keeps out a little radiation. A full suit keeps out all.",
 }
 
 -- The twelve turrets (BlockList "<Tier><Type>Turret"): one line for each type's calibre.
 for type, calibre in { Smg = "9mm", Rifle = "5.56", Sniper = ".308" } do
 	for _, tier in { "Basic", "Advanced", "Elite", "Ultimate" } do
 		lore[`{tier}{type}Turret`] = `Shoots zombies with {calibre} rounds a transporter feeds it. Needs power.`
+	end
+end
+
+-- The packs' lines: their `lore`, then each entry's.
+local content = Content.default
+local function add(name: string, line: string, where: string)
+	assert(lore[name] == nil, `LoreList: {where} has a lore line, and so has LoreList's side table`)
+	lore[name] = line
+end
+for name, line in content.lore do
+	add(name, line, content.where("lore", name))
+end
+for _, entry in content.entries do
+	local line = entry.lore
+	if line then
+		add(entry.name, line, content.where(if content.block(entry.name) then "block" else "item", entry.name))
 	end
 end
 

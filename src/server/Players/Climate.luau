@@ -22,8 +22,9 @@
 	                    cooling block in the cube (TAN's proximity modifier; `sources` gives the
 	                    nearest of each, in blocks along the farthest axis)
 
-	Heat and cold sources (TAN's heating_blocks and cooling_blocks tags): Config.ToughAsNails
-	.HeatingBlocks and .CoolingBlocks, by fluid name (every level of the fluid and its cave twin:
+	Heat and cold sources (TAN's heating_blocks and cooling_blocks tags): Temperature.HEATING_BLOCKS
+	and .COOLING_BLOCKS (Config.ToughAsNails.HeatingBlocks and .CoolingBlocks, and the content
+	packs' blocks with `heats` / `cools`), by fluid name (every level of the fluid and its cave twin:
 	"Lava") or block name ("Fire", "Campfire", "Ice"). A name no block or fluid has is skipped with
 	a warning, so a block can be named before it exists (it warms from the moment BlockList has
 	one). Blocks that warm only in some state register a check (`addHeatSource(block, check)`: a
@@ -140,14 +141,14 @@ local function idsOf(name: string): { number }
 	return { id }
 end
 
-for _, name in Config.ToughAsNails.HeatingBlocks do
+for _, name in Temperature.HEATING_BLOCKS do
 	for _, id in idsOf(name) do
 		heating[id] = true
 		-- (Lava, fire and campfires warm by radiance: in a room too.)
 		radiant[id] = true
 	end
 end
-for _, name in Config.ToughAsNails.CoolingBlocks do
+for _, name in Temperature.COOLING_BLOCKS do
 	for _, id in idsOf(name) do
 		cooling[id] = true
 	end

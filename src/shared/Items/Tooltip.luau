@@ -40,8 +40,8 @@
 	            harvests (ores first); every tool but swords its mining speed (Shared/Mining).
 	  Blocks    the tool that mines it ("Needs a Stone Pickaxe or better", "Best tool: Axe"),
 	            "Light: 14", "Falls" (Gravity), "Climbable", "Slippery", a chest's slots,
-	            "Flammable", heat and cold for Tough As Nails (Config.ToughAsNails Heating /
-	            CoolingBlocks), "Creative only", an energy block's store, a tank's capacity and a
+	            "Flammable", heat and cold for Tough As Nails (Temperature.HEATING_BLOCKS /
+	            COOLING_BLOCKS), "Creative only", an energy block's store, a tank's capacity and a
 	            transmitter's tier numbers (Transmitters/Tiers, Mekanism's own tooltips), a
 	            turret's stat line ("Range 24 · 240 rpm · holds 4 · 9mm": its Shared/Turrets
 	            Spec's range, rate, the rounds its ammo slot holds and its calibre; `turretLine`).
@@ -52,7 +52,6 @@
 
 local Blocks = require(script.Parent.Parent.Blocks)
 local Combat = require(script.Parent.Parent.Entities.Combat)
-local Config = require(script.Parent.Parent.Config)
 local Effects = require(script.Parent.Parent.Effects)
 local Items = require(script.Parent)
 local Accessories = require(script.Parent.Accessories)
@@ -64,6 +63,7 @@ local Mana = require(script.Parent.Parent.Mana)
 local Progression = require(script.Parent.Parent.Progression)
 local Smelting = require(script.Parent.Parent.Crafting.Smelting)
 local Drinks = require(script.Parent.Parent.ToughAsNails.Drinks)
+local Temperature = require(script.Parent.Parent.ToughAsNails.Temperature)
 local Tiers = require(script.Parent.Parent.Transmitters.Tiers)
 local Fluids = require(script.Parent.Parent.Fluids)
 local Describe = require(script.Parent.Parent.Weapons.Describe)
@@ -186,19 +186,19 @@ end
 
 --[[ Blocks ]]
 
-local heating: { [number]: boolean } = {}
-local cooling: { [number]: boolean } = {}
-do
-	local settings = Config.ToughAsNails :: any
-	for _, pair in { { settings.HeatingBlocks, heating }, { settings.CoolingBlocks, cooling } } do
-		for _, name in (pair[1] or {}) :: { string } do
-			local id = Blocks.find(name)
-			if id then
-				pair[2][id] = true
-			end
+-- The blocks that heat and cool (Config.ToughAsNails' lists and the packs' blocks that do), by id.
+local function blockSet(names: { string }): { [number]: boolean }
+	local set: { [number]: boolean } = {}
+	for _, name in names do
+		local id = Blocks.find(name)
+		if id then
+			set[id] = true
 		end
 	end
+	return set
 end
+local heating = blockSet(Temperature.HEATING_BLOCKS)
+local cooling = blockSet(Temperature.COOLING_BLOCKS)
 
 -- "Needs a Stone Pickaxe or better", "Needs a Pickaxe", "Needs a Sword or Shears", "Best tool:
 -- Axe".

@@ -21,8 +21,10 @@
 	  boiling     a campfire boils dirty water `speed` x as fast (ToughAsNails/Boiling.ready's
 	              `speed`: the client's wait and the server's check)
 
-	A node may also name `recipes` (result item names) it unlocks: those stay locked until the
-	node is unlocked, besides their Age (Demolition: Gunpowder and TNT; Fission: the Nuke).
+	A node's `recipes` (result item names) stay locked until the node is unlocked, besides their
+	Age (Demolition: Gunpowder and TNT; Fission: the Nuke): every content pack entry naming the
+	node (`skill = "demolition"`, Shared/Content), and the node's own `recipes` here, the side list
+	for entries that name none yet (a name in both, or an unknown skill, is an error).
 	`row` places it on the skill tree screen (Ui/SkillTreeScreen: a column per Age), `icon` is
 	the item drawn in its frame. Three branches run across the Ages: knowledge (rows 1 and 2),
 	tools (3 and 4), survival (5 and 6).
@@ -41,6 +43,7 @@
 ]]
 
 local Ages = require(script.Parent.Ages)
+local Content = require(script.Parent.Parent.Content)
 
 export type Perk = {
 	kind: "knowledge" | "mining" | "wear" | "thirst" | "insulation" | "boiling" | "none",
@@ -316,6 +319,25 @@ for index, spec in SPECS do
 	byId[skill.id] = skill
 	table.insert(list, skill)
 	table.insert(byAge[skill.age], skill)
+end
+
+-- The entries naming a node (`skill`).
+do
+	local content = Content.default
+	for _, entry in content.entries do
+		local id = entry.skill
+		if id then
+			local where = content.where(if content.block(entry.name) then "block" else "item", entry.name)
+			local skill = byId[id]
+			assert(skill, `Skills: {where} names an unknown skill {id}`)
+			local other = skillOfName[entry.name]
+			if other then
+				error(`Skills: {where} names its skill, and {other.id}'s recipes name it too`)
+			end
+			table.insert(skill.recipes, entry.name)
+			skillOfName[entry.name] = skill
+		end
+	end
 end
 
 Skills.list = list

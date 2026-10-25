@@ -1105,10 +1105,12 @@ return function(t, shared, require, _server, client)
 		for name in drops do
 			t.ok(MinerRules.ore(id[name]) ~= nil, `{name} is the miner's`)
 		end
+		local Content = require(shared.Content)
 		for index, ore in MinerRules.ORES do
 			local drop = drops[ore.name] or Items.get(ore.drop).name
 			local entry = entries[index]
-			local numbers = Config.Miner.Ores[ore.name]
+			-- (Config's side table, or the ore's own entry's `miner`: the Ores pack's carry theirs.)
+			local numbers = (Config.Miner.Ores :: any)[ore.name] or (Content.default.block(ore.name) :: any).miner
 			t.eq(#entry.inputs[1], 1, `{ore.name}: one input`)
 			t.eq(entry.inputs[1][1], id[ore.name], `{ore.name}: the ore block, in MinerRules' order`)
 			t.eq(entry.inputs[2], nil)

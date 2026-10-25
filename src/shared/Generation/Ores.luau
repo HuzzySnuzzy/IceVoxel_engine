@@ -79,8 +79,10 @@
 	Saltpetre needs each column's surface height and biome (`Ores.place`'s `surface` and
 	`biomes`, from TerrainGenerator); without them it draws its numbers and places nothing.
 
-	Each ore draws from one random stream per chunk, in ORES order, so new ores go at the end of the
-	list: an ore placed earlier never moves, and a later one only replaces the stone left over. A
+	The features are the content packs' `ores` (Shared/Content: the Base pack's stones, Minecraft's
+	ores and osmium, the Ores pack's copper .. uranium), in load order. Each ore draws from one
+	random stream per chunk, in that order, so new ores go after the others (a pack of a later
+	order): an ore placed earlier never moves, and a later one only replaces the stone left over. A
 	feature that places nothing somewhere (saltpetre under wet land, a buried cell left as stone)
 	still draws the same numbers there, and the vents draw from a stream per lake and per well, so
 	neither moves anything after it.
@@ -89,6 +91,7 @@
 local Config = require(script.Parent.Parent.Config)
 local Blocks = require(script.Parent.Parent.Blocks)
 local Biomes = require(script.Parent.Parent.Biomes)
+local Content = require(script.Parent.Parent.Content)
 local ChunkLayout = require(script.Parent.Parent.World.ChunkLayout)
 local Hash = require(script.Parent.Parent.Util.Hash)
 local Lava = require(script.Parent.Lava)
@@ -98,7 +101,6 @@ local SIZE = ChunkLayout.SIZE
 local P = ChunkLayout.PADDED
 local STRIDE = ChunkLayout.LAYER * 2
 local SEA = Config.SeaLevel
-local LAVA_LEVEL = Config.Caves.LavaLevel
 local readu8 = buffer.readu8
 local readu16 = buffer.readu16
 local writeu16 = buffer.writeu16
@@ -151,86 +153,29 @@ export type Ore = {
 	buried: number?,
 }
 
-local ORES: { Ore } = {
-	{ name = "diorite", block = Blocks.id.Diorite, veins = 1.5, size = 40, minY = 5, maxY = 200 },
-	{ name = "andesite", block = Blocks.id.Andesite, veins = 1.5, size = 40, minY = 200, maxY = 370 },
-	{ name = "granite", block = Blocks.id.Granite, veins = 1.5, size = 40, minY = 370, maxY = 540 },
-	{ name = "coal", block = Blocks.id.CoalOre, veins = 12, size = 10, minY = 5, maxY = math.huge },
-	{ name = "iron", block = Blocks.id.IronOre, veins = 7, size = 7, minY = 5, maxY = math.huge },
-	{ name = "gold", block = Blocks.id.GoldOre, veins = 3, size = 6, minY = 48, maxY = math.huge },
-	{ name = "diamond", block = Blocks.id.DiamondOre, veins = 4, size = 5, minY = 5, maxY = 30 },
-	{ name = "emerald", block = Blocks.id.EmeraldOre, veins = 4, size = 3, minY = 600, maxY = math.huge },
-	-- Mekanism's osmium (see the top). The middle feature's 4 per 128 blocks over its 192 are
-	-- Mekanism's 6 veins per chunk.
-	{ name = "osmium_small", block = Blocks.id.OsmiumOre, veins = 3, size = 4, minY = 5, maxY = math.huge },
-	{
-		name = "osmium_middle",
-		block = Blocks.id.OsmiumOre,
-		veins = 4,
-		size = 9,
-		minY = 5,
-		maxY = 197,
-		shape = "trapezoid",
-	},
-	{ name = "osmium_upper", block = Blocks.id.OsmiumOre, veins = 2, size = 7, minY = 197, maxY = math.huge },
-	-- The newer ores (see the top). Minecraft's copper: 8 per 128 blocks over 256 are its 16 veins
-	-- per chunk.
-	{
-		name = "copper",
-		block = Blocks.id.CopperOre,
-		veins = 8,
-		size = 10,
-		minY = 48,
-		maxY = 304,
-		shape = "trapezoid",
-	},
-	-- Mekanism's lead: 4.5 per 128 blocks over 228 are its 8 veins per chunk (8.02).
-	{
-		name = "lead",
-		block = Blocks.id.LeadOre,
-		veins = 4.5,
-		size = 9,
-		minY = -31,
-		maxY = 197,
-		shape = "trapezoid",
-	},
-	-- Gold's 3 veins of 6 per 128 blocks in Create's veins of 12.
-	{ name = "zinc", block = Blocks.id.ZincOre, veins = 1.5, size = 12, minY = 5, maxY = 197 },
-	-- 12 per 128 blocks over 32 are 3 veins per chunk.
-	{ name = "sulfur", block = SULFUR, veins = 12, size = 8, minY = 1, maxY = LAVA_LEVEL + 22 },
-	-- 16 per 128 blocks of depth over 32 are 4 veins per chunk.
-	{
-		name = "saltpetre",
-		block = Blocks.id.SaltpetreOre,
-		veins = 16,
-		size = 8,
-		minY = 4,
-		maxY = 36,
-		depth = true,
-		dry = true,
-	},
-	-- Mekanism's uranium at a quarter of its veins: 1 and 1.75 per chunk (ranges of 128).
-	{
-		name = "uranium_small",
-		block = Blocks.id.UraniumOre,
-		veins = 1,
-		size = 4,
-		minY = 5,
-		maxY = 133,
-		shape = "trapezoid",
-	},
-	{
-		name = "uranium_buried",
-		block = Blocks.id.UraniumOre,
-		veins = 1.75,
-		size = 9,
-		minY = -35,
-		maxY = 93,
-		shape = "trapezoid",
-		plateau = 24,
-		buried = 0.75,
-	},
-}
+-- Every feature: the content packs' `ores` (Shared/Content: the Base pack's stones, Minecraft's ores
+-- and osmium, then the Ores pack's), in load order, each block by id.
+local ORES: { Ore } = {}
+do
+	local content = Content.default
+	for _, feature in content.ores do
+		local block = Blocks.find(feature.block)
+		assert(block, `Ores: {content.where("ores", feature.name)} places unknown block {feature.block}`)
+		table.insert(ORES, {
+			name = feature.name,
+			block = block,
+			veins = feature.veins,
+			size = feature.size,
+			minY = feature.minY,
+			maxY = feature.maxY,
+			shape = feature.shape,
+			plateau = feature.plateau,
+			depth = feature.depth,
+			dry = feature.dry,
+			buried = feature.buried,
+		})
+	end
+end
 for _, ore in ORES do
 	assert(ore.minY < ore.maxY, `Ores: empty height range of {ore.name}`)
 	assert(ore.shape == nil or (ore.shape == "trapezoid" and ore.maxY < math.huge), `Ores: bad shape of {ore.name}`)

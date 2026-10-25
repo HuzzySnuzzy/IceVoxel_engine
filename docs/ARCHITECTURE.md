@@ -17,6 +17,155 @@ thousands of parts from the server is slow. IceVoxel never does either:
   requests, runs block updates and replicates every change.
 - **Clients** generate, mesh and render terrain locally, then overlay the server's edits.
 
+## Content packs (`Content/`, `Content/Schema`, `Content/Define`, `Content/Packs/`)
+
+Every block, item, recipe, item tag, texture, loot table, ore feature, Age and lore line comes
+from a content pack, a folder under `Content/Packs` the game finds as it loads (Minecraft's data
+packs). The registries build themselves from what `Shared/Content` loads; none keeps a list of
+content of its own:
+
+```
+Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, lore
+   │                   (each a .luau module, its data or function(define) -> data, or a .json file)
+   │  Content.load: find the packs, sort by (order, name), require each kind, check it (Schema),
+   │                merge, check every cross-reference, give ids by place
+   ▼
+Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePack (textures, faces, icons)
+                ─► Items/ItemList ─► Items (loot)       ─► Items/LoreList ─► Tooltip
+                ─► Crafting/Recipes ─► Crafting, Smelting, JEI (recipes, tags, fuel)
+                ─► Progression/Ages, Skills, Knowledge  ─► Machines/MinerRules ─► the Metal Miner
+                ─► Radiation                            ─► Generation/Ores (features)
+                ─► Generation/ScavengeLoot, Mineshafts  ─► Sounds (block sounds, equip sounds)
+                ─► ToughAsNails/Temperature (heating, cooling) ─► server Players/Climate, Tooltip
+```
+
+**A pack** is a folder holding `pack`, its manifest (`{ order, description, requires? }`), and
+any of the kinds: `blocks` and `items` (entries, Schema's BlockSpec and ItemSpec), `recipes`
+(`{ type = "shaped" | "shapeless" | "smelting", ... }`), `tags` (tag -> names), `textures` (name
+-> Texture), `loot` (table name -> pools, ScavengeLoot's format), `ores` (ore features, the block
+by name), `ages` (the Age records) and `lore` (name -> line). Each is a module of the kind's name:
+a Luau module returning its data, or a function the loader calls with `Content/Define` (the shared
+helpers and Config, for packs that build entries or read switches), or a `.json` file (Rojo 7
+makes one a ModuleScript returning its table; the Lune loader does the same and skips Rojo's
+`.model.json`, `.meta.json` and `.project.json`). Any other module in a pack is an error (a
+misspelt kind would be ignored), unless its name starts with `_`: the pack's own helpers, which its
+modules require (the Ores pack's `_metals`).
+
+**Order and ids.** Packs load sorted by `order`, then by name, and a pack's entries keep their
+order; a pack's `requires` must load before it. A block's id is its place among every pack's
+blocks (Core, order 0, holds Air and Cave Air: ids 0 and 1, so a zero-filled chunk buffer is
+air), an item's ITEM_BASE (4096, now `Content.ITEM_BASE`) + its place among the items (every
+placeable block is an item with its block's id, as before), dense and given at load: no
+append-only rule, no positions to keep. There must be fewer blocks than ITEM_BASE (checked by
+Content and by Items). Every machine loads the same packs in the same order, so client and server
+agree on every id; saves still hold ids until they keep names (the saves phase).
+
+**Merging.** Blocks and items merge by name: an entry with `override = true` patches the entry of
+that name an earlier pack made, field by field, keeping its place and id (`{ name = "Stone",
+override = true, hardness = 2 }`); without it a name already taken, by a block or an item, is an
+error naming both packs, and so is an override of nothing. Textures merge the same way (an
+override patches a texture's fields: a resource pack's new picture). Tags are a union: each pack's
+lists in load order, then every entry's `tags`, each name once (an entry's `tags = { "coals" }`
+joins Core's tag). Recipes, ore features (each named once) and Ages (each id once) append in load
+order; loot tables and lore lines are named once. `content.where(kind, name)` says where a thing
+came from ("pack Base (patched by Gamma), block Stone") for every message.
+
+**Per-entry fields.** Each replaces a side table a registry kept by name, and reaches it as
+before (`tests/spec/Content` checks each one end to end):
+
+| Field | On | Registry (the side table it replaces) |
+|---|---|---|
+| `lore` | block, item | Items/LoreList (its table) |
+| `texture` (All, Sides, Top, Bottom, Front, Sprite) | block | TexturePack.Blocks (`LEGACY_BLOCKS`) |
+| `icon` ("rbxassetid://n" or "") | item | TexturePack.Icons (`LEGACY_ICONS`); a block's `icon` stays its item model's boxes |
+| `age` (an Age id) | block, item | Progression/Ages (its recipe lists) |
+| `skill` (a skill id) | block, item | Progression/Skills (each node's `recipes`) |
+| `knowledge = { mine?, smelt? }` | block, item | Progression/Knowledge (`ORES`, `SMELTED`) |
+| `miner = { ticks, joules, floor? }` | ore block | Machines/MinerRules (`NAMES`, Config.Miner.Ores); entries come after NAMES, in id order |
+| `radiation` (Sv/h) | block, item | Radiation (Config.Radiation.Sources) |
+| `radiationShield` (share let through) | block | Radiation (Config.Radiation.Shielding, `Solid` stays Config's) |
+| `shielding` (share kept out) | armor item | Radiation (Config.Radiation.Hazmat) |
+| `fuel` (ticks) | block, item | Crafting/Recipes' fuel (`LEGACY_FUEL`, by name or "#tag") |
+| `tags` | block, item | the packs' tags (Core's base tags) |
+| `heats`, `cools` | block | ToughAsNails/Temperature.HEATING_BLOCKS / COOLING_BLOCKS (Config.ToughAsNails.HeatingBlocks / CoolingBlocks) |
+| `sounds = { [action] = event }` | block | Sounds (SoundList.BLOCK_SOUNDS) |
+| `equipSound` | armor item | Sounds.armorEquip (SoundList.ARMOR's prefixes) |
+| `loot` (a loot table's name or pools) | block | Items.lootDrop (Items' leafDrop, randomDrop and STRAW_CHANCE rules) |
+| `blastResistance`, `zombieBreak`, `flammable` | block | (already fields; the Base pack's BLAST_RESISTANCE, ZOMBIE_BREAK and fire odds set them by name) |
+
+A block's `loot` is Minecraft's block loot table in short: when a player breaks it by hand or
+with a tool that harvests it (not Shears; server Network/EditRules) and when it drops by itself
+(leaves decaying, a blast: `leafDrop`), `Items.lootDrop` rolls its pools in order with the
+caller's random and the first item one rolls drops instead of the usual drop (none: the usual
+drop). A pool rolls `rolls[1]..rolls[2]` times, drawing only when they differ, each roll an entry
+by weight, its count drawn only when min and max differ: so the gravel rule (`{ "Flint", 1, 1, 1
+}, { false, 9, 0, 0 }`), the leaves' (a sapling pool, then a sticks pool) and the grass's Straw
+roll exactly as their code does today, ready to move into data.
+
+**Checks**, as the packs load; every message names the pack, the kind and the entry:
+- Schema (`Content/Schema`): each kind's fields and their types, nested ones too (a shape box's
+  `size`, a miner's `floor`); an unknown field is an error with a "did you mean" (`harndess` ->
+  hardness, by edit distance), and so are a wrong type, a colour outside 0..255, a missing field
+  (a block's name, an item's model, a recipe's type and the fields its type needs, and only
+  those), a manifest's `order`.
+- Names and packs: a name taken twice, an override of nothing, two packs of one name, a
+  `requires` that is not there or loads later, a kind given as the wrong shape, an unknown module.
+- Every cross-reference: the items and blocks recipes, tags and loot tables name; the tags recipes
+  name; `drops`, `shearDrops`, `item`, `places`, `caveTwin`, a plant's other half, a toggle's `to`;
+  a block's loot table; an ore feature's block; `age`; a block's textures and the blocks textures
+  are tinted like; the Ages' milestones; every lore line's item; a line given both by an entry
+  and by a pack's `lore`. Unknown names come with a hint too (`Stnoe` -> Stone).
+- In the registries, as they load (with `where`): a skill (Skills), a sound event or action
+  (Sounds), the miner's numbers (MinerRules), and a value given both on an entry and in the
+  registry's side table.
+
+**Side tables** still in use while features move into packs (each holds what no entry carries
+yet; naming a thing both there and on its entry is an error): LoreList's table; TexturePack's
+`LEGACY_BLOCKS` and `LEGACY_ICONS`; the Ages' recipe lists and the Skills' `recipes`;
+Knowledge.ORES and SMELTED; MinerRules' `NAMES` with Config.Miner.Ores; Config.Radiation.Sources,
+Shielding (by name) and Hazmat (all empty now but Solid); Recipes' `LEGACY_FUEL`;
+Config.ToughAsNails.HeatingBlocks and CoolingBlocks; SoundList.BLOCK_SOUNDS and ARMOR; Items'
+leafDrop / randomDrop / STRAW_CHANCE rules; and inside the Base pack its BLAST_RESISTANCE,
+ZOMBIE_BREAK and fire odds (which touch only Base's own blocks; a block both in BLAST_RESISTANCE or
+ZOMBIE_BREAK and with the field on its entry is an error) and its generators.
+
+**The packs.**
+- **Core** (order 0): Air and Cave Air, the Ages (`ages`: stone, iron, industrial, electric,
+  atomic) and the base tags (planks, logs, leaves, coals, tulips, stone tool and crafting
+  materials).
+- **Base** (order 100, requires Core): everything the game had before packs, as it was:
+  BlockList's, ItemList's and Recipes' lists are its `blocks`, `items` and `recipes` (unchanged,
+  in their old order, so no id moved), TexturePack's sheet its `textures`, ScavengeLoot's tables and
+  the mineshafts' its `loot` (`mineshaft`), Generation/Ores' stones, vanilla ores and osmium its
+  `ores`. `Blocks.BlockList`, `Items.ItemList` and `Crafting.Recipes` remain, as the merged lists
+  (BlockList and ItemList re-export the types from Schema). Its features move out into packs of
+  their own (Minecraft, Mekanism, the seasons, the apocalypse, turrets...).
+- **Ores** (order 200, requires Core and Base): the new ores, the worked example of a feature in
+  one pack: copper, lead, zinc, brass, sulfur, saltpetre, uranium and the Hazmat suit, their
+  blocks, items, recipes (the metals' storage and smelting, brass, black powder, the Nuke's uranium
+  core, the Hazmat suit), textures and ore features, each entry with its lore, texture, icon, Age,
+  knowledge, miner numbers, radiation and shielding; none of them is in a side table any more.
+  `_metals` holds the five metals for `define.metal`. After Base, so their ids stay the last.
+
+**Define** (`Content/Define`, what a function-form module gets; pure): `Config`; the model helpers
+(`shade`, `lump`, `ingot`, `nugget`) and armor shapes (`HELMET` .. `BOOTS`, `ARMOR_PIECES`) that
+were ItemList's; recipe records (`shaped`, `shapeless`, `smelting`, `storage`); `append`; and
+`metal(spec)`: a metal's ore, storage block and raw block, raw lump, ingot and nugget, their
+storage recipes both ways and smelting, and their blank textures, as `{ blocks, items, recipes,
+textures }` for each kind module to take its part of (`ore = false` for an alloy: brass), each
+piece's own fields (lore, Age, numbers) given in the spec. The rest of BlockList's and ItemList's
+generators move here as their features become packs.
+
+**Cost.** Content loads once (`Content.default`); merging and checking every pack takes about
+10 ms in Lune, besides compiling the pack modules the old lists cost anyway.
+
+**Specs.** `tests/spec/Content` loads the fixture packs in `tests/fixtures/content/packs` through
+`Content.load` (Beta, JSON, order 10; Alpha, Luau, order 20, with a `_` helper and `define.metal`;
+Gamma, order 20 after Alpha by name, overriding both), grafts `tests/fixtures/content/fields/Fields`
+(every per-entry field) into a fresh game to follow each field to its registry, builds packs in
+memory for every check (`Content.build`, and the Lune loader's `folder` / `module` / `graft`), and
+pins no id or total.
+
 ## Chunks
 
 A chunk is a full-height column (`Config.ChunkSize` = 16 wide, `Config.WorldHeight` = 1024 tall) stored
@@ -2557,9 +2706,12 @@ tests/build_textures ─► src/textures/*.model.json ─► Rojo 7.7.1 ─► M
                                      (the variants and prototypes TextureLooks draws with)
 ```
 
-**The pack** (`Shared/TexturePack`): pure data that requires nothing, so the server, clients,
-worker Actors and Lune all load it, and it is the only place textures are set (BlockList's old
-`texture`, `tint` and `faces` fields are gone). `Textures` maps a name (lower case with spaces, as
+**The pack** (`Shared/TexturePack`): pure data built from the content packs (Content packs,
+above: `Textures` is their `textures`, the Base pack's the hand-edited sheet; `Blocks` each block
+entry's `texture` and `LEGACY_BLOCKS` for the rest; `Icons` each item entry's `icon` and
+`LEGACY_ICONS`), so the server, clients, worker Actors and Lune all load it, and it is the only
+place textures are set (BlockList's old `tint` and `faces` fields are gone; a block's `texture` is
+its faces). `Textures` maps a name (lower case with spaces, as
 Minecraft names them) to a colour map (`""` until made), optional normal, roughness and metalness
 maps, the `Material` its MaterialVariant is based on, `Tint` (true, the default: the drawn block's
 voxel colour; false: the image's own; a block name: that block's colour), `Average` and `Align`.
@@ -4803,10 +4955,12 @@ burns away.
   (1 − distance / (`ShakeDistance` × power)) × min(1, power / 4), fading over 0.45 s, turning the
   camera by up to 1.6° after Roblox's camera updates.
 
-## The new ores (`Blocks/BlockList`, `Items/ItemList`, `Crafting/Recipes`, `Machines/MinerRules`)
+## The new ores (`Content/Packs/Ores`, `Machines/MinerRules`)
 
-Copper, lead, zinc, brass, sulfur, saltpetre and uranium, after the Ammo Press (499) so no other
-id moved; `tests/spec/Ores` checks the registries.
+Copper, lead, zinc, brass, sulfur, saltpetre and uranium: the Ores content pack (Content packs,
+above), loading after Base so its ids come after the Ammo Press's (499) and no other id moved; its
+entries carry their lore, textures, icons, Ages, knowledge, miner numbers, radiation and Hazmat
+shielding, and `define.metal` makes each metal's set. `tests/spec/Ores` checks the registries.
 
 - Blocks 500..514, in this order: Copper Ore, Block of Copper, Block of Raw Copper; Lead Ore and
   its two; Zinc Ore and its two (zinc is brass's other metal: brass is an alloy, so it needs one);
@@ -4829,8 +4983,8 @@ id moved; `tests/spec/Ores` checks the registries.
   Ingots and White Wool, the mask's visor Glass ("WLW", "LGL").
 - The Metal Miner copies all six new ores: `MinerRules.ORES` appends Copper, Lead, Zinc, Sulfur,
   Saltpetre and Uranium Ore after Diamond (the order is packed into a miner's state, 8 x index +
-  code, so the old six keep theirs); Config.Miner.Ores: the metals as iron (400 ticks at 200 J),
-  the powders 600 at 200, uranium 3600 at 800. A panel line holds 16 characters before the arrow
+  code, so the old six keep theirs); their entries' `miner`: the metals as iron (400 ticks at 200
+  J), the powders 600 at 200, uranium 3600 at 800. A panel line holds 16 characters before the arrow
   (`LINE_CHARACTERS`): a drop whose "Makes ..." is longer shows alone ("Raw Uranium").
 - Knowledge (`Knowledge.ORES`, `SMELTED`): the metals as iron, the powders as coal, uranium as
   gold.
@@ -5364,8 +5518,9 @@ too; `Players/Radiation` the glue. `tests/spec/Radiation` tests them, plays the 
 fake world and inventory (below) and measures a look. Numbers in `Config.Radiation`; `Enabled`
 false turns all of it off (a saved dose is kept as it is).
 
-- **Sources** (`Config.Radiation.Sources` by name: Sv/h a block away or nearer, or carried; one
-  table by id, a block item's id being its block's): Uranium Ore 1 (a lump's uranium spread through
+- **Sources** (each content pack entry's `radiation`, and `Config.Radiation.Sources` by name for
+  entries without: Sv/h a block away or nearer, or carried; one table by id, a block item's id
+  being its block's; the Ores pack's uranium carries its own): Uranium Ore 1 (a lump's uranium spread through
   rock), the Block of Raw Uranium 2.7, the Block of Uranium 108, Raw Uranium 0.3 (mostly rock), the
   Uranium Ingot 12 (the refined metal: forty lumps' worth) and Nugget 1.33; each storage block is
   nine of its item. Carried (`carried`): every stack of the 36 slots, the armor and the cursor,
@@ -5380,14 +5535,16 @@ false turns all of it off (a saved dose is kept as it is).
   source found is traced (`transmission`: an Amanatides and Woo voxel walk to the body, each cell
   strictly between letting through its block's share: any full solid opaque block
   `Shielding.Solid` 0.5 (leaves too: they are solid and opaque), a Block of Lead 0.02, a Block of
-  Raw Lead 0.1; glass, plants, fluids and unknown cells all of it), the nearest `MaxRays` (32) of
+  Raw Lead 0.1 (their entries' `radiationShield`); glass, plants, fluids and unknown cells all of
+  it), the nearest `MaxRays` (32) of
   them; the rest take the mean share of those traced in their octant of directions from the body,
   and all of it in an octant with none traced (only a player-built heap has more within the
   radius: a wall round the body shields them all, but a lead wall on one side hides no heap in
   the open on the other). Bounded: at most `readsBound()` reads a look (3,809: the sphere and the
   rays, each at most the Manhattan distance), about 0.3 to 0.6 ms under Lune, once a second a
   player.
-- **The Hazmat suit** (`shielding`): `Hazmat`'s shares summed over the armor worn, at most all
+- **The Hazmat suit** (`shielding`): the pieces' shares (their entries' `shielding`, and
+  `Config.Radiation.Hazmat` by name for entries without) summed over the armor worn, at most all
   of it (Mekanism's getRadiationResistance: the mask 0.25, the gown 0.4, the pants 0.2, the boots
   0.15), taken off the blocks' and the carried alike (`exposure`); under `MinRate` (0.0005 Sv/h)
   is none.

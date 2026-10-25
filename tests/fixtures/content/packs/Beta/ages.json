@@ -1,0 +1,10 @@
+[
+	{
+		"id": "beta_age",
+		"name": "Beta Age",
+		"level": 0,
+		"milestones": [{ "category": "mine", "key": "BetaOre", "text": "Mine Beta Ore" }],
+		"reward": 10,
+		"color": [10, 20, 30]
+	}
+]
