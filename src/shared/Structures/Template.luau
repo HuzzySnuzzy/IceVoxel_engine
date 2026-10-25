@@ -22,7 +22,8 @@
 	As text: "IVS1:" followed by the payload in base64url (A-Z a-z 0-9 - _, no padding), so it
 	pastes into chat and into a Luau string literal as it is. `decode` ignores whitespace anywhere
 	(wrapped pastes) and quotes around the whole text. The payload is a byte stream of LEB128
-	varints (unsigned) and strings (a varint byte length, then UTF-8):
+	varints (unsigned) and strings (a varint byte length, then UTF-8; Structures/TemplateText reads
+	them, the frame round the body and its head, needing no registry):
 
 	  varint   version (1)
 	  varint   body length: the bytes from the next one up to the checksum (so a cut paste is
@@ -60,6 +61,7 @@ local Blocks = require(script.Parent.Parent.Blocks)
 local Config = require(script.Parent.Parent.Config)
 local Items = require(script.Parent.Parent.Items)
 local Settings = require(script.Parent.Settings)
+local TemplateText = require(script.Parent.TemplateText)
 
 export type Jigsaw = {
 	x: number,
@@ -106,8 +108,8 @@ export type CaptureOptions = {
 
 local Template = {}
 
-Template.VERSION = 1
-Template.PREFIX = "IVS1:"
+Template.VERSION = TemplateText.VERSION
+Template.PREFIX = TemplateText.PREFIX
 Template.MAX_SIZE = Config.Structures.MaxSize
 Template.MAX_NAME = Settings.MAX_NAME
 -- Jigsaw names, targets, pools, final states and marker data.
@@ -126,8 +128,8 @@ Template.MAX_STACK = 64
 Template.MAX_DAMAGE = 65535
 -- Longest text `decode` reads (characters, whitespace included) and payload (bytes): far above
 -- any real structure (a busy 48 x 48 x 48 one is ~150,000 characters), so these only stop junk.
-Template.MAX_TEXT = 3000000
-Template.MAX_PAYLOAD = 2097152
+Template.MAX_TEXT = TemplateText.MAX_TEXT
+Template.MAX_PAYLOAD = TemplateText.MAX_PAYLOAD
 
 Template.DIRECTIONS = table.freeze({ "Down", "Up", "North", "South", "West", "East" })
 local DIRECTION_CODE: { [string]: number } = {}
@@ -623,7 +625,7 @@ function Template.capture(options: CaptureOptions): (Template, { string })
 	return t, warnings
 end
 
---[[ Bytes: varints, strings, CRC-32, base64url ]]
+--[[ Bytes: writing varints and strings (the rest is Structures/TemplateText's) ]]
 
 -- A growable byte buffer.
 type Writer = { b: buffer, n: number }
@@ -679,110 +681,10 @@ local function writeString(w: Writer, value: string)
 	w.n += #value
 end
 
-local CRC_TABLE: { number } = table.create(256, 0)
-for i = 0, 255 do
-	local c = i
-	for _ = 1, 8 do
-		if bit32.band(c, 1) == 1 then
-			c = bit32.bxor(0xEDB88320, bit32.rshift(c, 1))
-		else
-			c = bit32.rshift(c, 1)
-		end
-	end
-	CRC_TABLE[i + 1] = c
-end
-
--- CRC-32 (IEEE 802.3, as zip and PNG) of bytes [from, to) of `b`.
-function Template.crc32(b: buffer, from: number, to: number): number
-	local crc = 0xFFFFFFFF
-	local band, bxor, rshift = bit32.band, bit32.bxor, bit32.rshift
-	for i = from, to - 1 do
-		crc = bxor(CRC_TABLE[band(bxor(crc, buffer.readu8(b, i)), 0xFF) + 1], rshift(crc, 8))
-	end
-	return bxor(crc, 0xFFFFFFFF)
-end
-
-local ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-local ENCODE = buffer.create(64)
-buffer.writestring(ENCODE, 0, ALPHABET)
--- Per byte: its 6-bit value, WHITESPACE (skipped) or INVALID.
-local WHITESPACE, INVALID = 254, 255
-local DECODE = buffer.create(256)
-buffer.fill(DECODE, 0, INVALID)
-for i = 1, 64 do
-	buffer.writeu8(DECODE, string.byte(ALPHABET, i), i - 1)
-end
--- Bytes `decode` cuts off the end of a text: whitespace and closing quotes.
-local TRAILING: { [number]: boolean } = {}
-for _, c in { " ", "\t", "\n", "\r", "\v", "\f" } do
-	buffer.writeu8(DECODE, string.byte(c), WHITESPACE)
-	TRAILING[string.byte(c)] = true
-end
-for _, c in { '"', "'", "`" } do
-	TRAILING[string.byte(c)] = true
-end
-
--- The first `n` bytes of `data` in base64url without padding.
-function Template.base64(data: buffer, n: number?): string
-	local count = n or buffer.len(data)
-	local out = buffer.create((count * 4 + 2) // 3)
-	local o = 0
-	local i = 0
-	while i + 3 <= count do
-		local v = buffer.readu8(data, i) * 65536 + buffer.readu8(data, i + 1) * 256 + buffer.readu8(data, i + 2)
-		buffer.writeu8(out, o, buffer.readu8(ENCODE, v // 262144))
-		buffer.writeu8(out, o + 1, buffer.readu8(ENCODE, v // 4096 % 64))
-		buffer.writeu8(out, o + 2, buffer.readu8(ENCODE, v // 64 % 64))
-		buffer.writeu8(out, o + 3, buffer.readu8(ENCODE, v % 64))
-		i += 3
-		o += 4
-	end
-	local rest = count - i
-	if rest == 1 then
-		local v = buffer.readu8(data, i)
-		buffer.writeu8(out, o, buffer.readu8(ENCODE, v // 4))
-		buffer.writeu8(out, o + 1, buffer.readu8(ENCODE, v % 4 * 16))
-	elseif rest == 2 then
-		local v = buffer.readu8(data, i) * 256 + buffer.readu8(data, i + 1)
-		buffer.writeu8(out, o, buffer.readu8(ENCODE, v // 1024))
-		buffer.writeu8(out, o + 1, buffer.readu8(ENCODE, v // 16 % 64))
-		buffer.writeu8(out, o + 2, buffer.readu8(ENCODE, v % 16 * 4))
-	end
-	return buffer.tostring(out)
-end
-
---[[
-	The bytes of base64url `text` from character `from` on (whitespace skipped), or nil and a
-	message for a character outside the alphabet. A trailing group of 2 or 3 characters gives 1 or
-	2 bytes; a lone trailing character (a cut paste) is ignored.
-]]
-function Template.unbase64(text: string, from: number?): (buffer?, string?)
-	local start = from or 1
-	local out = buffer.create((#text - start + 1) * 3 // 4 + 3)
-	local o = 0
-	local acc, bits = 0, 0
-	for i = start, #text do
-		local c = string.byte(text, i)
-		local v = buffer.readu8(DECODE, c)
-		if v == INVALID then
-			local shown = if c >= 33 and c <= 126 then string.char(c) else string.format("\\%d", c)
-			return nil, `The structure data has a character that doesn't belong in it ('{shown}' at character {i})`
-		elseif v ~= WHITESPACE then
-			acc = acc * 64 + v
-			bits += 6
-			if bits >= 8 then
-				bits -= 8
-				local byte = acc // 2 ^ bits
-				buffer.writeu8(out, o, byte)
-				o += 1
-				acc -= byte * 2 ^ bits
-			end
-		end
-	end
-	local result = buffer.create(o)
-	buffer.copy(result, 0, out, 0, o)
-	return result, nil
-end
+-- CRC-32 and base64url (Structures/TemplateText's).
+Template.crc32 = TemplateText.crc32
+Template.base64 = TemplateText.base64
+Template.unbase64 = TemplateText.unbase64
 
 --[[ Encoding ]]
 
@@ -934,60 +836,13 @@ end
 
 --[[ Decoding ]]
 
--- Raised inside `decode` with a message for the player.
-type Failure = { failure: string }
-
-local function fail(message: string): never
-	error({ failure = message } :: Failure, 0)
-end
-
-type Reader = { b: buffer, o: number, len: number }
-
-local function readByte(r: Reader): number
-	if r.o >= r.len then
-		fail("The structure data ends too early")
-	end
-	local v = buffer.readu8(r.b, r.o)
-	r.o += 1
-	return v
-end
-
--- A varint of at most 5 bytes (values below 2^35).
-local function readVarint(r: Reader): number
-	local value, scale = 0, 1
-	for _ = 1, 5 do
-		local byte = readByte(r)
-		value += (byte % 128) * scale
-		if byte < 128 then
-			return value
-		end
-		scale *= 128
-	end
-	return fail("The structure data has a number that is too long")
-end
-
-local function readCount(r: Reader, cap: number, what: string): number
-	local n = readVarint(r)
-	if n > cap then
-		fail(`The structure has too many {what} ({n}, at most {cap})`)
-	end
-	return n
-end
-
-local function readString(r: Reader, cap: number, what: string): string
-	local n = readVarint(r)
-	if n > cap then
-		fail(`The structure's {what} is too long ({n} bytes, at most {cap})`)
-	elseif r.o + n > r.len then
-		fail("The structure data ends too early")
-	end
-	local s = buffer.readstring(r.b, r.o, n)
-	r.o += n
-	if utf8.len(s) == nil then
-		fail(`The structure's {what} is not text`)
-	end
-	return s
-end
+-- (Reading raises a TemplateText Failure with a message for the player; `decode` catches it.)
+type Reader = TemplateText.Reader
+local fail = TemplateText.fail
+local readByte = TemplateText.readByte
+local readVarint = TemplateText.readVarint
+local readCount = TemplateText.readCount
+local readString = TemplateText.readString
 
 -- A position inside the template (varint x, y, z).
 local function readPosition(r: Reader, t: Template, what: string): (number, number, number)
@@ -1173,63 +1028,15 @@ end
 	(unknown blocks replaced by air, unknown items left out).
 ]]
 function Template.decode(text: any): (Template?, string?, { string }?)
-	if type(text) ~= "string" then
-		return nil, "No structure data", nil
-	end
-	if #text > Template.MAX_TEXT then
-		return nil, `The structure data is too long ({#text} characters, at most {Template.MAX_TEXT})`, nil
-	end
-	-- The prefix, after whitespace and an opening quote.
-	local first, last = string.find(text, "^[%s\"'`]*IVS1:")
-	if first == nil or last == nil then
-		if string.find(text, "^[%s\"'`]*IVS%d+:") then
-			return nil, "The structure data is from a newer version of this game", nil
-		end
-		return nil, "That is not structure data: it starts with IVS1:", nil
-	end
-	-- (A closing quote and whitespace after the data, cut by a backward scan: a pattern anchored
-	-- at the end would rescan every whitespace run inside the text to its end, quadratic.)
-	local stop = #text
-	while stop > last and TRAILING[string.byte(text, stop)] do
-		stop -= 1
-	end
-	local payload, problem = Template.unbase64(string.sub(text, last + 1, stop))
-	if payload == nil then
+	local r, problem = TemplateText.open(text)
+	if r == nil then
 		return nil, problem, nil
 	end
-	local len = buffer.len(payload)
-	if len > Template.MAX_PAYLOAD then
-		return nil, "The structure data is too long", nil
-	end
+	local reader: Reader = r
 	local warnings: { string } = {}
 	local ok, result = pcall(function(): Template
-		local r: Reader = { b = payload, o = 0, len = len }
-		-- (Junk after the prefix usually fails here: say so plainly.)
-		local headerOk, version, bodyLength = pcall(function(): (number, number)
-			return readVarint(r), readVarint(r)
-		end)
-		if not headerOk then
-			fail("The structure data is damaged or cut off")
-		end
-		if version > Template.VERSION then
-			fail(`The structure data is from a newer version of this game (format {version})`)
-		elseif version ~= Template.VERSION then
-			fail(`That is not structure data this game knows (format {version})`)
-		end
-		local expected = r.o + bodyLength + 4
-		if bodyLength > Template.MAX_PAYLOAD then
-			fail("The structure data is too long")
-		elseif len < expected then
-			fail(`The structure data is cut off: it has {len} of its {expected} bytes. Copy all of it`)
-		elseif len > expected then
-			fail("The structure data has something extra at its end (two pasted together?)")
-		end
-		if buffer.readu32(payload, len - 4) ~= Template.crc32(payload, 0, len - 4) then
-			fail("The structure data is damaged (its checksum doesn't match): copy it again")
-		end
-		r.len = len - 4
-		local t = decodeBody(r, warnings)
-		if r.o ~= r.len then
+		local t = decodeBody(reader, warnings)
+		if reader.o ~= reader.len then
 			fail("The structure data has bytes this game doesn't understand")
 		end
 		return t
@@ -1237,11 +1044,7 @@ function Template.decode(text: any): (Template?, string?, { string }?)
 	if ok then
 		return result, nil, warnings
 	end
-	local failure = result :: any
-	if type(failure) == "table" and type(failure.failure) == "string" then
-		return nil, failure.failure, nil
-	end
-	return nil, "The structure data is damaged", nil
+	return nil, TemplateText.failure(result), nil
 end
 
 --[[ Editable tables: ASCII layers ]]
