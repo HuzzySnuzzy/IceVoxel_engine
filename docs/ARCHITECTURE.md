@@ -3857,15 +3857,14 @@ layer, then every melt back to air, is an edit). So weather writes go through
 `world:setWeather`, which first records what the seed generated at a cell with no edit
 (`world.natural`); a later `setBlock` back to that block deletes the edit instead of storing it
 (still replicated, still `onChanged`). A player's edit on such a cell is kept as any edit. It is
-saved as RegionCodec record 12 NATURAL beside the edits (`Save/WorldSnapshot`); builds before it
-refuse the record, the documented "newer version" path. **The thaw map** beside it: SnowWorld's
+saved as RegionCodec record 12 NATURAL beside the edits (`Save/WorldSnapshot`). **The thaw map**
+beside it: SnowWorld's
 freezing (`setWeather(x, y, z, Ice, true)`) also remembers the block it replaced (`world.thaw`,
 `thawAt`), edited cell or not, until anything else changes the cell; only such ice thaws, back to
 that block, so a player's pond thaws back to its water edit and the seed's lake to no edit, while
-ice a player puts there (after breaking the weather's, say) is never the weather's. Record 13 THAW;
-a region holding either map is RegionCodec version 2, any other still version 1 and the same bytes
-as before; a version 1 region with a natural map (saved before record 13) gets the thaw map of the
-rule that build thawed by (the natural map's Water under an Ice edit).
+ice a player puts there (after breaking the weather's, say) is never the weather's. Record 13
+THAW, in every region of version 3 (palettes: regions of older versions are never read, see
+Saving worlds).
 
 **Foliage colours** (`Shared/Seasons/Foliage`, client `Rendering/SeasonTint`; data
 `Config.Seasons.Foliage`). Grass tops, every leaves block, tinted plants and vines follow
@@ -4683,6 +4682,11 @@ strings of at most 64 bytes or booleans. No data is nil, never an empty table.
   data (Minecraft's creative slot packet), checked by `Items.validData` and the item's durability.
 - **Trust.** Everything from the network passes `Items.validData`; Net/Protocol decodes nothing
   else and hands out frozen tables. `Items.dataNumber(data, key)` reads a number back.
+- **Ids in data.** The keys whose number is a content id are listed once, in `Items/ItemData`
+  (`ID_KEYS`: a weapon's `ch`, `ammo`, `mag`, `optic`, `muzzle`, `light`, items; a Fluid Tank's
+  `fluid`; `addIdKey` for more: Shared/Machines adds each tank's `<tank>Fluid` and any typed kept
+  field), so saves keep them by name (Saving worlds: Names, not ids). A new key holding an id goes
+  there, or a save would keep its number as it is.
 
 **On the wire.** Snapshots and creative actions send a stack's data after its wear: u8 n (0 none,
 at most 16), then n entries sorted by key (equal data encodes alike): u8 key length + key, u8 type
@@ -4981,9 +4985,9 @@ shielding, and `define.metal` makes each metal's set. `tests/spec/Ores` checks t
   (two Saltpetre, a Sulfur, a `#coals`: four Gunpowder, Thermal's niter recipe; the coal and flint
   recipe stays); the Nuke's core a Block of Uranium; the Hazmat pieces in the armor shapes of Lead
   Ingots and White Wool, the mask's visor Glass ("WLW", "LGL").
-- The Metal Miner copies all six new ores: `MinerRules.ORES` appends Copper, Lead, Zinc, Sulfur,
-  Saltpetre and Uranium Ore after Diamond (the order is packed into a miner's state, 8 x index +
-  code, so the old six keep theirs); their entries' `miner`: the metals as iron (400 ticks at 200
+- The Metal Miner copies all six new ores: `MinerRules.ORES` has Copper, Lead, Zinc, Sulfur,
+  Saltpetre and Uranium Ore after Diamond (any order: saves keep a miner's ore by name, its state
+  packs a place only on the wire); their entries' `miner`: the metals as iron (400 ticks at 200
   J), the powders 600 at 200, uranium 3600 at 800. A panel line holds 16 characters before the arrow
   (`LINE_CHARACTERS`): a drop whose "Makes ..." is longer shows alone ("Raw Uranium").
 - Knowledge (`Knowledge.ORES`, `SMELTED`): the metals as iron, the powders as coal, uranium as
@@ -5120,8 +5124,8 @@ HUD drops its FOOD icon).
 - **Creative and spectator** (GameMode.invulnerable): nothing drains, heals or hurts; they eat
   whenever.
 - **Saves**: the bar (food, saturation, exhaustion, timer) is an optional flagged block of the
-  player record (Save/PlayerCodec version 4, flag bit 6) and the character (Save/CharacterCodec
-  version 3, flag bit 4); older records have none and give a full bar.
+  player record (Save/PlayerCodec since version 4, flag bit 6) and the character
+  (Save/CharacterCodec since version 3, flag bit 4); none kept gives a full bar.
 - **HUD**: the FOOD status icon (`Ui/StatusCluster`, see "The inventory and the HUD"): the
   drumstick's silhouette empties from the top with the food points, yellow at 6, red at 3,
   blinking at 0; two falling arrows under the Hunger effect (read from `Player/EffectState`) and a
@@ -5578,9 +5582,9 @@ false turns all of it off (a saved dose is kept as it is).
   Block of Uranium at the cap. F3's `radiation` line shows the rate and the dose with Mekanism's SI
   prefixes (`format`); the effect's icon is a trefoil (`Ui/EffectIcons` `radiation`). No HUD hint
   beyond them.
-- **Saved**: the dose rides in the player record (`Save/PlayerCodec` version 5, flag bit 7, an f32
-  after the food bar) and the character (`Save/CharacterCodec` version 4, flag bit 5), written only
-  above 0; older records read none, and an older server refuses the newer ones as before.
+- **Saved**: the dose rides in the player record (`Save/PlayerCodec` since version 5, flag bit 7,
+  an f32 after the food bar) and the character (`Save/CharacterCodec` since version 4, flag bit
+  5), written only above 0; an older server refuses the newer records as before.
   `World/WorldSave` and `Players/CharacterStore` capture it (`Radiation.export`, their caches for a
   leaving player: the glue forgets a leaving player only after every PlayerRemoving handler ran),
   give it back on entering (`Radiation.restore`: the standing character, else the next), and
@@ -6209,8 +6213,11 @@ transporter faces, what transporters may take out, `takes`, and an outline shown
 `ghost`), data fields, fields kept in the item, fluid tanks (`tanks`, below), its panel, its server
 tick, a status line, optional rate overrides, numbers for JEI (`info`, `Machines.info`) and an
 optional state field: a code (0..255, `Machines.state`) saying why it is not working, which Machines
-records carry and `status` gets as `view.state`. Its tick gets a context (`TickContext`): the block,
-its energy spec and position, the server's day time (`dayTime`, World/TimeOfDay) and whether a cell
+records carry and `status` gets as `view.state` (worked out from the data by its `stateOf` when it
+has one: the Metal Miner's adds its ore). Fields holding content ids get a type (`types = {
+mining = "block" }`: "block", "item" or "fluid"; a tank's `<tank>Fluid` is a fluid on its own),
+so saves keep them by name (`Machines.idFields`; see Saving worlds). Its tick gets a context
+(`TickContext`): the block, its energy spec and position, the server's day time (`dayTime`, World/TimeOfDay) and whether a cell
 sees the sky (`sky(x, y, z)`, below). Its contents are a container of kind "machine" (Types.KINDS)
 with the kind's slots and f64 `data` (at most 16): a header every machine shares, 1 energy, 2
 capacity, 3 input and 4 output (what the network moved last tick), 5 rate (made +, used -), 6
@@ -7276,14 +7283,14 @@ medicine and the rising on a real world server).
   player's torso colour, a skin tone by UserId: `riseVariant`; "<name> rose again"). The record
   goes to the player as Protocol `Survivor` (8 bytes) on each character, after a restore, a kill
   or a moon survived, and every `Survivor.SyncTicks`.
-- **Saved**: Save/CharacterCodec version 2 appends u32 alive, u16 kills, u16 moons and u32
-  infection to a character; a version 1 record reads them as 0. `Players/CharacterStore` captures
+- **Saved**: Save/CharacterCodec (since version 2) keeps u32 alive, u16 kills, u16 moons and u32
+  infection of a character. `Players/CharacterStore` captures
   them (`Survival.export`, the cache for a leaving player) and restores them on entering
   (`Survival.restore`); `keepThings` keeps the infection with the effects (an unfair visit can't
   cure it for good), while the record is the character's own (like deaths and time played). With
-  `Characters.Enabled` off, each world's player record (Save/PlayerCodec version 3, flag bit 5: the
-  same four numbers, written only when not all 0) carries them through `World/WorldSave`'s capture,
-  leaving fallback and restore; versions 1 and 2 read them as 0.
+  `Characters.Enabled` off, each world's player record (Save/PlayerCodec since version 3, flag bit
+  5: the same four numbers, written only when not all 0) carries them through `World/WorldSave`'s
+  capture, leaving fallback and restore.
 - **Bleeding** is a plain data effect (EffectList: `interval = 80, damage = 1, lethal = false`):
   EffectRules' `current > 1` rule stops it at the last half heart; amplifier 1 halves the
   interval. Every hurt the survival rules deal goes through `Characters.magicHurt` or EffectRules,
@@ -7643,12 +7650,12 @@ require it):
   energy bar; `info` range (its own, as the item's tooltip), rpm, buffer, idle, tracking, shot.
 - The Metal Miner (`Machines/Kinds/Miner`, kind "miner"; `Machines/MinerRules`). Frozen: slot 1 the
   output (pushed out every 10 ticks), 2-3 the cards (`Upgrades.slots(8, 53)`); data 7 progress, 8
-  ticksRequired, 9 energyPerTick, 10 mining (the ore block seen), 11 state (`MinerRules.packState`:
-  code + 8 x the ore's index in `MinerRules.ORES`, the frozen order Coal, Iron, Osmium, Gold,
-  Emerald, Diamond Ore, then the new ores appended: Copper, Lead, Zinc, Sulfur, Saltpetre, Uranium
-  Ore), 12 activeDelay; MINING ("Mining Diamond Ore"), NO_POWER, OUTPUT_FULL,
-  NO_ORE ("No ore below"); a 200 kJ store taking its capacity a tick (`rates`); `info` the store and
-  each ore's ticks, J a tick and floor. Config.Miner.Ores: coal 600 ticks at 800 J/t with a 400 kJ
+  ticksRequired, 9 energyPerTick, 10 mining (the ore block seen: `types`, saved by name), 11
+  state (the code alone; its views and records carry `MinerRules.packState`, code + 8 x the ore's
+  index in this version's `MinerRules.ORES`, worked out from `mining` by `stateOf`, so no place in
+  the list is ever saved and ores may come and go), 12 activeDelay; MINING ("Mining Diamond Ore"),
+  NO_POWER, OUTPUT_FULL, NO_ORE ("No ore below"), IDLE (switched off); a 200 kJ store taking its
+  capacity a tick (`rates`); `info` the store and each ore's ticks, J a tick and floor. Config.Miner.Ores: coal 600 ticks at 800 J/t with a 400 kJ
   floor, iron, osmium, copper, lead and zinc 400 at 200, sulfur and saltpetre 600 at 200, gold 800
   at 300, emerald and uranium 3600 at 800, diamond 4800 at 800. Each
   tick it reads the cell under it with `ctx.getBlock`: an ore of `ORES` is mined; another block is
@@ -8471,28 +8478,61 @@ its regions and its players.
   capacity, `TransmitterWorld.saveState`), Fluid Tanks, stacks in transporters, dropped items (with
   their age), farm animals (`Config.Save.Mobs`; monsters despawn anyway), block updates still due
   (`BlockTicker.scheduled`, in ticks from the save) and the seasons' natural and thaw maps (records
-  12 and 13: a region with them is version 2, one without version 1). Records are tagged and
-  length-prefixed and read back exactly to their length; ids this version doesn't know (a newer
-  version's blocks, items, mobs, items in a chest) are dropped one by one and counted (`dropped`),
+  12 and 13). Records are tagged and length-prefixed and read back exactly to their length, the
+  region's palette first (version 3: Names, not ids, below); names this version doesn't know (a
+  newer version's, or content since removed) are left out one by one and counted (`dropped`: an
+  edit of such a block becomes Air, a stack or a mob goes, a pipe's or tank's fluid empties),
   anything else damaged refuses the region. A world with any dropped is played but never saved
-  (`canSave` false, "saved by a newer version" on the title screens): writing it back would lose
-  them for good. Block updates still waiting for their chunk to generate are saved again as they
-  were (`WorldSnapshot.collect`'s `pending`), not lost at the next save.
+  (`canSave` false, "saved by a newer version, or since removed" on the title screens): writing
+  it back would lose them for good. Block updates still waiting for their chunk to generate are
+  saved again as they were (`WorldSnapshot.collect`'s `pending`), not lost at the next save.
 - Players (`Save/PlayerCodec`, Minecraft's playerdata): feet and facing (or none: back at the
   spawn), health in half hearts, game mode and the previous one, the selected slot, inventory,
   armor and cursor, Tough As Nails' thirst and temperature (Climate Clemency left included) and
   the running status effects, and (version 3, flag bit 5, written only when not all 0) the
   apocalypse's survivor record and infection with `Characters.Enabled` off (Infection and
   bleeding), and (version 4, flag bit 6) Minecraft's food bar (food, saturation, exhaustion,
-  timer; older records have none: a full bar), and (version 5, flag bit 7, written only above 0)
-  the radiation dose (Radiation). Knowledge, Ages and skills stay in Players/ProgressStore, for every world. 60-400
-  bytes. A record holding items this version doesn't know is applied (what it can read) but
-  never written that session. The world's options carry its `ruins` setting; a record from before
+  timer; none kept: a full bar), and (version 5, flag bit 7, written only above 0) the radiation
+  dose (Radiation); version 6 keeps names (its own palette right after the version byte: its
+  items, the fluids in their data, its effects). Knowledge, Ages and skills stay in
+  Players/ProgressStore, for every world. 100-700 bytes. A record holding items this version
+  doesn't know is applied (what it can read) but never written that session; an effect it
+  doesn't know is skipped. The world's options carry its `ruins` setting; a record from before
   the ruins has no key and reads it as off (World types).
 - Not saved: fire's ages (fire comes back at age 0), a lit TNT's or Nuke's fuse (a lit block
   with no record starts its full fuse, Behaviours/Tnt), explosions under way, items' and mobs'
   velocities, monsters, the session's SAVE texts of structure blocks (copy the IVS1 text) and
   open windows (a window's cursor goes back into the inventory).
+
+**Names, not ids** (`Save/SaveCodec`'s palettes, `Items/ItemData`, Shared/Machines `types`).
+Content ids are given out as content loads, so another version may give a block, item, fluid,
+mob kind or effect another number. Saves keep names: every record the DataStore commits on its
+own (a region, a player record, a character) carries a palette, the names of the blocks, items,
+fluids, mob kinds and effects it holds, each once in the order first written (per kind a varint
+count and the texts; id 0, Air and nothing, stays 0 in every version), and stores its indices
+there instead of ids; the reader maps each index to today's id of that name (`Blocks.find`,
+`Items.find`: a RENAMED line keeps renamed content). Ids hiding inside data go through it too: a
+container's numbers (a furnace's cooking item, `Crafting/Smelting.ID_FIELDS`; the machine fields
+a kind types, `types = { mining = "block" }`: the Metal Miner's ore, the Electric Furnace's item,
+and the fluid of each tank taking several: `Machines.idFields`) and item data (the keys
+`ItemData.ID_KEYS` lists once: a weapon's `ch`, `ammo`, `mag`, `optic`, `muzzle` and `light`, a
+Fluid Tank's `fluid`; Shared/Machines adds each tank's `<tank>Fluid` and any typed kept field).
+The Metal Miner's state field keeps its code alone and its views and records add its ore's place
+in this version's `MinerRules.ORES` from `mining` (KindSpec `stateOf`), so the ore list may
+change. A name this version doesn't know never refuses a record: a block becomes Air (left out of
+the seasons' maps), an item is dropped (an id in an item's data drops that key), a fluid empties
+its pipe, tank or machine tank, a mob goes, a machine's typed field reads 0 (what it works on
+starts over), an effect is skipped; all but effects are counted, so such a record is played but
+not written back (it may be a newer version's: Roblox runs both during an update). To retire
+content for good, a RENAMED line names what replaces it. So content can be added, reordered and
+renamed between versions with every world, player and character intact (tests/spec/SaveNames:
+round trips through palettes whose names were swapped, renamed and removed). Records from before
+palettes (regions of versions 1 and 2, player records of 1 to 5, characters of 1 to 4: the user
+accepted losing them) are refused, never misread (`SaveCodec.OLDER`): such a region is left out
+(`Loaded.outdated`: the world there is what the seed generates, said in the output, and the first
+save writes it anew), such a player starts afresh (told, and saved), such a character comes back
+as who it is (the head every version wrote alike, with no ids: name, look, difficulty, times,
+deaths; and its progress, kept by name), its things afresh (`outdated`, told when selected).
 
 **Format and keys** (`Save/SaveCodec`, `Save/WorldMeta`). DataStore "IceVoxelWorlds_v1"
 (`Config.Save.StoreName`): "index" (the game's world list, the worlds made with the title screen
@@ -8511,13 +8551,14 @@ so the head is the region's commit: a save cut short leaves the old head naming 
 intact parts, and parts whose `gen` or `w` differ from their head's (two servers that both
 believed they held the world, numbering their saves alike) refuse the load instead of joining
 into a region neither wrote. Every record carries a version; a newer
-one is refused, never half read or overwritten. A world's bytes are its record, regions and
-players (each value's text plus 96 for the JSON around it); a save that would take a world past
+one is refused, never half read or overwritten (an older one: Names, not ids). A world's bytes
+are its record, regions and players (each value's text plus 96 for the JSON around it); a save that would take a world past
 `Config.Save.MaxWorldBytes` (64 MB) is refused as a whole, and operators are warned past
 `WarnShare` (80%) and every 5% more. Measured (tests/spec/WorldSave): a 9 × 9 × 5 house, a 3 × 3 ×
-64 tunnel, a chest, a furnace, a battery, pipes, an item and a cow are 797 edits, 881 bytes, 1,102
-characters; 6 fully edited chunks with no two neighbouring cells alike (no run compresses: the
-worst case) are 3.66 MB and two parts; a typical player record is 192 characters.
+64 tunnel, a chest, a furnace, a battery, pipes, an item and a cow are 797 edits, 1,036 bytes
+(155 of them its palette's names), 1,295 characters; 6 fully edited chunks with no two
+neighbouring cells alike (no run compresses: the worst case) are 3.66 MB and two parts; a
+typical player record is 259 characters.
 
 **Owners.** A world is its creator's (`WorldMeta` `owner`: the operator who pressed Create New
 World, `WorldSave.claim`; 0, the game's, with the title screen off). Load World lists a player's
@@ -8542,7 +8583,8 @@ or not at all: any key that can't be read (after the scheduler's retries) or dec
 lock back and the world is never started, so nothing is ever written over it; a world whose start
 failed half way (`WorldSave.abandon`) is never saved either. A player whose record can't be read
 starts afresh and is never written that session (and is told), so an outage never replaces a
-saved inventory with an empty one; one who leaves before their first character (still on the
+saved inventory with an empty one (one whose record an older version saved starts afresh too,
+is told, and is saved); one who leaves before their first character (still on the
 title screen) is written with their saved place, health, Tough As Nails and effects
 (`PlayerCodec.withWaiting`), not as a fresh player. Each player record a save or a leaving player
 writes carries its capture's order: a record older than one already written (or being written)
@@ -8904,7 +8946,9 @@ second, half hearts). The shared groundwork (data, codecs, messages), then how e
   everything on death, Mediumcore drops it, Hardcore dies for good), inventory and equipment,
   health, mana and Mana Crystals, effects, Tough As Nails, its food bar (CharacterCodec version 3,
   flag bit 4: Minecraft's hunger), its radiation dose (version 4, flag bit 5) and its Knowledge/Ages/skills between worlds; a world keeps only where each character stood, its game mode and a spawn point.
-  `Save/CharacterCodec` is the record (inventory places 1..59: `Inventory/Types.PLACE_*`), its
+  `Save/CharacterCodec` is the record (version 5: its own palette, names not ids, see Saving
+  worlds; of an older version's only the head, who it is, comes back, `outdated`; inventory
+  places 1..59: `Inventory/Types.PLACE_*`), its
   DataStore value (`{ v, data, progress, lock }`: the session lock inside the value, so loading
   with it and every save are one UpdateAsync each) and the user's index (`{ v, next, chars }`);
   `Save/WorldCharacterCodec` the per-world entry. `Characters/Appearance` is the R15 look: body
@@ -8950,7 +8994,10 @@ stays: a non-operator joins the one running.
   id, never reused; refused at `Characters.MAX`); an orphan record of a failed index write is
   written over by the next create unless another job's live lock sits on it. Select is one
   UpdateAsync that reads the record and takes the lock, keeping the stored bytes exactly ("busy"
-  for another job's live lock: CharacterStore retries 2, 4, 8 s up to `LockWait`). Every save is
+  for another job's live lock: CharacterStore retries 2, 4, 8 s up to `LockWait`); a record an
+  older version saved (before palettes) selects as who it is with its things afresh, the player
+  told ("... was saved by an older version: its things could not be kept, it starts afresh"),
+  and its next save writes it whole. Every save is
   an UpdateAsync that writes only while `SaveLock.renew` says the lock is still this job's
   ("lost" stops saving that character) and carries an order number (an older capture is
   "skipped"); the last save releases. A select (and a rename) while this server's own last save
@@ -9002,7 +9049,9 @@ stays: a non-operator joins the one running.
   the same safety as player records (a failed read is never written over, departed entries are
   flushed at once, order numbers). With characters on, WorldSave no longer reads or applies
   `<id>/p/<userId>` at PlayerAdded; with them off everything is as before (PlayerCodec version 2
-  only adds the equipment places 42..59 and the hidden bits; version 1 still reads).
+  added the equipment places 42..59 and the hidden bits). The migration takes in records of this
+  version only: one saved before palettes is never read (Saving worlds), so there is nothing to
+  take.
 - **Death**: `Inventories.setKeepRule(CharacterStore.keepsInventory)` keeps everything for
   Classic; Hardcore marks the record dead, saves it and touches the index at once, and makes the
   player a Spectator for the session.

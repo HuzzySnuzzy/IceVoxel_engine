@@ -59,7 +59,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   and status effects (with characters the character carries all of that but where it stood and its
   game mode, above; without them progress is kept per player for every world). Autosave every 5
   minutes writes only what changed (a house and a tunnel, a chest, a furnace, a battery, pipes,
-  an item and a cow: about 1.1 KB of a key); `/save-all`, `/save-off` and `/save-on` as
+  an item and a cow: about 1.3 KB of a key); `/save-all`, `/save-off` and `/save-on` as
   Minecraft's; and the world is saved when the server shuts down. While a save is in flight a
   little grass block bobs in the bottom right corner ("Saving..."), and operators get a toast:
   "World saved — 1.4 MB of 64 MB (largest region 0.3 / 4 MB)"; the chat warns them when the world
@@ -71,11 +71,18 @@ A fast, Minecraft-style voxel engine for Roblox.
   into an empty server can't touch anyone else's; each list holds 200 worlds, and a new one past
   that is refused, never an old one dropped. One server opens a world at a time (a lock renewed
   while it loads and before every save, that goes stale 3 minutes after a crash), a world that
-  can't be read whole is never started or written over, one holding blocks or items this
-  version doesn't know (saved by a newer version) is played but not saved, a player who leaves
-  from the title screen keeps their saved place, and Studio without API access says so on the
-  title screen and in the chat (worlds then last for the session; `/save-on` doesn't pretend
-  otherwise).
+  can't be read whole is never started or written over, a player who leaves from the title
+  screen keeps their saved place, and Studio without API access says so on the title screen and
+  in the chat (worlds then last for the session; `/save-on` doesn't pretend otherwise). Saves
+  keep names, not ids, so content can change between versions: each region, player record and
+  character lists once the names of the blocks, items, fluids, mobs and effects it holds (and
+  those inside machines and items: a miner's ore, a gun's rounds, a tank's fluid), so content
+  added, reordered or renamed (with a `RENAMED` line) loads just as it was saved; a name this
+  version doesn't know (a newer version's, or content removed) loads as air or is left out, never
+  refusing the world, which is then played but not saved. Worlds, players and characters saved
+  before names were kept are not read: such a world's terrain and chests start afresh from its
+  seed (its name, seed, settings and clock stay), a player starts afresh, and a character keeps
+  its name, look and progress but not its things; each says so.
 - **Loading what you see first.** Terrain loads in the order you need it: the ground under you,
   then what is in front of the camera, then what is just behind, then the rest, and terrain hidden
   behind mountains last; after a teleport 90% of the view is there 15-40% sooner. A teleport drops
