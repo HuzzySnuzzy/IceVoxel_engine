@@ -2501,6 +2501,37 @@ return function(t, shared, require, _server, _client)
 		t.eq(Lakes.puddleChance[forest], 0.1, "the forest's")
 	end)
 
+	t.test("content: a block's poi: its type, its variants' and a family's; a POI tag naming none", function()
+		local env, root = fresh(function(env, packs)
+			local folder = env.folder(packs, "Patch")
+			env.module(folder, "pack", { order = 900, requires = { "Minecraft" } })
+			env.module(folder, "blocks", {
+				{ name = "Anvil", poi = "anvil" },
+				{ name = "ChippedAnvil", item = "Anvil", placeable = false },
+				{ name = "Bellows", poi = "anvil" },
+			})
+		end)
+		local Patched = env.require(root.Poi)
+		local B = env.require(root.Blocks).id
+		t.eq(Patched.of(B.Anvil), "anvil")
+		t.eq(Patched.of(B.ChippedAnvil), "anvil", "a variant: its item's")
+		t.eq(Patched.of(B.Bellows), "anvil", "blocks giving one id: one type")
+		t.eq(#assert(Patched.get("anvil")).blocks, 3)
+		t.eq(Patched.of(B.Chest), "chest", "the game's")
+		t.eq(Patched.of(B.Stone), nil)
+		fails(
+			{ pack("P", { blocks = { { name = "A", poi = "Anvil" } } }) },
+			{ 'pack P, block A: poi must be a snake case id (lower case, digits and _: "crafting_table")' },
+			"a poi id"
+		)
+		-- (Poi.TAGS name types: a pack taking the supply crates' away leaves two tags naming none.)
+		refused(
+			{ blocks = { { name = "SupplyCrate", override = true, poi = "crate" } } },
+			{ "Poi" },
+			{ "names supply_crate, which no block's `poi` gives" }
+		)
+	end)
+
 	t.test("content: a registry's own check names the pack: two effects /effect finds by one word", function()
 		refused({
 			effects = {

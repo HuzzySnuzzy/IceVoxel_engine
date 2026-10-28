@@ -73,6 +73,8 @@ return function(define: Define.Context): { BlockSpec }
 			workSound = "block.oil_refinery.hum",
 			lore = "Turns Oil into Fuel with energy.",
 			age = "electric",
+			-- (/locate poi finds both: Shared/Poi.)
+			poi = "oil_refinery",
 		},
 		{
 			name = "CombustionGenerator",
@@ -87,6 +89,7 @@ return function(define: Define.Context): { BlockSpec }
 			energy = { capacity = 1000000, output = 5000 },
 			lore = "Burns Fuel for a lot of energy.",
 			age = "electric",
+			poi = "combustion_generator",
 		},
 	})
 	return list

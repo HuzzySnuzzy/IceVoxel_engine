@@ -62,6 +62,8 @@ for _, mode in { "Save", "Load", "Corner", "Data" } do
 		decor = `StructureBlock{mode}`,
 		structureMode = string.lower(mode),
 		lore = if item then "Saves and loads structures. Creative only." else nil,
+		-- (/locate poi finds every mode: the others are the item's, Shared/Poi.)
+		poi = if item then "structure_block" else nil,
 	})
 end
 
@@ -99,6 +101,7 @@ for index, orientation in JIGSAW_ORIENTATIONS do
 		decor = `Jigsaw{front}{top}`,
 		jigsaw = { front = front, top = top },
 		lore = if item then "Joins structure pieces together. Creative only." else nil,
+		poi = if item then "jigsaw" else nil,
 	})
 end
 

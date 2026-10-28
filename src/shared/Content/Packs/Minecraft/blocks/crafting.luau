@@ -4,7 +4,7 @@
 	27 slots, breaking drops them), the crafting table (a 3 x 3 grid, Shared/Crafting) and the
 	furnace (3 slots, Crafting/Smelting), each drawn with its decorated faces (BlockDecor). The
 	chest and the crafting table burn 300 ticks in a furnace (Minecraft's). Zombies break none of
-	them.
+	them. Each is a point of interest /locate poi finds (`poi`: Shared/Poi).
 ]]
 
 local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
@@ -26,6 +26,7 @@ return {
 		texture = { All = "chest" },
 		lore = "Stores your things. Breaking it drops what's inside.",
 		fuel = 300,
+		poi = "chest",
 	},
 	{
 		name = "CraftingTable",
@@ -40,6 +41,7 @@ return {
 		texture = { Top = "crafting table top", Sides = "crafting table side" },
 		lore = "Opens a 3 x 3 crafting grid for bigger recipes.",
 		fuel = 300,
+		poi = "crafting_table",
 	},
 	{
 		name = "Furnace",
@@ -53,5 +55,6 @@ return {
 		decor = "Furnace",
 		texture = { Top = "furnace top", Sides = "furnace side", Bottom = "furnace top" },
 		lore = "Smelts ores, cooks food and purifies water with fuel.",
+		poi = "furnace",
 	},
 } :: { BlockSpec }

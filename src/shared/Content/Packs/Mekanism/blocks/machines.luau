@@ -78,6 +78,8 @@ return function(define: Define.Context): { BlockSpec }
 			machine = { kind = "creative" },
 			energy = { capacity = math.huge, output = math.huge },
 			lore = "Never runs out of energy. Creative only.",
+			-- (Each machine is a point of interest /locate poi finds: Shared/Poi.)
+			poi = "energy_cube",
 		},
 		{
 			name = "HeatGenerator",
@@ -92,6 +94,7 @@ return function(define: Define.Context): { BlockSpec }
 			energy = { capacity = 160000, output = 400 },
 			lore = "Burns furnace fuel or lava for energy. Lava around it helps.",
 			age = "industrial",
+			poi = "heat_generator",
 		},
 		{
 			name = "ElectricFurnace",
@@ -107,6 +110,7 @@ return function(define: Define.Context): { BlockSpec }
 			workSound = "block.electric_furnace.hum",
 			lore = "Smelts with energy instead of fuel. Takes upgrades.",
 			age = "electric",
+			poi = "electric_furnace",
 		},
 		{
 			name = "SolarPanel",
@@ -124,6 +128,7 @@ return function(define: Define.Context): { BlockSpec }
 			energy = { capacity = 96000, output = 100 },
 			lore = "Makes energy under an open sky by day.",
 			age = "atomic",
+			poi = "solar_panel",
 		},
 	}
 	local batteries = {
@@ -148,6 +153,8 @@ return function(define: Define.Context): { BlockSpec }
 			energy = { capacity = numbers.batteryCapacity, input = numbers.batteryRate, output = numbers.batteryRate },
 			lore = own.lore,
 			age = own.age,
+			-- (Every tier is one point of interest.)
+			poi = "battery",
 		})
 	end
 	return list

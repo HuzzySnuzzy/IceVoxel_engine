@@ -199,6 +199,8 @@ return function(define: Define.Context): { BlockSpec }
 			flammable = { ignite = 5, burn = 20 },
 			texture = { Top = "supply crate top", Sides = "supply crate side", Bottom = "supply crate top" },
 			lore = "A wooden crate someone stocked and never came back for.",
+			-- (The ruins' and bunkers' loot is a point of interest /locate poi finds: Shared/Poi.)
+			poi = "supply_crate",
 		},
 		{
 			name = "MedicineCabinet",
@@ -213,6 +215,7 @@ return function(define: Define.Context): { BlockSpec }
 			menu = "Chest",
 			texture = { Top = "medicine cabinet top", Sides = "medicine cabinet side" },
 			lore = "Check it for bandages and pills before anyone else does.",
+			poi = "medicine_cabinet",
 		},
 	})
 
@@ -290,6 +293,8 @@ return function(define: Define.Context): { BlockSpec }
 			texture = if open then nil else { All = "bunker hatch" },
 			lore = if open then nil else "A steel hatch over a ladder shaft. The dead can't break it.",
 			age = if open then nil else "iron",
+			-- (A point of interest, open or shut: open, the item's.)
+			poi = if open then nil else "bunker_hatch",
 		})
 	end
 

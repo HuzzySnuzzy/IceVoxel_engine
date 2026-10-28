@@ -64,5 +64,7 @@ return {
 		heats = true,
 		lore = "Warms you when close and boils dirty water clean. Hot to touch.",
 		spawnUnsafe = "near",
+		-- (/locate poi finds it: Shared/Poi.)
+		poi = "campfire",
 	},
 } :: { Schema.BlockSpec }

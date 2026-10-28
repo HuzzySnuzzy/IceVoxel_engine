@@ -8563,7 +8563,8 @@ seed and the full detail terrain, and the generators answer for one cell at a ti
   built-in kinds `mineshaft`, `mineshaft_overgrown`, `mineshaft_entrance`, `oil_geyser`,
   `oil_deposit`, `lava_lake`, `lake`, `cave_entrance`, `ravine`, `city`, `bunker`, then the
   library's structures; a library name clashing with a built-in one is left out), biomes
-  (the packs' 18) and points of interest (`Shared/Poi`). Ids show in snake case without a namespace
+  (the packs' 18) and points of interest (`Shared/Poi`: the block entries' `poi`, a variant
+  taking its item's). Ids show in snake case without a namespace
   ("birch_forest") and match loosely (`Locate.key`: any case, "minecraft:" or "icevoxel:" dropped,
   no `_`, spaces or dashes). Tags (`#mineshaft`, `#oil_well`, `#lake`, `#cave`, `#ruins` (a city or
   a bunker), `#library`; the biomes' own `tags`, `#is_forest`, `#is_taiga`, `#is_mountain`,

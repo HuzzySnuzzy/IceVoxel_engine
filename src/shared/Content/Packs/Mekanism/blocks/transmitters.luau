@@ -93,6 +93,8 @@ return function(define: Define.Context): { BlockSpec }
 	}
 	for tier, spec in tanks do
 		spec.tank = { tier = tier, capacity = Tiers.TIERS[tier].tankCapacity }
+		-- (Every tier is one point of interest /locate poi finds: Shared/Poi.)
+		spec.poi = "fluid_tank"
 		table.insert(list, define.tank(spec, Tiers.TIERS[tier].colour))
 	end
 	local cables: { BlockSpec } = {

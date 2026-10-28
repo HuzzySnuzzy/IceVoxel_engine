@@ -74,6 +74,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			age = "industrial",
 			skill = "demolition",
 			lit = "LitTnt",
+			-- (/locate poi finds it, lit or not: Shared/Poi.)
+			poi = "tnt",
 		},
 		{
 			name = "LitTnt",
@@ -106,6 +108,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			age = "atomic",
 			skill = "fission",
 			lit = "LitNuke",
+			poi = "nuke",
 		},
 		{
 			name = "LitNuke",

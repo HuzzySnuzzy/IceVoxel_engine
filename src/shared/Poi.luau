@@ -5,49 +5,26 @@
 	lodestones and lightning rods, none of which this game has; these are the blocks a player
 	looks for here instead.
 
-	  Types   each an id (snake case, as /locate shows it) and the block names it covers: every
-	          block whose BlockList `item` (or name, without one) is one of them, so a type takes in
+	  Types   each an id (snake case, as /locate shows it): the block entries' `poi` (Content/
+	          Schema), in id order. A block without one is of its `item`'s type, so a type takes in
 	          every variant of its block (structure blocks' four modes, jigsaws' twelve facings,
-	          lit TNT) and a family is one type (`battery`: the four tiers, `fluid_tank` the four
-	          tanks).
+	          lit TNT), and the blocks giving one id are one type (`battery`: the four tiers,
+	          `fluid_tank` the four tanks).
 	  Tags    Minecraft's tag files' idea (#acquirable_job_site, #village): `workstation`,
 	          `machine` (every type whose blocks have a BlockList `machine`), `generator`,
 	          `container`, `structure`, `explosive`, `scavenge` (what the ruins and bunkers hold
-	          loot in).
+	          loot in); each names types some block gives (checked as this loads).
 	  Lookup  `lut` holds each block id's type index (u8, 0: none), for the hot loops that scan
 	          edits and templates (World/PoiSearch, Generation/StructureGen.pieceBlocks); `of`
 	          gives a block's type id.
 ]]
 
 local Blocks = require(script.Parent.Blocks)
+local BlockList = require(script.Parent.Blocks.BlockList)
 
 export type Type = { id: string, index: number, blocks: { number } }
 
 local Poi = {}
-
--- id, then the block names (BlockList names, matched against `item or name`).
-local TYPES: { { any } } = {
-	{ "chest", "Chest" },
-	{ "crafting_table", "CraftingTable" },
-	{ "furnace", "Furnace" },
-	{ "campfire", "Campfire" },
-	{ "electric_furnace", "ElectricFurnace" },
-	{ "heat_generator", "HeatGenerator" },
-	{ "combustion_generator", "CombustionGenerator" },
-	{ "oil_refinery", "OilRefinery" },
-	{ "solar_panel", "SolarPanel" },
-	{ "energy_cube", "CreativeEnergyCube" },
-	{ "battery", "BasicBattery", "AdvancedBattery", "EliteBattery", "UltimateBattery" },
-	{ "fluid_tank", "BasicFluidTank", "AdvancedFluidTank", "EliteFluidTank", "UltimateFluidTank" },
-	{ "structure_block", "StructureBlock" },
-	{ "jigsaw", "Jigsaw" },
-	{ "tnt", "Tnt" },
-	{ "nuke", "Nuke" },
-	-- (The apocalypse's ruins and bunkers: their loot, and the hatch, open or shut.)
-	{ "supply_crate", "SupplyCrate" },
-	{ "medicine_cabinet", "MedicineCabinet" },
-	{ "bunker_hatch", "BunkerHatch" },
-}
 
 Poi.TAGS = table.freeze({
 	workstation = { "crafting_table", "furnace", "campfire", "electric_furnace", "oil_refinery" },
@@ -60,7 +37,7 @@ Poi.TAGS = table.freeze({
 -- Every type whose blocks are machines.
 Poi.MACHINE_TAG = "machine"
 
--- The types in order (Poi.types[i].index == i).
+-- The types, in the id order of their first blocks (Poi.types[i].index == i).
 Poi.types = {} :: { Type }
 local byId: { [string]: Type } = {}
 -- u8 per block id: its type's index, 0 for none.
@@ -68,27 +45,38 @@ Poi.lut = buffer.create(Blocks.count)
 
 local machines: { string } = {}
 do
-	local wanted: { [string]: number } = {}
-	for i, entry in TYPES do
-		local poiType: Type = { id = entry[1] :: string, index = i, blocks = {} }
-		Poi.types[i] = poiType
-		byId[poiType.id] = poiType
-		for k = 2, #entry do
-			wanted[entry[k] :: string] = i
+	-- A block's type id: its entry's `poi`, else its item's (nil: none).
+	local specs = BlockList
+	local function poiOf(id: number): string?
+		local spec = specs[id + 1]
+		if spec.poi then
+			return spec.poi
 		end
+		local item = if spec.item then Blocks.find(spec.item) else nil
+		return if item then specs[item + 1].poi else nil
 	end
 	for id = 0, Blocks.count - 1 do
-		local def = Blocks.get(id)
-		local index = wanted[def.item or def.name]
-		if index then
-			table.insert(Poi.types[index].blocks, id)
-			buffer.writeu8(Poi.lut, id, index)
+		local poiId = poiOf(id)
+		if poiId then
+			local poiType = byId[poiId]
+			if poiType == nil then
+				poiType = { id = poiId, index = #Poi.types + 1, blocks = {} }
+				table.insert(Poi.types, poiType)
+				byId[poiId] = poiType
+			end
+			table.insert(poiType.blocks, id)
+			buffer.writeu8(Poi.lut, id, poiType.index)
 		end
 	end
+	assert(#Poi.types < 256, "Poi: point of interest types must fit a u8")
 	for _, poiType in Poi.types do
-		assert(#poiType.blocks > 0, `Poi: no block for {poiType.id}`)
 		if Blocks.get(poiType.blocks[1]).machine ~= nil then
 			table.insert(machines, poiType.id)
+		end
+	end
+	for tag, members in Poi.TAGS do
+		for _, member in members do
+			assert(byId[member], `Poi: tag {tag} names {member}, which no block's \`poi\` gives`)
 		end
 	end
 end

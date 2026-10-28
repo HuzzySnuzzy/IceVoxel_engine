@@ -97,6 +97,10 @@
 	                                it by (Blocks.find, Items.find: Blocks.RENAMED, Items.RENAMED;
 	                                a block's are its item's too). No two entries may claim one, and
 	                                none may be a name an entry has now.
+	  poi              block        the point of interest type /locate poi finds it as, a snake case
+	                                id ("chest", "battery"; Shared/Poi): blocks naming it as `item`
+	                                are of its type too (every mode, facing and lit form), and blocks
+	                                giving one id are one type (the four batteries)
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
 	gone: each entry says its own).
@@ -308,6 +312,8 @@ export type BlockSpec = {
 	spawnUnsafe: string?,
 	-- Its former names (the header).
 	formerly: { string }?,
+	-- Its point of interest type (the header).
+	poi: string?,
 }
 
 -- One box of an item's model (`model`).
@@ -1149,6 +1155,13 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	`material` stay the block's plain look (drawn while its texture is blank or textures are off,
 	and on the map) and the colour a tinted texture takes.
 ]]
+-- A snake case id: lower case letters, digits and "_" (a block's `poi`).
+local function SNAKE_ID(value: any): string?
+	if type(value) ~= "string" or not string.match(value, "^[%l%d_]+$") then
+		return ` must be a snake case id (lower case, digits and _: "crafting_table"), not {describe(value)}`
+	end
+	return nil
+end
 Schema.BLOCK_FIELDS = {
 	name = STRING,
 	render = enum({ "Opaque", "Transparent", "Fluid", "None" }),
@@ -1245,6 +1258,7 @@ Schema.BLOCK_FIELDS = {
 	spawnUnsafe = enum({ "on", "in", "near" }),
 	-- (The header's.)
 	formerly = STRINGS,
+	poi = SNAKE_ID,
 } :: { [string]: Check }
 
 --[[
