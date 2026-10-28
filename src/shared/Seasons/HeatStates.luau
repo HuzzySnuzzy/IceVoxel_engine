@@ -3,8 +3,8 @@
 	The state codes of the heaters, coolers and stoves (Shared/Machines kinds "heater", "cooler",
 	"stove" and "oilheater": their `state` field, KindSpec `state`), and the status line each one
 	reads (WAILA and the panel, with RATE and `heat`: "Heating 32 HU"). Pure data, requiring
-	nothing, so the kinds, their panels and WAILA agree. Codes are append-only (a byte in Machines
-	records); 0 is a machine that has done nothing yet.
+	nothing, so the kinds, their panels and WAILA agree. Codes are append-only (saved in the
+	machine's data, sent in Machines records); 0 is a machine that has done nothing yet.
 ]]
 
 local HeatStates = {}

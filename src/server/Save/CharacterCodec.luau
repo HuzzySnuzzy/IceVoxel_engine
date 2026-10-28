@@ -23,20 +23,23 @@
 	            game mode are each world's (Save/WorldCharacterCodec); its Knowledge, Ages and
 	            skills are a table beside the bytes in the value (Shared/Progression.toRecord).
 	  Bytes     u8 VERSION, the record's palette (Save/SaveCodec: names, not ids: its items, the
-	            fluids in their data, its effects), then the head: u8 flags (bit 0 thirst, 1
-	            temperature, 2 dead, 3 legacy, 4 hunger, 5 radiation), u32 id, text name, u8
-	            difficulty, f64 created, f64 lastPlayed, f64 played, u32 deaths, u16 n + n bytes
-	            of look (Appearance.encode); then f32 health, f32 maxHealth, f32 mana, u8
-	            crystals, u8 selected, u16 hidden, u8 n + n x (u8 place (Types.PLACE_*: 1..36
-	            slots, 37..40 armor, 41 cursor, 42..48 accessories, 49..52 vanity armor, 53..59
-	            vanity accessories), stack (Save/SaveCodec)), [5 x f32 thirst], [10 x f32
-	            temperature], u8 n + n x (varint effect, u8 amplifier, i32 ticks, u8 ambient), u8
-	            n + n x text (imported world ids), u32 alive, u16 kills, u16 moons, u32 infection,
-	            [4 x f32 hunger], [f32 dose] (only above 0). 100 bytes to 3 KB: far below a
-	            key's 4 MB. Decoding checks every number; anything odd is a damaged record (nil);
-	            names this version doesn't know are left out: an item is dropped and counted
-	            (`dropped`), an effect skipped, each name counted in `unknown`; as PlayerCodec's,
-	            the palette carries the writer's place version (`placeVersion`), which says
+	            fluids in their data, its effects, and which item data keys hold them), then the
+	            head: u8 flags (bit 0 thirst, 1 temperature, 2 dead, 3 legacy, 4 hunger, 5
+	            radiation), u32 id, text name, u8 difficulty, f64 created, f64 lastPlayed, f64
+	            played, u32 deaths, u16 n + n bytes of look (Appearance.encode); then f32 health,
+	            f32 maxHealth, f32 mana, u8 crystals, u8 selected, u16 hidden, u8 n + n x (u8
+	            place (Types.PLACE_*: 1..36 slots, 37..40 armor, 41 cursor, 42..48 accessories,
+	            49..52 vanity armor, 53..59 vanity accessories), stack (Save/SaveCodec)), [5 x f32
+	            thirst], [10 x f32 temperature], u8 n + n x (varint effect, u8 amplifier, i32
+	            ticks, u8 ambient), u8 n + n x text (imported world ids), u32 alive, u16 kills, u16
+	            moons, u32 infection, [4 x f32 hunger], [f32 dose] (only above 0). 100 bytes to 3
+	            KB: far below a key's 4 MB. Decoding checks every number; anything odd is a
+	            damaged record (nil); names this version doesn't know are left out, as
+	            PlayerCodec's: an item is dropped, an effect skipped, an id in an item's data that
+	            can't be read drops that key (SaveCodec's Ids in data), each counted (`dropped`)
+	            and by name in `unknown`, and a stack over today's maxStack gives the rest back
+	            into the empty slots of the 36 (SaveCodec.giveBack; what finds no room is counted
+	            too); the palette carries the writer's place version (`placeVersion`), which says
 	            whether they may be a newer version's content (then the record is not written
 	            back this session) or content since removed (it saves: SaveCodec.newerNames,
 	            Save/CharacterSaves.writesBack).
@@ -115,9 +118,9 @@ export type Record = {
 	hunger: PlayerCodec.Hunger?,
 	-- The radiation dose (Sv; 0: none).
 	radiation: number,
-	-- Read: stacks of items this version doesn't know, left out (never written), each such name
-	-- (effects' too) with how many things of it, and the place version that wrote the record
-	-- (0: unknown, Studio, or an older version's record).
+	-- Read: the things this version doesn't know, left out (never written: stacks, effects, keys
+	-- of item data), each such name with how many things of it, and the place version that
+	-- wrote the record (0: unknown, Studio, or an older version's record).
 	dropped: number,
 	unknown: { [string]: number },
 	placeVersion: number,
@@ -448,11 +451,16 @@ local function decode(bytes: buffer): Record
 		error("bad crystals or selected slot", 0)
 	end
 	local parts = stores(record)
+	-- (Stacks over today's maxStack: the rest, given back once every place is read.)
+	local extras: { { stack: Stack, extra: number } } = {}
 	for _ = 1, SaveCodec.readU8(r) do
 		local place = SaveCodec.readU8(r)
-		local stack, lost = SaveCodec.readStack(r, palette)
+		local stack, lost, extra = SaveCodec.readStack(r, palette)
 		if lost then
 			record.dropped += 1
+		end
+		if stack and extra > 0 then
+			table.insert(extras, { stack = stack, extra = extra })
 		end
 		local placed = false
 		if place == Types.PLACE_CURSOR then
@@ -472,6 +480,12 @@ local function decode(bytes: buffer): Record
 			error("bad inventory place", 0)
 		end
 	end
+	-- (Into the inventory's empty slots, which take anything; what finds no room is counted.)
+	for _, cut in extras do
+		if SaveCodec.giveBack(palette, cut.stack, cut.extra, record.slots, Types.INVENTORY_SIZE) then
+			record.dropped += 1
+		end
+	end
 	if bit32.btest(flags, 1) then
 		record.thirst = readFields(r, THIRST_FIELDS, "thirst")
 	end
@@ -487,12 +501,15 @@ local function decode(bytes: buffer): Record
 		if index == 0 or ticks < -1 or ambient > 1 then
 			error("bad effect", 0)
 		end
-		-- (One this version doesn't know is skipped.)
+		-- (One this version doesn't know is skipped, and counted: a newer version's is never
+		-- written back without it.)
 		if effect then
 			table.insert(
 				record.effects,
 				{ effect = effect, amplifier = amplifier, ticks = ticks, ambient = ambient == 1 }
 			)
+		else
+			record.dropped += 1
 		end
 	end
 	for _ = 1, SaveCodec.readU8(r) do

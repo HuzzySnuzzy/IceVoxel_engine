@@ -423,14 +423,15 @@ return function(t, shared, require, _server, client)
 			t.eq(facts.state, 0)
 			facts.state = 7
 			t.eq(WailaInfo.text(WailaInfo.machineLines(B.IronBlock, facts)[2]), "state 7", "WAILA")
-			-- Only whole numbers 0..MAX_STATE are states.
-			t.eq(Machines.MAX_STATE, 255)
-			for _, bad in { -1, 2.5, 256, 0 / 0, math.huge } do
+			-- Only whole numbers 0..MAX_STATE are states (two bytes in Machines records since the
+			-- Metal Miner's packed state names any of a pack's ores: it was one, 255).
+			t.eq(Machines.MAX_STATE, 65535)
+			for _, bad in { -1, 2.5, 65536, 0 / 0, math.huge } do
 				Machines.set(c, "why", bad)
 				t.eq(Machines.state(c), 0, `{bad} is no state`)
 			end
-			Machines.set(c, "why", 255)
-			t.eq(Machines.state(c), 255)
+			Machines.set(c, "why", 65535)
+			t.eq(Machines.state(c), 65535)
 			-- Reading never makes data (a client's window may have none yet).
 			local bare: any = { kind = Machines.CONTAINER_KIND, block = B.IronBlock, size = 0, slots = {} }
 			t.eq(Machines.state(bare), 0)
@@ -498,10 +499,11 @@ return function(t, shared, require, _server, client)
 				output = 8000,
 				rate = 0,
 				active = false,
-				state = 255,
+				state = 65535,
 			},
 		}
-		t.eq(Protocol.MACHINE_BYTES, 40, "the state is the last byte")
+		-- (The state is a u16 since the Metal Miner's packed state names any of a pack's ores.)
+		t.eq(Protocol.MACHINE_BYTES, 41, "the state is the last two bytes")
 		local decoded = Protocol.decodeMachines(Protocol.encodeMachines(records)) :: any
 		t.eq(#decoded, 2)
 		for i, record in records do
@@ -526,8 +528,9 @@ return function(t, shared, require, _server, client)
 		t.eq(sent[1].energy, 0)
 		t.eq(sent[1].input, 0)
 		t.eq(sent[1].state, 0, "no state given: 0")
-		-- A state that is no byte goes as 0.
-		for _, bad in { 256, -1, 1.5, 0 / 0 } do
+		-- A state that is no u16 goes as 0 (two bytes since the Metal Miner's packed state names
+		-- any of a pack's ores: 256 was the first that didn't fit).
+		for _, bad in { 65536, -1, 1.5, 0 / 0 } do
 			local one = Protocol.decodeMachines(Protocol.encodeMachines({
 				{
 					x = 0,

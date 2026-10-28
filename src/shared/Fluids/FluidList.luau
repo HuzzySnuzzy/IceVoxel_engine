@@ -1,12 +1,14 @@
 --!strict
 --[[
-	Every fluid in the game. A fluid's id is its position in this list (0 is "none"), so:
-
-	  * ALWAYS ADD NEW FLUIDS AT THE END. The ids are sent (Protocol `Tanks`, `Transmitters`) and
-	    saved in items (a Fluid Tank's sustained `fluid`), and they must fit a u8.
+	Every fluid in the game. A fluid's id is its position in this list (0 is "none"). The ids are
+	sent (Protocol `Tanks`, `Transmitters`, `Machines`), so they must fit a u8, and every server
+	and client loads this same list, so they agree. Saves keep fluids by name (server Save/
+	SaveCodec's palettes: a Fluid Tank's, a pipe's, a machine tank's, the `fluid` of an item's
+	data), so a new fluid may go anywhere in the list and the list may be reordered.
 
 	Pure data that requires nothing, so Blocks and Items may read it; Shared/Fluids turns it into
-	the registry (ids, block and bucket lookups) and checks it against BlockList and ItemList.
+	the registry (ids, block and bucket lookups) and checks it against the content packs' blocks
+	and items (Blocks, Items: each fluid's blocks, colour, light and bucket).
 
 	Fields (all required unless marked optional):
 	  name           The fluid's name and its BlockList group: `fluid("<name>", ...)` makes the
@@ -194,6 +196,7 @@ local list: { FluidSpec } = {
 	},
 }
 
--- Add new fluids above this line, at the end (never reorder: the ids are saved and sent).
+-- Add new fluids above this line (anywhere: saves keep their names, and the ids sent are this
+-- list's on every server and client).
 
 return list

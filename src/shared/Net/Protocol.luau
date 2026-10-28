@@ -179,8 +179,9 @@
 	  Machines       u32 count, count x (i32 x, u16 y, i32 z, f64 energy, f64 capacity (J; math.huge
 	                 is the creative cube's infinity), f32 input, f32 output (J the energy network
 	                 put in / took out last tick), f32 rate (J/t the machine made, + or used, -),
-	                 u8 flags (bit 0: active), u8 state (the kind's state code, Shared/Machines
-	                 KindSpec `state`: why it is not working), u8 tanks (0 for a kind without
+	                 u8 flags (bit 0: active), u16 state (the kind's state code, Shared/Machines
+	                 KindSpec `state`: why it is not working; two bytes, so the Metal Miner's
+	                 packed state names any of its ores), u8 tanks (0 for a kind without
 	                 any), tanks x (u8 fluid (a Shared/Fluids id, 0 empty; beyond them is
 	                 malformed), u32 amount, u32 capacity (mB)): the machine's fluid tanks in its
 	                 kind's order, Machines.tankContents): Mekanism machines (Shared/Machines) for
@@ -1357,7 +1358,7 @@ export type TankRecord = { x: number, y: number, z: number, fluid: number, amoun
 -- One of a machine's fluid tanks: its fluid (Shared/Fluids id, 0 empty), amount and capacity in mB.
 export type MachineTank = { fluid: number, amount: number, capacity: number }
 -- A Mekanism machine: energy and capacity (J), the network's input / output and its own rate (J
--- per tick, the last tick's), whether it is working, its kind's state code (0..255) and its
+-- per tick, the last tick's), whether it is working, its kind's state code (0..65535) and its
 -- tanks in order (Machines.tankContents; nil or empty for a kind without any, and decoded
 -- records without tanks have nil).
 export type MachineRecord = {
@@ -1390,8 +1391,8 @@ export type TransportOp = {
 
 Protocol.TRANSMITTER_BYTES = 15
 Protocol.TANK_BYTES = 15
--- A Machines record's fixed part (up to its state), then its tank count byte and its tanks.
-Protocol.MACHINE_BYTES = 40
+-- A Machines record's fixed part (up to its u16 state), then its tank count byte and its tanks.
+Protocol.MACHINE_BYTES = 41
 Protocol.MACHINE_TANK_BYTES = 9
 -- Most tanks a Machines record carries (a u8 count).
 Protocol.MAX_MACHINE_TANKS = 255
@@ -1546,9 +1547,9 @@ function Protocol.encodeMachines(records: { MachineRecord }): buffer
 		buffer.writef32(b, o + 30, finiteOrInfinite(record.output))
 		buffer.writef32(b, o + 34, finiteOrInfinite(record.rate))
 		buffer.writeu8(b, o + 38, if record.active then 1 else 0)
-		-- (Anything but a whole number 0..255 goes as 0: no state.)
+		-- (Anything but a whole number 0..65535 goes as 0: no state.)
 		local state = record.state or 0
-		buffer.writeu8(b, o + 39, if state == math.floor(state) and state >= 0 and state <= 255 then state else 0)
+		buffer.writeu16(b, o + 39, if state == math.floor(state) and state >= 0 and state <= 65535 then state else 0)
 		o += Protocol.MACHINE_BYTES
 		local count = tankCount(record)
 		buffer.writeu8(b, o, count)
@@ -1631,7 +1632,7 @@ function Protocol.decodeMachines(b: buffer): { MachineRecord }?
 			output = output,
 			rate = rate,
 			active = flags == 1,
-			state = buffer.readu8(b, o + 39),
+			state = buffer.readu16(b, o + 39),
 			tanks = tanks,
 		}
 		o = at

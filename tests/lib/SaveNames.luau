@@ -4,17 +4,21 @@
 	RENAMED name), content it had that this one doesn't (a removed name), or the same content in
 	another order (names swapped: what was saved as one name is read as today's id of another).
 
-	  region(SaveCodec, bytes, rename, place?)
+	  region(SaveCodec, bytes, rename, place?, edit?)
 	                                    a region's bytes (Save/RegionCodec: the palette is its
 	                                    first record) with every palette name `rename(kind, name)`
-	                                    (the same name: unchanged), and `place` as the place
-	                                    version that wrote it (default: as it was)
-	  record(SaveCodec, bytes, rename, place?)
+	                                    (the same name: unchanged), `place` as the place version
+	                                    that wrote it (default: as it was), and `edit(palette)`
+	                                    changing the rest as it likes (another version's lists of
+	                                    ids in data, `keys` and `fields`; names cut short)
+	  record(SaveCodec, bytes, rename, place?, edit?)
 	                                    the same for a player or character record (Save/
 	                                    PlayerCodec, Save/CharacterCodec: the palette follows the
 	                                    version byte)
 	  regionNames(SaveCodec, bytes), recordNames(SaveCodec, bytes)
-	                                    their palette as read (names by kind, index order)
+	                                    their palette's names as read (by kind, index order)
+	  regionPalette(SaveCodec, bytes), recordPalette(SaveCodec, bytes)
+	                                    their whole palette as read (SaveCodec.readPalette)
 
 	SaveCodec is passed in: the module the spec required (tests/lib modules have no env require).
 ]]
@@ -22,8 +26,9 @@
 local SaveNames = {}
 
 type Rename = (kind: string, name: string) -> string
+type Edit = (palette: any) -> ()
 
-local function renamed(SaveCodec: any, palette: any, rename: Rename, place: number?): any
+local function renamed(SaveCodec: any, palette: any, rename: Rename, place: number?, edit: Edit?): any
 	if place then
 		palette.place = place
 	end
@@ -32,6 +37,9 @@ local function renamed(SaveCodec: any, palette: any, rename: Rename, place: numb
 		for i, name in names do
 			names[i] = rename(kind, name)
 		end
+	end
+	if edit then
+		edit(palette)
 	end
 	return palette
 end
@@ -57,18 +65,26 @@ local function readRegionHead(SaveCodec: any, bytes: buffer): (any, any, { numbe
 	return r, palette, header
 end
 
-function SaveNames.regionNames(SaveCodec: any, bytes: buffer): { [string]: { string } }
+function SaveNames.regionPalette(SaveCodec: any, bytes: buffer): any
 	local _, palette = readRegionHead(SaveCodec, bytes)
-	return palette.names
+	return palette
+end
+
+function SaveNames.recordPalette(SaveCodec: any, bytes: buffer): any
+	local r = SaveCodec.reader(bytes)
+	SaveCodec.readU8(r)
+	return SaveCodec.readPalette(r)
+end
+
+function SaveNames.regionNames(SaveCodec: any, bytes: buffer): { [string]: { string } }
+	return SaveNames.regionPalette(SaveCodec, bytes).names
 end
 
 function SaveNames.recordNames(SaveCodec: any, bytes: buffer): { [string]: { string } }
-	local r = SaveCodec.reader(bytes)
-	SaveCodec.readU8(r)
-	return SaveCodec.readPalette(r).names
+	return SaveNames.recordPalette(SaveCodec, bytes).names
 end
 
-function SaveNames.region(SaveCodec: any, bytes: buffer, rename: Rename, place: number?): buffer
+function SaveNames.region(SaveCodec: any, bytes: buffer, rename: Rename, place: number?, edit: Edit?): buffer
 	local r, palette, header = readRegionHead(SaveCodec, bytes)
 	local w = SaveCodec.writer(buffer.len(bytes) + 64)
 	SaveCodec.u8(w, header[1])
@@ -76,7 +92,7 @@ function SaveNames.region(SaveCodec: any, bytes: buffer, rename: Rename, place: 
 	SaveCodec.zigzag(w, header[3])
 	SaveCodec.varint(w, header[4])
 	local body = SaveCodec.writer(256)
-	SaveCodec.writePalette(body, renamed(SaveCodec, palette, rename, place))
+	SaveCodec.writePalette(body, renamed(SaveCodec, palette, rename, place, edit))
 	SaveCodec.u8(w, 14)
 	SaveCodec.varint(w, body.n)
 	SaveCodec.bytes(w, body.b, body.n)
@@ -84,13 +100,13 @@ function SaveNames.region(SaveCodec: any, bytes: buffer, rename: Rename, place: 
 	return SaveCodec.finish(w)
 end
 
-function SaveNames.record(SaveCodec: any, bytes: buffer, rename: Rename, place: number?): buffer
+function SaveNames.record(SaveCodec: any, bytes: buffer, rename: Rename, place: number?, edit: Edit?): buffer
 	local r = SaveCodec.reader(bytes)
 	local version = SaveCodec.readU8(r)
 	local palette = SaveCodec.readPalette(r)
 	local w = SaveCodec.writer(buffer.len(bytes) + 64)
 	SaveCodec.u8(w, version)
-	SaveCodec.writePalette(w, renamed(SaveCodec, palette, rename, place))
+	SaveCodec.writePalette(w, renamed(SaveCodec, palette, rename, place, edit))
 	rest(SaveCodec, w, r)
 	return SaveCodec.finish(w)
 end

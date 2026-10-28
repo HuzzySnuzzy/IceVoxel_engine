@@ -36,8 +36,8 @@
 	removed or reordered between versions without moving a block. A region of version 1 or 2
 	(before palettes: ids that were another version's) is refused, never misread (SaveCodec.OLDER:
 	Save/WorldStore starts it afresh from the seed), and a newer one too (never written over).
-	 14 PALETTE    the palette (SaveCodec.writePalette: the writer's place version, then the
-	               names), first
+	 14 PALETTE    the palette (SaveCodec.writePalette: the writer's place version, the names, then
+	               which item data keys and container data indices are ids), first
 	  1 EDITS      u16 chunk (lcx x RegionChunks + lcz, its place in the region), varint runs, then
 	               per run: varint gap (cells skipped since the last run's end: local indices are
 	               ChunkLayout's, x then z then y, so a dug tunnel or a wall is a few runs),
@@ -45,7 +45,8 @@
 	               (when not the same). A chunk's whole 16 x 16 layer of one block is one run.
 	  2 CONTAINER  position (u16 x, y, z within the region), u8 kind (Inventory/Types KINDS),
 	               varint block, u8 size, u8 n + n x f64 data, u8 stacks + stacks x (u8 slot,
-	               stack). The data's ids are palette indices too: a furnace's cooking item
+	               stack). The data's ids are palette indices too, the palette listing which by
+	               the container's block (SaveCodec `fields`): a furnace's cooking item
 	               (Crafting/Smelting.ID_FIELDS), a machine's fields holding ids and its tanks'
 	               fluids (Shared/Machines.idFields: the Metal Miner's ore, the Electric Furnace's
 	               item)
@@ -68,8 +69,11 @@
 	natural or thaw entry is left out, a container of such a block goes (its stacks with it), a
 	stack is dropped (or, for an id in its data, that key), a pipe's or tank's fluid empties, a
 	mob goes, an id in a container's data becomes 0 (nothing: what the machine works on starts
-	over). The region's `placeVersion` (its writer's) tells Save/WorldStore which they are
-	(SaveCodec.newerNames).
+	over). So does an id in data another version keeps where this one doesn't, or the other way
+	round (SaveCodec's Ids in data: counted as "<field> (<Block>)" or "<key> (item data)"), and
+	what of a stack over today's maxStack finds no room (a chest's empty slots take it, a
+	dropped item's lies beside it: SaveCodec.giveBack). The region's `placeVersion` (its
+	writer's) tells Save/WorldStore which they are (SaveCodec.newerNames).
 
 	Parts (`split` / `join`): a stream longer than a key holds is cut into parts of at most
 	`maxText` characters of base85 text each (4 bytes are 5 characters; the cuts fall anywhere,
@@ -372,7 +376,8 @@ local function encodeContainer(w: Writer, region: Region, entry: ContainerRecord
 	scratch.n = 0
 	position(scratch, region, entry.x, entry.y, entry.z)
 	SaveCodec.u8(scratch, code)
-	SaveCodec.varint(scratch, SaveCodec.indexOf(palette, "block", container.block))
+	local block = SaveCodec.indexOf(palette, "block", container.block)
+	SaveCodec.varint(scratch, block)
 	local size = math.clamp(container.size, 0, Types.MAX_CONTAINER)
 	SaveCodec.u8(scratch, size)
 	local data = container.data
@@ -383,8 +388,9 @@ local function encodeContainer(w: Writer, region: Region, entry: ContainerRecord
 		local value = (data :: { number })[i]
 		local kind = if ids then ids[i] else nil
 		if kind then
-			-- (An id as its palette index: 0, nothing, for none and anything that is no id.)
-			value = SaveCodec.indexOf(palette, kind, value)
+			-- (An id as its palette index, the palette noting that it is one: 0, nothing, for
+			-- none and anything that is no id.)
+			value = SaveCodec.fieldIndex(palette, block, i, kind, value)
 		end
 		SaveCodec.f64(scratch, if value == value then value else 0)
 	end
@@ -594,10 +600,28 @@ local function decodeEdits(r: Reader, region: Region, palette: Palette, into: { 
 	end
 end
 
+local NO_FIELDS: { [number]: SaveCodec.PaletteKind } = table.freeze({})
+
+-- What the counts call data index `at` of `container`: "<field> (<Block>)" by its kind's field
+-- name, "data <at> (<Block>)" without one (a furnace's).
+local function fieldLabel(container: Types.Container, at: number): string
+	local block = Blocks.get(container.block).name
+	local kind = if container.kind == Machines.CONTAINER_KIND then Machines.kindOf(container.block) else nil
+	if kind then
+		for field, index in kind.index do
+			if index == at then
+				return `{field} ({block})`
+			end
+		end
+	end
+	return `data {at} ({block})`
+end
+
 local function decodeContainer(r: Reader, region: Region, palette: Palette)
 	local x, y, z = readPosition(r, region)
 	local kind = Types.KINDS[SaveCodec.readU8(r)]
-	local block = SaveCodec.idOf(palette, "block", SaveCodec.readVarint(r))
+	local blockIndex = SaveCodec.readVarint(r)
+	local block = SaveCodec.idOf(palette, "block", blockIndex)
 	local size = SaveCodec.readU8(r)
 	local count = SaveCodec.readU8(r)
 	if kind == nil or size > Types.MAX_CONTAINER or count > Types.MAX_CONTAINER_DATA then
@@ -613,31 +637,43 @@ local function decodeContainer(r: Reader, region: Region, palette: Palette)
 		data = values
 	end
 	local slots: { [number]: Stack? } = {}
+	-- (Stacks over today's maxStack: the rest, given back once every slot is read.)
+	local extras: { { stack: Stack, extra: number } } = {}
 	for _ = 1, SaveCodec.readU8(r) do
 		local slot = SaveCodec.readU8(r)
-		local stack, lost = SaveCodec.readStack(r, palette)
+		local stack, lost, extra = SaveCodec.readStack(r, palette)
 		if lost then
 			region.dropped += 1
 		end
 		if slot >= 1 and slot <= size then
 			slots[slot] = stack
+			if stack and extra > 0 then
+				table.insert(extras, { stack = stack, extra = extra })
+			end
 		end
 	end
 	if block == nil or not Blocks.isValid(block) then
 		region.dropped += 1
 		return
 	end
+	-- (A chest takes anything in any slot: the rest goes in its empty ones. A furnace's or a
+	-- machine's slots each take their own: left out, counted.)
+	local chest = kind == "chest"
+	for _, cut in extras do
+		if SaveCodec.giveBack(palette, cut.stack, cut.extra, if chest then slots else nil, size) then
+			region.dropped += 1
+		end
+	end
 	local container: Types.Container = { kind = kind, block = block, size = size, slots = slots, data = data }
-	local ids = idFields(container)
-	if ids and data then
-		-- (The ids in its data, today's again: one this version doesn't know is nothing, 0.)
-		for i, idKind in ids do
-			local index = data[i]
-			if index ~= nil then
-				if index < 0 or index ~= math.floor(index) then
-					error("bad palette index in save", 0)
-				end
-				local id = SaveCodec.idOf(palette, idKind, index)
+	local mine = idFields(container) or NO_FIELDS
+	local listed = palette.fields[blockIndex] or NO_FIELDS
+	if data and (next(mine) ~= nil or next(listed) ~= nil) then
+		-- (The ids in its data, today's again, by what the writer listed and this version types:
+		-- one that is left out is nothing, 0, and what the machine works on starts over.)
+		for i, value in data do
+			local idKind, wrote = mine[i], listed[i]
+			if idKind or wrote then
+				local id = SaveCodec.dataId(palette, wrote, idKind, value, fieldLabel(container, i))
 				if id == nil then
 					region.dropped += 1
 				end
@@ -708,23 +744,31 @@ local function decodeRecord(r: Reader, region: Region, tag: number, palette: Pal
 	elseif tag == TRANSPORT then
 		local x, y, z = readPosition(r, region)
 		local colour = SaveCodec.readU8(r)
-		local stack, lost = SaveCodec.readStack(r, palette)
+		local stack, lost, extra = SaveCodec.readStack(r, palette)
 		if lost then
 			region.dropped += 1
 		end
 		if stack then
 			table.insert(region.transport, { x = x, y = y, z = z, colour = colour, stack = stack })
+			-- (Over today's maxStack: a transporter carries one stack, the rest is left out.)
+			if SaveCodec.giveBack(palette, stack, extra) then
+				region.dropped += 1
+			end
 		end
 	elseif tag == ITEM then
 		local x, y, z = SaveCodec.readFinite(r), SaveCodec.readFinite(r), SaveCodec.readFinite(r)
 		local age = SaveCodec.readVarint(r)
 		local pickupDelay = SaveCodec.readVarint(r)
-		local stack, lost = SaveCodec.readStack(r, palette)
+		local stack, lost, extra = SaveCodec.readStack(r, palette)
 		if lost then
 			region.dropped += 1
 		end
 		if stack then
 			table.insert(region.items, { x = x, y = y, z = z, stack = stack, age = age, pickupDelay = pickupDelay })
+			-- (Over today's maxStack: the rest lies beside it, in stacks of at most that.)
+			for _, more in SaveCodec.extraStacks(stack, extra) do
+				table.insert(region.items, { x = x, y = y, z = z, stack = more, age = age, pickupDelay = pickupDelay })
+			end
 		end
 	elseif tag == MOB then
 		local kind = SaveCodec.idOf(palette, "mob", SaveCodec.readVarint(r))

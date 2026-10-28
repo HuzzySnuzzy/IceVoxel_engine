@@ -291,7 +291,11 @@ for index, spec in ItemList do
 	})
 end
 
-assert(#list < 65535, "Item ids must fit 16 bits")
+-- (The largest id is the last item's that is no block: ITEM_BASE + their count - 1.)
+assert(
+	Items.ITEM_BASE + #ItemList - 1 < 65536,
+	`{#ItemList} items from ITEM_BASE {Items.ITEM_BASE}: item ids must fit 16 bits`
+)
 
 -- What blocks drop and the items placing their variants must exist (`drops` / `item` are looked up
 -- without erroring later, so a typo would silently drop nothing).

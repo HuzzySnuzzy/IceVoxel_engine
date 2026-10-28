@@ -10,7 +10,11 @@
 	rounds and parts, a Fluid Tank's fluid, a machine's tank) and effects, each read back through a
 	palette whose names were changed (tests/lib/SaveNames: content another version had in another
 	order, under an older name, or not at all; content added since is names the save never
-	held); and older versions refused cleanly, never misread.
+	held); the ids in data between versions that type other keys and fields (the palette lists
+	those it wrote: another version's are left out and counted, never misread, never a refused
+	record; Shared/Machines refuses a plain number under an id key); unknown effects counted;
+	stacks over today's maxStack cut and given back; and older versions refused cleanly, never
+	misread.
 ]]
 
 local SaveNames = require("../lib/SaveNames")
@@ -27,7 +31,9 @@ return function(t, shared, require, server, _client)
 	local Machines = require(shared.Machines)
 	local MinerRules = require(shared.Machines.MinerRules)
 	local MobList = require(shared.Entities.MobList)
+	local Protocol = require(shared.Net.Protocol)
 	local Smelting = require(shared.Crafting.Smelting)
+	local Types = require(shared.Inventory.Types)
 	local CharacterCodec = require(server.Save.CharacterCodec)
 	local PlayerCodec = require(server.Save.PlayerCodec)
 	local RegionCodec = require(server.Save.RegionCodec)
@@ -120,11 +126,11 @@ return function(t, shared, require, server, _client)
 		t.eq(SaveCodec.idOf(back, "mob", 1), COW)
 		t.eq(SaveCodec.idOf(back, "fluid", 1), LAVA)
 		t.ok(not pcall(SaveCodec.idOf, back, "block", 3), "an index past the palette is damage")
-		-- An empty palette is its writer's place version and five counts (a byte each, place
-		-- versions below 128).
+		-- An empty palette is its writer's place version, five counts and the two of the ids in
+		-- data (a byte each, place versions below 128).
 		local empty = SaveCodec.writer()
 		SaveCodec.writePalette(empty, SaveCodec.palette(42))
-		t.eq(empty.n, 1 + #SaveCodec.PALETTE_KINDS)
+		t.eq(empty.n, 1 + #SaveCodec.PALETTE_KINDS + 2)
 		t.eq(SaveCodec.readPalette(SaveCodec.reader(SaveCodec.finish(empty))).place, 42, "the writer's place version")
 		t.eq(back.place, 0, "none given: 0, unknown")
 	end)
@@ -543,6 +549,271 @@ return function(t, shared, require, server, _client)
 		t.eq(junk.n, 1)
 	end)
 
+	--[[ Ids in data between versions ]]
+
+	-- (Which keys and fields hold ids is code: another version may type more or fewer. Its code
+	-- is stood in for by swapping Machines.idFields and ItemData.idKind while it writes or reads.)
+	local thisIdFields, thisIdKind = Machines.idFields, ItemData.idKind
+
+	-- Runs `fn` as a version whose Electric Furnace doesn't type `smelting` and whose item data
+	-- keeps `fluid` as a plain number (an older one, or one that dropped them), then this one again.
+	local function otherVersion(fn: () -> ())
+		Machines.idFields = function(block: number): any
+			return if block == SMELTER then {} else thisIdFields(block)
+		end
+		ItemData.idKind = function(key: string): any
+			return if key == "fluid" then nil else thisIdKind(key)
+		end
+		local ok, err = pcall(fn)
+		Machines.idFields, ItemData.idKind = thisIdFields, thisIdKind
+		if not ok then
+			error(err, 0)
+		end
+	end
+
+	-- A chest of Sticks, Gold Ingots and Diamonds (the palette's items 1 to 3) and an Electric
+	-- Furnace smelting Iron Ingots.
+	local function smelterRegion(): (any, any)
+		local region = RegionCodec.new(0, 0)
+		local chest = {
+			kind = "chest",
+			block = B.Chest,
+			size = 27,
+			slots = {
+				[1] = Items.newStack(I.Stick, 1),
+				[2] = Items.newStack(I.GoldIngot, 1),
+				[3] = Items.newStack(I.Diamond, 1),
+			},
+		}
+		table.insert(region.containers, { x = 1, y = 10, z = 0, container = chest })
+		local smelter = Machines.newContainer(SMELTER)
+		Machines.set(smelter, "smelting", I.IronIngot)
+		table.insert(region.containers, { x = 0, y = 10, z = 0, container = smelter })
+		return region, smelter
+	end
+
+	local SMELTING_LABEL = "smelting (ElectricFurnace)"
+
+	t.test("save names: a record lists the item data keys and container fields it wrote as ids", function()
+		local region = smelterRegion()
+		table.insert(region.containers, {
+			x = 2,
+			y = 10,
+			z = 0,
+			container = { kind = "furnace", block = B.Furnace, size = 3, slots = {}, data = { 1, 2, 3, 4, I.Stick } },
+		})
+		local palette = SaveNames.regionPalette(SaveCodec, RegionCodec.encode(region))
+		local function fieldsOf(block: number): any
+			return palette.fields[table.find(palette.names.block, Blocks.get(block).name) :: number]
+		end
+		t.eq(fieldsOf(SMELTER)[(Machines.kind("smelter") :: any).index.smelting], "item", "the smelter's item")
+		t.eq(fieldsOf(B.Furnace)[5], "item", "a furnace's cooking item")
+		t.eq(fieldsOf(B.Chest), nil, "a chest holds none")
+		local player = PlayerCodec.new()
+		for i, stack in heldStacks() do
+			player.slots[i] = stack
+		end
+		local keys = SaveNames.recordPalette(SaveCodec, PlayerCodec.encode(player)).keys
+		t.eq(keys.fluid, "fluid", "a Fluid Tank's")
+		t.eq(keys.fuelFluid, "fluid", "a machine tank's")
+		t.eq(keys.ammo, "item", "a gun's rounds")
+		t.eq(keys.n, nil, "a plain number is not listed")
+		t.eq(keys.amount, nil)
+	end)
+
+	t.test("save names: a field a newer version types is left out by an older one, never misread", function()
+		-- P2: a newer version (place 100) types `smelting`; an older one (95) doesn't. It reads
+		-- the index as a field it keeps plain: left out (0) and counted, so never written back.
+		local region = smelterRegion()
+		local newer = RegionCodec.encode(region, 100)
+		local old: any, olderWrote: any
+		otherVersion(function()
+			old = RegionCodec.decode(newer, 0, 0)
+			-- (Written back anyway: by a version without this rule, or a bug.)
+			olderWrote = RegionCodec.encode(old, 95)
+		end)
+		t.eq(Machines.get(old.containers[2].container, "smelting"), 0, "left out: nothing")
+		t.eq(old.dropped, 1)
+		t.eq(old.unknown[SMELTING_LABEL], 1, "counted under the field's name")
+		t.eq(SaveCodec.newerNames(old.dropped, old.placeVersion, 95), true, "so the older one never writes it back")
+		t.eq(old.containers[1].container.slots[2].item, I.GoldIngot, "the rest as it was")
+		-- P2b: the newer one reads what the older one wrote: never refused ("bad palette index"),
+		-- never another item (its palette's item 2 is the chest's Gold Ingot).
+		local back, why = RegionCodec.tryDecode(olderWrote, 0, 0)
+		t.ok(back ~= nil, `not refused: {why}`)
+		if back then
+			t.eq(Machines.get(back.containers[2].container, "smelting"), 0, "nothing, not a Gold Ingot")
+			t.eq(back.containers[1].container.slots[3].item, I.Diamond)
+		end
+	end)
+
+	t.test("save names: a field an older version kept plain is left out by a newer one, never misread", function()
+		-- The reverse: an older version (95) that doesn't type `smelting` wrote its own number
+		-- there, unlisted (2 here: the palette's item 2 is a Gold Ingot). The newer one (100)
+		-- types it: left out, counted, and the record saves (it was that version's: lost).
+		local region, smelter = smelterRegion()
+		local older: any
+		otherVersion(function()
+			Machines.set(smelter, "smelting", 2)
+			older = RegionCodec.encode(region, 95)
+		end)
+		local back, why = RegionCodec.tryDecode(older, 0, 0)
+		t.ok(back ~= nil, `not refused: {why}`)
+		if back then
+			t.eq(Machines.get(back.containers[2].container, "smelting"), 0, "nothing, not a Gold Ingot")
+			t.eq(back.dropped, 1)
+			t.eq(back.unknown[SMELTING_LABEL], 1)
+			t.eq(SaveCodec.newerNames(back.dropped, back.placeVersion, 100), false, "an older one's: it saves")
+		end
+	end)
+
+	t.test("save names: item data keys likewise, both ways between versions", function()
+		local tank = Items.newStack(B.BasicFluidTank, 1, nil, Items.cleanData({ fluid = LAVA, amount = 4000 }))
+		local heater = Items.newStack(HEATER, 1, nil, Items.cleanData({ fuel = 500, fuelFluid = FUEL }))
+		local player = PlayerCodec.new()
+		player.slots[1], player.slots[2] = heater, tank
+		-- P2c: a newer version lists `fluid`; an older one keeps it plain: the key is left out
+		-- (the tank kept), counted, never written back; written back anyway, the newer one reads
+		-- it without the key, never refused.
+		local newer = PlayerCodec.encode(player, 100)
+		local old: any, olderWrote: any
+		otherVersion(function()
+			old = PlayerCodec.decode(newer)
+			olderWrote = PlayerCodec.encode(old, 95)
+		end)
+		t.eq(old.slots[2].item, B.BasicFluidTank, "the tank kept")
+		t.eq(old.slots[2].data.fluid, nil, "its fluid left out")
+		t.eq(old.slots[2].data.amount, 4000)
+		t.eq(old.slots[1].data.fuelFluid, FUEL, "a key both keep as an id")
+		t.eq(old.dropped, 1)
+		t.eq(old.unknown["fluid (item data)"], 1)
+		t.eq(SaveCodec.newerNames(old.dropped, old.placeVersion, 95), true)
+		local back, why = PlayerCodec.decode(olderWrote)
+		t.ok(back ~= nil, `not refused: {why}`)
+		t.eq((back :: any).slots[2].data.fluid, nil)
+		-- The reverse: the older one wrote its own number under `fluid`, unlisted (1 here: the
+		-- palette's fluid 1 is the heater's Fuel). The newer one leaves it out and counts it.
+		local older: any
+		otherVersion(function()
+			player.slots[2] = Items.newStack(B.BasicFluidTank, 1, nil, Items.cleanData({ fluid = 1, amount = 4000 }))
+			older = PlayerCodec.encode(player, 95)
+		end)
+		local read = PlayerCodec.decode(older) :: any
+		t.eq(read.slots[2].data.fluid, nil, "not Fuel")
+		t.eq(read.slots[1].data.fuelFluid, FUEL)
+		t.eq(read.dropped, 1)
+		t.eq(read.unknown["fluid (item data)"], 1)
+		t.eq(SaveCodec.newerNames(read.dropped, read.placeVersion, 100), false, "an older one's: it saves")
+		-- A key listed as another kind of id than this version's: left out too.
+		local otherKind = PlayerCodec.decode(SaveNames.record(SaveCodec, newer, renames({}), nil, function(palette: any)
+			palette.keys.fluid = "item"
+		end)) :: any
+		t.eq(otherKind.slots[2].data.fluid, nil)
+		t.eq(otherKind.dropped, 1)
+	end)
+
+	t.test("save names: an index in data the palette doesn't have is a lost key, never a damaged save", function()
+		-- A smelter's item and a tank's fluid whose names were cut from the palette.
+		local region = smelterRegion()
+		region.containers[1].container.slots = {}
+		local bytes = RegionCodec.encode(region)
+		local cut = SaveNames.region(SaveCodec, bytes, renames({}), nil, function(palette: any)
+			palette.names.item = {}
+		end)
+		local back, why = RegionCodec.tryDecode(cut, 0, 0)
+		t.ok(back ~= nil, `not refused: {why}`)
+		if back then
+			t.eq(Machines.get(back.containers[2].container, "smelting"), 0)
+			t.eq(back.dropped, 1)
+			t.eq(back.unknown[SMELTING_LABEL], 1)
+		end
+		-- An item's: a stack written by hand, its `fluid` 9 in a palette of one fluid.
+		local palette = SaveCodec.palette()
+		local w = SaveCodec.writer()
+		SaveCodec.varint(w, SaveCodec.indexOf(palette, "item", B.BasicFluidTank))
+		SaveCodec.varint(w, 1)
+		SaveCodec.varint(w, 0)
+		local data = Items.cleanData({ fluid = 9, amount = 4000 })
+		SaveCodec.ensure(w, Protocol.dataSize(data))
+		w.n = Protocol.writeData(w.b, w.n, data)
+		SaveCodec.indexOf(palette, "fluid", LAVA)
+		palette.keys.fluid = "fluid"
+		local names = SaveCodec.writer()
+		SaveCodec.writePalette(names, palette)
+		local read = SaveCodec.readPalette(SaveCodec.reader(SaveCodec.finish(names)))
+		local ok, stack, lost = pcall(SaveCodec.readStack, SaveCodec.reader(SaveCodec.finish(w)), read)
+		t.ok(ok, `not refused: {stack}`)
+		t.eq(stack.item, B.BasicFluidTank, "the stack kept")
+		t.eq(stack.data.fluid, nil, "its key left out")
+		t.eq(stack.data.amount, 4000)
+		t.eq(lost, true, "and counted")
+		t.eq(read.unknown["fluid (item data)"], 1)
+	end)
+
+	t.test("save names: a machine's item keeps no plain number under an id key", function()
+		local function refused(name: string, spec: any, what: string): string
+			local ok, err = pcall(Machines.define, name, spec)
+			t.ok(not ok, what)
+			return tostring(err)
+		end
+		-- A tank named like one: its amount (mB) would be read as a fluid's index.
+		local why = refused(
+			"savenames_tank_fluid",
+			{ tanks = { { name = "fluid", capacity = 8000, fluids = { WATER }, role = "input" } } },
+			"a tank named fluid"
+		)
+		t.ok(string.find(why, "tank fluid", 1, true) ~= nil and string.find(why, "Items/ItemData", 1, true) ~= nil, why)
+		-- A kept field named like one: untyped, or holding another kind of id.
+		refused("savenames_keep_light", { fields = { "light" }, keep = { "light" } }, "a kept light level")
+		refused(
+			"savenames_keep_light_block",
+			{ fields = { "light" }, keep = { "light" }, types = { light = "block" } },
+			"light holds items"
+		)
+		t.ok(
+			pcall(Machines.define, "savenames_keep_light_item", {
+				fields = { "light" },
+				keep = { "light" },
+				types = { light = "item" },
+			}),
+			"typed the same: allowed"
+		)
+		-- Across kinds, both ways: a key one kind keeps plain, another may not type, and the other
+		-- way round (a tank's "<name>Fluid" too).
+		t.ok(
+			pcall(
+				Machines.define,
+				"savenames_plain",
+				{ fields = { "zzLevel", "zzTankFluid" }, keep = { "zzLevel", "zzTankFluid" } }
+			)
+		)
+		refused(
+			"savenames_typed",
+			{ fields = { "zzLevel" }, keep = { "zzLevel" }, types = { zzLevel = "block" } },
+			"a key another kind keeps plain"
+		)
+		refused(
+			"savenames_tank",
+			{ tanks = { { name = "zzTank", capacity = 8000, fluids = { WATER, LAVA }, role = "input" } } },
+			"a tank's fluid key another kind keeps plain"
+		)
+		t.ok(
+			pcall(
+				Machines.define,
+				"savenames_ore",
+				{ fields = { "zzOre" }, keep = { "zzOre" }, types = { zzOre = "block" } }
+			)
+		)
+		refused(
+			"savenames_ore_plain",
+			{ fields = { "zzOre" }, keep = { "zzOre" } },
+			"a key another kind keeps as an id"
+		)
+		t.eq(ItemData.idKind("zzOre"), "block")
+		t.eq(ItemData.idKind("zzLevel"), nil, "a refused kind adds no key")
+		t.eq(ItemData.idKind("zzTankFluid"), nil)
+	end)
+
 	--[[ Players and characters ]]
 
 	t.test("save names: a player's and a character's items and effects by name; unknown effects skipped", function()
@@ -573,7 +844,7 @@ return function(t, shared, require, server, _client)
 			t.eq(back.slots[2].item, I.IronIngot)
 			t.eq(back.armor[1].damage, 5)
 			t.eq(back.effects[1].effect, Effects.id.Speed)
-			-- Swapped between versions; then gone (the effect skipped, never counted; the item
+			-- Swapped between versions; then gone (the effect skipped and the item dropped, each
 			-- counted).
 			local moved = decode(
 				SaveNames.record(
@@ -598,8 +869,89 @@ return function(t, shared, require, server, _client)
 			t.eq(gone.effects[1].effect, Effects.id.Slowness)
 			t.eq(gone.slots[2], nil)
 			t.eq(gone.slots[1].item, B.Stone)
-			t.eq(gone.dropped, 1, `{what}: only the item counts`)
+			-- (The effect counts too since a newer version's record holding only an effect this
+			-- one lacked was written back without it: dropped was 1.)
+			t.eq(gone.dropped, 2, `{what}: the item and the effect count`)
+			t.eq(gone.unknown.GoneEffect, 1)
+			-- Only an effect it doesn't know: a newer version's is never written back without it,
+			-- a removed one (in an older version's record) is skipped and the record saves.
+			local onlyEffect =
+				decode(SaveNames.record(SaveCodec, bytes, renames({ effect = { Speed = "NewerEffect" } }), 100)) :: any
+			t.eq(onlyEffect.dropped, 1, `{what}: an effect alone counts`)
+			t.eq(SaveCodec.newerNames(onlyEffect.dropped, onlyEffect.placeVersion, 95), true, "a newer one's")
+			t.eq(SaveCodec.newerNames(onlyEffect.dropped, onlyEffect.placeVersion, 105), false, "a removed one")
 		end
+	end)
+
+	--[[ Stacks over today's maxStack ]]
+
+	t.test("save names: a stack over today's maxStack is cut to it and the rest given back", function()
+		-- (Another version's maxStack may be more, or this one's went down since: Iron Helmets
+		-- stack to 1, so a saved 3 stands in for either.)
+		t.eq(Items.maxStack(I.IronHelmet), 1)
+		local function helmets(count: number): any
+			return { item = I.IronHelmet, count = count, damage = 5 }
+		end
+		-- A player's or a character's: into the inventory's first empty slots, with its wear.
+		local player = PlayerCodec.new()
+		player.slots[1] = helmets(3)
+		player.slots[2] = Items.newStack(B.Stone, 1)
+		local character = CharacterCodec.new(1, "Ada", Characters.DEFAULT_DIFFICULTY, Appearance.default(), 0)
+		character.slots[1] = helmets(3)
+		character.slots[2] = Items.newStack(B.Stone, 1)
+		for what, back in
+			{
+				player = PlayerCodec.decode(PlayerCodec.encode(player)),
+				character = CharacterCodec.decode(CharacterCodec.encode(character)),
+			}
+		do
+			local read = back :: any
+			t.eq(read.slots[1].count, 1, `{what}: cut to 1`)
+			t.eq(read.slots[2].item, B.Stone)
+			t.eq(read.slots[3].count, 1, `{what}: the rest in the empty slots`)
+			t.eq(read.slots[4].count, 1)
+			t.eq(read.slots[4].damage, 5, "with its wear")
+			t.eq(read.slots[5], nil)
+			t.eq(read.dropped, 0, `{what}: nothing lost`)
+		end
+		-- No room: what is left is left out and counted by the item's name, so a newer version's
+		-- bigger stack is never cut and written back.
+		for slot = 2, Types.INVENTORY_SIZE do
+			player.slots[slot] = Items.newStack(B.Stone, 1)
+		end
+		local full = PlayerCodec.decode(PlayerCodec.encode(player, 100)) :: any
+		t.eq(full.slots[1].count, 1)
+		t.eq(full.dropped, 1)
+		t.eq(full.unknown.IronHelmet, 2)
+		t.eq(SaveCodec.newerNames(full.dropped, full.placeVersion, 95), true)
+		-- A region: a chest's empty slots take the rest, a dropped item's lies beside it; a
+		-- furnace's slots and a transporter take one stack: counted.
+		local region = RegionCodec.new(0, 0)
+		local chest = {
+			kind = "chest",
+			block = B.Chest,
+			size = 27,
+			slots = { [1] = helmets(3), [2] = Items.newStack(B.Stone, 1) },
+		}
+		table.insert(region.containers, { x = 1, y = 10, z = 1, container = chest })
+		local furnace =
+			{ kind = "furnace", block = B.Furnace, size = 3, slots = { [1] = helmets(2) }, data = { 0, 0, 0, 0, 0 } }
+		table.insert(region.containers, { x = 2, y = 10, z = 1, container = furnace })
+		table.insert(region.items, { x = 5.5, y = 10, z = 5.5, stack = helmets(3), age = 10, pickupDelay = 0 })
+		table.insert(region.transport, { x = 4, y = 10, z = 4, colour = 0, stack = helmets(2) })
+		local back = RegionCodec.decode(RegionCodec.encode(region), 0, 0)
+		local slots = back.containers[1].container.slots :: any
+		t.eq(slots[1].count, 1)
+		t.ok(slots[3] and slots[4] and slots[3].count == 1 and slots[4].count == 1, "the chest's empty slots")
+		t.eq((back.containers[2].container.slots :: any)[1].count, 1, "the furnace's cut")
+		t.eq(#back.items, 3, "three helmets on the ground")
+		for _, item in back.items do
+			t.eq(item.stack.count, 1)
+			t.eq(item.x, 5.5)
+		end
+		t.eq(back.transport[1].stack.count, 1)
+		t.eq(back.dropped, 2, "the furnace's and the transporter's rest")
+		t.eq(back.unknown.IronHelmet, 2)
 	end)
 
 	--[[ Older versions ]]

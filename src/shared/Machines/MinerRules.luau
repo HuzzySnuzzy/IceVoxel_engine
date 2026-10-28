@@ -18,7 +18,9 @@
 	             IDLE (switched off); its state field holds the code alone
 	  packState  the state its views and records carry (Kinds/Miner's `stateOf`, from the code and
 	             the ore of its `mining`): code + 8 x the ore's index in ORES (0: none), a place in
-	             this version's list, never saved; unpackState reads it back
+	             this version's list, never saved; unpackState reads it back. Machines records
+	             carry it in two bytes (Machines.MAX_STATE, Net/Protocol), room for 8191 ores, and
+	             packs can't add that many: ores are blocks, whose ids stay under ITEM_BASE
 	  settings   what an ore costs with `speed` Speed and `energy` Energy Upgrades installed
 	             (Mekanism's maths, Machines/Upgrades, as the Electric Furnace's): the ticks an
 	             item takes (`Upgrades.ticks`: its ticks x 10^(-speed/8), truncated), the J a tick
@@ -30,7 +32,7 @@
 	             of Coal), so coal is never energy-positive
 
 	Checked as this loads: every ore is a block whose drop is one item, at whole ticks and some J a
-	tick.
+	tick, and every packed state fits Machines.MAX_STATE.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -92,6 +94,10 @@ do
 end
 
 MinerRules.ORES = table.freeze(ores)
+assert(
+	MAX_CODE + 8 * #ores <= Core.MAX_STATE,
+	`MinerRules: {#ores} ores don't fit the miner's packed state (Machines.MAX_STATE {Core.MAX_STATE})`
+)
 
 -- The Ore of `block` (nil: no ore, or unknown).
 function MinerRules.ore(block: number?): Ore?

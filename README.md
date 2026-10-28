@@ -84,8 +84,15 @@ A fast, Minecraft-style voxel engine for Roblox.
   saves as usual and the server's output names what went ("removed content left out of world
   "Island": 12 OldBlock, 3 OldItem"); content of a newer version (Roblox runs old and new servers
   side by side during an update, or the version is unknown, as in Studio) leaves that world,
-  player or character played but not saved, so nothing a newer version wrote is ever lost.
-  Worlds, players and characters saved
+  player or character played but not saved, so nothing a newer version wrote is ever lost. The
+  same holds for the ids inside machines and items: each record lists which of its numbers are
+  ids, so a version that keeps one more or one fewer leaves the other's out and counts it, never
+  misreading it as something else. A stack bigger than an item's `maxStack` today (another
+  version's, or an item that stacks to less since) is cut to it and the rest put in empty slots
+  of the inventory or chest, or beside a dropped item (what finds no room is left out and counted
+  like a removed name). Place versions are per place: a test place sharing the game's DataStores
+  can judge newer and older backwards, so give it stores of its own (another `Save.StoreName` and
+  `Characters.StoreName` in its Config). Worlds, players and characters saved
   before names were kept are not read: such a world's terrain and chests start afresh from its
   seed (its name, seed, settings and clock stay), a player starts afresh, and a character keeps
   its name, look and progress but not its things; each says so.
@@ -3067,7 +3074,7 @@ for performance:
 | `Lighting.Atmosphere.Offset` / `ColorFloor` | 0.05 / 0 | How sharp a sky the haze fades into (low: the edge melts into it; high: silhouettes, LOD changes show); the time of day's haze colour raised to this at its brightest channel before the weather darkens it (0: Minecraft's own; raise it only if the night horizon looks black in the Roblox player). |
 | `Lighting.Day` / `Night` / `Dusk` `.Haze` / `Glare` / `Decay` | 0.25 / 0.2 / 0.8, glare 0 / 0 / 0.4 | The Atmosphere's haze along the horizon, glow round the sun and colour away from it, blended like the light (the dusk glare only while the sun is above the horizon); its Color is `FogColor` (Minecraft's fog colours). |
 | `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |
-| `Save.Enabled` / `StoreName` | true / "IceVoxelWorlds_v1" | Save worlds at all, and the DataStore they go in (a new name starts afresh; Studio needs API access). |
+| `Save.Enabled` / `StoreName` | true / "IceVoxelWorlds_v1" | Save worlds at all, and the DataStore they go in (a new name starts afresh; Studio needs API access; a test place in the game's universe should have its own, as place versions are per place). |
 | `Save.Interval`           | 300     | Seconds between automatic saves (Minecraft's 5 minutes), each writing only what changed; 0: only `/save-all` and shutdown. |
 | `Save.MaxWorldBytes` / `WarnShare` | 64 MB / 0.8 | The most a world may take in the store (a save past it is refused and operators are told); the chat warns operators past this share of it (again every 5% more). |
 | `Save.KeyLimit` / `MaxKeyBytes` | 4194304 / 4000000 | Roblox's limit per key, and the text a region's key is filled to before it goes on in another part. |
@@ -3650,7 +3657,11 @@ mint cure keeps a canteen's sips).
 **Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
 numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make
 a new stack instead of changing one: `Items.withData(stack, { energy = 5000 })`; read it back with
-`Items.dataNumber(stack.data, "energy")`. A data key gets a tooltip line with a describer:
+`Items.dataNumber(stack.data, "energy")`. A key whose number is a content id (an item, a block or
+a fluid: a gun's `ammo`, a tank's `fluid`) is listed in `Items/ItemData` (`ID_KEYS`, or
+`ItemData.addIdKey`) so saves keep it by name, and it holds that kind of id in every item: a
+machine kind's tank, or a kept field without the same `types`, named like one is an error. A data
+key gets a tooltip line with a describer:
 
 ```lua
 Items.addDescriber("charge", function(data) return `Charge: {data.charge}%` end)

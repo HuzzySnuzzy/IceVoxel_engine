@@ -2481,7 +2481,7 @@ local Config = {
 	Turrets = {
 		-- false: the game as before: the kinds tick inert ("Disabled", no energy taken), no recipes
 		-- for turrets, parts or the Laser Sight, no service, no messages, no demand rule (blocks
-		-- and items stay registered: ids are append-only).
+		-- and items stay registered, so a world keeps the turrets and parts it holds).
 		Enabled = true,
 		-- Per type: its round and stand-in gun (sound, noise; Weapons/WeaponList), damage times the
 		-- round's, J a shot, the most degrees off its aim it fires at, the barrel's length (blocks

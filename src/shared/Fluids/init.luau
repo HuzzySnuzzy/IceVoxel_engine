@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Fluid registry: water, lava, oil and fuel, by id (FluidList; u8, append only):
+	Fluid registry: water, lava, oil and fuel, by id (FluidList's order, a u8; saves keep names):
 
 	  0 none, 1 water, 2 lava, 3 oil, 4 fuel (WATER, LAVA, OIL, FUEL: looked up by name).
 

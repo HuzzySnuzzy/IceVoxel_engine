@@ -912,7 +912,7 @@ return function(t, shared, require, server, client)
 			t.eq(WailaInfo.text(WailaInfo.machineLines(MINER, facts)[2]), text)
 		end
 		t.eq(WailaInfo.text(WailaInfo.machineDetails(MINER, facts)[1]), "Machine miner (consumer)")
-		-- The state travels in Machines records (a byte: at most 3 + 8 x the ores).
+		-- The state travels in Machines records (two bytes: at most 4 + 8 x the ores).
 		local s = sim()
 		s.set(0, Y - 1, 0, B.EmeraldOre)
 		s.set(0, Y, 0, MINER)
@@ -924,6 +924,73 @@ return function(t, shared, require, server, client)
 		t.eq(sent.active, true)
 		t.eq(sent.rate, -800)
 		t.ok(MinerRules.packState(STATE.NO_ORE, #MinerRules.ORES) <= Machines.MAX_STATE)
+	end)
+
+	t.test("miner: a pack's 40 ores travel with their state (Machines records' two bytes)", function()
+		-- A pack adding ores with `miner`, as the docs invite, to 40 in all: a byte held a packed
+		-- state of 31 ores (3 + 8 x 31); past it the record sent none and WAILA said Idle.
+		local env = Loader.new()
+		local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
+		local clientRoot = env.mount("src/client", "StarterPlayerScripts", "IceVoxel")
+		local pack = env.folder(root.Content.Packs, "ZzMoreOres")
+		env.module(pack, "pack", { order = 900, description = "More ores", requires = { "Core", "Minecraft" } })
+		local blocks = {}
+		for i = 1, 40 - #MinerRules.ORES do
+			table.insert(blocks, {
+				name = `ExtraOre{i}`,
+				color = { 100, 100, 100 },
+				material = "Granite",
+				hardness = 3,
+				tool = "pickaxe",
+				toolLevel = 1,
+				drops = "Coal",
+				lore = "An extra ore.",
+				miner = { ticks = 400, joules = 200 },
+			})
+		end
+		env.module(pack, "blocks", blocks)
+		local MoreBlocks = env.require(root.Blocks)
+		local MoreItems = env.require(root.Items)
+		local MoreMachines = env.require(root.Machines)
+		local MoreRules = env.require(root.Machines.MinerRules)
+		local MoreProtocol = env.require(root.Net.Protocol)
+		local MoreWaila = env.require(clientRoot.Ui.WailaInfo)
+		t.eq(#MoreRules.ORES, 40)
+		local last = MoreRules.ORES[40]
+		local block = MoreBlocks.id.MetalMiner
+		local container: any = MoreMachines.newContainer(block)
+		container.data[ENERGY] = CAPACITY
+		local context = {
+			block = block,
+			x = 0,
+			y = Y,
+			z = 0,
+			energy = MoreMachines.energyOf(block),
+			tick = 1,
+			dayTime = 6000,
+			getBlock = function(): number?
+				return last.block
+			end,
+		}
+		MoreMachines.tick(container, context :: any)
+		local name = MoreItems.displayName(last.block)
+		for _, case in { { CAPACITY, STATE.MINING, `Mining {name}` }, { 0, STATE.NO_POWER, "No power" } } do
+			container.data[ENERGY] = case[1]
+			MoreMachines.tick(container, context :: any)
+			local view = MoreMachines.view(container)
+			local record = table.clone(view) :: any
+			record.x, record.y, record.z = 0, Y, 0
+			local sent = (MoreProtocol.decodeMachines(MoreProtocol.encodeMachines({ record })) :: any)[1]
+			t.eq(sent.state, view.state, `{case[3]}: the record carries the whole state`)
+			local code, index = MoreRules.unpackState(sent.state)
+			t.eq(code, case[2], "its state")
+			t.eq(index, 40, "and its ore")
+			t.eq(MoreMachines.status(block, sent), case[3])
+			local facts = MoreWaila.machineDefaults(block)
+			facts.state = sent.state
+			t.eq(MoreWaila.text(MoreWaila.machineLines(block, facts)[2]), case[3], "WAILA")
+			t.eq(table.concat(MoreMachines.lines(block, sent, nil), " | "), "Makes Coal", "the panel's line")
+		end
 	end)
 
 	t.test("miner: the client lights its grille and drills; the press lights its window and stamps", function()

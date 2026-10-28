@@ -43,7 +43,11 @@
 	            RegionCodec, through its palette: `idFields`); a tank's "<name>Fluid" is a fluid
 	            on its own. A kept field with a type is an id key of the item too (Items/ItemData)
 	  keep      fields kept in the item when the machine is broken (energy and tanks always are),
-	            while they differ from what a fresh machine's start at (`defaults`)
+	            while they differ from what a fresh machine's start at (`defaults`). An item data
+	            key holds an id everywhere or nowhere, so a kept field without a type, or a tank,
+	            named like an id key (Items/ItemData: `fluid`, `light` ...) is an error, as is a
+	            typed one holding another kind of id than that key or one another kind keeps as a
+	            plain number
 	  defaults  { [field]: number }: what a fresh machine's fields start at (default 0; a
 	            thermostat's "on" 1, a turret's Lure on)
 	  tanks     { TankSpec }: fluid tanks (Mekanism's machine fluid tanks), each with a `name`, a
@@ -411,8 +415,9 @@ local ENERGY, CAPACITY, INPUT, OUTPUT, RATE, ACTIVE = 1, 2, 3, 4, 5, 6
 Machines.CONTAINER_KIND = "machine"
 assert(table.find(Types.KINDS, Machines.CONTAINER_KIND), "Types.KINDS must list machines")
 
--- The largest state code (KindSpec `state`): one byte in Machines records.
-Machines.MAX_STATE = 255
+-- The largest state code (KindSpec `state`): two bytes in Machines records (Net/Protocol), so a
+-- code may carry a place in a content list (the Metal Miner's ore: Machines/MinerRules).
+Machines.MAX_STATE = 65535
 
 -- Mekanism's GuiVerticalPowerBar and the furnace panel's height (GUI pixels).
 Machines.ENERGY_BAR = table.freeze({ x = 164, y = 15, w = 6, h = 52 })
@@ -529,6 +534,36 @@ end
 local NO_TANKS: { Tank } = table.freeze({})
 local NO_IDS: { number } = table.freeze({})
 
+--[[
+	The item data keys a machine's item keeps as plain numbers (`save`: tank amounts, untyped kept
+	fields), and which kind keeps each: such a key may never also be an id key (Items/ItemData),
+	or saves would read its number as an id (`define` checks both ways).
+]]
+local plainKeys: { [string]: string } = {}
+
+-- Checks that the item data key `key` (a `what` of kind `name`) can hold ids of `kind` (nil: a
+-- plain number) in its item: no id key holds other ids, no other kind keeps it plain.
+local function checkKey(name: string, key: string, kind: IdKind?, what: string)
+	local idKind = ItemData.idKind(key)
+	if kind == nil then
+		local hint = if what == "tank" then "name it otherwise" else `type it "{idKind}" or name it otherwise`
+		assert(
+			idKind == nil,
+			`Machine kind {name}: {what} {key} is kept in its item as a plain number, but {key} is an item data key holding {idKind} ids (Items/ItemData), so saves would read it as one: {hint}`
+		)
+	else
+		assert(
+			idKind == nil or idKind == kind,
+			`Machine kind {name}: {what} {key} holds {kind} ids, but the item data key {key} holds {idKind} ids (Items/ItemData)`
+		)
+		local keeper = plainKeys[key]
+		assert(
+			keeper == nil,
+			`Machine kind {name}: {what} {key} holds {kind} ids, but machine kind {keeper} keeps {key} in its item as a plain number`
+		)
+	end
+end
+
 -- The tooltip line of a tank kept in a machine's item (`save`): "Lava: 5,000 mB". One describer
 -- per tank name, shared by every kind with a tank of that name (the stack's kind says which
 -- fluid a tank of one fluid holds).
@@ -629,7 +664,10 @@ end
 	BlockList's `machine.kind` names one. Errors on a bad spec: too many slots or fields (tanks
 	count), a field or tank name that is no data key or repeats a header name or another field, a
 	kept or typed field that is no field, a type that is no kind of id, a tank without a whole
-	capacity, a role or a carriable fluid.
+	capacity, a role or a carriable fluid, and an item data key the machine's item keeps that
+	another holds otherwise: a tank or an untyped kept field named like an id key (Items/ItemData:
+	`fluid`, `light` ...), or a typed kept field or a tank's "<name>Fluid" holding another kind of
+	id than that key, or a key another kind keeps as a plain number.
 ]]
 function Machines.define(name: string, spec: KindSpec): Kind
 	assert(type(name) == "string" and name ~= "", "a kind needs a name")
@@ -674,8 +712,12 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		`Machine kind {name}: its state {stateField} is no field`
 	)
 	assert(spec.stateOf == nil or stateField ~= nil, `Machine kind {name} works out a state but has none`)
-	-- The fields holding ids (`types`), then the fluid of each tank taking several.
+	-- The fields holding ids (`types`), then the fluid of each tank taking several. What the item
+	-- keeps (`save`) is checked against Items/ItemData's id keys now, and its own id keys and
+	-- plain keys are registered once the whole spec is checked.
 	local ids: { [number]: IdKind } = {}
+	local idKeys: { [string]: IdKind } = {}
+	local plain: { string } = {}
 	local specTypes: { [string]: string } = spec.types or {}
 	for field, typeName in specTypes do
 		assert(table.find(fields, field), `Machine kind {name}: a type for {field}, which is no field`)
@@ -685,16 +727,31 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		)
 		local idKind: IdKind = (typeName :: any) :: IdKind
 		ids[index[field]] = idKind
-		if table.find(keep, field) then
+	end
+	for _, field in keep do
+		local idKind: IdKind? = ids[index[field]]
+		checkKey(name, field, idKind, "kept field")
+		if idKind then
 			-- (Kept in the item: an id key of its data, Machines.save.)
-			ItemData.addIdKey(field, idKind)
+			idKeys[field] = idKind
+		else
+			table.insert(plain, field)
 		end
 	end
 	for _, tank in tanks do
+		-- (Its amount, under its name, is a plain number.)
+		checkKey(name, tank.name, nil, "tank")
+		table.insert(plain, tank.name)
 		if tank.fluidIndex then
 			ids[tank.fluidIndex] = "fluid"
-			ItemData.addIdKey(`{tank.name}Fluid`, "fluid")
+			local fluidKey = `{tank.name}Fluid`
+			local fluid: IdKind = "fluid"
+			checkKey(name, fluidKey, fluid, "tank fluid")
+			idKeys[fluidKey] = fluid
 		end
+	end
+	for _, key in plain do
+		assert(idKeys[key] == nil, `Machine kind {name} keeps {key} in its item as an id and a plain number`)
 	end
 	local insertFaces: { [number]: { number } } = {}
 	local extractFaces: { [number]: { number } } = {}
@@ -799,6 +856,12 @@ function Machines.define(name: string, spec: KindSpec): Kind
 	}
 	for _, tank in tanks do
 		describeTank(tank.name)
+	end
+	for key: string, idKind: IdKind in idKeys do
+		ItemData.addIdKey(key, idKind)
+	end
+	for _, key in plain do
+		plainKeys[key] = plainKeys[key] or name
 	end
 	kinds[name] = table.freeze(kind)
 	return kind

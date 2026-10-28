@@ -677,9 +677,9 @@ return function(t, shared, require, server, client)
 		t.eq(clamped.mana, Config.Mana.Max)
 		t.eq(clamped.crystals, Config.Mana.MaxCrystals)
 		record.mana, record.crystals = nil, 0
-		-- No position, nothing held: tiny (17 bytes, 22 characters: it was under 20 before its
-		-- palette came, the writer's place version and five empty counts).
-		t.ok(#PlayerCodec.toText(PlayerCodec.new(), 7) <= 22)
+		-- No position, nothing held: tiny (19 bytes, 24 characters: it was under 20 before its
+		-- palette came, the writer's place version, five empty counts and two of ids in data).
+		t.ok(#PlayerCodec.toText(PlayerCodec.new(), 7) <= 24)
 		t.eq((PlayerCodec.fromText("not base85 \\")), nil)
 		t.eq((PlayerCodec.fromText(42)), nil)
 		local bytes = PlayerCodec.encode(record)

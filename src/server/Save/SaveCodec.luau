@@ -19,14 +19,29 @@
 	            blocks, items, fluids, mob kinds and effects it writes (`indexOf`: each id once,
 	            numbered 1.. in the order first written; 0 stays 0 for every kind: Air, no item,
 	            no fluid) and writes them once (`writePalette`: varint the writer's place version,
-	            then for each of PALETTE_KINDS in order varint n + n texts), before what uses
-	            them; the reader (`readPalette`) maps each index to today's id of its name
-	            (`idOf`; blocks and items through Blocks.find and Items.find, so a RENAMED line
-	            keeps a renamed one). A name this version doesn't know reads as nil: a block
-	            becomes air, an item is `lost`, a fluid or a mob is dropped, an effect skipped
-	            (each decoder says, and counts what it left out), never a refused record. An
-	            index the palette doesn't have is a damaged save. So content can be added,
-	            removed, renamed (with a RENAMED line) and reordered between versions.
+	            then for each of PALETTE_KINDS in order varint n + n texts, then the ids in data,
+	            below), before what uses them; the reader (`readPalette`) maps each index to
+	            today's id of its name (`idOf`; blocks and items through Blocks.find and
+	            Items.find, so a RENAMED line keeps a renamed one). A name this version doesn't
+	            know reads as nil: a block becomes air, an item is `lost`, a fluid or a mob is
+	            dropped, an effect skipped (each decoder says, and counts what it left out), never
+	            a refused record. An index the palette doesn't have is a damaged save (but see
+	            Ids in data). So content can be added, removed, renamed (with a RENAMED line) and
+	            reordered between versions.
+	  Ids in    which numbers inside data are ids is code too (Items/ItemData's id keys, Shared/
+	  data      Machines `types` and tanks, Crafting/Smelting.ID_FIELDS), and another version may
+	            have more or fewer such keys and fields, so the record says which it wrote as
+	            palette indices, after the names: varint n + n x (text key, u8 kind: its place in
+	            PALETTE_KINDS), the item data keys (`keys`); varint n + n x (varint the block's
+	            palette index, u8 m + m x (u8 data index, u8 kind)), the container data indices
+	            by the container's block (`fields`). The reader goes by both (`dataId`): a key or
+	            field both versions keep an id of the same kind under is mapped by name; one only
+	            the writer listed (a newer version's id key, or one this version dropped) or only
+	            this version types (an older writer's plain number), or listed as another kind,
+	            can't be read and is left out, as is an index the palette doesn't have: counted
+	            under the key's or field's name (`unknown`, and the decoders' `dropped`), so the
+	            newer-version rule below keeps such a record from being written back, never a
+	            refused record. 0 is none in every version: kept.
 	  Unknown   which of two a name this version doesn't know is, the place version that wrote
 	            the record says (`newerNames`; the glue reads game.PlaceVersion once, 0 in Studio,
 	            and passes it in: WorldStore's Env `place`). From this place version or an older
@@ -46,8 +61,12 @@
 	            Items.validData), the numbers under Items/ItemData's id keys (a weapon's rounds and
 	            attachments, a tank's fluid) indices in the palette too. An item this version
 	            doesn't know reads back as nil and `lost` (the decoders count it): the stack is
-	            dropped, not the save; an id in its data this version doesn't know drops that key
-	            and counts the stack `lost` too.
+	            dropped, not the save; an id in its data that can't be read (Ids in data) drops
+	            that key and counts the stack `lost` too. A count over today's maxStack (another
+	            version's, or an item whose maxStack went down) is cut to it and the rest given
+	            back (`extraStacks`, `giveBack`): as more stacks in the empty slots of a place that
+	            takes anything (an inventory's 36 slots, a chest) or beside a dropped item, else
+	            left out and counted by the item's name like a name this version doesn't know.
 	  Text      DataStore values are JSON: binary has to become text. Base85 (Ascii85's
 	            arithmetic: 4 bytes are a big-endian u32 written as 5 digits base 85, the last
 	            group of k bytes as k + 1 digits) over 85 printable ASCII characters that JSON
@@ -88,14 +107,26 @@ export type Palette = {
 	index: { [PaletteKind]: { [number]: number } },
 	-- Index -> today's id of its name (false: a name this version doesn't know).
 	ids: { [PaletteKind]: { [number]: number | false } },
-	-- Reading: names this version doesn't know -> how many things were left out (`idOf`).
+	-- Reading: names this version doesn't know -> how many things were left out (`idOf`), and
+	-- the ids in data that couldn't be read, under their key's or field's name (`dataId`).
 	unknown: { [string]: number },
+	-- Ids in data (see the header): the item data keys written as palette indices, and of what
+	-- kind (writing: those `stack` wrote so; read: the writer's list) ...
+	keys: { [string]: PaletteKind },
+	-- ... and the container data indices, by the palette index of the container's block
+	-- (`fieldIndex`).
+	fields: { [number]: { [number]: PaletteKind } },
 }
 
 local SaveCodec = {}
 
 -- The kinds a palette names, in the order they are written.
 SaveCodec.PALETTE_KINDS = table.freeze({ "block", "item", "fluid", "mob", "effect" } :: { PaletteKind })
+-- A kind's place in PALETTE_KINDS (how ids in data say their kind).
+local KIND_CODE: { [PaletteKind]: number } = {}
+for code, kind in SaveCodec.PALETTE_KINDS do
+	KIND_CODE[kind] = code
+end
 -- Why a record from another version is refused (see the header).
 SaveCodec.NEWER = "saved by a newer version"
 SaveCodec.OLDER = "saved by an older version"
@@ -356,7 +387,8 @@ end
 
 -- An empty palette, written by place version `place` (default 0: unknown).
 function SaveCodec.palette(place: number?): Palette
-	local palette: Palette = { place = placeOf(place), names = {}, index = {}, ids = {}, unknown = {} }
+	local palette: Palette =
+		{ place = placeOf(place), names = {}, index = {}, ids = {}, unknown = {}, keys = {}, fields = {} }
 	for _, kind in SaveCodec.PALETTE_KINDS do
 		palette.names[kind] = {}
 		palette.index[kind] = {}
@@ -411,8 +443,60 @@ function SaveCodec.idOf(palette: Palette, kind: PaletteKind, index: number, coun
 	return nil
 end
 
--- Writes `palette`: the writer's place version, then its names (for each of PALETTE_KINDS:
--- varint n, then n texts).
+--[[
+	The index container data's id `id` (one of `kind`'s) at data index `at` is written as
+	(`indexOf`), in a container whose block is index `block` in `palette`: noted in the palette's
+	`fields`, so the reader knows that number is an index (see the header's Ids in data).
+]]
+function SaveCodec.fieldIndex(palette: Palette, block: number, at: number, kind: PaletteKind, id: number): number
+	if block > 0 then
+		local fields = palette.fields[block]
+		if fields == nil then
+			fields = {}
+			palette.fields[block] = fields
+		end
+		fields[at] = kind
+	end
+	return SaveCodec.indexOf(palette, kind, id)
+end
+
+--[[
+	The number `value` a record's data held under an id key or field, read back with its
+	`palette` (see the header's Ids in data). `listed`: the kind of id the writer wrote it as
+	(the palette's `keys` or `fields`; nil: a plain number); `mine`: the kind this version keeps
+	there (ItemData.idKind, Machines.idFields; nil: a plain number); one of them is set. Returns
+	today's id of its name, 0 for 0 (none in every version), or nil when it is left out, counted
+	in the palette's `unknown`: under its name when this version doesn't know the name, else under
+	`label` (the key or field) when the number can't be read: an id one version keeps there and
+	the other doesn't, or of another kind, or an index the palette doesn't have. Never an error:
+	an id in data never refuses a record.
+]]
+function SaveCodec.dataId(
+	palette: Palette,
+	listed: PaletteKind?,
+	mine: PaletteKind?,
+	value: any,
+	label: string
+): number?
+	if value == 0 then
+		return 0
+	end
+	if listed ~= nil and listed == mine and type(value) == "number" then
+		local id = palette.ids[listed][value]
+		if type(id) == "number" then
+			return id
+		elseif id == false then
+			local name = palette.names[listed][value]
+			palette.unknown[name] = (palette.unknown[name] or 0) + 1
+			return nil
+		end
+	end
+	palette.unknown[label] = (palette.unknown[label] or 0) + 1
+	return nil
+end
+
+-- Writes `palette`: the writer's place version, its names (for each of PALETTE_KINDS: varint n,
+-- then n texts), then the ids in data: its `keys` and its `fields` (see the header).
 function SaveCodec.writePalette(w: Writer, palette: Palette)
 	SaveCodec.varint(w, placeOf(palette.place))
 	for _, kind in SaveCodec.PALETTE_KINDS do
@@ -422,6 +506,46 @@ function SaveCodec.writePalette(w: Writer, palette: Palette)
 			SaveCodec.text(w, name)
 		end
 	end
+	-- (In order: the same record always writes alike.)
+	local keys: { string } = {}
+	for key in palette.keys do
+		table.insert(keys, key)
+	end
+	table.sort(keys)
+	SaveCodec.varint(w, #keys)
+	for _, key in keys do
+		SaveCodec.text(w, key)
+		SaveCodec.u8(w, KIND_CODE[palette.keys[key]])
+	end
+	local blocks: { number } = {}
+	for block in palette.fields do
+		table.insert(blocks, block)
+	end
+	table.sort(blocks)
+	SaveCodec.varint(w, #blocks)
+	for _, block in blocks do
+		local fields = palette.fields[block]
+		local indices: { number } = {}
+		for at in fields do
+			table.insert(indices, at)
+		end
+		table.sort(indices)
+		SaveCodec.varint(w, block)
+		SaveCodec.u8(w, #indices)
+		for _, at in indices do
+			SaveCodec.u8(w, at)
+			SaveCodec.u8(w, KIND_CODE[fields[at]])
+		end
+	end
+end
+
+-- A kind as `writePalette` wrote it (its place in PALETTE_KINDS); anything else is damage.
+local function readKind(r: Reader): PaletteKind
+	local kind = SaveCodec.PALETTE_KINDS[SaveCodec.readU8(r)]
+	if kind == nil then
+		error("bad palette in save", 0)
+	end
+	return kind
 end
 
 -- A palette `writePalette` wrote, each name mapped to today's id (false: none by that name).
@@ -437,6 +561,23 @@ function SaveCodec.readPalette(r: Reader): Palette
 			if id and index[id] == nil then
 				index[id] = i
 			end
+		end
+	end
+	for _ = 1, SaveCodec.readVarint(r) do
+		local key = SaveCodec.readText(r)
+		palette.keys[key] = readKind(r)
+	end
+	local blocks = #palette.names.block
+	for _ = 1, SaveCodec.readVarint(r) do
+		local block = SaveCodec.readVarint(r)
+		if block < 1 or block > blocks or palette.fields[block] then
+			error("bad palette in save", 0)
+		end
+		local fields: { [number]: PaletteKind } = {}
+		palette.fields[block] = fields
+		for _ = 1, SaveCodec.readU8(r) do
+			local at = SaveCodec.readU8(r)
+			fields[at] = readKind(r)
 		end
 	end
 	return palette
@@ -501,9 +642,9 @@ end
 --[[ Stacks ]]
 
 --[[
-	`data` with the numbers under id keys (ItemData) as `palette` indices: the same table when it
-	has none; a key whose number is no id of its kind is left out. (Keys in order: the same data
-	always adds its names alike.)
+	`data` with the numbers under id keys (ItemData) as `palette` indices, each such key noted in
+	the palette's `keys`: the same table when it has none; a key whose number is no id of its kind
+	is left out. (Keys in order: the same data always adds its names alike.)
 ]]
 local function savedData(data: Items.Data?, palette: Palette): Items.Data?
 	if data == nil then
@@ -528,14 +669,22 @@ local function savedData(data: Items.Data?, palette: Palette): Items.Data?
 	for _, key in keys do
 		local value = data[key]
 		local index = if type(value) == "number" then SaveCodec.indexOf(palette, kinds[key], value) else 0
-		-- (None, or no id: the key goes.)
-		out[key] = (if index > 0 or value == 0 then index else nil) :: any
+		if index > 0 or value == 0 then
+			out[key] = index :: any
+			palette.keys[key] = kinds[key]
+		else
+			-- (No id: the key goes.)
+			out[key] = nil
+		end
 	end
 	return out
 end
 
--- Data `savedData` wrote, its id keys today's ids again, and whether an id this version doesn't
--- know was left out. Errors on an id key whose number is no index (a damaged save).
+--[[
+	Data `savedData` wrote, its id keys today's ids again (`dataId`: the writer's `keys` and this
+	version's id keys), and whether one was left out: a name this version doesn't know, or a
+	number that can't be read (counted under "<key> (item data)").
+]]
 local function loadedData(data: Items.Data?, palette: Palette): (Items.Data?, boolean)
 	if data == nil then
 		return nil, false
@@ -543,15 +692,12 @@ local function loadedData(data: Items.Data?, palette: Palette): (Items.Data?, bo
 	local out: Items.Data? = nil
 	local lost = false
 	for key, value in next, data do
-		local kind = ItemData.idKind(key)
-		if kind then
-			if type(value) ~= "number" or value < 0 or value ~= math.floor(value) then
-				error("bad item data in save", 0)
-			end
+		local listed, mine = palette.keys[key], ItemData.idKind(key)
+		if listed or mine then
 			local copy: Items.Data = out or table.clone(data)
 			out = copy
-			local id = SaveCodec.idOf(palette, kind, value)
-			-- (None: the key goes.)
+			local id = SaveCodec.dataId(palette, listed, mine, value, `{key} (item data)`)
+			-- (Left out: the key goes.)
 			copy[key] = id :: any
 			if id == nil then
 				lost = true
@@ -582,12 +728,13 @@ end
 --[[
 	A stack written by `stack` with the record's `palette`: nil for empty; nil and `lost` true for
 	an item this version doesn't know; the stack and `lost` true when an id in its data was one
-	(that key left out).
+	(that key left out). Third: how many items over today's maxStack were cut off it (0 none; the
+	caller gives them back, `extraStacks` and `giveBack`, or counts them left out).
 ]]
-function SaveCodec.readStack(r: Reader, palette: Palette): (Stack?, boolean)
+function SaveCodec.readStack(r: Reader, palette: Palette): (Stack?, boolean, number)
 	local index = SaveCodec.readVarint(r)
 	if index == 0 then
-		return nil, false
+		return nil, false, 0
 	end
 	local count = SaveCodec.readVarint(r)
 	local damage = SaveCodec.readVarint(r)
@@ -599,10 +746,65 @@ function SaveCodec.readStack(r: Reader, palette: Palette): (Stack?, boolean)
 	local item = SaveCodec.idOf(palette, "item", index)
 	local data, lostData = loadedData(saved, palette)
 	if item == nil or not Items.isValid(item) or count < 1 or count > 255 then
-		return nil, true
+		return nil, true, 0
 	end
-	local stack = Items.newStack(item, count, if damage > 0 then damage else nil, data)
-	return stack, stack == nil or lostData
+	-- (Today's maxStack: another version's may be more, or this one's went down since.)
+	local most = Items.maxStack(item)
+	local stack = Items.newStack(item, math.min(count, most), if damage > 0 then damage else nil, data)
+	return stack, stack == nil or lostData, math.max(0, count - most)
+end
+
+-- `extra` more of `stack` (its item, wear and data) as stacks of at most its maxStack each.
+function SaveCodec.extraStacks(stack: Stack, extra: number): { Stack }
+	local out: { Stack } = {}
+	local most = Items.maxStack(stack.item)
+	local left = extra
+	while left > 0 do
+		local count = math.min(left, most)
+		table.insert(out, Items.newStack(stack.item, count, stack.damage, stack.data) :: Stack)
+		left -= count
+	end
+	return out
+end
+
+--[[
+	Gives back the `extra` items `readStack` cut off `stack` (over today's maxStack), as
+	`extraStacks`, into the empty slots of `store` 1..`size` (a place that takes anything: an
+	inventory's 36 slots, a chest; nil: nowhere). What finds no room is left out, counted in
+	`palette`'s `unknown` under the item's name; returns whether something was (the caller counts
+	it in its `dropped`, so the newer-version rule holds: a newer version's bigger stack is never
+	cut and written back).
+]]
+function SaveCodec.giveBack(
+	palette: Palette,
+	stack: Stack,
+	extra: number,
+	store: { [number]: Stack? }?,
+	size: number?
+): boolean
+	if extra <= 0 then
+		return false
+	end
+	local left = 0
+	local slot = 1
+	for _, more in SaveCodec.extraStacks(stack, extra) do
+		if store then
+			while slot <= (size or 0) and store[slot] ~= nil do
+				slot += 1
+			end
+		end
+		if store and slot <= (size or 0) then
+			store[slot] = more
+		else
+			left += more.count
+		end
+	end
+	if left > 0 then
+		local name = (Items.get(stack.item) :: Items.ItemDef).name
+		palette.unknown[name] = (palette.unknown[name] or 0) + left
+		return true
+	end
+	return false
 end
 
 --[[ Text (base85) ]]

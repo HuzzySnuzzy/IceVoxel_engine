@@ -89,8 +89,10 @@ air), an item's ITEM_BASE (4096, now `Content.ITEM_BASE`) + its place among the 
 placeable block is an item with its block's id, as before), an effect's its place among the
 effects from 1 (a u8 on the wire: `Content.MAX_EFFECTS`, 255, at most), dense and given at load:
 no append-only rule, no positions to keep. There must be fewer blocks than ITEM_BASE (checked by
-Content and by Items). Every machine loads the same packs in the same order, so client and server
-agree on every id; saves still hold ids until they keep names (the saves phase). Nothing may lean
+Content and by Items), and the last item's id, ITEM_BASE + the items - 1, must fit 16 bits
+(checked by Items). Every machine loads the same packs in the same order, so client and server
+agree on every id; saves keep names, never ids (Saving worlds: Names, not ids), so ids may move
+between versions. Nothing may lean
 on where an entry stands: ids, the creative order (`Items.list`: blocks by id, then items) and
 JEI's fuel list follow the packs and their files' names, so code finds content by name (the
 turrets' blocks, the fluids Fluids names, a calibre's default round: WeaponList `default`), and a
@@ -4897,7 +4899,10 @@ strings of at most 64 bytes or booleans. No data is nil, never an empty table.
   (`ID_KEYS`: a weapon's `ch`, `ammo`, `mag`, `optic`, `muzzle`, `light`, items; a Fluid Tank's
   `fluid`; `addIdKey` for more: Shared/Machines adds each tank's `<tank>Fluid` and any typed kept
   field), so saves keep them by name (Saving worlds: Names, not ids). A new key holding an id goes
-  there, or a save would keep its number as it is.
+  there, or a save would keep its number as it is. A key holds an id in every item or in none:
+  `Machines.define` refuses a tank, or a kept field without the same type, named like an id key
+  (a tank called `fluid` would have its mB read as a fluid), and a key one kind keeps plain that
+  another types.
 
 **On the wire.** Snapshots and creative actions send a stack's data after its wear: u8 n (0 none,
 at most 16), then n entries sorted by key (equal data encodes alike): u8 key length + key, u8 type
@@ -7903,7 +7908,8 @@ require it):
   ticksRequired, 9 energyPerTick, 10 mining (the ore block seen: `types`, saved by name), 11
   state (the code alone; its views and records carry `MinerRules.packState`, code + 8 x the ore's
   index in this version's `MinerRules.ORES`, worked out from `mining` by `stateOf`, so no place in
-  the list is ever saved and ores may come and go), 12 activeDelay; MINING ("Mining Diamond Ore"),
+  the list is ever saved and ores may come and go; two bytes in Machines records, so a pack may add
+  any number of ores), 12 activeDelay; MINING ("Mining Diamond Ore"),
   NO_POWER, OUTPUT_FULL, NO_ORE ("No ore below"), IDLE (switched off); a 200 kJ store taking its
   capacity a tick (`rates`); `info` the store and each ore's ticks, J a tick and floor. The ores'
   `miner` (on their entries): coal 600 ticks at 800 J/t with a 400 kJ
@@ -8761,75 +8767,102 @@ its regions and its players.
   12 and 13). Records are tagged and length-prefixed and read back exactly to their length, the
   region's palette first (version 3: Names, not ids, below); names this version doesn't know are
   left out one by one and counted (`dropped`, and by name: an edit of such a block becomes Air, a
-  stack or a mob goes, a pipe's or tank's fluid empties), anything else damaged refuses the
-  region. In a region a newer place version wrote they may be content this version lacks: the
-  world is played but never saved (`canSave` false, "saved by a newer version" on the title
-  screens), as writing it back would lose them for good; in one this version or an older one
-  wrote they are content since removed and the world saves (Names, not ids). Block updates still
-  waiting for their chunk to generate are saved again as they were (`WorldSnapshot.collect`'s
-  `pending`), not lost at the next save.
+  stack or a mob goes, a pipe's or tank's fluid empties, an id in data another version keeps where
+  this one doesn't is nothing), anything else damaged refuses the region. In a region a newer place
+  version wrote they may be content this version lacks: the world is played but never saved
+  (`canSave` false, "saved by a newer version" on the title screens), as writing it back would lose
+  them for good; in one this version or an older one wrote they are content since removed and the
+  world saves (Names, not ids). Block updates still waiting for their chunk to generate are saved
+  again as they were (`WorldSnapshot.collect`'s `pending`), not lost at the next save.
 - Players (`Save/PlayerCodec`, Minecraft's playerdata): feet and facing (or none: back at the
-  spawn), health in half hearts, game mode and the previous one, the selected slot, inventory,
-  armor and cursor, Tough As Nails' thirst and temperature (Climate Clemency left included) and
-  the running status effects, and (version 3, flag bit 5, written only when not all 0) the
-  apocalypse's survivor record and infection with `Characters.Enabled` off (Infection and
-  bleeding), and (version 4, flag bit 6) Minecraft's food bar (food, saturation, exhaustion,
-  timer; none kept: a full bar), and (version 5, flag bit 7, written only above 0) the radiation
-  dose (Radiation); version 6 keeps names (its own palette right after the version byte: its
-  items, the fluids in their data, its effects). Knowledge, Ages and skills stay in
-  Players/ProgressStore, for every world. 100-700 bytes. A record holding items this version
-  doesn't know is applied (what it can read); a newer place version's is never written that
-  session, one holding items since removed saves without them (the player told); an effect it
-  doesn't know is skipped. The world's options carry its `ruins` setting; a record from before
-  the ruins has no key and reads it as off (World types).
+  spawn), health in half hearts, game mode and the previous one, the selected slot, inventory, armor
+  and cursor, Tough As Nails' thirst and temperature (Climate Clemency left included) and the
+  running status effects, and (version 3, flag bit 5, written only when not all 0) the apocalypse's
+  survivor record and infection with `Characters.Enabled` off (Infection and bleeding), and (version
+  4, flag bit 6) Minecraft's food bar (food, saturation, exhaustion, timer; none kept: a full bar),
+  and (version 5, flag bit 7, written only above 0) the radiation dose (Radiation); version 6 keeps
+  names (its own palette right after the version byte: its items, the fluids in their data, its
+  effects). Knowledge, Ages and skills stay in Players/ProgressStore, for every world. 100-700
+  bytes. A record holding items this version doesn't know is applied (what it can read); a newer
+  place version's is never written that session, one holding items since removed saves without them
+  (the player told); an effect it doesn't know is skipped and counted as an item is. The world's
+  options carry its `ruins` setting; a record from before the ruins has no key and reads it as off
+  (World types).
 - Not saved: fire's ages (fire comes back at age 0), a lit TNT's or Nuke's fuse (a lit block
   with no record starts its full fuse, Behaviours/Tnt), explosions under way, items' and mobs'
   velocities, monsters, the session's SAVE texts of structure blocks (copy the IVS1 text) and
   open windows (a window's cursor goes back into the inventory).
 
-**Names, not ids** (`Save/SaveCodec`'s palettes, `Items/ItemData`, Shared/Machines `types`).
-Content ids are given out as content loads, so another version may give a block, item, fluid,
-mob kind or effect another number. Saves keep names: every record the DataStore commits on its
-own (a region, a player record, a character) carries a palette, the names of the blocks, items,
-fluids, mob kinds and effects it holds, each once in the order first written (per kind a varint
-count and the texts; id 0, Air and nothing, stays 0 in every version), and stores its indices
-there instead of ids; the reader maps each index to today's id of that name (`Blocks.find`,
-`Items.find`: a RENAMED line keeps renamed content). Ids hiding inside data go through it too: a
-container's numbers (a furnace's cooking item, `Crafting/Smelting.ID_FIELDS`; the machine fields
-a kind types, `types = { mining = "block" }`: the Metal Miner's ore, the Electric Furnace's item,
-and the fluid of each tank taking several: `Machines.idFields`) and item data (the keys
-`ItemData.ID_KEYS` lists once: a weapon's `ch`, `ammo`, `mag`, `optic`, `muzzle` and `light`, a
-Fluid Tank's `fluid`; Shared/Machines adds each tank's `<tank>Fluid` and any typed kept field).
-The Metal Miner's state field keeps its code alone and its views and records add its ore's place
-in this version's `MinerRules.ORES` from `mining` (KindSpec `stateOf`), so the ore list may
-change. A name this version doesn't know never refuses a record: a block becomes Air (left out of
-the seasons' maps), an item is dropped (an id in an item's data drops that key), a fluid empties
-its pipe, tank or machine tank, a mob goes, a machine's typed field reads 0 (what it works on
-starts over), an effect is skipped; all but effects are counted (`dropped`), and each name with
-how many things of it (`unknown`). Which they are, the place version that wrote the record says:
-the palette starts with it (game.PlaceVersion, read once by World/WorldSave as `PLACE_VERSION`
-and passed in as WorldStore's Env `place`; 0 in Studio, whatever Studio reports: Roblox's
-documentation and developers give 0 there, and a Studio session may run unpublished content).
-From this place version or an older one, both known: content since removed. Left out as above,
-and the record saves as any other (`SaveCodec.newerNames` false, `WorldStore.writesBack`); the
-server warns once with the names and counts (`SaveCodec.removedNotice`: "[IceVoxel] removed
-content left out of world "Island": 12 OldBlock, 3 OldItem"; a player's or a character's
-things likewise, and the player is told the things were removed from the game), and the regions
-it was left out of are written anew by the first save (`Loaded.removedFrom`). From a newer place
-version (Roblox runs old and new servers side by side during an update), or with either version
-unknown (0: Studio): perhaps content this version lacks, so the record is played but never
-written back that session ("saved by a newer version"), so an old server never writes over a
-newer one's record and a Studio test never writes over live data it can't read. The locks, slots
-and gens are untouched by this. So content can be added, removed, reordered and renamed between
-versions with every world, player and character intact (tests/spec/SaveNames: round trips
-through palettes whose names were swapped, renamed and removed; tests/spec/WorldSave and
+**Names, not ids** (`Save/SaveCodec`'s palettes, `Items/ItemData`, Shared/Machines `types`). Content
+ids are given out as content loads, so another version may give a block, item, fluid, mob kind or
+effect another number. Saves keep names: every record the DataStore commits on its own (a region, a
+player record, a character) carries a palette, the names of the blocks, items, fluids, mob kinds and
+effects it holds, each once in the order first written (per kind a varint count and the texts; id 0,
+Air and nothing, stays 0 in every version), and stores its indices there instead of ids; the reader
+maps each index to today's id of that name (`Blocks.find`, `Items.find`: a RENAMED line keeps
+renamed content). Ids hiding inside data go through it too: a container's numbers (a furnace's
+cooking item, `Crafting/Smelting.ID_FIELDS`; the machine fields a kind types, `types = { mining =
+"block" }`: the Metal Miner's ore, the Electric Furnace's item, and the fluid of each tank taking
+several: `Machines.idFields`) and item data (the keys `ItemData.ID_KEYS` lists once: a weapon's
+`ch`, `ammo`, `mag`, `optic`, `muzzle` and `light`, a Fluid Tank's `fluid`; Shared/Machines adds
+each tank's `<tank>Fluid` and any typed kept field). Which keys and fields those are is code, so
+another version may have more or fewer: each palette also lists the ones its record wrote as
+indices, after the names (`keys`: varint n + n x (text key, u8 kind); `fields`: varint n + n x
+(varint the container block's palette index, u8 m + m x (u8 data index, u8 kind)); the kind is its
+place in `PALETTE_KINDS`), and the reader goes by both (`SaveCodec.dataId`): a key or field both
+versions keep the same kind of id under is read by name; one only the writer listed (a newer
+version's id key or typed field, or one this version dropped), one only this version types (an older
+writer's plain number), one listed as another kind, and an index the palette doesn't have are left
+out and counted under the key's or field's name ("fluid (item data)", "smelting (ElectricFurnace)"),
+never misread as another thing and never a refused record (0, none, is kept). So an older server
+reading a newer one's record never writes it back without those ids, and a newer one reads an older
+one's (tests/spec/SaveNames: both ways, for machine fields and item keys). The Metal Miner's state
+field keeps its code alone and its views and records add its ore's place in this version's
+`MinerRules.ORES` from `mining` (KindSpec `stateOf`), so the ore list may change; Machines records
+carry the state in two bytes (`Machines.MAX_STATE` 65535: room for 8191 ores, more than blocks can
+be). A name this version doesn't know never refuses a record: a block becomes Air (left out of the
+seasons' maps), an item is dropped (an id in an item's data drops that key), a fluid empties its
+pipe, tank or machine tank, a mob goes, a machine's typed field reads 0 (what it works on starts
+over), an effect is skipped; each is counted (`dropped`), and each name with how many things of it
+(`unknown`). Which they are, the place version that wrote the record says: the palette starts with
+it (game.PlaceVersion, read once by World/WorldSave as `PLACE_VERSION` and passed in as WorldStore's
+Env `place`; 0 in Studio, whatever Studio reports: Roblox's documentation and developers give 0
+there, and a Studio session may run unpublished content). From this place version or an older one,
+both known: content since removed. Left out as above, and the record saves as any other
+(`SaveCodec.newerNames` false, `WorldStore.writesBack`); the server warns once with the names and
+counts (`SaveCodec.removedNotice`: "[IceVoxel] removed content left out of world "Island": 12
+OldBlock, 3 OldItem"; a player's or a character's things likewise, and the player is told the things
+were removed from the game), and the regions it was left out of are written anew by the first save
+(`Loaded.removedFrom`). From a newer place version (Roblox runs old and new servers side by side
+during an update), or with either version unknown (0: Studio): perhaps content this version lacks,
+so the record is played but never written back that session ("saved by a newer version"), so an old
+server never writes over a newer one's record and a Studio test never writes over live data it can't
+read. The locks, slots and gens are untouched by this. So content can be added, removed, reordered
+and renamed between versions with every world, player and character intact (tests/spec/SaveNames:
+round trips through palettes whose names were swapped, renamed and removed; tests/spec/WorldSave and
 CharacterStore: removed content saves, a newer version's record never does). Records from before
 palettes (regions of versions 1 and 2, player records of 1 to 5, characters of 1 to 4: the user
 accepted losing them) are refused, never misread (`SaveCodec.OLDER`): such a region is left out
 (`Loaded.outdated`: the world there is what the seed generates, said in the output, and the first
-save writes it anew), such a player starts afresh (told, and saved), such a character comes back
-as who it is (the head every version wrote alike, with no ids: name, look, difficulty, times,
-deaths; and its progress, kept by name), its things afresh (`outdated`, told when selected).
+save writes it anew), such a player starts afresh (told, and saved), such a character comes back as
+who it is (the head every version wrote alike, with no ids: name, look, difficulty, times, deaths;
+and its progress, kept by name), its things afresh (`outdated`, told when selected).
+
+Stack sizes are checked against today's `maxStack` as a record loads (`SaveCodec.readStack`): a
+stack over it (another version's bigger one, or an item whose `maxStack` went down since) is cut
+to it and the rest given back as more stacks (`giveBack`) into the empty slots of a player's or
+character's 36 or of a chest, or beside a dropped item; what finds no room (a furnace's or a
+machine's slot, a transporter, a full inventory) is left out and counted under the item's name
+like an unknown name, so a newer version's bigger stacks are never cut and written back.
+
+A caveat: place versions are per place. A test place in the same universe shares its DataStores
+but counts its own versions, so the newer/older judgement between the two can come out
+backwards. A record the test place wrote (place version 12, say, holding content the live game
+lacks) looks older to the live place (version 340), whose servers take its unknown names for
+content since removed and save without them; and the test place sees every live record as newer
+and never writes it back. Give a test place stores of its own (another `Save.StoreName` and
+`Characters.StoreName` in its Config: a new name starts afresh), or never open live worlds and
+characters there.
 
 **Format and keys** (`Save/SaveCodec`, `Save/WorldMeta`). DataStore "IceVoxelWorlds_v1"
 (`Config.Save.StoreName`): "index" (the game's world list, the worlds made with the title screen
@@ -8852,10 +8885,10 @@ one is refused, never half read or overwritten (an older one: Names, not ids). A
 are its record, regions and players (each value's text plus 96 for the JSON around it); a save that would take a world past
 `Config.Save.MaxWorldBytes` (64 MB) is refused as a whole, and operators are warned past
 `WarnShare` (80%) and every 5% more. Measured (tests/spec/WorldSave): a 9 × 9 × 5 house, a 3 × 3 ×
-64 tunnel, a chest, a furnace, a battery, pipes, an item and a cow are 797 edits, 1,036 bytes
-(155 of them its palette's names), 1,295 characters; 6 fully edited chunks with no two
+64 tunnel, a chest, a furnace, a battery, pipes, an item and a cow are 797 edits, 1,043 bytes
+(155 of them its palette's names), 1,304 characters; 6 fully edited chunks with no two
 neighbouring cells alike (no run compresses: the worst case) are 3.66 MB and two parts; a
-typical player record is 259 characters.
+typical player record is 263 characters.
 
 **Owners.** A world is its creator's (`WorldMeta` `owner`: the operator who pressed Create New
 World, `WorldSave.claim`; 0, the game's, with the title screen off). Load World lists a player's
@@ -9794,15 +9827,15 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Turrets` (34)  | turrets' aim for the client: u16 count, 19 bytes each (i32 x, u16 y, i32 z, u16 yaw in 65536ths of a turn, i8 pitch in degrees, u32 target, u8 flags powered / firing / blocked / laser / scope / suppressor / tracking / dry, u8 ammo); a chunk's non-idle ones with its edit list, changes to players within `Turrets.RecordRange` (see Turrets and the Metal Miner) |
 | server → client | `Lightning`     | a strike within `Weather.Lightning.Distance` (4096 blocks): f32 x, y, z (the struck cell's bottom centre), u32 seed (the bolt's shape), u8 flashes (1-3): 17 bytes |
 
-Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
-an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record
-is 15 bytes (`TRANSMITTER_BYTES`: i32 x, u16 y, i32 z, u16 modes, u8 colour, u8 fill, u8 fluid
-id). A Machines record is its 40-byte fixed part (`MACHINE_BYTES`, up to the state code), then a u8
+Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write an
+unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record is 15
+bytes (`TRANSMITTER_BYTES`: i32 x, u16 y, i32 z, u16 modes, u8 colour, u8 fill, u8 fluid id). A
+Machines record is its 41-byte fixed part (`MACHINE_BYTES`, up to the u16 state code), then a u8
 tank count (0 for a kind without tanks) and per tank a u8 fluid id, u32 amount and u32 capacity
 (`MACHINE_TANK_BYTES` 9, at most `MAX_MACHINE_TANKS` 255), in the kind's tank order
 (`Machines.tankContents`); `decodeMachines` refuses an unknown fluid id, a tank count longer than
-the bytes left, leftover bytes and a record count that cannot fit (checked before anything is
-made for it), and a record with no tanks decodes with `tanks` nil.
+the bytes left, leftover bytes and a record count that cannot fit (checked before anything is made
+for it), and a record with no tanks decodes with `tanks` nil.
 
 Structure settings travel in `Structures/Settings`' format (Net/Protocol uses its `write*` /
 `read*`): unknown codes, NaN and strings over 128 bytes are malformed, numbers out of range are

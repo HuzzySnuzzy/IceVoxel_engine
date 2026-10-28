@@ -18,7 +18,11 @@
 	  idKind    what a key's number is ("block", "item" or "fluid"), nil for keys holding none
 
 	A new key holding an id goes in ID_KEYS (or through addIdKey), or saves would keep its number
-	as it is, which the next version's content may give to something else.
+	as it is, which the next version's content may give to something else. Each record also lists
+	the keys it wrote as ids (Save/SaveCodec's Ids in data), so a version with more or fewer id
+	keys never misreads another's: a key one of them holds an id under and the other doesn't is
+	left out and counted. A key holds an id in every item or in none: Shared/Machines refuses a
+	tank or an untyped kept field named like one.
 ]]
 
 export type IdKind = "block" | "item" | "fluid"
