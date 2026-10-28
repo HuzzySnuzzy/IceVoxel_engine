@@ -5,10 +5,10 @@
 
 	Placement. The world is cut into Spacing x Spacing block cells (Config.Caves.OilWells), each
 	with one candidate at a hashed column (INSET blocks from the cell's sides, so a well never
-	reaches past its cell). It becomes a well with a chance by the biome at that column: the
-	`Biomes` listed (deserts, savannas and plains, BuildCraft's oil biomes with their bonus) are
-	much more likely than other land (`Chance`), and columns under the sea (`Sea`) give undersea
-	pockets. Never within SpawnClearance blocks of the spawn, nor where a library structure's
+	reaches past its cell). It becomes a well with a chance by the biome at that column (`chanceOf`):
+	the biome's own `oilWells` (the packs' biomes: deserts, savannas and plains, BuildCraft's oil
+	biomes with their bonus) are much more likely than other land (`Chance`), and columns under
+	the sea (`Sea`) give undersea pockets. Never within SpawnClearance blocks of the spawn, nor where a library structure's
 	piece comes within MARGIN blocks of it. Sizes by share (`Sizes`): large and medium wells have
 	a geyser on land, small ones never; undersea pockets are all of `SeaSize` (small).
 
@@ -213,6 +213,13 @@ local function cellKey(cx: number, cz: number): number
 	return (cx + 2097152) * 4194304 + (cz + 2097152)
 end
 
+-- The chance a candidate well on the land of biome `biome` (a Biomes index) is one: the biome's
+-- `oilWells`, else Config.Caves.OilWells.Chance.
+function OilWells.chanceOf(biome: number): number
+	local own = Biomes.list[biome].oilWells
+	return if own then own else Config.Caves.OilWells.Chance
+end
+
 function OilWells.new(seed: number, terrain: Terrain): Wells
 	local cfg = Config.Caves.OilWells
 	local salt = Hash.hash2(seed, Hash.string("oil.wells"), 0x0177)
@@ -227,8 +234,8 @@ function OilWells.new(seed: number, terrain: Terrain): Wells
 	end
 	assert(seaSized, "OilWells.SeaSize is not one of its Sizes")
 	local biomeChance: { number } = {}
-	for i, biome in Biomes.list do
-		biomeChance[i] = cfg.Biomes[biome.name] or cfg.Chance
+	for i in Biomes.list do
+		biomeChance[i] = OilWells.chanceOf(i)
 	end
 	assert(spacing > 2 * INSET + 2 * 24, "OilWells.Spacing too small for a well")
 

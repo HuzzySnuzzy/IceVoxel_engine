@@ -1799,6 +1799,19 @@ return function(t, shared, require, _server, _client)
 			{ 'tags[1] must be a tag id (lower case, digits and _: "is_forest")' },
 			"a tag id"
 		)
+		-- (Its season class, oil wells, lakes and puddles.)
+		t.ok(
+			pcall(Content.build, with({ biome({ seasonClass = "dry", oilWells = 1, lakes = 3, puddles = 0 }) })),
+			"a season class and its water and oil"
+		)
+		fails(
+			with({ biome({ seasonClass = "warm" }) }),
+			{ 'pack P, biome B: seasonClass must be one of cold, temperate, dry, tropical, not the string "warm"' },
+			"a season class"
+		)
+		fails(with({ biome({ oilWells = 1.5 }) }), { "oilWells must be a share 0..1, not 1.5" }, "an oil chance")
+		fails(with({ biome({ lakes = -1 }) }), { "lakes must be a number of at least 0, not -1" }, "a lake weight")
+		fails(with({ biome({ puddles = "few" }) }), { 'puddles must be a share 0..1, not the string "few"' }, "puddles")
 		-- Names and overrides.
 		fails(
 			with({ biome({}) }, { pack("Q", { biomes = { biome({}) } }, { order = 20 }) }),
@@ -2387,8 +2400,7 @@ return function(t, shared, require, _server, _client)
 		t.ok(not ok and has(tostring(err), {
 			"Biomes: a spec (its check) needs a biome named Plain, which no pack makes (did you mean Plains?)",
 		}), tostring(err))
-		-- (No pack takes a biome away: the merged list without it, before the registry loads,
-		-- and Config's puddles without its chance, which Lakes would refuse first.)
+		-- (No pack takes a biome away: the merged list without it, before the registry loads.)
 		local env, root = fresh()
 		local list = env.require(root.Content).default.biomes
 		for index, biome in list do
@@ -2397,11 +2409,45 @@ return function(t, shared, require, _server, _client)
 				break
 			end
 		end
-		env.require(root.Config).Lakes.Puddles.Biomes.MushroomFields = nil
 		local loaded, problem = pcall(env.require, root.Generation.TerrainGenerator)
 		t.ok(not loaded and has(tostring(problem), {
 			"Biomes: TerrainGenerator (its islands far out at sea) needs a biome named MushroomFields, which no pack makes",
 		}), tostring(problem))
+	end)
+
+	t.test("content: a biome's season class, oil wells, lakes and puddles reach the seasons and generation", function()
+		-- (A pack patching the plains: cold, no oil, twice the lakes, more puddles; the tundra's
+		-- puddles stay none, as it is frozen.)
+		local env, root = fresh(function(env, packs)
+			local folder = env.folder(packs, "Patch")
+			env.module(folder, "pack", { order = 900, requires = { "Minecraft" } })
+			env.module(folder, "biomes", {
+				{ name = "Plains", override = true, seasonClass = "cold", oilWells = 0, lakes = 2, puddles = 0.2 },
+				{ name = "Tundra", override = true, puddles = 0.5 },
+			})
+		end)
+		local Biomes = env.require(root.Biomes)
+		local plains = assert(Biomes.byName("Plains")).index
+		local forest = assert(Biomes.byName("Forest")).index
+		local desert = assert(Biomes.byName("Desert")).index
+		local tundra = assert(Biomes.byName("Tundra")).index
+		local SeasonClimate = env.require(root.Seasons.SeasonClimate)
+		t.eq(SeasonClimate.classOf(plains), "cold", "the patch's class")
+		t.eq(SeasonClimate.classOf(desert), "dry", "the Minecraft pack's")
+		t.eq(SeasonClimate.classOf(forest), "temperate", "the default")
+		local OilWells = env.require(root.Generation.OilWells)
+		local Settings = env.require(root.Config)
+		t.eq(OilWells.chanceOf(plains), 0, "no oil on the patched plains")
+		t.eq(OilWells.chanceOf(desert), 0.6, "the desert's")
+		t.eq(OilWells.chanceOf(forest), Settings.Caves.OilWells.Chance, "the default")
+		local Lakes = env.require(root.Generation.Lakes)
+		t.eq(Lakes.lakeWeight[plains], 2)
+		t.eq(Lakes.lakeWeight[desert], 0.3)
+		t.eq(Lakes.lakeWeight[forest], 1, "the default")
+		t.eq(Lakes.puddleChance[plains], 0.2)
+		t.eq(Lakes.puddleChance[tundra], 0, "frozen: none whatever it says")
+		t.eq(Lakes.puddleChance[assert(Biomes.byName("Grove")).index], 0, "snowy: none")
+		t.eq(Lakes.puddleChance[forest], 0.1, "the forest's")
 	end)
 
 	t.test("content: a registry's own check names the pack: two effects /effect finds by one word", function()

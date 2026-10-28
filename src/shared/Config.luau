@@ -88,22 +88,16 @@ local Config = {
 			SpawnClearance = 128,
 		},
 		-- Oil wells (Generation/OilWells, BuildCraft's OilPopulate): one candidate per Spacing x
-		-- Spacing blocks, a well with Chance, or the chance of its biome in Biomes, or Sea under
-		-- the sea (undersea pockets: all of SeaSize, no geyser), never within SpawnClearance blocks
-		-- of the spawn or next to a library structure. A deposit is a sphere of oil (CaveOil, the
-		-- cave twin) of Radius centred Depth blocks down; large and medium wells on land get a
-		-- geyser: a lake of Lake radius (less by the shore) and LakeDepth, and a spout Spout blocks
-		-- into the air (BuildCraft's 16 and 6; 0: no geyser).
+		-- Spacing blocks, a well with its biome's chance (the packs' biomes' `oilWells`) or Chance,
+		-- or Sea under the sea (undersea pockets: all of SeaSize, no geyser), never within
+		-- SpawnClearance blocks of the spawn or next to a library structure. A deposit is a sphere
+		-- of oil (CaveOil, the cave twin) of Radius centred Depth blocks down; large and medium
+		-- wells on land get a geyser: a lake of Lake radius (less by the shore) and LakeDepth, and
+		-- a spout Spout blocks into the air (BuildCraft's 16 and 6; 0: no geyser).
 		OilWells = {
 			Enabled = true,
 			Spacing = 512,
 			Chance = 0.12,
-			Biomes = ({
-				Desert = 0.6,
-				Savanna = 0.5,
-				WindsweptSavanna = 0.5,
-				Plains = 0.45,
-			} :: any) :: { [string]: number },
 			Sea = 0.15,
 			SeaSize = "Small",
 			SpawnClearance = 256,
@@ -167,40 +161,21 @@ local Config = {
 		-- Minecraft's lake_water (LakeFeature before 1.18): the lava lakes' box of blobs, water in
 		-- its lower half, the bowl above it dug out, ice on top in frozen and snowy biomes. One
 		-- candidate per Rarity chunks of area (16 x 16 block cells) on dry land, kept with its
-		-- biome's weight in Biomes (others 1); never by water, a deep cave, a structure, an oil
-		-- well or a lava lake (about 0.3-0.6 lakes per km²: rarer than lava lakes).
+		-- biome's weight (the packs' biomes' `lakes`, else 1); never by water, a deep cave, a
+		-- structure, an oil well or a lava lake (about 0.3-0.6 lakes per km²: rarer than lava
+		-- lakes).
 		Water = {
 			Enabled = true,
 			Rarity = 600,
-			Biomes = ({
-				Desert = 0.3,
-				Savanna = 0.6,
-				WindsweptSavanna = 0.5,
-			} :: any) :: { [string]: number },
 		},
 		-- Puddles: water in place of the top block of Size columns (fewest, most) at the bottom of
 		-- a dip, flooding out to a radius of Radius blocks (smallest, largest). One candidate per
-		-- Spacing x Spacing blocks, a puddle with its biome's chance in Biomes or Chance (frozen and
-		-- snowy biomes none). Full detail chunks only.
+		-- Spacing x Spacing blocks, a puddle with its biome's chance (the packs' biomes' `puddles`)
+		-- or Chance (frozen and snowy biomes none). Full detail chunks only.
 		Puddles = {
 			Enabled = true,
 			Spacing = 32,
 			Chance = 0.05,
-			Biomes = ({
-				Jungle = 0.14,
-				MushroomFields = 0.12,
-				BirchForest = 0.1,
-				Forest = 0.1,
-				OldGrowthTaiga = 0.1,
-				Taiga = 0.08,
-				Plains = 0.05,
-				Meadow = 0.06,
-				WindsweptHills = 0.03,
-				Savanna = 0.012,
-				WindsweptSavanna = 0.008,
-				StonyPeaks = 0.008,
-				Desert = 0.005,
-			} :: any) :: { [string]: number },
 			Size = { 3, 20 },
 			Radius = { 1.5, 3.5 },
 		},

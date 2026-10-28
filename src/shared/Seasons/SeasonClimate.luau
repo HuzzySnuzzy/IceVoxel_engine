@@ -5,11 +5,12 @@
 	the weather (Shared/Weather's Moment: `weatherShift`, `wetBias`, `thunderBias`), plants'
 	growth and the snow (caps, melting, the far landscape's cover) take from it.
 
-	  Classes   `classOf(biome)`: "cold" (Tundra, Taiga, Old Growth Taiga, Grove, Snowy Slopes,
-	            Jagged and Frozen Peaks), "dry" (Desert, Savanna, Windswept Savanna), "tropical"
-	            (Jungle, Mushroom Fields), else "temperate". A class's Amplitude (cold 1, temperate
-	            1, dry 0.75, tropical 0.5) scales the day shift, the heat wave and the weather's
-	            temperature shift: a jungle's winter is half a plain's.
+	  Classes   `classOf(biome)`: the biome's `seasonClass` (the packs' biomes, Content/Schema's
+	            BIOME_FIELDS; the Minecraft pack's "cold" Tundra, Taiga, Old Growth Taiga, Grove,
+	            Snowy Slopes, Jagged and Frozen Peaks, "dry" Desert, Savanna and Windswept Savanna,
+	            "tropical" Jungle and Mushroom Fields), else "temperate". A class's Amplitude (cold
+	            1, temperate 1, dry 0.75, tropical 0.5) scales the day shift, the heat wave and the
+	            weather's temperature shift: a jungle's winter is half a plain's.
 	  Sample    `sample(dayTime, class, seed)`: every quantity blended at the calendar time
 	            (Calendar.value), the climate's `shift` already times the class's amplitude (and
 	            with the heat wave), `weatherShift` not (Shared/Weather scales it by each biome's
@@ -31,12 +32,14 @@
 	            snow without the season) melts then whatever the temperature, so the near snow and
 	            the far cover come and go together.
 
-	Requires Config, Calendar, Biomes and Util/Hash only (Shared/Weather requires this, for the
-	classes: SNOW_BELOW is Weather's copied, tests/spec/SeasonClimate checks they agree).
+	Requires Config, Calendar, Biomes, Content/Schema and Util/Hash only (Shared/Weather requires
+	this, for the classes: SNOW_BELOW is Weather's copied, tests/spec/SeasonClimate checks they
+	agree).
 ]]
 
 local Biomes = require(script.Parent.Parent.Biomes)
 local Config = require(script.Parent.Parent.Config)
+local Schema = require(script.Parent.Parent.Content.Schema)
 local Hash = require(script.Parent.Parent.Util.Hash)
 local Calendar = require(script.Parent.Calendar)
 
@@ -64,6 +67,7 @@ export type Sample = {
 
 local SeasonClimate = {}
 
+-- (Content/Schema's SEASON_CLASSES, a biome's `seasonClass`, are these: checked below.)
 SeasonClimate.CLASSES = table.freeze({ "cold", "temperate", "dry", "tropical" })
 -- Minecraft's Biome.coldEnoughToSnow border (Shared/Weather.SNOW_BELOW, copied: see the header).
 SeasonClimate.SNOW_BELOW = 0.15
@@ -72,24 +76,16 @@ SeasonClimate.MAX_LAYERS = 8
 -- The night drop without seasons (Shared/ToughAsNails/Temperature.NIGHT).
 SeasonClimate.NIGHT = 0.3
 
-local CLASS_OF_NAME: { [string]: Class } = {
-	Tundra = "cold",
-	Taiga = "cold",
-	OldGrowthTaiga = "cold",
-	Grove = "cold",
-	SnowySlopes = "cold",
-	JaggedPeaks = "cold",
-	FrozenPeaks = "cold",
-	Desert = "dry",
-	Savanna = "dry",
-	WindsweptSavanna = "dry",
-	Jungle = "tropical",
-	MushroomFields = "tropical",
-}
+local isClass: { [string]: boolean } = {}
+for _, class in SeasonClimate.CLASSES do
+	isClass[class] = true
+end
+for _, class in Schema.SEASON_CLASSES do
+	assert(isClass[class], `SeasonClimate: Content/Schema's season class {class} is none of CLASSES`)
+end
 local classByIndex: { [number]: Class } = {}
 for index = 1, Biomes.count do
-	local biome = Biomes.get(index)
-	classByIndex[index] = CLASS_OF_NAME[biome.name] or "temperate"
+	classByIndex[index] = Biomes.get(index).seasonClass :: Class
 end
 
 -- The class of biome `biome` (a Biomes index; unknown ones are temperate).

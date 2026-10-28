@@ -466,6 +466,11 @@ export type BiomeSpec = {
 	foliage: FoliageSpec?,
 	tags: { string }?,
 	override: boolean?,
+	-- How the seasons treat it, and its oil wells, lakes and puddles (BIOME_FIELDS).
+	seasonClass: string?,
+	oilWells: number?,
+	lakes: number?,
+	puddles: number?,
 }
 
 -- A status effect (the `effects` kind; EFFECT_FIELDS below says what each field does).
@@ -1523,6 +1528,20 @@ Schema.AGE_FIELDS = {
 	                 taiga's grass and flowers. A list (bands, features, plants, species, tags) is
 	                 replaced whole: to add a flower, give the species list with it. Nothing takes a
 	                 field away.
+	  seasonClass    Optional: how the seasons treat it (Shared/Seasons/SeasonClimate.CLASSES):
+	                 "cold" (the most snow, white from late autumn to mid spring), "dry" (no snow, 0.75
+	                 of the seasons' swing), "tropical" (a little snow, half the swing, colours kept
+	                 all year) or "temperate" (the default: snow over winter, the whole swing).
+	                 Config.Seasons.Climate's Amplitude and Snow's Caps are by class.
+	  oilWells       Optional share (0-1): the chance a candidate oil well on its land is one
+	                 (Generation/OilWells: deserts 0.6, savannas 0.5, plains 0.45); default
+	                 Config.Caves.OilWells.Chance.
+	  lakes          Optional weight (0 or more) of a water lake candidate on it (Generation/Lakes:
+	                 deserts 0.3, savannas 0.5-0.6); default 1.
+	  puddles        Optional share (0-1): the chance a puddle cell on it holds a puddle
+	                 (Generation/Lakes: jungles 0.14 down to deserts 0.005); default
+	                 Config.Lakes.Puddles.Chance. Frozen and snowy biomes (`frozen`, or a Snow
+	                 `top`) have none whatever it says.
 	Weights are above 0, shares 0..1, and a plant list holds a plant at least. The blocks a biome
 	names are checked as packs load (its plants must be single plants or lower halves); its bands
 	are checked by Shared/Biomes and its features by Generation/Structures as they load.
@@ -1565,6 +1584,18 @@ local function TAG_ID(value: any): string?
 	return nil
 end
 
+-- A biome's season class (`seasonClass`), as Shared/Seasons/SeasonClimate.CLASSES (which checks
+-- the two agree).
+local SEASON_CLASSES = { "cold", "temperate", "dry", "tropical" }
+Schema.SEASON_CLASSES = table.freeze(SEASON_CLASSES)
+-- A weight of 0 or more (a biome's `lakes`).
+local function atLeastZero(value: any): string?
+	if type(value) ~= "number" or not (value >= 0) then
+		return ` must be a number of at least 0, not {describe(value)}`
+	end
+	return nil
+end
+
 -- A biome's fields; `patch`: an override's, whose tables of fields need none of theirs (Content
 -- checks the patched biome whole).
 local function biomeFields(patch: boolean): { [string]: Check }
@@ -1595,6 +1626,11 @@ local function biomeFields(patch: boolean): { [string]: Check }
 		),
 		tags = listOf(TAG_ID),
 		override = BOOLEAN,
+		-- (The header's.)
+		seasonClass = enum(SEASON_CLASSES),
+		oilWells = SHARE,
+		lakes = atLeastZero,
+		puddles = SHARE,
 	}
 end
 Schema.BIOME_FIELDS = biomeFields(false)

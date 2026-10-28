@@ -9,6 +9,16 @@
 
 	`tags` are Minecraft's biome tags that /locate searches ("#is_forest"); "is_snowy" and the bands'
 	tags are worked out from the biomes themselves (Generation/Locate).
+
+	  * seasonClass: the snowy and cold biomes are "cold", the deserts and savannas "dry", the
+	    jungle and the mushroom fields "tropical" (Seasons/SeasonClimate), the rest temperate.
+	  * oilWells: deserts, savannas and plains, BuildCraft's oil biomes with their bonus, are much
+	    more likely to hold a well than other land (Generation/OilWells; others
+	    Config.Caves.OilWells.Chance, 0.12).
+	  * lakes: deserts and savannas have fewer water lakes (Generation/Lakes; others 1).
+	  * puddles: most in jungles and forests, fewer on plains, rare in deserts, savannas and on
+	    bare peaks (Generation/Lakes; others Config.Lakes.Puddles.Chance, 0.05); frozen and snowy
+	    biomes have none.
 ]]
 
 local Schema = require(script.Parent.Parent.Parent.Schema)
@@ -39,6 +49,7 @@ return {
 		beach = "Gravel",
 		frozen = true,
 		features = { { "SpruceTree", 1 } },
+		seasonClass = "cold",
 	},
 	{
 		name = "Taiga",
@@ -67,6 +78,8 @@ return {
 			flowers = { chance = 0.002, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
 		},
 		tags = { "is_taiga" },
+		seasonClass = "cold",
+		puddles = 0.08,
 	},
 	{
 		name = "Plains",
@@ -103,6 +116,8 @@ return {
 				},
 			},
 		},
+		oilWells = 0.45,
+		puddles = 0.05,
 	},
 	{
 		name = "Forest",
@@ -124,6 +139,7 @@ return {
 			flowers = { chance = 0.014, species = FOREST_FLOWERS },
 		},
 		tags = { "is_forest" },
+		puddles = 0.1,
 	},
 	{
 		name = "BirchForest",
@@ -144,6 +160,7 @@ return {
 			flowers = { chance = 0.014, species = FOREST_FLOWERS },
 		},
 		tags = { "is_forest" },
+		puddles = 0.1,
 	},
 	{
 		name = "Savanna",
@@ -166,6 +183,10 @@ return {
 			flowers = { chance = 0.004, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
 		},
 		tags = { "is_savanna" },
+		seasonClass = "dry",
+		oilWells = 0.5,
+		lakes = 0.6,
+		puddles = 0.012,
 	},
 	{
 		name = "Desert",
@@ -182,6 +203,10 @@ return {
 		features = { { "Cactus", 1 } },
 		-- Sparse dead bushes.
 		foliage = { density = 0.015, cover = 0.8, plants = { { "DeadBush", 1 } } },
+		seasonClass = "dry",
+		oilWells = 0.6,
+		lakes = 0.3,
+		puddles = 0.005,
 	},
 	{
 		name = "Jungle",
@@ -205,6 +230,8 @@ return {
 			flowers = { chance = 0.008, species = { { "Dandelion", 2 }, { "Poppy", 2 }, { "BlueOrchid", 1 } } },
 		},
 		tags = { "is_jungle" },
+		seasonClass = "tropical",
+		puddles = 0.14,
 	},
 	{
 		name = "WindsweptHills",
@@ -226,6 +253,7 @@ return {
 			flowers = { chance = 0.002, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
 		},
 		tags = { "is_hill" },
+		puddles = 0.03,
 	},
 	{
 		name = "OldGrowthTaiga",
@@ -255,6 +283,8 @@ return {
 			},
 		},
 		tags = { "is_forest", "is_taiga" },
+		seasonClass = "cold",
+		puddles = 0.1,
 	},
 	{
 		name = "WindsweptSavanna",
@@ -277,6 +307,10 @@ return {
 			flowers = { chance = 0.004, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
 		},
 		tags = { "is_savanna" },
+		seasonClass = "dry",
+		oilWells = 0.5,
+		lakes = 0.5,
+		puddles = 0.008,
 	},
 	{
 		name = "Meadow",
@@ -310,6 +344,7 @@ return {
 			},
 		},
 		tags = { "is_mountain" },
+		puddles = 0.06,
 	},
 	{
 		name = "Grove",
@@ -326,6 +361,7 @@ return {
 		frozen = true,
 		features = { { "SpruceTree", 1 } },
 		tags = { "is_forest", "is_mountain" },
+		seasonClass = "cold",
 	},
 	{
 		name = "StonyPeaks",
@@ -342,6 +378,7 @@ return {
 		beach = "Gravel",
 		features = {},
 		tags = { "is_mountain" },
+		puddles = 0.008,
 	},
 	{
 		name = "SnowySlopes",
@@ -359,6 +396,7 @@ return {
 		frozen = true,
 		features = {},
 		tags = { "is_mountain" },
+		seasonClass = "cold",
 	},
 	{
 		name = "JaggedPeaks",
@@ -376,6 +414,7 @@ return {
 		frozen = true,
 		features = {},
 		tags = { "is_mountain" },
+		seasonClass = "cold",
 	},
 	{
 		name = "FrozenPeaks",
@@ -395,6 +434,7 @@ return {
 		frozen = true,
 		features = {},
 		tags = { "is_mountain" },
+		seasonClass = "cold",
 	},
 	{
 		-- Islands far out in some seas (TerrainGenerator picks it; it belongs to no band).
@@ -414,5 +454,7 @@ return {
 			density = 0.045,
 			plants = { { "BrownMushroom", 1 }, { "RedMushroom", 1 } },
 		},
+		seasonClass = "tropical",
+		puddles = 0.12,
 	},
 } :: { Schema.BiomeSpec }

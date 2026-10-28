@@ -24,7 +24,8 @@
 	    or gravel in patches (`shoreAt`: about 40 % sand, 15 % gravel, 2 x 2 blotches; on ground,
 	    never over air or water), else stays grass; frozen lakes keep their snowy shores.
 	One candidate per 16 x 16 block cell with chance 1 / Water.Rarity (rarer than lava lakes, which
-	are 1 / 200), times the biome's weight in Water.Biomes (deserts and savannas fewer); its layer
+	are 1 / 200), times the biome's `lakes` weight (the packs' biomes; default 1: deserts and
+	savannas fewer); its layer
 	4 at the full detail height of the box's centre, on dry land more than 2 blocks above the sea
 	(no beaches, rivers or seas). Two candidates in neighbouring cells could overlap, and each,
 	decided alone, could spill into the other's bowl: neither is a lake (about 1 in 60). Decided
@@ -40,9 +41,9 @@
 	Puddles: shallow pools one block deep in natural hollows, not a Minecraft feature (its swamps
 	and rain have none; IceVoxel's terrain is a heightfield of whole blocks, so a puddle is water
 	in place of the top block of a few columns at the bottom of a dip). One candidate per
-	Puddles.Spacing square cell, at a hashed spot, kept with its biome's chance (Puddles.Biomes:
-	most in jungles and forests, fewer on plains, rare in deserts, savannas and on bare peaks, none
-	in frozen or snowy biomes). From the spot it runs downhill, steepest first, up to DRAIN steps,
+	Puddles.Spacing square cell, at a hashed spot, kept with its biome's `puddles` chance (the
+	packs' biomes, else Puddles.Chance: most in jungles and forests, fewer on plains, rare in
+	deserts, savannas and on bare peaks, none in frozen or snowy biomes). From the spot it runs downhill, steepest first, up to DRAIN steps,
 	to a column no 4-neighbour is lower than (still going after DRAIN steps: a long slope, no
 	puddle), the bottom of the dip at height L. Then it floods outwards from there over columns of
 	that same height L, within a wobbly radius (Puddles.Radius, two harmonics of up to WOBBLE
@@ -121,8 +122,9 @@ local GRASSY: { [number]: boolean } = {
 local water = Config.Lakes.Water
 local puddleCfg = Config.Lakes.Puddles
 
--- Per biome index: a water lake candidate's weight and a puddle cell's chance (frozen and snowy
--- biomes: none), and whether water freezes there.
+-- Per biome index: a water lake candidate's weight (its `lakes`, else 1) and a puddle cell's chance
+-- (its `puddles`, else Puddles.Chance; frozen and snowy biomes: none), and whether water freezes
+-- there.
 local lakeWeight: { number } = {}
 local puddleChance: { number } = {}
 local freezes: { boolean } = {}
@@ -130,16 +132,10 @@ local MAX_PUDDLE_CHANCE = 0
 for i, biome in Biomes.list do
 	local cold = biome.frozen or biome.top == SNOW
 	freezes[i] = cold
-	lakeWeight[i] = water.Biomes[biome.name] or 1
-	local chance = puddleCfg.Biomes[biome.name] or puddleCfg.Chance
+	lakeWeight[i] = biome.lakes or 1
+	local chance = biome.puddles or puddleCfg.Chance
 	puddleChance[i] = if cold then 0 else chance
 	MAX_PUDDLE_CHANCE = math.max(MAX_PUDDLE_CHANCE, puddleChance[i])
-end
-for name in water.Biomes do
-	assert(Biomes.byName(name), `Config.Lakes.Water.Biomes names unknown biome {name}`)
-end
-for name in puddleCfg.Biomes do
-	assert(Biomes.byName(name), `Config.Lakes.Puddles.Biomes names unknown biome {name}`)
 end
 
 --[[
@@ -228,6 +224,9 @@ Lakes.PROTECT = PROTECT
 Lakes.PUDDLE_MARGIN = PUDDLE_MARGIN
 Lakes.DRAIN = DRAIN
 Lakes.SHORE = SHORE
+-- Per biome index (read only): a water lake candidate's weight and a puddle cell's chance.
+Lakes.lakeWeight = lakeWeight
+Lakes.puddleChance = puddleChance
 
 -- Is column (x, z) one of the puddle's?
 function Lakes.inPuddle(puddle: Puddle, x: number, z: number): boolean

@@ -201,7 +201,9 @@ return function(t, shared, require)
 		local lines = {}
 		for name, km2 in area do
 			local n = count[name] or 0
-			if cfg.Biomes[name] then
+			-- (The oil biomes: those whose entry gives `oilWells`, the Minecraft pack's.)
+			local biome = Biomes.byName(name)
+			if biome and biome.oilWells then
 				oilBiomes += n
 				oilArea += km2
 			elseif name ~= "(sea)" then

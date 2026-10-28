@@ -82,6 +82,14 @@ export type Biome = {
 	foliage: Foliage?,
 	-- Minecraft's biome tags it is in ("is_forest"; Generation/Locate).
 	tags: { string },
+	-- How the seasons treat it (Seasons/SeasonClimate's class: its `seasonClass`, else
+	-- "temperate").
+	seasonClass: string,
+	-- Its own chances of an oil well and a puddle and its lakes' weight (nil: Config's, see
+	-- Generation/OilWells and Generation/Lakes).
+	oilWells: number?,
+	lakes: number?,
+	puddles: number?,
 }
 
 export type Band = { name: string, from: number }
@@ -203,6 +211,10 @@ for index, spec in content.biomes do
 		featureWeight = total,
 		foliage = foliage,
 		tags = spec.tags or {},
+		seasonClass = spec.seasonClass or "temperate",
+		oilWells = spec.oilWells,
+		lakes = spec.lakes,
+		puddles = spec.puddles,
 	}
 	table.insert(list, biome)
 	byName[spec.name] = biome

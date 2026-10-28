@@ -779,8 +779,8 @@ full detail terrain only (`find`, cached per generator), so every chunk and leve
 
 - **Placement.** One candidate per `Spacing` (512) square cell, at a hashed column INSET (32)
   blocks from the cell's sides (a well never reaches past its cell). It is a well with its biome's
-  chance in `Biomes` (Desert 0.6, Savanna and Windswept Savanna 0.5, Plains 0.45: BuildCraft's oil
-  biomes), `Chance` (0.12) on other land and `Sea` (0.15) under the sea; never within
+  `oilWells` chance (the biome entry's: Desert 0.6, Savanna and Windswept Savanna 0.5, Plains 0.45,
+  BuildCraft's oil biomes), `Chance` (0.12) on other land and `Sea` (0.15) under the sea; never within
   `SpawnClearance` (256) blocks of the spawn, nor where a library structure's piece comes within
   MARGIN (2) of it. Sizes by share (`Sizes`): large 25% (deposit radius 8-12, lake radius 7-10,
   spout 16), medium 50% (5-7, 4-7, 6), small 25% (3-4, no geyser); undersea pockets are all of
@@ -836,7 +836,7 @@ below the sea), cached per generator, so every chunk and level agrees. All of it
   4-7 ellipsoid blobs in a 16 × 8 × 16 box), water in its lower four layers, the bowl above dug
   out as air; the shell's barrier draws are made and unused (lake_water has no barrier). One
   candidate per 16 × 16 cell with chance 1 / `Lakes.Water.Rarity` (600; lava's is 200), times the
-  biome's weight in `Lakes.Water.Biomes` (deserts 0.3, savannas 0.5-0.6), its layer 4 at the
+  biome's `lakes` weight (the biome entry's: deserts 0.3, savannas 0.5-0.6), its layer 4 at the
   full detail height of the box's centre, more than `SHORE` (2) blocks above the sea. Minecraft's
   shell rule keeps the water in: refused where a shell cell is liquid from layer 4 up or not
   ground below it. Also refused where a cell could meet a deep cave (the caves' 9 cave-free
@@ -867,7 +867,7 @@ below the sea), cached per generator, so every chunk and level agrees. All of it
   lakes 1.55 / 0.69), one in 10-20 frozen.
 - **Puddles** (`puddles`, `write`; not a Minecraft feature). One candidate per
   `Lakes.Puddles.Spacing` (32) square cell at a hashed spot, kept with its biome's chance
-  (`Lakes.Puddles.Biomes`, else `Chance`: jungles 0.14, mushroom fields 0.12, forests 0.08-0.1,
+  (the biome entry's `puddles`, else `Lakes.Puddles.Chance`: jungles 0.14, mushroom fields 0.12, forests 0.08-0.1,
   plains and meadows 0.05-0.06, windswept hills 0.03, savannas, stony peaks and deserts
   0.005-0.012; frozen and snowy biomes none). From the spot it runs downhill, steepest first, up
   to `DRAIN` (12) steps to a column no 4-neighbour is lower than, the bottom of a dip at height
