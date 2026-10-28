@@ -58,7 +58,7 @@ SeasonLine.TOASTS = table.freeze({
 	"Summer · heat waves ahead",
 })
 SeasonLine.HEAT_WAVE_TOAST = "Heat wave · seek shade"
--- The stingers (Shared/Sounds/SoundList), by season number, and a heat wave's.
+-- The stingers (the Survival pack's sounds), by season number, and a heat wave's.
 SeasonLine.SOUNDS = table.freeze({
 	"ambient.season.autumn",
 	"ambient.season.winter",

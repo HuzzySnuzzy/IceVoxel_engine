@@ -82,6 +82,7 @@
 
 local BlockList = require(script.BlockList)
 local Config = require(script.Parent.Config)
+local Content = require(script.Parent.Content)
 local TexturePack = require(script.Parent.TexturePack)
 
 export type BlockDef = {
@@ -295,28 +296,35 @@ Blocks.MAX_SHAPE_BOXES = 15
 
 --[[
 	Sound types, Minecraft's SoundType: how a block sounds when broken, placed, hit while mining,
-	walked on and fallen on. Shared/Sounds has the events `block.<type>.<action>` for each. A
-	block's type is its `sound`, else its material's (SOUND_BY_MATERIAL), else stone; fluids sound
-	like water and blocks that are never drawn (air) like nothing. Ladders, rope, vines (and
-	hanging roots) and moss have types of their own (Minecraft's SoundType.LADDER, VINE and MOSS,
-	Supplementaries' rope), named on their blocks.
+	walked on and fallen on (SOUND_ACTIONS). A type is a name the content packs' sounds give all
+	five events `block.<type>.<action>` of (Content/Define's `blockSounds` makes them; Shared/Sounds
+	plays them), in the order their break events come: the Minecraft pack's stone, wood, gravel,
+	grass, sand, glass, snow, metal, wool and water, and ladder, rope, vine and moss (Minecraft's
+	SoundType.LADDER, VINE and MOSS, Supplementaries' rope) for ladders, rope, vines (and hanging
+	roots) and moss. A block's type is its `sound`, else its material's (SOUND_BY_MATERIAL), else
+	stone; fluids sound like water and blocks that are never drawn (air) like nothing. Each is a
+	u8 in `soundLut`: at most 255.
 ]]
-Blocks.SOUND_TYPES = table.freeze({
-	"stone",
-	"wood",
-	"gravel",
-	"grass",
-	"sand",
-	"glass",
-	"snow",
-	"metal",
-	"wool",
-	"water",
-	"ladder",
-	"rope",
-	"vine",
-	"moss",
-})
+Blocks.SOUND_ACTIONS = table.freeze({ "break", "place", "hit", "step", "fall" })
+do
+	local named: { [string]: boolean } = {}
+	for _, event in Content.default.sounds do
+		named[event.name] = true
+	end
+	local types: { string } = {}
+	for _, event in Content.default.sounds do
+		local name = string.match(event.name, "^block%.([%w_]+)%.break$")
+		local whole = name ~= nil
+		for _, action in Blocks.SOUND_ACTIONS do
+			whole = whole and named[`block.{name}.{action}`] == true
+		end
+		if whole then
+			table.insert(types, name :: string)
+		end
+	end
+	assert(#types <= 255, `Blocks: {#types} sound types, at most 255 (a u8 each)`)
+	Blocks.SOUND_TYPES = table.freeze(types)
+end
 local SOUND_BY_MATERIAL: { [string]: string } = {
 	Wood = "wood",
 	WoodPlanks = "wood",
@@ -341,6 +349,16 @@ local SOUND_BY_MATERIAL: { [string]: string } = {
 local soundIndex: { [string]: number } = {}
 for index, name in Blocks.SOUND_TYPES do
 	soundIndex[name] = index
+end
+-- (The types the defaults give must be there.)
+for _, name in { "stone", "water" } do
+	assert(soundIndex[name], `Blocks: no pack's sounds give the sound type {name} (block.{name}.break and the rest)`)
+end
+for material, name in SOUND_BY_MATERIAL do
+	assert(
+		soundIndex[name],
+		`Blocks: no pack's sounds give the sound type {name}, material {material}'s (block.{name}.break and the rest)`
+	)
 end
 
 -- The box around a shape's boxes (turned ones included), in pixels 0..16.
@@ -738,7 +756,10 @@ for index, spec in BlockList do
 		def.maxStack >= 1 and def.maxStack <= 64 and def.maxStack == math.floor(def.maxStack),
 		`Block {spec.name} has a bad maxStack`
 	)
-	assert(def.sound == nil or soundIndex[def.sound], `Block {spec.name} has unknown sound {def.sound}`)
+	assert(
+		def.sound == nil or soundIndex[def.sound],
+		`Block {spec.name} has unknown sound {def.sound} (a type is one once the packs' sounds give block.{def.sound}.break, .place, .hit, .step and .fall)`
+	)
 	local transmitter = spec.transmitter
 	assert(
 		transmitter == nil

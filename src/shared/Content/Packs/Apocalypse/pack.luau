@@ -16,7 +16,11 @@
 	  DayZ items         rags, duct tape, nails, scrap metal, the ruins' food and drink, bats, the
 	                     machete, crowbar and fire axe: items/supplies, recipes
 	  weapons            firearms, magazines, ammunition, attachments and melee weapons
-	                     (Shared/Weapons' WeaponList holds their numbers): items/weapons, recipes
+	                     (Shared/Weapons' WeaponList holds their numbers): items/weapons, recipes,
+	                     sounds/weapons (each class's and recorded calibre's shots: _sounds)
+	  zombies            their voices, groans, door bashing, the screamer's shriek and the blood
+	                     moon (the mobs are Shared/Entities/MobList's): sounds/zombies; the bunkers'
+	                     hatch and the medical supplies' sounds: sounds/bunkers, sounds/medical
 
 	Calls made here: the ruins' and bunkers' loot hold the Terraria pack's Feral Claws (a loot table
 	is one pack's); the medical supplies' effects are Shared/Items/Foods' (keyed by name), and the

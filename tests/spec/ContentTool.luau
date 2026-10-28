@@ -482,6 +482,42 @@ return function(t, shared, require, _server, _client)
 		t.ok(has(assert(ContentTool.show(patched, "blasting")), { "gates: BlastCharge" }), "a pack's node")
 	end)
 
+	t.test("content tool: sound events and tracks: lists by pack, pages with what names them", function()
+		-- (The Content spec's sounds and music fixture pack, grafted in.)
+		local view, problem = fresh(function(env, packs)
+			env.graft("tests/fixtures/content/sounds/Chorus", packs, "Chorus")
+		end)
+		assert(view, problem)
+		local number = 0
+		for index, spec in view.content.sounds do
+			if spec.name == "entity.chorus.sing" then
+				number = index
+			end
+		end
+		local sounds = assert(ContentTool.list(view, "sounds", "Chorus"))
+		t.ok(has(sounds, { `#{number}`, "entity.chorus.sing", "Chorus" }), "number, name, pack")
+		t.ok(has(sounds, { "block.chime.step", "Chorus", "block.step" }), "and category")
+		t.ok(has(sounds, { "ui.button.click", "Minecraft (patched by Chorus)" }), "what a pack patched")
+		local music = assert(ContentTool.list(view, "music", "Chorus"))
+		t.ok(has(music, { "chorus_mood", "mood", "Chorus" }), "name, set, pack")
+		t.ok(has(music, { "surface1", "surface", "Minecraft (patched by Chorus)", "First Light" }), "and title")
+
+		local page = assert(ContentTool.show(view, "item.armor.equip_chorus"))
+		t.ok(has(page, { "sound item.armor.equip_chorus", "pack Chorus" }), page[1])
+		t.ok(has(page, { "pitch = 1.7" }), "the merged fields")
+		t.ok(has(page, { "named by:", "IronHelmet (put on)" }), "the entries naming it")
+		t.ok(has(assert(ContentTool.show(view, "block.chorus.hum")), { "ElectricFurnace (working)" }))
+		t.ok(has(assert(ContentTool.show(view, "block.fire.extinguish")), { "Fire (break)" }))
+		local click = assert(ContentTool.show(view, "ui.button.click"))
+		t.ok(has(click, { "patched by: Chorus" }) and has(click, { "volume = 0.8" }), "an override")
+		local mood = assert(ContentTool.show(view, "ambient.cave.chorus_mood"))
+		t.ok(has(mood, { "track chorus_mood: mood, pack Chorus" }), "a cave mood's event shows its track")
+		t.ok(has(mood, { "event: ambient.cave.chorus_mood" }))
+		local missing, near = ContentTool.show(view, "entity.chorus.sign")
+		t.eq(missing, nil)
+		t.eq((near :: any)[1], "entity.chorus.sing", "the nearest name")
+	end)
+
 	--[[ A new pack ]]
 
 	t.test("content tool: a new pack loads and passes the check as it is made", function()

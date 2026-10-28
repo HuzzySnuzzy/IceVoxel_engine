@@ -4,10 +4,10 @@
 	(brass's other metal) and brass, sulfur and saltpetre (gunpowder's other halves), uranium (the
 	Nuke's core, radioactive) and the Hazmat suit. Their blocks, items, recipes, textures and ore
 	features are this pack's modules (_metals holds the metals, for Content/Define's `metal`), and
-	so is uranium's Radiation Sickness (effects); their lore, textures, icons, Ages, knowledge, the
-	Metal Miner's numbers and their radiation are fields on their entries. Last of the game's
-	packs (order 700). Its recipes name the Minecraft pack's TNT, glass, wool and coals (the Nuke
-	is its block, with TNT).
+	so is uranium's Radiation Sickness (effects), with the Geiger counter's click (sounds); their
+	lore, textures, icons, Ages, knowledge, the Metal Miner's numbers and their radiation are
+	fields on their entries. Last of the game's packs (order 700). Its recipes name the Minecraft
+	pack's TNT, glass, wool and coals (the Nuke is its block, with TNT).
 ]]
 return {
 	order = 700,

@@ -626,7 +626,7 @@ end
 
 --[[ Buttons (Minecraft's container buttons: Shared/Machines.buttons) ]]
 
--- The sound a panel button's click plays (Shared/Sounds/SoundList; a same-named Sound in
+-- The sound a panel button's click plays (Shared/Sounds, the packs' sounds; a same-named Sound in
 -- SoundService.IceVoxelSounds replaces it).
 MenuLayout.BUTTON_SOUND = "ui.thermostat.click"
 

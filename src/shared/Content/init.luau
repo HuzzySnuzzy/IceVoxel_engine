@@ -2,22 +2,22 @@
 --[[
 	Content packs (Minecraft's data packs): every block, item, recipe, tag, texture, loot table, ore
 	feature, Age, lore line, fuel tag, biome, status effect, potion, structure template, template
-	pool and generated structure of the game comes from a pack, a folder under Content/Packs, and
-	every value about an entry is on the entry. The registries (Blocks, Items, TexturePack,
-	Crafting, Progression, the Metal Miner, Radiation, generation, biomes, loot, sounds, Tough As
-	Nails, Effects, PotionList and the structure library) build themselves from what this module
-	loads; adding content is adding entries to a pack, or a pack.
+	pool, generated structure, sound event and music track of the game comes from a pack, a folder
+	under Content/Packs, and every value about an entry is on the entry. The registries (Blocks,
+	Items, TexturePack, Crafting, Progression, the Metal Miner, Radiation, generation, biomes, loot,
+	sounds and music, Tough As Nails, Effects, PotionList and the structure library) build
+	themselves from what this module loads; adding content is adding entries to a pack, or a pack.
 
 	A pack
 	  A folder holding `pack`, its manifest ({ order = n, description = "...", requires = { pack
 	  names }? }), and any of the kinds Content/Schema lists (blocks, items, recipes, tags, textures,
-	  loot, ores, ages, skills, lore, fuel, biomes, effects, potions, templates, pools, structures),
-	  each a module of the kind's name: a Luau module returning its data, or `function(define) ->
-	  data` (define: Content/Define, the shared helpers and Config, for packs that build entries or
-	  read switches), or a `.json` file holding it (Rojo makes a JSON file a ModuleScript returning
-	  its table, and so does the Lune loader). Any other module in a pack is an error (a misspelt
-	  kind would be ignored otherwise) unless its name starts with "_": the pack's own helpers, which
-	  its kind modules require (at the pack's top only).
+	  loot, ores, ages, skills, lore, fuel, biomes, effects, potions, templates, pools, structures,
+	  sounds, music), each a module of the kind's name: a Luau module returning its data, or
+	  `function(define) -> data` (define: Content/Define, the shared helpers and Config, for packs
+	  that build entries or read switches), or a `.json` file holding it (Rojo makes a JSON file a
+	  ModuleScript returning its table, and so does the Lune loader). Any other module in a pack is
+	  an error (a misspelt kind would be ignored otherwise) unless its name starts with "_": the
+	  pack's own helpers, which its kind modules require (at the pack's top only).
 
 	Kind folders
 	  A kind may also be a folder of the kind's name (`Minecraft/blocks/`), as Minecraft's data
@@ -57,6 +57,9 @@
 	  skills         by id, the same way ({ id = "forager", override = true, cost = 2 }); a node's
 	                 place among every pack's nodes is its position, sent as a u8
 	                 (Progression/Skills).
+	  sounds, music  by name, the same way, keeping their place (a sound's number is its place:
+	                 Shared/Sounds); each kind's names its own (a track and an event may share
+	                 one).
 	  tags           a union: each pack's lists in load order, then every entry's `tags`, each
 	                 name once.
 	  recipes        appended in load order; so are ore features (each with a name of its own)
@@ -92,15 +95,16 @@
 	    that reads, under the name it holds) and its palette's blocks, the templates pools'
 	    elements give, pools' fallbacks and structures' start pools (each a pool, a template, or
 	    the templates named under it: Structures/Library's lookup), and a structure's biomes (by
-	    their exact names, at least one);
+	    their exact names, at least one); the sound events entries name (a block's `sounds`,
+	    `workSound` and toggle's `sound`, an item's `equipSound` and food's `sound`);
 	  * the skills: each node's Age and icon, its `requires` (known nodes, of its Age or an earlier
 	    one, never in a loop), one node to an Age's row, and every entry's `skill`.
 	  The registries check what only they know of an entry's value as they load, naming the pack
-	  too (`where`): a skill's row, icon item and perk numbers, a sound event or action, a machine
-	  kind, the miner's numbers, a radiation or shielding number, a fuel's ticks, a biome's bands
-	  (Biomes) and tree builders (Generation/Structures), two effects /effect would find by one
-	  word (Effects), a structure's numbers, start jigsaw and its templates' jigsaws and chests
-	  (Structures/Library).
+	  too (`where`): a skill's row, icon item and perk numbers, a block's sound action, a sound
+	  event's numbers and limit, a machine kind, the miner's numbers, a radiation or shielding
+	  number, a fuel's ticks, a biome's bands (Biomes) and tree builders (Generation/Structures), two
+	  effects /effect would find by one word (Effects), a structure's numbers, start jigsaw and its
+	  templates' jigsaws and chests (Structures/Library).
 
 	API
 	  Content.default             the packs under Content/Packs, loaded once: what the game uses
@@ -116,6 +120,8 @@
 	                              and recipes are among .items and .recipes)
 	  content.templates, .pools   template name -> IVS1 text, pool name -> pool
 	  content.structures          the structures, in load order
+	  content.sounds, .music      the sound events and the tracks, in load order (Schema's
+	                              SoundSpec, TrackSpec; Shared/Sounds and Sounds/MusicList)
 	  content.packs               the packs, in load order
 	  content.blockId, .itemId    name -> id (items: those that are no blocks)
 	  content.effectId            name -> effect id (Shared/Effects')
@@ -150,6 +156,8 @@ type PotionSpec = Schema.PotionSpec
 type SkillRecord = Schema.SkillRecord
 type TemplatePool = Schema.TemplatePool
 type StructureSpec = Schema.StructureSpec
+type SoundSpec = Schema.SoundSpec
+type TrackSpec = Schema.TrackSpec
 
 -- A pack, as loaded: its folder's name, its manifest's numbers.
 export type PackInfo = { name: string, order: number, description: string, requires: { string } }
@@ -189,6 +197,8 @@ export type Content = {
 	templates: { [string]: string },
 	pools: { [string]: TemplatePool },
 	structures: { StructureSpec },
+	sounds: { SoundSpec },
+	music: { TrackSpec },
 	blockId: { [string]: number },
 	itemId: { [string]: number },
 	effectId: { [string]: number },
@@ -336,11 +346,20 @@ function Content.build(input: { PackData }): Content
 	local templates: { [string]: string } = {}
 	local templatePools: { [string]: TemplatePool } = {}
 	local structures: { StructureSpec } = {}
+	local sounds: { SoundSpec } = {}
+	local music: { TrackSpec } = {}
 	-- The kinds merged by name (`mergeEntry`): each one's entries, and name -> place among them.
-	local lists: { [string]: { any } } =
-		{ blocks = blocks, items = items, effects = effects, potions = potions, structures = structures }
+	local lists: { [string]: { any } } = {
+		blocks = blocks,
+		items = items,
+		effects = effects,
+		potions = potions,
+		structures = structures,
+		sounds = sounds,
+		music = music,
+	}
 	local places: { [string]: { [string]: number } } =
-		{ blocks = blockAt, items = itemAt, effects = {}, potions = {}, structures = {} }
+		{ blocks = blockAt, items = itemAt, effects = {}, potions = {}, structures = {}, sounds = {}, music = {} }
 	-- Where each pack's own items and recipes end (its potions' go after them).
 	local ends: { [string]: { items: number, recipes: number } } = {}
 	local skills: { SkillRecord } = {}
@@ -364,9 +383,9 @@ function Content.build(input: { PackData }): Content
 	end
 
 	-- The kind and pack that took a name of `kind`'s, or nil: blocks and items share their names,
-	-- effects, potions and structures have names of their own.
+	-- effects, potions, structures, sounds and tracks have names of their own.
 	local function takenBy(kind: string, name: string): string?
-		if kind == "effects" or kind == "potions" or kind == "structures" then
+		if kind == "effects" or kind == "potions" or kind == "structures" or kind == "sounds" or kind == "music" then
 			return if made[kind][name] then whereOf(kind, name) else nil
 		elseif made.blocks[name] then
 			return whereOf("blocks", name)
@@ -396,8 +415,8 @@ function Content.build(input: { PackData }): Content
 	end
 
 	-- An entry of a kind merged by name (`lists`: a block, an item, an effect, a potion, a
-	-- structure) of `pack` (checked; `file`: its kind folder's file): appended, or patched onto the
-	-- earlier one.
+	-- structure, a sound, a track) of `pack` (checked; `file`: its kind folder's file): appended,
+	-- or patched onto the earlier one.
 	local function mergeEntry(kind: string, pack: string, file: string?, entry: any)
 		local name = entry.name :: string
 		local list = lists[kind]
@@ -783,6 +802,14 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
+	-- A sound event an entry names: one of the packs' sounds.
+	local soundAt = places.sounds
+	local function needSound(here: string, what: string, name: string)
+		if soundAt[name] == nil then
+			fail(`{here}: {what} names unknown sound {name}{hint(name, soundAt)}`)
+		end
+	end
+
 	for _, spec in blocks do
 		local here = whereOf("blocks", spec.name)
 		if type(spec.drops) == "string" then
@@ -806,6 +833,23 @@ function Content.build(input: { PackData }): Content
 		end
 		if spec.toggle then
 			needName(here, "toggle", spec.toggle.to, true)
+			if spec.toggle.sound then
+				needSound(here, "toggle sound", spec.toggle.sound)
+			end
+		end
+		if spec.sounds then
+			-- (In order, so the same mistake reads the same everywhere.)
+			local actions: { string } = {}
+			for action in spec.sounds do
+				table.insert(actions, action)
+			end
+			table.sort(actions)
+			for _, action in actions do
+				needSound(here, `sounds.{action}`, spec.sounds[action])
+			end
+		end
+		if spec.workSound then
+			needSound(here, "workSound", spec.workSound)
 		end
 		if spec.texture then
 			for face, texture in spec.texture :: { [string]: string } do
@@ -824,8 +868,15 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 	for _, spec in items do
+		local here = whereOf("items", spec.name)
 		if spec.places then
-			needName(whereOf("items", spec.name), "places", spec.places, true)
+			needName(here, "places", spec.places, true)
+		end
+		if spec.equipSound then
+			needSound(here, "equipSound", spec.equipSound)
+		end
+		if spec.food and spec.food.sound then
+			needSound(here, "food sound", spec.food.sound)
 		end
 	end
 	for _, entry in entries do
@@ -1094,6 +1145,8 @@ function Content.build(input: { PackData }): Content
 		templates = templates,
 		pools = templatePools,
 		structures = structures,
+		sounds = sounds,
+		music = music,
 		blockId = blockId,
 		itemId = itemId,
 		effectId = effectId,

@@ -8,6 +8,8 @@
 	               Laser Sight: blocks, items, recipes (Shared/Turrets, Config.Turrets)
 	  Metal Miner  blocks, recipes (Machines/MinerRules, Config.Miner)
 	  Ammo Press   blocks, recipes (Config.AmmoPress; the servo motor is the turrets' and its)
+	  sounds       the turrets' servo, the miner's and the press's hums (their blocks'
+	               `workSound`): sounds
 
 	Each feature stays behind its Config switch (`Enabled`): its recipes and its Ages are left out
 	when it is off, its blocks and items are always there. Their lore, the items' icons (blank) and

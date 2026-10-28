@@ -20,14 +20,15 @@ thousands of parts from the server is slow. IceVoxel never does either:
 ## Content packs (`Content/`, `Content/Schema`, `Content/Define`, `Content/Packs/`)
 
 Every block, item, recipe, item tag, texture, loot table, ore feature, Age, lore line, fuel tag,
-biome, status effect, potion, structure template, template pool and generated structure comes from
-a content pack, a folder under `Content/Packs` the game finds as it loads (Minecraft's data packs).
-The registries build themselves from what `Shared/Content` loads; none keeps a list of content of
-its own, nor any value about an entry by its name:
+biome, status effect, potion, structure template, template pool, generated structure, sound event
+and music track comes from a content pack, a folder under `Content/Packs` the game finds as it
+loads (Minecraft's data packs). The registries build themselves from what `Shared/Content` loads;
+none keeps a list of content of its own, nor any value about an entry by its name:
 
 ```
 Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, skills,
-   │                   lore, fuel, biomes, effects, potions, templates, pools, structures
+   │                   lore, fuel, biomes, effects, potions, templates, pools, structures,
+   │                   sounds, music
    │                   (each a .luau module, its data or function(define) -> data, or a .json
    │                   file; or a kind folder of them: Minecraft/blocks/terrain, .../plants...)
    │  Content.load: find the packs, sort by (order, name), require each kind (a kind folder's
@@ -39,7 +40,9 @@ Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePa
                 ─► Crafting/Recipes ─► Crafting, Smelting, JEI (recipes, tags, fuel)
                 ─► Progression/Ages, Skills, Knowledge  ─► Machines/MinerRules ─► the Metal Miner
                 ─► Radiation                            ─► Generation/Ores (features)
-                ─► Generation/ScavengeLoot, Mineshafts  ─► Sounds (block sounds, equip sounds)
+                ─► Generation/ScavengeLoot, Mineshafts  ─► Sounds (events, block sound types,
+                                                           limits, own, work and equip sounds)
+                ─► Sounds/MusicList (music sets, cave moods) ─► client Audio/Music, Sounds
                 ─► ToughAsNails/Temperature (heating, cooling) ─► server Players/Climate, Tooltip
                 ─► Items/Foods, ToughAsNails/Drinks (food, drink) ─► eating, drinking, Tooltip
                 ─► Biomes (the generator's biomes) ─► Generation/Structures (features), Locate (tags)
@@ -56,8 +59,10 @@ by name), `ages` (the Age records), `skills` (the skill tree's nodes, by id), `l
 line), `fuel` (tag -> burn ticks: Core's logs and planks), `biomes` (Schema's BiomeSpec: bands,
 climate, weather, ground, trees, plants, tags), `effects` (status effects, Schema's EffectSpec),
 `potions` (Schema's PotionSpec, each brewed into its items and their recipes), `templates` (name
--> IVS1 text: a structure block's SAVE), `pools` (name -> template pool) and `structures` (the
-jigsaw structures generation places; Structures below). Each is a module of the kind's name:
+-> IVS1 text: a structure block's SAVE), `pools` (name -> template pool), `structures` (the
+jigsaw structures generation places; Structures below), `sounds` (sound events, Schema's
+SoundSpec) and `music` (tracks and cave moods, each in its set: Schema's TrackSpec). Each is a
+module of the kind's name:
 a Luau module returning its data, or a function the loader calls with `Content/Define` (the shared
 helpers and Config, for packs that build entries or read switches), or a `.json` file (Rojo 7
 makes one a ModuleScript returning its table; the Lune loader does the same and skips Rojo's
@@ -94,7 +99,9 @@ cave twin may stand before or after its block (Blocks resolves twins in a second
 **Merging.** Blocks and items merge by name: an entry with `override = true` patches the entry of
 that name an earlier pack made, field by field, keeping its place and id (`{ name = "Stone",
 override = true, hardness = 2 }`); without it a name already taken, by a block or an item, is an
-error naming both packs, and so is an override of nothing. Textures merge the same way (an
+error naming both packs, and so is an override of nothing. Sound events and tracks merge the same
+way, each kind's names its own (`{ name = "ui.button.click", override = true, volume = 0.3 }`
+retunes the click in its place, so its number stays). Textures merge the same way (an
 override patches a texture's fields: a resource pack's new picture). Tags are a union: each pack's
 lists in load order, then every entry's `tags`, each name once (an entry's `tags = { "coals" }`
 joins Core's tag). Recipes, ore features (each named once) and Ages (each id once) append in load
@@ -144,7 +151,8 @@ from there (`tests/spec/Content` follows each one end to end):
 | `tags` | block, item | the packs' tags (Core's base tags) |
 | `heats`, `cools` | block | ToughAsNails/Temperature.HEATING_BLOCKS / COOLING_BLOCKS |
 | `sounds = { [action] = event }` | block | Sounds.block |
-| `equipSound` | armor item | Sounds.armorEquip (else SoundList.ARMOR_DEFAULT) |
+| `workSound` | machine block | Sounds.workSound (client Rendering/TransmitterModel.machineLoop, Audio/Ambience: its loop while it works; TransmitterModel's LOOPS by decor are gone) |
+| `equipSound` | armor item | Sounds.armorEquip (else Sounds.ARMOR_DEFAULT) |
 | `loot` (a loot table's name or pools) | block | Items.lootDrop |
 | `blastResistance`, `zombieBreak`, `flammable` | block | (each entry gives its own: BlockList's old BLAST_RESISTANCE, ZOMBIE_BREAK and fire odds by name suffix are gone) |
 | `food = { heal, nutrition?, saturation?, effect?, useTicks?, cures?, effects?, aftermath?, setback?, sound?, burp? }` | item | Items/Foods.ITEMS (effects and cures by name) |
@@ -194,17 +202,19 @@ pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `
   tree screen's cell), and every entry's `skill`; a template's text (IVS1 that reads, under the
   name inside it) and its palette's blocks; the templates a pool's elements give, a pool's
   fallback and a structure's start pool (a pool, a template or the templates named under it); a
-  structure's biomes, by their exact names (at least one; left out, every biome). Unknown names
-  come with a hint too (`Stnoe` -> Stone).
+  structure's biomes, by their exact names (at least one; left out, every biome); the sound
+  events entries name (a block's `sounds`, `workSound` and toggle sound, an item's `equipSound`
+  and food sound). Unknown names come with a hint too (`Stnoe` -> Stone).
 - In the registries, as they load (with `where`): what only a registry knows of an entry's
   value: a skill's row on the screen (1..6), its icon being an item, its perk's knowledge sources
-  and tool tiers, at most 255 nodes for the protocol's u8 (Skills), a sound event or action
-  (Sounds), the miner's numbers (MinerRules), a radiation or shielding number (Radiation), a
-  fuel's ticks (Recipes), a biome's bands and that every band has one (Biomes), its tree builders
-  (Generation/Structures), two effects `/effect` would find by one word (Effects); the structure
-  library (Structures/Library) builds the packs' part alone first and makes everything it would
-  warn about an error naming the pack: a number out of range (a weight, a depth, a spacing and
-  its separation), a start jigsaw no start piece has, a jigsaw's pool with no templates or its
+  and tool tiers, at most 255 nodes for the protocol's u8 (Skills), a block's sound action, an
+  event's numbers and its kind's limit, a machine's work sound (Sounds), the miner's numbers
+  (MinerRules), a radiation or shielding number (Radiation), a fuel's ticks (Recipes), a biome's
+  bands and that every band has one (Biomes), its tree builders (Generation/Structures), two
+  effects `/effect` would find by one word (Effects); the structure library
+  (Structures/Library) builds the packs' part alone first and makes everything it would warn
+  about an error naming the pack: a number out of range (a weight, a depth, a spacing and its
+  separation), a start jigsaw no start piece has, a jigsaw's pool with no templates or its
   unknown final state, an unknown item in a chest.
 
 **The packs.** Each manifest's header says what the pack adds, file by file, where the code
@@ -339,10 +349,12 @@ Gamma, order 20 after Alpha by name, overriding both) and the kind folder ones i
 file and a `_` helper at its top; Epsilon, JSON), grafts `tests/fixtures/content/fields/Fields`
 (every per-entry field) into a fresh game to follow each field to its registry, and
 `tests/fixtures/content/biomes/Wilds` (a biome, and an override of Plains) to follow a biome to
-Biomes, Locate and the generator, and `tests/fixtures/content/brewing/Brewing` (an effect and a
+Biomes, Locate and the generator, `tests/fixtures/content/brewing/Brewing` (an effect and a
 potion of it, and Speed and Swiftness patched: the potion's items, recipes, lore, tooltip and
-drink from its entry alone), builds packs in memory for every check (`Content.build`, and the
-Lune loader's `folder` / `module` / `graft`), and pins no id or total.
+drink from its entry alone) and `tests/fixtures/content/sounds/Chorus` (a block sound type and
+its block, events, a work and an equip sound, a track, a cave mood and overrides of each: to the
+catalogue, the blocks and the music), builds packs in memory for every check (`Content.build`,
+and the Lune loader's `folder` / `module` / `graft`), and pins no id or total.
 
 **The content tool** (`tests/content`: `check`, `list`, `show`, `new`; README, Development) sees
 what the game sees: `tests/lib/ContentGame` mounts `src/shared` with the Lune loader, requires
@@ -3816,7 +3828,7 @@ summer, no thunder in winter, snow on winter plains; `WeatherServer.snowingAt` b
 Not done: cauldrons filling (the game has no cauldron block), Minecraft's charged creepers and skeleton horse traps (the game has neither mob); rain
 splashes (Minecraft's rain particles on the ground) and the sky box's own greying (Roblox's sky
 can't be tinted by a property, so the picture is graded instead); real rain, snow and thunder
-textures and sounds (stand-ins, set in Config and SoundList).
+textures and sounds (stand-ins, set in Config and the Minecraft pack's sounds).
 
 ## Seasons (`Seasons/`, server `World/SeasonClock`, `Seasons/RoomWorld`, `Seasons/SnowWorld`, client `Rendering/LightingController`, `Rendering/SeasonTint`, `Ui/SeasonHud`)
 
@@ -8242,19 +8254,45 @@ its three inputs, the switches, the tabs), `Tooltips` (the turrets' line), `Craf
 
 Sounds are Minecraft's sound events, played with files that ship with every Roblox client.
 
-**The catalogue** (`Sounds`, from `Sounds/SoundList`). Events are numbered by position: the block
-events first (`Blocks.SOUND_TYPES` x the five actions), then SoundList's list, in a fixed order,
-so the server and clients agree on the numbers without sending names. Each event has a file, a
-volume and pitch (final: Sound.Volume and PlaybackSpeed), a random pitch variance, the distance it
-carries (16 blocks), the volume setting it follows (`source`), and who plays it (`side`). The list
-ends with the cave moods, built from `Sounds/MusicList.Moods` (`ambient.cave.mood1`..., category
-`ambient.cave`, client side, volume 0.5, falling back on the stand-in wind; `Sounds.MOODS`); the
+**The catalogue** (`Sounds`, from the content packs' `sounds` and `music`). Events are the packs'
+sound events (Content/Schema's SoundSpec), merged by name (`override = true` retunes one in its
+place), numbered at load by place: every pack's in load order (a kind folder's files in their
+names' order: the Minecraft pack's `sounds/armor`, `blocks`, `buckets`...), then one for each cave
+mood. Every machine loads the same packs, so the server and clients agree on the numbers without
+sending names; they go as a u16 (asserted), are never saved and move when content does, so code
+names events by name. Each event has a file, a volume and pitch (final: Sound.Volume and
+PlaybackSpeed), a random pitch variance, the distance it carries (16 blocks), the volume setting it
+follows (`source`), who plays it (`side`) and the most of its kind playing at once (`limit`). The
+cave moods are the packs' music of the set `mood` (`Sounds/MusicList`): each the event
+`ambient.cave.<name>` (`ambient.cave.mood1`..., category `ambient.cave`, volume 0.5, like the
+stand-in `ambient.cave` in every other way, its rumble their fallback; `Sounds.MOODS`); the
 music is not in the catalogue (Audio/Music plays it, following the `music` source volume).
+- Where they are: the vanilla events are the Minecraft pack's `sounds/` (block sound types, the
+  workshop, doors, players, armor, buckets, lava, fire and explosions, the farm animals' voices,
+  the interface, the cave stand-in, the weather), progression's the Core pack's, each feature's
+  its pack's (the Configurator and the Electric Furnace's and Oil Refinery's hums Mekanism's;
+  Tough As Nails' drinking and boiling and the seasons' Survival's; Terraria's; the zombies' voices
+  and sounds, the bunker hatch, medicine and every weapon's Apocalypse's, `sounds/`, its shots by
+  `_sounds`; the turrets' servo and the miner's and press's hums Turrets'; the Geiger click Ores').
+  Families are made by helpers: `define.blockSounds` (a block sound type's five events),
+  `define.mobVoice` (a mob's hurt and death), the Apocalypse pack's `_sounds.shot` and
+  `.calibreShots`.
+- Checked as the packs load: each event's fields (Schema: a file `rbxasset://...`, a source and a
+  side of their sets, numbers); the names entries give (Content); its numbers and its kind's limit
+  (Sounds: every event of a kind, its category else its name, gives the same limit or none, and
+  `Sounds.LIMITS` is what the client's `SoundRules.CAPS` reads: three mining hits, six footsteps,
+  one cave mood...); and the events the game's own code plays by name (`Sounds.PLAYED`, which
+  `tests/spec/Sounds` checks against the code's literals), the chest lids (`Sounds.MENUS`), the
+  generic equip sound and the falls (Sounds), the firearm classes' shots (Weapons), the fluids'
+  buckets (Fluids) and the mobs' voices (MobList): a pack set without one fails to load, naming
+  it. A lookup by name the code does without (a calibre's own shot, ShotRules) needs none.
 - Blocks have a sound type (`sound`, else by material: Wood wood, Ground gravel as Minecraft's
-  dirt, Ice glass, Metal metal...; fluids water; `Blocks.soundLut`). A type has a dig clip and a
-  step clip (step, hit, fall), and its break and place clips are the data sheet's two recordings
-  (`SoundList.RECORDED`, given to every type at its dig clip's volume, pitch and variance, the dig
-  thud as their `fallback`), all scaled per action like Minecraft (break and place (v + 1) / 2 and
+  dirt, Ice glass, Metal metal...; fluids water; `Blocks.soundLut`). A type is a name the packs'
+  sounds give all five `block.<type>.<action>` events of (`Blocks.SOUND_TYPES`, in their break
+  events' order). A type has a dig clip and a step clip (step, hit, fall), and its break and place
+  clips are the data sheet's two recordings (`define.RECORDINGS.BREAK`, `.PLACE`, given to every
+  type at its dig clip's volume, pitch and variance, the dig thud as their `fallback`, unless the
+  type says `recorded = false`), all scaled per action like Minecraft (break and place (v + 1) / 2 and
   pitch 0.8, hit (v + 1) / 8 and 0.5, step v x 0.15, fall v x 0.5 and 0.75). With one recording
   each for everything, pitch tells the materials apart (placed: wool 0.6, gravel 0.72, stone 0.8,
   sand 0.88, wood 0.96, grass 1.08, metal 1.2, snow 1.32; glass is placed like stone and shatters
@@ -8269,8 +8307,9 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
   cave moods and the blocks' break and place recordings a `fallback`, the eating and drinking
   loops (`entity.generic.eating`, `.drinking`) Minecraft's clicks (Audio/UseSoundRules). Other
   recordings replace stand-ins as overrides (`src/sounds`, below).
-- Lookups: `block(block, action)`, `container(block, opened)` (chest lids), `equip(old, new)`
-  (armor put on), `fall(halfHearts)` (small up to 4, else big), `lookupNames` (override names).
+- Lookups: `block(block, action)`, `workSound(block)` (a machine's loop while it works),
+  `container(block, opened)` (chest lids), `equip(old, new)` (armor put on), `fall(halfHearts)`
+  (small up to 4, else big), `lookupNames` (override names).
 - Lava (appended at the end of the list): `block.lava.pop` and `block.lava.ambient` (lava open to
   the air, each client by itself; the second is the fifth sheet's "Lava Ambient" loop, its old
   bubbling rumble the fallback), `block.lava.extinguish` (LiquidBlock.fizz: lava hardening and
@@ -8300,11 +8339,11 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
 - Turrets and the Metal Miner (appended after the seasons', the last events): `block.turret.servo`
   (a turning turret: the falling wind pitched up, at most `Config.Turrets.Client.ServoLoops` of
   them; Rendering/TurretView), `block.metal_miner.hum` and `block.ammo_press.hum` (a working
-  miner and press, from their records: TransmitterModel.machineLoop's names, Audio/Ambience), each
+  miner and press, from their records: their blocks' `workSound`, Audio/Ambience), each
   replaced by a Sound of its name in `SoundService.IceVoxelSounds`. A turret's shots are its stand-in gun's
   fire sounds (ShotView, through `ShotRules.fireSound`), its dry click `item.firearm.dry`.
 - The fifth data sheet (appended after the turrets', the last events). Its recordings, each with
-  the stand-in it replaced as its `fallback` (`SoundList.FIFTH_SHEET` lists the ids):
+  the stand-in it replaced as its `fallback` (`tests/spec/DataSheet` lists the ids):
   - "Entity Hit" for `entity.player.attack.strong` / `.weak` and `entity.bullet.flesh` (their
     old numbers and categories);
   - per calibre (`calibreShot`): `item.firearm.<calibre>.fire` (category item.firearm.fire, the
@@ -8315,7 +8354,7 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
   - the machines' hums, by category: `machine.hum` ("Electric Hum": `block.electric_furnace.hum`,
     `block.electric_heater.hum`, `block.air_conditioner.hum`, `block.ammo_press.hum`) and
     `machine.heavy_hum` ("Heavy Electric Hum": `block.metal_miner.hum`, `block.oil_refinery.hum`,
-    the two using the most energy); TransmitterModel.machineLoop names them per decor, so a
+    the two using the most energy); each machine's block names its own (`workSound`), so a
     working Electric Furnace or Oil Refinery hums like the seasons' and turrets' machines;
   - `ambient.radiation.click` (a Geiger counter's click; source ambient, ui, client): client
     `Audio/Geiger` clicks it flat while the player is exposed to radiation (see Radiation).
@@ -8359,7 +8398,7 @@ groans; a growl and two deaths for each zombie voice's own hurt and death events
 category `entity.mob.*`, which covers the farm animals too). A replacement plays at its
 PlaybackSpeed varied by the event's variance as a share of the event's pitch, so the voices' speeds
 (brute 0.65, zombie 1, runner 1.3, screamer 1.6) keep the kinds apart in the stand-ins' order, and
-no two kinds' spreads overlap (the stand-ins' never did either). The stand-ins stay in SoundList for
+no two kinds' spreads overlap (the stand-ins' never did either). The stand-ins stay in the packs for
 a game without the folder, and a replacement whose file never loads is left out (`SoundPlayer`
 preloads them as the catalogue's files), so its event plays the stand-in again.
 **The client** (`Audio/`). `SoundPlayer` plays everything: the server's `Sound` messages and the
@@ -8369,7 +8408,7 @@ client's own sounds, which play at once as Minecraft's client does.
   interface. Nothing is created per sound.
   - A voice is free again when its sound ends, or when it is cut at `duration / PlaybackSpeed`.
   - When all voices are busy, the oldest is taken. A kind of sound (an event's category) has at
-    most a few at once (`SoundRules.CAPS`: three mining hits, six footsteps).
+    most a few at once (`SoundRules.CAPS`, the events' `limit`: three mining hits, six footsteps).
   - At most 32 sounds start per frame. Sounds beyond hearing of the listener are never started.
 - Listener: the camera, as in Minecraft, but never more than 4 blocks (`SoundRules.LISTENER_REACH`,
   Minecraft's third person distance) from the eyes it looks at (`Camera.Focus`), turned like the
@@ -8452,7 +8491,7 @@ What the client plays itself:
     - its sky light s > 0: mood −= s / 15 × 0.001; else mood −= (block light − 1) / 6000, except
       a dark open block (not opaque, block light 0), which adds OPEN_WEIGHT (4) / 6000: this
       game's change, so a bigger cave brings the mood sooner (5 min / (1 + 3 × open share));
-    - at mood ≥ 1: a random `Sounds.MOODS` event (`ambient.cave.mood<N>`, from MusicList.Moods;
+    - at mood ≥ 1: a random `Sounds.MOODS` event (`ambient.cave.<name>`, the packs' mood tracks;
       the stand-in `ambient.cave` while there are none) plays at the eyes + the direction to the
       block's centre × (its distance + 2), and the mood is 0 again; else it stays ≥ 0.
     - The light is estimated, as the engine keeps no light map. Sky light
@@ -8468,7 +8507,8 @@ What the client plays itself:
     - It counts whatever the switches say (F3's `mood N%`); Config.Sounds.Ambient and the Cave
       Moods setting only keep it quiet.
 
-**Music** (`Audio/Music`, rules in `Audio/MusicRules`, tracks in `Sounds/MusicList`):
+**Music** (`Audio/Music`, rules in `Audio/MusicRules`, tracks the packs' `music`, by set in
+`Sounds/MusicList`):
 - Minecraft's MusicManager with the surface and caves as its situations, and the surface's night
   as a list of its own. `MusicRules.step` (every frame, with the exposure and whether it is night)
   and `ended` (reported back) make a pure state machine:
@@ -8494,7 +8534,7 @@ What the client plays itself:
   - a fade takes `FadeSeconds` (4);
   - its volume is `Music.Volume` (0.5) × `SoundPlayer.sourceVolume("music")` × the fade;
   - nothing new starts while that volume is 0, so nothing downloads.
-- When a track starts, `Ui/MusicToast` shows its title: the MusicList `Title`, else the asset's
+- When a track starts, `Ui/MusicToast` shows its title: the track's `title`, else the asset's
   name from `MarketplaceService:GetProductInfo` (asked once a track), else "Unknown Track". The
   toast is Minecraft's 160 × 32 panel (a music disc, "Now Playing" in yellow, the title cut with
   "..." to fit), tweened in from the right edge and back out after `ToastSeconds` (5). It sits

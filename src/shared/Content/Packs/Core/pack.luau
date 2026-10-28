@@ -1,9 +1,10 @@
 --!strict
 --[[
 	The game's core: Air and Cave Air (ids 0 and 1: blocks), the Ages (ages), the skill tree's
-	knowledge and tools branches (skills), the base item tags (tags), how long the logs and planks
-	tags burn in a furnace (fuel) and the texture pack's missing texture (textures). First of all
-	(order 0); every other pack builds on it.
+	knowledge and tools branches (skills) and progression's sounds (sounds: knowledge, a level, an
+	Age reached), the base item tags (tags), how long the logs and planks tags burn in a furnace
+	(fuel) and the texture pack's missing texture (textures). First of all (order 0); every other
+	pack builds on it.
 ]]
 return {
 	order = 0,

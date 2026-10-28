@@ -1671,7 +1671,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   going underground fades a surface or night track out and a cave track follows (and the other way
   back up), so surface music never plays underground. Dusk and dawn never cut a track: the next
   one follows the time. A "Now Playing" toast slides in at the top right with the track's title
-  for five seconds. The tracks are in `src/shared/Sounds/MusicList.luau`.
+  for five seconds. The tracks are the content packs' `music` (the Minecraft pack's
+  `music.luau`).
 - **Cave moods.** Minecraft's cave mood: every tick a random block within 8 blocks of you makes
   the mood grow in the dark (1/6000; dark open cave counts 4 times, so bigger caves bring it
   sooner) and shrink in daylight or by torches; at 100% one of the cave mood sounds plays a couple
@@ -2298,8 +2299,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             `skills`, its perks' kinds), init
                             (the state: awards, discoveries, advancing, unlocking, the recipe
                             gate, perks, death, the saved record, the client's status)
-  Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
-           MusicList        the music (surface, night and cave tracks) and the cave mood sounds
+  Sounds/  init             the sound catalogue: the packs' sound events (Minecraft's names),
+                            numbered at load, the cave moods' events, block sound types, voice
+                            limits, the events the code plays by name
+           MusicList        the packs' music by set (surface, night and cave tracks, the cave
+                            moods)
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
                             brightness (solar panels), /time arguments, lighting blends
   Weather/ init             the weather clock, /weather's overrides and their blending, the
@@ -3004,7 +3008,7 @@ for performance:
 | `Sounds.Footsteps`        | true    | Footsteps of everyone (swimming and splashes still play).           |
 | `Sounds.Interface`        | true    | Clicks of buttons and tabs.                                         |
 | `Sounds.Ambient`          | true    | Minecraft's cave moods.                                             |
-| `Music.Enabled`           | true    | The background music (tracks: `Sounds/MusicList`).                  |
+| `Music.Enabled`           | true    | The background music (tracks: the packs' `music`).                  |
 | `Music.Volume`            | 0.5     | A track's Sound.Volume, times the master and music volumes.         |
 | `Music.FirstDelay` / `MinDelay` / `MaxDelay` | 5 / 600 / 1200 | Seconds to the first track, and between tracks (Minecraft's 10 to 20 minutes). |
 | `Music.CaveExposure` / `SurfaceExposure` / `SwitchSeconds` | 0.2 / 0.5 / 5 | In a cave below this sky exposure (F3), on the surface again above the other, each for SwitchSeconds. |
@@ -3354,16 +3358,16 @@ screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"voi
 ## Extending
 
 **Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages, the
-skill tree's nodes, lore lines, biomes, status effects, potions and jigsaw structures come
-from content packs, folders
+skill tree's nodes, lore lines, biomes, status effects, potions, jigsaw structures, sound events
+and music come from content packs, folders
 under `src/shared/Content/Packs/` that the game finds and checks as it loads, like Minecraft's data
 packs (docs/ARCHITECTURE.md, "Content packs"). A pack is a `pack` manifest
 (`{ order = 300, description = "..." }`) and any of `blocks`, `items`, `recipes`, `tags`,
 `textures`, `loot`, `ores`, `ages`, `skills`, `lore`, `fuel`, `biomes`, `effects`, `potions`,
-`templates`, `pools` and `structures`, each a Luau
+`templates`, `pools`, `structures`, `sounds` and `music`, each a Luau
 module (its data, or a function of `define`, the helpers in `Content/Define`) or a `.json` file. An
 entry carries what other registries used to keep in tables of their own: `lore`, `texture`, `icon`,
-`age`, `skill`, `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`...
+`age`, `skill`, `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `workSound`, `loot`...
 (`Content/Schema` lists them all, and a misspelt field is an error naming the pack and the entry).
 Ids are given at load in pack order, so content may be added anywhere; `override = true` patches
 another pack's entry. A kind may also be a folder of files merged in name order
@@ -3393,7 +3397,9 @@ its plain look (and the colour a tinted texture takes); its texture goes in the 
 Block textures below).
 
 **Sounds.** Every sound is a Minecraft sound event (`block.stone.break`, `entity.item.pickup`,
-`ui.button.click`...; the full list is `src/shared/Sounds/SoundList.luau`) played with one of the
+`ui.button.click`...), an entry of a content pack's `sounds` (the vanilla ones the Minecraft
+pack's `sounds/` folder, each feature's in its pack: the zombies' and the guns' in Apocalypse, the
+Geiger counter's in Ores, Tough As Nails' and the seasons' in Survival...), played with one of the
 sounds every Roblox client ships (`rbxasset://sounds/...`: the character's footsteps, landing,
 get-up rustle (chest lids, armor), free-fall wind (a cave mood that fails to load), swimming and splash, the
 explosion, `oof`, `ouch` and the volume slider's tick; the jump sound is unused), as stand-ins
@@ -3437,18 +3443,63 @@ A Sound named like the event wins; otherwise one named like its category, the ev
 variant left out (`block.break` for every `block.<type>.break`, `item.armor.equip` for every
 `item.armor.equip_<material>`). Several Sounds with one name are Minecraft's variants. They play
 with their own Volume and PlaybackSpeed (times the volume settings, varied a little like the
-built-in ones), heard as far as the event (16 blocks). To change the defaults instead, edit `id`,
-`volume` and `pitch` in SoundList: block types have a `dig` clip and a `step` clip (walking, mining
-hits, falls), scaled per action like Minecraft. Breaking and placing play the data sheet's
-recordings (`GENERIC_BREAK`, `GENERIC_PLACE` in SoundList, given to every type at its `dig`
-volume, pitch and variance, so each material still sounds its own), with the `dig` thud as their
-fallback should one fail to load; glass keeps its shatter for breaking and water its splash. Swap
-them there, or override one type (`block.stone.break`) or all (`block.break`, `block.place`) with
-a Sound. A block's sound type is its entry's `sound` (`sound = "metal"`), else its
-material's.
+built-in ones), heard as far as the event (16 blocks). To change the defaults instead, change the
+event in its pack, or retune it from a pack of your own (below). Block sound types are
+`define.blockSounds` in the Minecraft pack's `sounds/blocks.luau`: a type has a `dig` clip and a
+`step` clip (walking, mining hits, falls), scaled per action like Minecraft. Breaking and placing
+play the data sheet's recordings (`define.RECORDINGS.BREAK`, `.PLACE`, given to every type at its
+`dig` volume, pitch and variance, so each material still sounds its own), with the `dig` thud as
+their fallback should one fail to load; glass keeps its shatter for breaking and water its splash
+(`recorded = false`). Swap them there, or override one type (`block.stone.break`) or all
+(`block.break`, `block.place`) with a Sound. A block's sound type is its entry's `sound` (`sound =
+"metal"`), else its material's; a block may also have its own action sounds (`sounds = { ["break"]
+= "block.fire.extinguish" }`: punching fire out), and a machine the loop it plays while it works
+(`workSound = "block.electric_heater.hum"`).
+
+**A sound event.** Add an entry to a pack's `sounds` (a module, or a file of a `sounds/` folder),
+retune one another pack made with `override = true`, or make a block sound type with
+`define.blockSounds`:
+
+```lua
+-- src/shared/Content/Packs/MyPack/sounds.luau
+return function(define)
+	local list = define.blockSounds({
+		name = "copper",          -- block.copper.break, .place, .hit, .step, .fall; `sound = "copper"`
+		volume = 1,
+		pitch = 1.4,
+		dig = { id = define.SHIPPED.LAND, volume = 0.8, pitchVariance = 0.05 },
+		step = { id = define.SHIPPED.STEPS, volume = 1.6, pitchVariance = 0.05, duration = define.ONE_STEP },
+	})
+	define.append(list, {
+		{
+			name = "block.bell.ring",   -- play it by name: Sounds.play("block.bell.ring", x, y, z)
+			id = "rbxassetid://1234567890",
+			volume = 0.8,
+			pitchVariance = 0.05,
+			fallback = { id = define.SHIPPED.TICK, pitch = 2 }, -- if the upload fails to load
+			maxDistance = 48,
+			source = "blocks",        -- the volume it follows: blocks, players, ambient, ui
+			side = "server",          -- server, predicted (the actor's client at once) or client
+			limit = 2,                -- most at once on a client (its category's, else its name's)
+		},
+		{ name = "ui.button.click", override = true, volume = 0.3 }, -- a quieter click
+	})
+	return list
+end
+```
+
+The fields are Content/Schema's (`SOUND_FIELDS`: `category` lets one Sound replace a family, as
+`item.armor.equip` does). Event numbers are given at load in pack order (a pack's sounds, then the
+cave moods), sent as a u16 and never saved, so events may be added anywhere; the code names them
+by name. Every name an entry gives (a block's `sounds`, `workSound` and toggle sound, an item's
+`equipSound` and food sound) is checked as the packs load, and so is every event the game's own
+code plays (`Sounds.PLAYED`, the chest lids, the firearm classes' shots, the fluids' buckets, the
+mobs' voices): a pack set without one fails loudly, naming it. A Sound in
+SoundService.IceVoxelSounds still replaces any event, a pack's own too.
 
 Eating and drinking loop the data sheet's recordings (`entity.generic.eating` and
-`entity.generic.drinking`, their ids in SoundList; a Sound of either name replaces it and loops too)
+`entity.generic.drinking`, their ids in the Minecraft and Survival packs' sounds; a Sound of either
+name replaces it and loops too)
 while the use button is held on a food (medicine keeps its own sound) or a drink: the eater hears it
 at once from their own client, other players near hear it too (the server sets the `IceVoxelUse`
 player attribute while the use lasts), and it stops the moment the use ends (finished, cancelled,
@@ -3491,18 +3542,23 @@ Sounds are heard from the camera, but never more than 4 blocks from the player's
 (`SoundRules.LISTENER_REACH`, Minecraft's third person distance), so zooming out does not
 silence the world; a Scriptable camera hears from where it is.
 
-**Music and cave moods.** `src/shared/Sounds/MusicList.luau` holds the game's own audio, like the
-texture pack holds the textures:
+**Music and cave moods.** The tracks are the content packs' `music`, each by name in its set
+(the Minecraft pack's `music.luau` holds every track the data sheets brought; `Sounds/MusicList`
+gives the sets to the client). A pack adds a track to a set with a line, or patches one by name:
 
 ```lua
-Surface = { { Id = "rbxassetid://...", Title = "" }, ... },  -- above ground by day
-Night = { { Id = "rbxassetid://...", Title = "" }, ... },    -- above ground at night
-Cave = { { Id = "rbxassetid://...", Title = "" }, ... },     -- in caves, day or night
-Moods = { "rbxassetid://...", ... },                         -- Minecraft's ambient.cave
+-- src/shared/Content/Packs/MyPack/music.luau
+return {
+	{ name = "dawn", id = "rbxassetid://...", title = "Dawn", set = "surface" }, -- above ground by day
+	{ name = "owls", id = "rbxassetid://...", set = "night" },   -- above ground at night
+	{ name = "deep", id = "rbxassetid://...", set = "cave" },    -- in caves, day or night
+	{ name = "drip", id = "rbxassetid://...", set = "mood" },    -- a cave mood: ambient.cave.drip
+	{ name = "surface3", override = true, title = "Morning" },  -- the Minecraft pack's, retitled
+}
 ```
 
-- **Titles:** a track's `Title` is what the Now Playing toast shows; `""` uses the audio's own name
-  on Roblox (looked up once).
+- **Titles:** a track's `title` is what the Now Playing toast shows; none (or `""`) uses the
+  audio's own name on Roblox (looked up once).
 - **Tracks:** Minecraft's MusicManager timing (Config.Music): the first about five seconds after
   joining, then one at random every 10 to 20 minutes, never the same twice in a row.
 - **Surface or cave:** where the player is comes from the sky light reaching the camera (F3's
@@ -3511,12 +3567,13 @@ Moods = { "rbxassetid://...", ... },                         -- Minecraft's ambi
   starts while the light says the other place. A track that fails to load is skipped with a warning.
 - **Night:** on the surface at night (the game's own rule, `DayCycle.isDay` false at the server's
   clock: from a little before sunset to a little after sunrise, as the sky, the mobs and the
-  zombies have it) a track comes from `Night`, by day from `Surface`. The time is read when a
-  track is picked, so dusk and dawn never cut one. An empty `Night` list (or one whose tracks all
-  failed to load) leaves the surface its `Surface` tracks at night too.
-- **Moods:** each becomes the event `ambient.cave.mood<N>` (category `ambient.cave`, so a Sound named
-  `ambient.cave` in the override folder replaces them all), played at Minecraft's volume 0.5,
-  heard 16 blocks away. The mood itself is Minecraft's
+  zombies have it) a track comes from the `night` set, by day from `surface`. The time is read
+  when a track is picked, so dusk and dawn never cut one. An empty `night` set (or one whose
+  tracks all failed to load) leaves the surface its `surface` tracks at night too.
+- **Moods:** each becomes the event `ambient.cave.<name>` (`ambient.cave.mood1`...; category
+  `ambient.cave`, so a Sound named `ambient.cave` in the override folder replaces them all), played
+  at Minecraft's volume 0.5 like the stand-in `ambient.cave` (heard 16 blocks away, one at a time,
+  its rumble the fallback). The mood itself is Minecraft's
   (`BiomeAmbientSoundsHandler`, `AmbientMoodSettings.LEGACY_CAVE_SETTINGS`):
   - every game tick one block within 8 blocks of the eyes (each axis) is picked;
   - with sky light s > 0 the mood drops s/15 × 0.001;
@@ -3692,9 +3749,10 @@ table.insert(list, zombie({
   variant and id, so nothing more is sent. A new gait is a profile in client `Entities/MobRig`
   (`GAITS`) and a stance in `Shared/Entities/MobShape.GAITS` (its lean and droop: where bullets
   find its head); a new kind of motion is code in its `angles`.
-- **Its voice:** the zombie's, or one of its own: a line in SoundList's `MOB_VOICES` (`{ kind =
-  "zombie_miner", hurt = 0.9, death = 0.85 }` makes `entity.zombie_miner.hurt` and `.death`, which
-  `sounds = { hurt = ..., death = ... }` names; swap them like any sound). Its knowledge goes in
+- **Its voice:** the zombie's, or one of its own: a line in a pack's sounds (the Apocalypse
+  pack's `sounds/zombies.luau`), `define.mobVoice({ kind = "zombie_miner", hurt = 0.9, death =
+  0.85 })` makes `entity.zombie_miner.hurt` and `.death`, which `sounds = { hurt = ..., death =
+  ... }` names (MobList checks both are events); swap them like any sound. Its knowledge goes in
   `Progression/Knowledge.MOBS` (else 3 a kill); `/summon zombie_miner` finds it by itself.
 
 A creature (`hostile = false`, no `zombie`) is a plain record with Minecraft's numbers: `wander`

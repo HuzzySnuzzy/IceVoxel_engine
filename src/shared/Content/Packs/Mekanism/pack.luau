@@ -15,6 +15,8 @@
 	  oil and fuel  Oil Coated and Fuel Soaked, the effects they give the skin: effects; and
 	                the Oil and Fuel fluids, CaveOil, the oil and fuel buckets, the Oil Refinery and
 	                the Combustion Generator: blocks/oil, items, recipes
+	  sounds        the Configurator's click, the Electric Furnace's and the Oil Refinery's hums
+	                (their blocks' `workSound`): sounds
 
 	Every entry carries what it says of itself: its lore, its texture or (blank) icon, the Age that
 	opens it, osmium's knowledge and the Metal Miner's numbers for Osmium Ore.

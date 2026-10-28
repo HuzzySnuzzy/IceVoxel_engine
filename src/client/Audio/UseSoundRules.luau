@@ -5,7 +5,7 @@
 	server's player attribute Inventory/Types.USE_ATTRIBUTE).
 
 	  loop    while the use lasts, its recording loops at the player's mouth (LOOPS: the fourth
-	          sheet's "loop this during eating / drinking", Sounds/SoundList), and it stops the
+	          sheet's "loop this during eating / drinking", the content packs' sounds), and it stops the
 	          moment the use ends: finished, cancelled, the hotbar slot changed, the player dead or
 	          gone (no use, or not `alive`).
 	  clicks  only when the loop's recording cannot play (its file failed to load, and no

@@ -25,6 +25,9 @@
 	  effects   { EffectSpec }: status effects (Shared/Effects; EFFECT_FIELDS), ids in load order
 	  potions   { PotionSpec }: potions (Effects/PotionList; POTION_FIELDS), each made into its
 	            items and their recipes as packs load
+	  sounds    { SoundSpec }: sound events (SOUND_FIELDS; Shared/Sounds numbers them)
+	  music     { TrackSpec }: music tracks and cave moods, each in its set (MUSIC_FIELDS;
+	            Sounds/MusicList)
 	  templates   { [name]: IVS1 text }: structure templates as a structure block's SAVE gives
 	              them, each under the name its text holds (Structures/Template)
 	  pools       { [name]: TemplatePool }: template pools (Minecraft's template_pool: weighted
@@ -58,6 +61,8 @@
 	  heats, cools     block        true: it warms / cools a player near it, Tough As Nails
 	                                (ToughAsNails/Temperature.HEATING_BLOCKS / COOLING_BLOCKS)
 	  sounds           block        { [action] = event }: its own action sounds (Sounds.block)
+	  workSound        block        a machine: the event it plays looped while it works (Sounds
+	                                .workSound; client Audio/Ambience)
 	  equipSound       item         armor: the event putting it on plays (Sounds.armorEquip)
 	  loot             block        a loot table's name, or its pools: now and then what it gives
 	                                in place of its usual drop (Items.lootDrop)
@@ -71,8 +76,8 @@
 	                                (ToughAsNails/Drinks.ITEMS, whose header says what each does;
 	                                numbers left out are 0); `empty` the container it leaves, by
 	                                name
-	  override         block, item, texture, biome, effect, potion, pool, structure  patches the
-	                   entry of that name an earlier pack made
+	  override         block, item, texture, biome, effect, potion, pool, structure, sound, track
+	                   patches the entry of that name an earlier pack made
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
 	gone: each entry says its own).
@@ -270,6 +275,7 @@ export type BlockSpec = {
 	heats: boolean?,
 	cools: boolean?,
 	sounds: { [string]: string }?,
+	workSound: string?,
 	loot: (string | { Pool })?,
 	override: boolean?,
 }
@@ -543,6 +549,31 @@ export type StructureSpec = {
 	foundation: boolean?,
 	override: boolean?,
 }
+
+-- What a sound event plays instead when its file fails to load (`fallback`): fields left out are
+-- the event's own.
+export type FallbackSpec = { id: string, volume: number?, pitch: number?, duration: number? }
+
+-- A sound event (the `sounds` kind; SOUND_FIELDS below says what each field does).
+export type SoundSpec = {
+	name: string,
+	id: string,
+	volume: number?,
+	pitch: number?,
+	pitchVariance: number?,
+	duration: number?,
+	fallback: FallbackSpec?,
+	category: string?,
+	maxDistance: number?,
+	source: string,
+	ui: boolean?,
+	side: string,
+	limit: number?,
+	override: boolean?,
+}
+
+-- A music track or a cave mood (the `music` kind; MUSIC_FIELDS below).
+export type TrackSpec = { name: string, id: string, title: string?, set: string, override: boolean? }
 
 -- A pack's manifest (its `pack` module).
 export type Manifest = { order: number, description: string?, requires: { string }? }
@@ -886,8 +917,10 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	                blocks are drawn one part per block.
 	  sound         What breaking, placing, hitting, walking and falling on it sounds like
 	                (Minecraft's SoundType; the events are `block.<sound>.break` and so on, see
-	                Shared/Sounds): "stone", "wood", "gravel", "grass", "sand", "glass", "snow",
-	                "metal", "wool" or "water". Default: from the material (Wood / WoodPlanks wood;
+	                Shared/Sounds): a type the packs' sounds give (Content/Define's `blockSounds`;
+	                the Minecraft pack's "stone", "wood", "gravel", "grass", "sand", "glass",
+	                "snow", "metal", "wool", "water", "ladder", "rope", "vine" and "moss").
+	                Default: from the material (Wood / WoodPlanks wood;
 	                Grass / LeafyGrass grass; Ground / Mud / Pebble gravel, as Minecraft's dirt
 	                sounds; Sand sand; Snow snow; Glass / Ice / Glacier / Neon glass; Metal /
 	                DiamondPlate / CorrodedMetal / Foil metal; Fabric wool; anything else stone),
@@ -1163,6 +1196,7 @@ Schema.BLOCK_FIELDS = {
 	heats = BOOLEAN,
 	cools = BOOLEAN,
 	sounds = NAMES_MAP,
+	workSound = STRING,
 	loot = oneOf("a loot table's name or its pools", { STRING, LOOT_TABLE }),
 	override = BOOLEAN,
 } :: { [string]: Check }
@@ -1902,6 +1936,86 @@ Schema.STRUCTURE_FIELDS = {
 -- Pool names that mean no pool (a fallback's or a jigsaw's: Structures/Jigsaw.EMPTY_POOLS).
 Schema.EMPTY_POOLS = table.freeze({ [""] = true, empty = true, ["minecraft:empty"] = true }) :: { [string]: boolean }
 
+-- A sound file: "rbxasset://sounds/..." (one every client ships) or "rbxassetid://<n>".
+local function SOUND_FILE(value: any): string?
+	if type(value) ~= "string" or string.find(value, "^rbxasset") == nil then
+		return ` must be a sound file (rbxasset://sounds/... or rbxassetid://<n>), not {describe(value)}`
+	end
+	return nil
+end
+
+-- The volume settings an event may follow, who may play it, and the music's sets.
+Schema.SOUND_SOURCES = table.freeze({ "blocks", "players", "ambient", "ui" })
+Schema.SOUND_SIDES = table.freeze({ "server", "predicted", "client" })
+Schema.MUSIC_SETS = table.freeze({ "surface", "night", "cave", "mood" })
+
+--[[
+	Sound event fields (the `sounds` kind: Minecraft's sound events, `block.stone.break`,
+	`entity.item.pickup`, `ui.button.click`...; Shared/Sounds numbers them, and a developer's Sound
+	of an event's name in SoundService.IceVoxelSounds replaces it, README "Sounds"). `name`, `id`,
+	`source` and `side` are needed, an override needs only its `name`:
+	  name           Minecraft's event name (the game's own where Minecraft has none)
+	  id             the file: "rbxasset://sounds/..." (one every client ships, Content/Define's
+	                 SHIPPED) or "rbxassetid://<n>"
+	  volume         Sound.Volume (default 0.5)
+	  pitch          Sound.PlaybackSpeed (default 1)
+	  pitchVariance  the pitch varies randomly by up to this much either way (default 0)
+	  duration       seconds of the file to play (it stops at that TimePosition); nil: all of it
+	  fallback       { id, volume?, pitch?, duration? }: played instead when `id` fails to load;
+	                 its missing fields are the event's own
+	  category       the name with the variant left out, which a developer's Sound may also have
+	                 to replace every variant at once (item.armor.equip for equip_iron...)
+	  maxDistance    blocks it is heard from (default 16, Minecraft's); it fades out linearly
+	  source         the volume it follows (Config.Sounds.Sources): "blocks", "players", "ambient"
+	                 or "ui"
+	  ui             played flat (2D) for the local player alone instead of at a position
+	  side           who plays it:
+	                   "server"     the server sends it to everyone near (the player who caused it
+	                                too); clients only play what it sends
+	                   "predicted"  the player who caused it hears it at once from their own
+	                                client, and the server sends it to everyone else
+	                   "client"     clients play it by themselves; the server never sends it
+	  limit          the most of its kind (its category, else its name) playing at once on a
+	                 client (Audio/SoundRules: overlapping mining hits, many footsteps); every
+	                 event of a kind that gives one gives the same (default 8)
+	  override       patches the event of that name an earlier pack made, field by field
+]]
+Schema.SOUND_FIELDS = {
+	name = STRING,
+	id = SOUND_FILE,
+	volume = NUMBER,
+	pitch = NUMBER,
+	pitchVariance = NUMBER,
+	duration = NUMBER,
+	fallback = record({ id = SOUND_FILE, volume = NUMBER, pitch = NUMBER, duration = NUMBER }, { "id" }),
+	category = STRING,
+	maxDistance = NUMBER,
+	source = enum(Schema.SOUND_SOURCES),
+	ui = BOOLEAN,
+	side = enum(Schema.SOUND_SIDES),
+	limit = NUMBER,
+	override = BOOLEAN,
+} :: { [string]: Check }
+
+--[[
+	Music fields (the `music` kind; Sounds/MusicList, client Audio/Music). `name`, `id` and `set`
+	are needed, an override needs only its `name`:
+	  name    the track's name in the packs ("surface3"): what an override names
+	  id      its audio, "rbxassetid://<n>"
+	  title   what the Now Playing toast shows; "" or none uses the audio's own name on Roblox
+	  set     where it plays: "surface" (above ground by day), "night" (above ground at night),
+	          "cave" (in caves, day or night) or "mood" (a cave mood: Minecraft's ambient.cave,
+	          the sound event ambient.cave.<name>, Shared/Sounds)
+	  override  patches the track of that name an earlier pack made
+]]
+Schema.MUSIC_FIELDS = {
+	name = STRING,
+	id = SOUND_FILE,
+	title = STRING,
+	set = enum(Schema.MUSIC_SETS),
+	override = BOOLEAN,
+} :: { [string]: Check }
+
 Schema.MANIFEST_FIELDS = {
 	order = NUMBER,
 	description = STRING,
@@ -1929,6 +2043,8 @@ Schema.KINDS = table.freeze({
 	"templates",
 	"pools",
 	"structures",
+	"sounds",
+	"music",
 })
 -- Each kind's entries' name in messages.
 Schema.SINGULAR = table.freeze({
@@ -1949,6 +2065,8 @@ Schema.SINGULAR = table.freeze({
 	templates = "template",
 	pools = "pool",
 	structures = "structure",
+	sounds = "sound",
+	music = "track",
 }) :: { [string]: string }
 -- The kinds that are lists of entries (the rest are tables of names).
 Schema.LISTS = table.freeze({
@@ -1962,6 +2080,8 @@ Schema.LISTS = table.freeze({
 	effects = true,
 	potions = true,
 	structures = true,
+	sounds = true,
+	music = true,
 }) :: { [string]: boolean }
 
 -- Each kind's entry check, for the kinds whose entries are records.
@@ -1978,6 +2098,8 @@ local ENTRY_FIELDS: { [string]: { [string]: Check } } = {
 	potions = Schema.POTION_FIELDS,
 	pools = Schema.POOL_FIELDS,
 	structures = Schema.STRUCTURE_FIELDS,
+	sounds = Schema.SOUND_FIELDS,
+	music = Schema.MUSIC_FIELDS,
 }
 -- What the other kinds' values must be.
 local VALUE_CHECKS: { [string]: Check } = {
@@ -2036,6 +2158,8 @@ function Schema.check(kind: string, entry: any): string?
 		elseif kind == "potions" then (if override then { "name" } else { "name", "ingredient", "effect" })
 		elseif kind == "pools" then (if override then {} else { "elements" })
 		elseif kind == "structures" then (if override then { "name" } else { "name", "startPool" })
+		elseif kind == "sounds" then (if override then { "name" } else { "name", "id", "source", "side" })
+		elseif kind == "music" then (if override then { "name" } else { "name", "id", "set" })
 		else {}
 	if kind == "recipes" then
 		local rule = Schema.RECIPE_TYPES[entry.type]

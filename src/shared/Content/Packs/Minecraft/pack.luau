@@ -49,6 +49,10 @@
 	              own)
 	  biomes      the 18 biomes, their climate, weather, ground, trees, ground plants and biome
 	              tags, in the generator's order: biomes (the Survival pack adds its herbs)
+	  sounds      the block sound types (sounds/blocks, Content/Define's blockSounds), the
+	              workshop's, doors', players', armor's, buckets', lava's, fire's and explosions',
+	              the farm animals' voices, the interface's click, the cave mood's stand-in and the
+	              weather's: sounds/ (a file a feature); the music and the cave moods: music
 
 	Calls made here: Glow Dust and glow lichen are the lights' (the Glow Block is the game's
 	glowstone); White Wool is the mob drops' (sheep); the mineshafts' loot table is whole here,

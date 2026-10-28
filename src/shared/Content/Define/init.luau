@@ -3,7 +3,7 @@
 	What content packs build entries with (Shared/Content): a kind module written as
 	`function(define) -> data` is called with this module, and any pack module may require it.
 	Pure: it makes tables and requires only Config and the content types. The helpers live in its
-	submodules (Items, Blocks, Plants, Recipes, Metal, Potions) and are all here as
+	submodules (Items, Blocks, Plants, Recipes, Metal, Potions, Sounds) and are all here as
 	`define.<name>`; a pack's own helpers are its "_" modules.
 
 	  Config          the game's tunables, for packs that read switches and numbers (the turrets',
@@ -75,6 +75,18 @@
 	                  raw block, its raw lump, ingot and nugget, the recipes between them and their
 	                  textures, as { blocks, items, recipes, textures } for a pack's kind modules
 	                  to take their part of
+
+	Sound events (Define/Sounds)
+	  SHIPPED         the files every Roblox client ships (LAND, STEPS, SWIM, SPLASH, FALLING,
+	                  GET_UP, EXPLOSION, OOF, OUCH, TICK): the stand-ins
+	  RECORDINGS      the data sheets' recordings more than one pack plays (BREAK, PLACE,
+	                  ENTITY_HIT, ELECTRIC_HUM, HEAVY_HUM)
+	  ONE_STEP        seconds of the walking loop's first footstep
+	  BLOCK_ACTIONS   Minecraft's five actions on blocks and their scaling of a type's clips
+	  blockSounds(type)   a block sound type's five events, block.<type>.<action>, scaled per action
+	                  (a type's `dig` and `step` clips, `actions` of its own; breaking and placing
+	                  the recordings unless `recorded = false`)
+	  mobVoice(voice)   a mob's hurt and death events ({ kind, hurt, death }: their pitches)
 ]]
 
 local BlocksDefine = require(script.Blocks)
@@ -84,6 +96,7 @@ local MetalDefine = require(script.Metal)
 local PlantsDefine = require(script.Plants)
 local PotionsDefine = require(script.Potions)
 local RecipesDefine = require(script.Recipes)
+local SoundsDefine = require(script.Sounds)
 
 export type ArmorPiece = ItemsDefine.ArmorPiece
 export type ArmorMaterial = ItemsDefine.ArmorMaterial
@@ -93,6 +106,8 @@ export type DoorWood = BlocksDefine.DoorWood
 export type MetalSpec = MetalDefine.MetalSpec
 export type Metal = MetalDefine.Metal
 export type PotionVariant = PotionsDefine.Variant
+export type BlockSoundType = SoundsDefine.BlockSoundType
+export type MobVoice = SoundsDefine.MobVoice
 
 local Define = {}
 
@@ -191,6 +206,14 @@ Define.shapeless = RecipesDefine.shapeless
 Define.smelting = RecipesDefine.smelting
 Define.storage = RecipesDefine.storage
 Define.metal = MetalDefine.metal
+
+-- Sound events.
+Define.SHIPPED = SoundsDefine.SHIPPED
+Define.RECORDINGS = SoundsDefine.RECORDINGS
+Define.ONE_STEP = SoundsDefine.ONE_STEP
+Define.BLOCK_ACTIONS = SoundsDefine.BLOCK_ACTIONS
+Define.blockSounds = SoundsDefine.blockSounds
+Define.mobVoice = SoundsDefine.mobVoice
 
 -- What a function-form pack module receives (this module).
 export type Context = typeof(Define)

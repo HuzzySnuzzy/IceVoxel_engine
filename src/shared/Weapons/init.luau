@@ -25,8 +25,9 @@
 	              0.6), 3 Damaged (above 0.4), 4 Badly damaged (above 0.2), 5 Ruined (the
 	              survival look's Ui/Theme.CONDITIONS; tests/spec/WeaponHandling checks they agree)
 
-	Checked as this loads (an error names the culprit): every name is an item; every firearm
-	has a durability and stacks to 1, a known class, modes with rates above 0, a feed (a
+	Checked as this loads (an error names the culprit): every class's fire sound is an event of the
+	packs' sounds (`fireSound`); every name is an item; every firearm has a durability and stacks
+	to 1, a known class, modes with rates above 0, a feed (a
 	magazine of WeaponList's whose calibre is its own and which fits it, or an internal magazine
 	of 0 or more rounds) and ammunition of its calibre; every magazine has a capacity above 0, a
 	durability, and fits only guns that feed from it; every attachment has a known slot and fits
@@ -38,6 +39,7 @@
 ]]
 
 local Items = require(script.Parent.Items)
+local Sounds = require(script.Parent.Sounds)
 local WeaponList = require(script.WeaponList)
 
 export type Point = WeaponList.Point
@@ -130,7 +132,7 @@ export type MeleeSpec = { item: number, name: string, heavy: number, guard: numb
 
 local Weapons = {}
 
--- The firearm classes (each has its fire sound: Shared/Sounds/SoundList).
+-- The firearm classes (each has its fire sound, `fireSound`: the Apocalypse pack's sounds).
 Weapons.CLASSES = table.freeze({ "pistol", "revolver", "smg", "shotgun", "rifle", "heavy", "small", "crossbow" })
 -- Attachment slots, in the order a firearm's are taken off (Weapons/Loading) and drawn.
 Weapons.SLOTS = table.freeze({ "muzzle", "optic", "light" } :: { AttachmentSlot })
@@ -139,9 +141,16 @@ Weapons.SLOTS = table.freeze({ "muzzle", "optic", "light" } :: { AttachmentSlot 
 Weapons.CONDITIONS = table.freeze({ 0.8, 0.6, 0.4, 0.2 })
 Weapons.RUINED = 5
 
+-- A class's fire sound event: item.firearm.<class>.fire, the crossbow's item.crossbow.fire.
+function Weapons.fireSound(class: string): string
+	return if class == "crossbow" then "item.crossbow.fire" else `item.firearm.{class}.fire`
+end
+
 local CLASS_SET: { [string]: boolean } = {}
 for _, class in Weapons.CLASSES do
 	CLASS_SET[class] = true
+	local sound = Weapons.fireSound(class)
+	assert(Sounds.find(sound) ~= nil, `Weapons: class {class}'s shot {sound} is no pack's sound event`)
 end
 local SLOT_SET: { [string]: boolean } = { optic = true, muzzle = true, light = true }
 
@@ -316,7 +325,7 @@ for name, data in WeaponList.firearms do
 		scope = data.scope,
 		scale = scale,
 		look = scaledLook(look, scale),
-		sound = if data.class == "crossbow" then "item.crossbow.fire" else `item.firearm.{data.class}.fire`,
+		sound = Weapons.fireSound(data.class),
 		fits = fits,
 	}
 end

@@ -9,6 +9,7 @@ local fs = require("@lune/fs")
 
 return function(t, shared, require, _server, client)
 	local Blocks = require(shared.Blocks)
+	local Content = require(shared.Content)
 	local Sounds = require(shared.Sounds)
 	local Weapons = require(shared.Weapons)
 	local SoundRules = require(client.Audio.SoundRules)
@@ -461,11 +462,27 @@ return function(t, shared, require, _server, client)
 		-- comes off with the code that plays it.
 		-- The seasons' sounds came off with their players too (the turns' stingers: Ui/SeasonLine's
 		-- names, played by Ui/SeasonHud through Ui/SurvivorHud's toast queue; the machines' loops:
-		-- Audio/Ambience by Rendering/TransmitterModel.machineLoop's names; the thermostat's click:
+		-- Audio/Ambience by Rendering/TransmitterModel.machineLoop; the thermostat's click:
 		-- Ui/MenuLayout.BUTTON_SOUND).
 		-- So did the turrets' and the Metal Miner's (the servo: Rendering/TurretView; the machines'
-		-- hums: Rendering/TransmitterModel.machineLoop's names), and the fifth sheet's Geiger
-		-- counter click with the radiation that plays it (Audio/Geiger).
+		-- hums: Rendering/TransmitterModel.machineLoop), and the fifth sheet's Geiger counter click
+		-- with the radiation that plays it (Audio/Geiger).
+		-- (A machine's loop is no literal since it moved onto its block: the entry's `workSound`,
+		-- which machineLoop reads through Shared/Sounds.workSound.)
+		local workSounds: { [string]: boolean } = {}
+		for _, spec in Content.default.blocks do
+			if spec.workSound then
+				workSounds[spec.workSound] = true
+			end
+		end
+		-- (Nor is medicine's: its item entry's `food.sound`, which Interaction/Eating plays; the
+		-- closed list of them it kept is gone, Shared/Content checking the names instead.)
+		local foodSounds: { [string]: boolean } = {}
+		for _, spec in Content.default.items do
+			if spec.food and spec.food.sound then
+				foodSounds[spec.food.sound] = true
+			end
+		end
 		local pending: { [string]: boolean } = {}
 		-- A firearm's shot is played by its class through its FirearmSpec `sound` (Rendering/
 		-- ShotRules.fireSound, called by Interaction/Firearms for the player's own shot and by
@@ -512,6 +529,13 @@ return function(t, shared, require, _server, client)
 			elseif sound.category == "ambient.cave" then
 				-- (The cave moods are picked from Sounds.MOODS.)
 				t.ok(uses("Sounds%.MOODS"), "the client plays the cave moods")
+			elseif workSounds[sound.name] then
+				t.ok(
+					uses("TransmitterModel%.machineLoop%("),
+					`the client plays {sound.name} (a machine's workSound: TransmitterModel.machineLoop)`
+				)
+			elseif foodSounds[sound.name] then
+				t.ok(uses("play%(food%.sound%)"), `the client plays {sound.name} (a food's sound: Interaction/Eating)`)
 			else
 				t.ok(string.find(source, quoted, 1, true), `the client plays {sound.name}`)
 			end

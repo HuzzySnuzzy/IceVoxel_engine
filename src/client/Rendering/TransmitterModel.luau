@@ -37,8 +37,8 @@
 	           orange, an Electric Heater's element red, an Air Conditioner's cold strip cyan
 	           (`glowColour`); a burning stove or oil heater also casts a warm light
 	           (`machineLight`: Rendering/TransmitterRenderer gives the cell a PointLight), and
-	           every one of them hums, roars or crackles (`machineLoop`: Audio/Ambience plays it
-	           looped while the record says it works). A working Metal Miner lights its drill
+	           every one of them hums, roars or crackles (`machineLoop`: its block's `workSound`,
+	           which Audio/Ambience plays looped while the record says it works). A working Metal Miner lights its drill
 	           housing's grille yellow-orange, a working Ammo Press its stamping window: both from
 	           the record's ACTIVE (their kinds' `showActive`, held on through short stops). The
 	           electric machines hum while they work, the fifth data sheet's recordings: the
@@ -71,6 +71,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Fluids = require(Shared.Fluids)
 local Machines = require(Shared.Machines)
+local Sounds = require(Shared.Sounds)
 local Transmitters = require(Shared.Transmitters)
 
 local BlockDecor = require(script.Parent.BlockDecor)
@@ -344,23 +345,6 @@ local GLOW_COLOURS: { [string]: { number } } = {
 TransmitterModel.MACHINE_LIGHT = 10
 TransmitterModel.MACHINE_LIGHT_COLOUR = table.freeze({ 255, 156, 80 })
 local LIGHTS: { [string]: boolean } = { WoodStove = true, OilHeater = true }
---[[
-	What each of the seasons' machines, the Metal Miner and the Ammo Press plays looped while it
-	works (Shared/Sounds/SoundList events; each overridable by a same-named Sound in
-	SoundService.IceVoxelSounds), by BlockList `decor`.
-]]
-local LOOPS: { [string]: string } = {
-	ElectricHeater = "block.electric_heater.hum",
-	AirConditioner = "block.air_conditioner.hum",
-	ElectricFan = "block.fan.loop",
-	WoodStove = "block.wood_stove.crackle",
-	OilHeater = "block.oil_heater.burn",
-	MetalMiner = "block.metal_miner.hum",
-	AmmoPress = "block.ammo_press.hum",
-	ElectricFurnace = "block.electric_furnace.hum",
-	OilRefinery = "block.oil_refinery.hum",
-}
-
 -- Machines whose window lights while they work, by BlockList `decor`: the window on each side face
 -- (BlockDecor pixels, from the face's top left), the same rectangle their decor draws dark.
 local GLOWS: { [string]: { x: number, y: number, w: number, h: number } } = {
@@ -434,10 +418,16 @@ function TransmitterModel.machineLight(
 	return { range = level * 0.9, brightness = 1.6 * level / 15, colour = TransmitterModel.MACHINE_LIGHT_COLOUR }
 end
 
--- The sound event the machine `block` plays looped while it works (LOOPS), nil for none.
+--[[
+	The sound event the machine `block` plays looped while it works: its block entry's
+	`workSound` (Shared/Sounds.workSound; each overridable by a same-named Sound in
+	SoundService.IceVoxelSounds), nil for none and for anything that is no machine.
+]]
 function TransmitterModel.machineLoop(block: number): string?
-	local decor = decorOf(block)
-	return if decor then LOOPS[decor] else nil
+	if not Machines.isMachine(block) or not Blocks.isValid(block) then
+		return nil
+	end
+	return Sounds.workSound(block)
 end
 
 -- Does the machine `block` show anything over its faces (TransmitterRenderer keeps a cell for it)?

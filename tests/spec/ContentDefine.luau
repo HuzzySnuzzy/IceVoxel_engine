@@ -405,6 +405,36 @@ return function(t, shared, require)
 		valid("recipes", brew.recipes)
 	end)
 
+	t.test("define: a block sound type's five events and a mob's voice, sound events of the schema", function()
+		-- (The scaling per action is tests/spec/Sounds'.)
+		local events = Define.blockSounds({
+			name = "felt",
+			volume = 0.8,
+			pitch = 0.7,
+			dig = { id = Define.SHIPPED.LAND },
+			step = { id = Define.SHIPPED.STEPS },
+		})
+		t.eq(names(events), "block.felt.break block.felt.place block.felt.hit block.felt.step block.felt.fall")
+		valid("sounds", events)
+		for index, action in Define.BLOCK_ACTIONS do
+			t.eq(events[index].category, `block.{action.name}`, "each action's category")
+			t.eq(events[index].side, action.side)
+		end
+		local voice = Define.mobVoice({ kind = "goat", hurt = 1.2, death = 1.1 })
+		t.eq(names(voice), "entity.goat.hurt entity.goat.death")
+		valid("sounds", voice)
+		t.eq(voice[1].category, "entity.mob.hurt")
+		t.eq(voice[2].category, "entity.mob.death")
+		t.eq(voice[1].pitch, 1.2, "its hurt's pitch")
+		t.eq(voice[2].pitch, 1.1, "its death's")
+		for name, id in Define.SHIPPED do
+			t.ok(string.find(id, "^rbxasset://sounds/") ~= nil, `SHIPPED.{name} ships with every client`)
+		end
+		for name, id in Define.RECORDINGS do
+			t.ok(string.find(id, "^rbxassetid://%d+$") ~= nil, `RECORDINGS.{name} is an upload`)
+		end
+	end)
+
 	t.test("define: every helper its header lists is there", function()
 		for _, name in
 			{
@@ -454,6 +484,12 @@ return function(t, shared, require)
 				"smelting",
 				"storage",
 				"metal",
+				"SHIPPED",
+				"RECORDINGS",
+				"ONE_STEP",
+				"BLOCK_ACTIONS",
+				"blockSounds",
+				"mobVoice",
 			}
 		do
 			t.ok((Define :: any)[name] ~= nil, `define.{name}`)

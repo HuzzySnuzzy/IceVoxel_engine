@@ -10,6 +10,7 @@
 	               Potions (Shared/Mana), and the Mana Sickness they bring (effects)
 	  magic        the Wand of Sparking, the Emerald Staff and Water Bolt (Shared/Magic)
 	  vanity       the Top Hat, Tuxedo Shirt and Tuxedo Pants
+	  sounds       the air jump, mana, magic and the Fallen Stars' (sounds)
 
 	Calls made here: the accessories found in chests are rolled by the Minecraft pack's mineshaft
 	loot table (its fourth pool) and the Apocalypse pack's (Feral Claws): a loot table is one

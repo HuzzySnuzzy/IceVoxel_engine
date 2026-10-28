@@ -1,9 +1,13 @@
 --[[
-	Sounds: the catalogue (Shared/Sounds: Minecraft's event names, block sound types and their
-	per action scaling, lookups for chests, armor and falls, override names), the Protocol `Sound`
+	Sounds: the catalogue (Shared/Sounds, from the content packs' sounds and music: Minecraft's
+	event names, numbered by place, block sound types and their per action scaling (Content/
+	Define's blockSounds), the cave moods, the voice limits, lookups for chests, armor, falls and
+	machines, override names, and the events the game's code plays by name), the Protocol `Sound`
 	message, the server's routing of sounds to the players near them (Audio/Sounds), chest lids
 	(Containers' onOpeners, also through InventoryState) and where item pickups sound (EntityWorld).
 ]]
+
+local fs = require("@lune/fs")
 
 return function(t, shared, require, server, client)
 	local Blocks = require(shared.Blocks)
@@ -11,8 +15,9 @@ return function(t, shared, require, server, client)
 	local Config = require(shared.Config)
 	local Protocol = require(shared.Net.Protocol)
 	local Sounds = require(shared.Sounds)
-	local SoundList = require(shared.Sounds.SoundList)
 	local MusicList = require(shared.Sounds.MusicList)
+	local Content = require(shared.Content)
+	local Define = require(shared.Content.Define)
 	local ServerSounds = require(server.Audio.Sounds)
 	local Containers = require(server.Players.Containers)
 	local InventoryState = require(server.Players.InventoryState)
@@ -58,19 +63,29 @@ return function(t, shared, require, server, client)
 				t.eq(event.source, "blocks", "source")
 			end
 		end
-		-- Block events come first, in type and action order, then SoundList's in its order: the
-		-- numbering every machine builds alike (computed from the lists, not pinned).
-		local blockEvents = #Blocks.SOUND_TYPES * #Sounds.ACTIONS
-		for typeIndex, typeName in Blocks.SOUND_TYPES do
-			for actionIndex, action in Sounds.ACTIONS do
-				local index = (typeIndex - 1) * #Sounds.ACTIONS + actionIndex
-				t.eq(Sounds.events[index].name, `block.{typeName}.{action}`, `event {index}`)
+		-- (A type is one once the packs' sounds give all five: a lone block.<name>.break is no
+		-- type, as a block's own break sound may be named so.)
+		for _, spec in Content.default.sounds do
+			local typeName = string.match(spec.name, "^block%.([%w_]+)%.break$")
+			if typeName and table.find(Blocks.SOUND_TYPES, typeName) == nil then
+				local whole = true
+				for _, action in Sounds.ACTIONS do
+					whole = whole and Sounds.find(`block.{typeName}.{action}`) ~= nil
+				end
+				t.ok(not whole, `{typeName}: all five events, so a type`)
 			end
 		end
-		for index, spec in SoundList.EVENTS do
-			t.eq(Sounds.events[blockEvents + index].name, spec.name, `then {spec.name}`)
+		-- An event's number is its place: the packs' sounds in load order, then the cave moods (the
+		-- numbering every machine builds alike: computed from the packs, not pinned).
+		local sounds = Content.default.sounds
+		for index, spec in sounds do
+			t.eq(Sounds.events[index].name, spec.name, `event {index}: {spec.name}`)
 		end
-		t.eq(Sounds.count, blockEvents + #SoundList.EVENTS, "nothing else")
+		for index, name in Sounds.MOODS do
+			t.eq(Sounds.events[#sounds + index].name, name, `then the mood {name}`)
+		end
+		t.eq(Sounds.count, #sounds + #Sounds.MOODS, "nothing else")
+		t.ok(Sounds.count < 65536, "a u16 each")
 	end)
 
 	t.test("sounds: Minecraft's event names, numbered in order, unknown names fail loudly", function()
@@ -113,6 +128,65 @@ return function(t, shared, require, server, client)
 		end), "id errors on unknown names")
 	end)
 
+	t.test("sounds: every event the game's code plays by name is one it must find (Sounds.PLAYED)", function()
+		-- The code's string literals that are events (src, outside comments, but the packs and this
+		-- module, which list them): each must be in PLAYED, or named by content where it is checked
+		-- (MobList's voices, Weapons' class shots, FluidList's buckets, MENUS, ARMOR_DEFAULT). And
+		-- every name PLAYED lists is played somewhere, so the list never keeps a name nothing plays.
+		local function uncommented(text: string): string
+			text = string.gsub(text, "%-%-%[(=*)%[.-%]%1%]", "")
+			return (string.gsub(text, "%-%-[^\n]*", ""))
+		end
+		local literals: { [string]: string } = {}
+		local function scan(dir: string)
+			for _, entry in fs.readDir(dir) do
+				local path = `{dir}/{entry}`
+				if fs.isDir(path) then
+					if path ~= "src/shared/Content/Packs" then
+						scan(path)
+					end
+				elseif string.sub(entry, -5) == ".luau" and path ~= "src/shared/Sounds/init.luau" then
+					for name in string.gmatch(uncommented(fs.readFile(path)), '"([%l_]+%.[%l%d_%.]+)"') do
+						literals[name] = literals[name] or path
+					end
+				end
+			end
+		end
+		scan("src")
+		local allowed: { [string]: boolean } = {}
+		for _, name in Sounds.PLAYED do
+			allowed[name] = true
+		end
+		for _, kind in require(shared.Entities.MobList).kinds do
+			for _, name in kind.sounds or {} do
+				allowed[name] = true
+			end
+		end
+		local Weapons = require(shared.Weapons)
+		for _, class in Weapons.CLASSES do
+			allowed[Weapons.fireSound(class)] = true
+		end
+		for _, fluid in require(shared.Fluids.FluidList) do
+			allowed[fluid.fillSound] = true
+			allowed[fluid.emptySound] = true
+		end
+		for _, lid in Sounds.MENUS do
+			allowed[lid.open] = true
+			allowed[lid.close] = true
+		end
+		allowed[Sounds.ARMOR_DEFAULT] = true
+		local played = 0
+		for name, path in literals do
+			if Sounds.find(name) then
+				played += 1
+				t.ok(allowed[name], `{path} plays {name}: list it in Sounds.PLAYED`)
+			end
+		end
+		t.ok(played > 50, `the code's events ({played})`)
+		for _, name in Sounds.PLAYED do
+			t.ok(literals[name] ~= nil, `Sounds.PLAYED lists {name}, which no code plays`)
+		end
+	end)
 	t.test("sounds: every event is well formed, a file every client ships or one with a way back to it", function()
 		-- content/sounds in Roblox's file manifest (version 0.741, MaximumADHD/Roblox-Client-Tracker
 		-- rbxManifest.txt): every sound file a client has. The classic gear sounds (glassbreak.wav,
@@ -177,28 +251,21 @@ return function(t, shared, require, server, client)
 				end
 			end
 		end
-		-- The uploads: the moods, the loops and the blocks' break and place recordings, no others.
-		local recorded = { [SoundList.RECORDED["break"]] = true, [SoundList.RECORDED.place] = true }
-		-- (And the fifth sheet's: the entity hit, the hums, the lava, the calibres' shots, the click.)
-		for _, id in SoundList.FIFTH_SHEET do
-			recorded[id] = true
-		end
-		for _, event in Sounds.events do
-			if uploaded(event.id) then
-				t.ok(
-					table.find(MusicList.Moods, event.id) ~= nil or loopClicks[event.name] ~= nil or recorded[event.id],
-					`{event.name}: a known upload`
-				)
-			end
-		end
+		-- (Which uploads there are is the packs' to say: a pack may bring recordings of its own, so
+		-- the list of known uploads that was here is gone. The data sheets' are tests/spec/DataSheet's;
+		-- every upload's way back is checked above.)
 	end)
 
 	t.test("sounds: the cave moods, one event each in the category ambient.cave", function()
 		t.eq(#Sounds.MOODS, #MusicList.Moods, "one per mood sound")
+		local stand = Sounds.get("ambient.cave") :: any
 		for i, name in Sounds.MOODS do
 			local event = Sounds.get(name) :: any
-			t.eq(name, `ambient.cave.mood{i}`)
+			t.eq(name, `ambient.cave.{MusicList.MOOD_NAMES[i]}`, "its track's name")
 			t.eq(event.id, MusicList.Moods[i])
+			t.eq(event.limit, 1, "one at a time, as the stand-in")
+			t.eq(event.fallback.id, stand.id, "the stand-in's rumble its fallback")
+			t.eq(event.fallback.duration, stand.duration)
 			t.eq(event.category, "ambient.cave", "a developer's ambient.cave replaces them all")
 			t.eq(event.source, "ambient")
 			t.eq(event.side, "client")
@@ -209,7 +276,7 @@ return function(t, shared, require, server, client)
 		t.ok(Sounds.find("ambient.cave") ~= nil, "the stand-in stays for an empty list")
 	end)
 
-	t.test("sounds: the music list (MusicList): audio ids, surface, night and cave tracks", function()
+	t.test("sounds: the music (the packs' music, MusicList): audio ids, sets, the sheets' tracks", function()
 		t.ok(#MusicList.Surface > 0 and #MusicList.Night > 0 and #MusicList.Cave > 0, "every list has tracks")
 		local everywhere = {}
 		for kind, tracks in { Surface = MusicList.Surface, Night = MusicList.Night, Cave = MusicList.Cave } do
@@ -225,16 +292,45 @@ return function(t, shared, require, server, client)
 				everywhere[id] = true
 			end
 		end
-		-- The sheet's ids, written out in full (it stored them in scientific notation).
-		t.eq(MusicList.Surface[1].Id, "rbxassetid://113907623876478")
-		t.eq(MusicList.Cave[1].Id, "rbxassetid://273398061")
-		t.eq(MusicList.Moods[5], "rbxassetid://3231980820")
-		t.eq(#MusicList.Surface, 12, "the sheet's 13 rows, one of them a repeat")
-		-- (The fourth sheet added the Surface NightTime list and four cave tracks: their ids are
-		-- tests/spec/DataSheet's.)
-		t.eq(#MusicList.Night, 7, "the sheet's Surface NightTime")
-		t.eq(#MusicList.Cave, 6, "two, then the fourth sheet's four")
-		t.eq(#MusicList.Moods, 10)
+		-- The sheet's ids, written out in full (it stored them in scientific notation), on the
+		-- Minecraft pack's tracks by name.
+		local function track(name: string): any
+			for _, spec in MusicList.tracks do
+				if spec.name == name then
+					return spec
+				end
+			end
+			return nil
+		end
+		t.eq(track("surface1").id, "rbxassetid://113907623876478")
+		t.eq(track("cave1").id, "rbxassetid://273398061")
+		t.eq(track("mood5").id, "rbxassetid://3231980820")
+		-- (Counted in the Minecraft pack, not the game: another pack may add a track to a set, so
+		-- the game's totals pinned here before are the pack's now. The fourth sheet added the
+		-- Surface NightTime list and four cave tracks: their ids are tests/spec/DataSheet's.)
+		local counts: { [string]: number } = {}
+		for _, spec in MusicList.tracks do
+			local origin = Content.default.origin("track", spec.name)
+			if origin and origin.pack == "Minecraft" then
+				counts[spec.set] = (counts[spec.set] or 0) + 1
+			end
+		end
+		t.eq(counts.surface, 12, "the sheet's 13 rows, one of them a repeat")
+		t.eq(counts.night, 7, "the sheet's Surface NightTime")
+		t.eq(counts.cave, 6, "two, then the fourth sheet's four")
+		t.eq(counts.mood, 10, "the cave moods")
+		-- Each set's tracks are MusicList's lists, in load order.
+		local sets: { [string]: { any } } =
+			{ surface = MusicList.Surface, night = MusicList.Night, cave = MusicList.Cave }
+		local at: { [string]: number } = { surface = 0, night = 0, cave = 0 }
+		for _, spec in MusicList.tracks do
+			local list = sets[spec.set]
+			if list then
+				at[spec.set] += 1
+				t.eq(list[at[spec.set]].Id, spec.id, `{spec.name} in its set`)
+				t.eq(list[at[spec.set]].Title, spec.title or "", `{spec.name}'s title`)
+			end
+		end
 	end)
 
 	t.test("sounds: blocks sound like Minecraft's sound types, by material unless set", function()
@@ -323,33 +419,88 @@ return function(t, shared, require, server, client)
 	end)
 
 	t.test("sounds: block events scale their clips like Minecraft's actions", function()
-		local types = {}
-		for _, blockType in SoundList.BLOCK_TYPES do
-			types[blockType.name] = blockType
+		-- Content/Define's blockSounds, on a type of its own: each action's clip, scaled as Minecraft
+		-- does (break / place (v + 1) / 2 and 0.8, hit (v + 1) / 8 and 0.5, step v x 0.15, fall
+		-- v x 0.5 and 0.75), the variance with the pitch.
+		local soundType: Define.BlockSoundType = {
+			name = "test",
+			volume = 0.6,
+			pitch = 1.4,
+			dig = { id = "rbxasset://sounds/dig.ogg", volume = 0.7, pitch = 0.9, pitchVariance = 0.1, duration = 0.3 },
+			step = { id = "rbxasset://sounds/step.ogg", volume = 1.2, pitchVariance = 0.05 },
+			actions = {
+				fall = {
+					id = "rbxasset://sounds/fall.ogg",
+					fallback = { id = "rbxasset://sounds/thud.ogg", pitch = 2 },
+				},
+			},
+		}
+		local made: { [string]: any } = {}
+		for _, spec in Define.blockSounds(soundType) do
+			made[spec.name] = spec
 		end
-		local function check(typeName: string, action: string, clipName: string, volume: number, pitch: number)
-			local blockType = types[typeName]
-			local clip = (blockType.actions and blockType.actions[action]) or blockType[clipName]
-			local event = Sounds.get(`block.{typeName}.{action}`)
-			local v, p = blockType.volume, blockType.pitch
-			t.eq(event.id, clip.id, `{typeName} {action} id`)
-			t.near(event.volume, (clip.volume or 0.5) * (v * volume[1] + volume[2]), 1e-9, `{typeName} {action} volume`)
-			t.near(event.pitch, (clip.pitch or 1) * p * pitch, 1e-9, `{typeName} {action} pitch`)
+		local function check(action: string, clip: any, volume: { number }, pitch: number)
+			local spec = made[`block.test.{action}`]
+			t.eq(spec.category, `block.{action}`, `{action}: its category`)
+			t.eq(spec.id, clip.id, `{action}: its clip`)
+			t.near(spec.volume, (clip.volume or 0.5) * (0.6 * volume[1] + volume[2]), 1e-9, `{action} volume`)
+			t.near(spec.pitch, (clip.pitch or 1) * 1.4 * pitch, 1e-9, `{action} pitch`)
+			t.near(spec.pitchVariance, (clip.pitchVariance or 0) * 1.4 * pitch, 1e-9, `{action} variance`)
+			t.eq(spec.source, "blocks")
 		end
+		local dig = soundType.dig
+		check(
+			"break",
+			{ id = Define.RECORDINGS.BREAK, volume = 0.7, pitch = 0.9, pitchVariance = 0.1 },
+			{ 0.5, 0.5 },
+			0.8
+		)
+		check(
+			"place",
+			{ id = Define.RECORDINGS.PLACE, volume = 0.7, pitch = 0.9, pitchVariance = 0.1 },
+			{ 0.5, 0.5 },
+			0.8
+		)
+		check("hit", soundType.step, { 0.125, 0.125 }, 0.5)
+		check("step", soundType.step, { 0.15, 0 }, 1)
+		check("fall", (soundType.actions :: any).fall, { 0.5, 0 }, 0.75)
+		-- Breaking's and placing's recordings fall back on `dig`, scaled as they are.
+		local broken = made["block.test.break"]
+		t.eq(broken.fallback.id, dig.id, "the dig clip its fallback")
+		t.near(broken.fallback.volume, broken.volume, 1e-9, "scaled as the recording is")
+		t.near(broken.fallback.pitch, broken.pitch, 1e-9)
+		t.eq(broken.fallback.duration, 0.3)
+		-- An action's own fallback, scaled: what it leaves out is its clip's.
+		local fell = made["block.test.fall"]
+		t.near(fell.fallback.pitch, 2 * 1.4 * 0.75, 1e-9, "the fallback is scaled too")
+		t.near(fell.fallback.volume, 0.5 * 0.6 * 0.5, 1e-9)
+		-- Who plays each, and the voice limits of hits and steps.
+		t.eq(broken.side, "predicted")
+		t.eq(made["block.test.hit"].side, "client")
+		t.eq(made["block.test.fall"].side, "predicted")
+		t.eq(made["block.test.hit"].limit, 3, "three hits at once")
+		t.eq(made["block.test.step"].limit, 6, "six footsteps")
+		-- `recorded = false`: breaking and placing play `dig` itself.
+		soundType.recorded = false
+		for _, spec in Define.blockSounds(soundType) do
+			if spec.name == "block.test.break" or spec.name == "block.test.place" then
+				t.eq(spec.id, dig.id, `{spec.name}: its dig clip`)
+				t.eq(spec.fallback, nil)
+			end
+		end
+		-- The Minecraft pack's types: every type's break and place play the sheet's recordings, its
+		-- old thud (`dig`) their fallback, scaled with them; glass keeps its shatter for breaking,
+		-- water its splash. (Another pack's types are its own to tune.)
+		local minecraft: { string } = {}
 		for _, typeName in Blocks.SOUND_TYPES do
-			-- Minecraft: break / place (v + 1) / 2 and 0.8, hit (v + 1) / 8 and 0.5, step v x 0.15,
-			-- fall v x 0.5 and 0.75.
-			check(typeName, "break", "dig", { 0.5, 0.5 }, 0.8)
-			check(typeName, "place", "dig", { 0.5, 0.5 }, 0.8)
-			check(typeName, "hit", "step", { 0.125, 0.125 }, 0.5)
-			check(typeName, "step", "step", { 0.15, 0 }, 1)
-			check(typeName, "fall", "step", { 0.5, 0 }, 0.75)
+			local origin = Content.default.origin("sound", `block.{typeName}.break`)
+			if origin and origin.pack == "Minecraft" then
+				table.insert(minecraft, typeName)
+			end
 		end
-		-- Every type's break and place play the sheet's recordings, its old thud (`dig`) their
-		-- fallback, scaled with them; glass keeps its shatter for breaking, water its splash.
-		for _, typeName in Blocks.SOUND_TYPES do
-			local blockType = types[typeName]
-			for action, id in SoundList.RECORDED do
+		t.ok(#minecraft >= 14, "the Minecraft pack's types")
+		for _, typeName in minecraft do
+			for action, id in { ["break"] = Define.RECORDINGS.BREAK, place = Define.RECORDINGS.PLACE } do
 				local event = Sounds.get(`block.{typeName}.{action}`) :: any
 				if typeName == "water" or (typeName == "glass" and action == "break") then
 					t.ok(event.id ~= id, `block.{typeName}.{action} keeps its own sound`)
@@ -357,15 +508,15 @@ return function(t, shared, require, server, client)
 					t.eq(event.id, id, `block.{typeName}.{action}: the sheet's recording`)
 					local fallback = event.fallback
 					t.ok(fallback ~= nil, `block.{typeName}.{action} falls back`)
-					t.eq(fallback and fallback.id, blockType.dig.id, `block.{typeName}.{action}: on the stand-in`)
+					t.eq(fallback and fallback.id, Define.SHIPPED.LAND, `block.{typeName}.{action}: on the stand-in`)
 					t.near(fallback and fallback.volume or 0, event.volume, 1e-9, "scaled as the recording is")
 					t.near(fallback and fallback.pitch or 0, event.pitch, 1e-9)
 					t.eq(event.category, `block.{action}`, "a developer's block.<action> Sound still replaces it")
 				end
 			end
 		end
-		t.eq(SoundList.RECORDED["break"], "rbxassetid://73168198865721", "the sheet's Generic_Break")
-		t.eq(SoundList.RECORDED.place, "rbxassetid://101534882480796", "the sheet's Generic_Place")
+		t.eq(Define.RECORDINGS.BREAK, "rbxassetid://73168198865721", "the sheet's Generic_Break")
+		t.eq(Define.RECORDINGS.PLACE, "rbxassetid://101534882480796", "the sheet's Generic_Place")
 		t.eq(Sounds.get("block.water.place").id, "rbxasset://sounds/impact_water.mp3", "water still splashes")
 		-- Glass shatters when broken, but is placed like stone.
 		t.eq(Sounds.get("block.glass.break").id, "rbxasset://sounds/impact_explosion_03.mp3", "glass breaks")
@@ -384,9 +535,9 @@ return function(t, shared, require, server, client)
 			t.ok(placePitch(ladder[i]) >= placePitch(ladder[i - 1]) * 1.05, `{ladder[i]} placed above {ladder[i - 1]}`)
 		end
 		t.eq(placePitch("glass"), placePitch("stone"), "glass placed like stone")
-		-- Walked on too (glass like stone, water swims).
+		-- Walked on too (glass like stone, water swims): the Minecraft pack's types.
 		local stepped: { [number]: string } = {}
-		for _, typeName in Blocks.SOUND_TYPES do
+		for _, typeName in minecraft do
 			if typeName ~= "glass" then
 				local pitch = Sounds.get(`block.{typeName}.step`).pitch
 				for other, otherName in stepped do
@@ -582,14 +733,22 @@ return function(t, shared, require, server, client)
 		local nan = queue:route({ { key = "a", x = 16 + slack - 0.1, y = 0, z = 0 } })
 		t.ok(nan.a and nan.a[1].volume == 1, "a NaN volume plays at 1")
 
-		-- At most `limit` per player, in the order played.
-		for i = 1, 5 do
-			queue:add(i, 0, 0, 0)
+		-- At most `limit` per player, in the order played. (Five events the server sends, by what
+		-- they are: the first numbers were these once, but they follow the packs now, and flat
+		-- ones are never sent.)
+		local sent: { number } = {}
+		for _, event in Sounds.events do
+			if not event.ui and #sent < 5 then
+				table.insert(sent, event.index)
+			end
+		end
+		for _, sound in sent do
+			queue:add(sound, 0, 0, 0)
 		end
 		local limited = queue:route({ { key = "a", x = 0, y = 0, z = 0 } }, 3)
 		t.eq(#limited.a, 3, "limit")
-		t.eq(limited.a[1].sound, 1, "first first")
-		t.eq(limited.a[3].sound, 3, "order")
+		t.eq(limited.a[1].sound, sent[1], "first first")
+		t.eq(limited.a[3].sound, sent[3], "order")
 
 		-- Flat (ui) sounds, unknown events and nonsense positions are never sent.
 		queue:add(Sounds.id["ui.button.click"], 0, 0, 0)

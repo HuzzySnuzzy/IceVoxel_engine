@@ -13,7 +13,7 @@
 	nil until the first message (a fresh Stone Age player's rules meanwhile), and for good when
 	Config.Progression is off (everything is allowed, nothing is drawn).
 
-	Changes play sounds (Shared/Sounds/SoundList): knowledge gained the orb's pickup (at most
+	Changes play sounds (Shared/Sounds, the Core pack's): knowledge gained the orb's pickup (at most
 	ORB_INTERVAL apart), a level gained the level-up, an Age reached the challenge fanfare and
 	its banner. The first message after joining plays nothing.
 ]]

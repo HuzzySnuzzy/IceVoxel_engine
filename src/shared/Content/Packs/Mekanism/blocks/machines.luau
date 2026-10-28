@@ -104,6 +104,7 @@ return function(define: Define.Context): { BlockSpec }
 			decor = "ElectricFurnace",
 			machine = { kind = "smelter" },
 			energy = { capacity = 20000, input = 20000 },
+			workSound = "block.electric_furnace.hum",
 			lore = "Smelts with energy instead of fuel. Takes upgrades.",
 			age = "electric",
 		},

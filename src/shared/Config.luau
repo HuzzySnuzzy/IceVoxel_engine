@@ -1880,7 +1880,7 @@ local Config = {
 	-- Sounds -----------------------------------------------------------------------------------------
 
 	--[[
-		Minecraft's sound events (Shared/Sounds, listed in Sounds/SoundList) played with sounds that
+		Minecraft's sound events (Shared/Sounds, the content packs' sounds) played with sounds that
 		ship with Roblox. The server sends the ones other players cause (breaking, placing, chests,
 		pickups, tools breaking, hurting; server Audio/Sounds); clients play their own actions,
 		footsteps and the interface themselves (Audio/SoundPlayer).
@@ -1928,7 +1928,7 @@ local Config = {
 		Ambient = true,
 	},
 
-	-- Music (client; the tracks are in Shared/Sounds/MusicList) --------------------------------------
+	-- Music (client; the tracks are the content packs' music, Sounds/MusicList) ----------------------
 
 	--[[
 		Minecraft's background music (MusicManager): a track now and then, at random, never during

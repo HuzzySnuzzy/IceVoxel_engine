@@ -17,7 +17,7 @@ return function(t, shared, require, _server, client)
 	local KeyBindings = require(shared.KeyBindings)
 	local PlayerSettings = require(shared.PlayerSettings)
 	local Sounds = require(shared.Sounds)
-	local SoundList = require(shared.Sounds.SoundList)
+	local Content = require(shared.Content)
 	local Weather = require(shared.Weather)
 	local Precipitation = require(client.Weather.Precipitation)
 	local CloudLod = require(client.Weather.CloudLod)
@@ -929,13 +929,11 @@ return function(t, shared, require, _server, client)
 			t.eq((event :: any).source, "ambient", "Minecraft's WEATHER source: the ambient volume")
 		end
 		-- (By name, not by place in the list: event numbers move as content is added.) The
-		-- distant storms' far thunder is SoundList's too (tests/spec/DistantStorms).
-		local listed: { [string]: boolean } = {}
-		for _, entry in SoundList.EVENTS do
-			listed[entry.name] = true
-		end
+		-- Minecraft pack's sounds (SoundList's before they moved into the packs), the distant
+		-- storms' far thunder too (tests/spec/DistantStorms).
 		for _, name in { "weather.rain", "entity.lightning_bolt.impact", "entity.lightning_bolt.thunder.far" } do
-			t.ok(listed[name], `{name} is SoundList's`)
+			local origin = Content.default.origin("sound", name)
+			t.eq(origin and origin.pack, "Minecraft", `{name} is the Minecraft pack's`)
 		end
 		local volume, pitch = Weather.rainSound(1, false)
 		t.near(volume, 0.2, 1e-9, "weather.rain at 0.2")

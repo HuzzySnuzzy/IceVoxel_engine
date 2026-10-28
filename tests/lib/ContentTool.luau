@@ -36,14 +36,17 @@
 	                       something else: ores, grass, ice) are left out
 	  report(view, findings)    the check's lines: a summary per pack, the findings, the counts
 	  summary(view)             a line per pack: its order and how much of each kind it holds
-	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack
+	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack (a sound
+	                            event with its number, a track with its set)
 	  show(view, name)          lines about everything named `name` (a block, item, texture, loot
 	                            table, tag, ore feature, Age, skill, biome, effect, potion,
-	                            structure template, pool or structure): its merged fields, id,
-	                            pack and the packs that patched it, and what the registries made of
-	                            it (a skill's cell, the nodes needing it, the entries it gates and
-	                            their recipes; a potion's brewed items; a template's size and
-	                            palette); nil and the nearest names when nothing has the name
+	                            structure template, pool, structure, sound event or track): its
+	                            merged fields, id, pack and the packs that patched it, and what the
+	                            registries made of it (a skill's cell, the nodes needing it, the
+	                            entries it gates and their recipes; a potion's brewed items; a
+	                            template's size and palette; an event's number and the entries
+	                            naming it; a cave mood's event); nil and the nearest names when
+	                            nothing has the name
 	  reach(view)               when survival play first gives each item (an Age index) and how
 	  scaffold(name, order)     a new pack's modules, { { path, text } }: one block, one item, a
 	                            shaped and a smelting recipe, a texture and a loot table, each field
@@ -753,8 +756,10 @@ local function namesOf(content: any, kind: string): { any }
 		or kind == "effects"
 		or kind == "potions"
 		or kind == "structures"
+		or kind == "sounds"
+		or kind == "music"
 	then
-		for _, entry in content[kind] do
+		for _, entry in content[kind] or {} do
 			table.insert(names, entry.name)
 		end
 	elseif kind == "ages" or kind == "skills" then
@@ -998,6 +1003,20 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 						`{potion.effect}, {n} item{if n == 1 then "" else "s"}`,
 						madeText(view, each, potion.name),
 					})
+				end
+			end
+		elseif each == "sounds" then
+			-- (An event's number is its place: the cave moods' events come after, the tracks'.)
+			right[1] = true
+			for index, spec in content.sounds do
+				if listed(view, each, spec.name, pack) then
+					table.insert(rows, { `#{index}`, spec.name, madeText(view, each, spec.name), spec.category or "" })
+				end
+			end
+		elseif each == "music" then
+			for _, spec in content.music do
+				if listed(view, each, spec.name, pack) then
+					table.insert(rows, { spec.name, spec.set, madeText(view, each, spec.name), spec.title or "" })
 				end
 			end
 		elseif each == "tags" then
@@ -1640,6 +1659,63 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 			end
 		end
 	end
+	-- A sound event, and what names it (blocks' and items' sound fields).
+	for index, spec in content.sounds or {} do
+		if spec.name == name then
+			section(`sound {name}: number {index}, pack {packOf(view, "sounds", name)}`)
+			patches("sounds")
+			table.insert(lines, "  fields:")
+			for _, line in fieldLines(spec, { name = true }) do
+				table.insert(lines, line)
+			end
+			local users = {}
+			for _, block in content.blocks do
+				local own = block.sounds or {}
+				for _, action in sortedKeys(own) do
+					if own[action] == name then
+						table.insert(users, `{block.name} ({action})`)
+					end
+				end
+				if block.workSound == name then
+					table.insert(users, `{block.name} (working)`)
+				end
+				if block.toggle and block.toggle.sound == name then
+					table.insert(users, `{block.name} (toggled)`)
+				end
+			end
+			for _, item in content.items do
+				if item.equipSound == name then
+					table.insert(users, `{item.name} (put on)`)
+				end
+				if item.food and item.food.sound == name then
+					table.insert(users, `{item.name} (used)`)
+				end
+			end
+			if #users > 0 then
+				for _, line in wrap("  named by: ", users) do
+					table.insert(lines, line)
+				end
+			end
+		end
+	end
+	-- A track (and a cave mood's event by its name: ambient.cave.<track>).
+	local moodName = string.match(name, "^ambient%.cave%.(.+)$")
+	for _, spec in content.music or {} do
+		if spec.name == name or (spec.set == "mood" and spec.name == moodName) then
+			section(`track {spec.name}: {spec.set}, pack {packOf(view, "music", spec.name)}`)
+			local by = patchedBy(view, "music", spec.name)
+			if #by > 0 then
+				table.insert(lines, `  patched by: {table.concat(by, ", ")}`)
+			end
+			table.insert(lines, "  fields:")
+			for _, line in fieldLines(spec, { name = true }) do
+				table.insert(lines, line)
+			end
+			if spec.set == "mood" then
+				table.insert(lines, `  event: ambient.cave.{spec.name} (a cave mood, after every pack's sounds)`)
+			end
+		end
+	end
 	if #lines > 0 then
 		return lines, nil
 	end
@@ -1670,6 +1746,11 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	for _, list in { content.effects or {}, content.potions or {} } do
 		for _, entry in list do
 			names[entry.name] = true
+		end
+	end
+	for _, list in { content.sounds or {}, content.music or {} } do
+		for _, spec in list do
+			names[spec.name] = true
 		end
 	end
 	local near = view.suggest(name, names)

@@ -11,7 +11,7 @@
 	  Music      the MusicList lists they are in (the "Surface NightTime" list is Night).
 	  Mob SFX    the Sounds of src/sounds/Zombies.model.json (SoundService.IceVoxelSounds) that
 	             play them, by event name.
-	  Main SFX   the catalogue events (Sounds/SoundList) whose ids they are: the eating and
+	  Main SFX   the catalogue events (the content packs' sounds) whose ids they are: the eating and
 	             drinking loops, every block sound type's break and place.
 
 	The fifth sheet (icevoxel.xlsx, SHEET5) brought only main sounds: each the catalogue events
@@ -188,7 +188,6 @@ return function(t, shared, require, _server, _client)
 	local Blocks = require(shared.Blocks)
 	local MusicList = require(shared.Sounds.MusicList)
 	local Sounds = require(shared.Sounds)
-	local SoundList = require(shared.Sounds.SoundList)
 
 	local function asset(id: string): string
 		return `rbxassetid://{id}`
@@ -327,9 +326,10 @@ return function(t, shared, require, _server, _client)
 		local text = table.concat(sources("src", {}), "\n")
 		for _, id in ids do
 			t.ok(string.find(text, `rbxassetid://{id}"`, 1, true) ~= nil, `{id} is used`)
-			t.ok(table.find(SoundList.FIFTH_SHEET, asset(id)) ~= nil, `{id} is a known upload`)
 		end
-		t.eq(#SoundList.FIFTH_SHEET, #ids, "and no others")
+		-- (SoundList kept the sheet's ids in a list of their own, FIFTH_SHEET, checked against this
+		-- one; the events moved into the content packs, so the rows below, each the events playing
+		-- an id, are the check.)
 		for _, row in SHEET5.main do
 			local id, names = row[1], row[2]
 			for _, name in names do

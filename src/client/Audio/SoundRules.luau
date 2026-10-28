@@ -20,7 +20,8 @@
 	             when several share it (Minecraft's variants).
 	  voices     the pool of Sound instances (`newPool`, `acquire`, `release`): a free voice;
 	             else, when a kind of sound (an event's category or name) already has its most at
-	             once (CAPS: overlapping mining hits, many footsteps), its oldest; else the oldest.
+	             once (CAPS, the events' `limit`: overlapping mining hits, many footsteps), its
+	             oldest; else the oldest.
 	             Distant sounds (far thunder) have a few voices of their own (`acquireQuietest`):
 	             a free one, else the quietest as heard now if this one is louder (it fades out
 	             first: `fadeOut`), else none.
@@ -217,24 +218,11 @@ end
 export type Voice = { busy: boolean, key: string, startedAt: number }
 export type Pool = { voices: { Voice } }
 
--- Most voices one kind of sound (an event's category, else its name) has at once.
-SoundRules.CAPS = table.freeze({
-	-- A hit lasts about 0.6 s and comes every 0.2 s.
-	["block.hit"] = 3,
-	["block.step"] = 6,
-	["entity.generic.swim"] = 3,
-	["block.furnace.fire_crackle"] = 2,
-	-- (A forest fire crackles all around, as in Minecraft, but a few at a time.)
-	["block.fire.ambient"] = 4,
-	["ambient.cave"] = 1,
-	-- (Rain comes every 2-3 ticks and lasts longer: a few at once make the downpour.)
-	["weather.rain"] = 4,
-	["weather.rain.above"] = 3,
-	["entity.lightning_bolt.thunder"] = 3,
-	["entity.lightning_bolt.impact"] = 2,
-	-- (Distant thunder and rain play on voices of their own: SoundPlayer.playDistant, newBed.)
-	["weather.rain.far"] = 1,
-}) :: { [string]: number }
+-- Most voices one kind of sound (an event's category, else its name) has at once: the events'
+-- `limit` (Shared/Sounds.LIMITS, from the content packs' sounds: three mining hits, six
+-- footsteps, one cave mood...), else DEFAULT_CAP. (Distant thunder and rain play on voices of
+-- their own: SoundPlayer.playDistant, newBed.)
+SoundRules.CAPS = Sounds.LIMITS
 SoundRules.DEFAULT_CAP = 8
 
 -- The kind of sound an event is, for the caps: its category, else its name.

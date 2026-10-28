@@ -9,8 +9,8 @@
 	    lune run tests/content list [kind] [pack]    entries (id, name, pack), of one kind (blocks,
 	                                                 items, recipes, tags, textures, loot, ores,
 	                                                 ages, skills, lore, fuel, biomes, effects,
-	                                                 potions, templates, pools, structures), of one
-	                                                 pack
+	                                                 potions, templates, pools, structures, sounds,
+	                                                 music), of one pack
 	    lune run tests/content show <name>           an entry's merged fields, its id and pack, the
 	                                                 packs that patched it, and what the registries
 	                                                 made of it (lore, faces or icon, Age, recipes;

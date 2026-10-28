@@ -67,6 +67,7 @@ return function(define: Define.Context): { BlockSpec }
 			decor = "OilRefinery",
 			machine = { kind = "refinery" },
 			energy = { capacity = 40000, input = 40000 },
+			workSound = "block.oil_refinery.hum",
 			lore = "Turns Oil into Fuel with energy.",
 			age = "electric",
 		},

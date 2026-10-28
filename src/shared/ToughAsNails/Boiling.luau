@@ -41,7 +41,7 @@ type Stack = Items.Stack
 
 local Boiling = {}
 
--- The block that boils water, and the sound it makes (Sounds/SoundList).
+-- The block that boils water, and the sound it makes (the Survival pack's sounds).
 Boiling.CAMPFIRE = Blocks.id.Campfire
 Boiling.SOUND = "block.campfire.boil"
 -- Ticks between two boils by one player, and the ticks short of them the server allows.

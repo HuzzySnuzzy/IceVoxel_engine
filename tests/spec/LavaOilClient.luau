@@ -23,7 +23,7 @@ return function(t, shared, require, _server, client)
 	local Items = require(shared.Items)
 	local Machines = require(shared.Machines)
 	local Sounds = require(shared.Sounds)
-	local SoundList = require(shared.Sounds.SoundList)
+	local Content = require(shared.Content)
 	local FluidFog = require(client.Rendering.FluidFog)
 	local TransmitterModel = require(client.Rendering.TransmitterModel)
 	local MenuLayout = require(client.Ui.MenuLayout)
@@ -631,19 +631,13 @@ return function(t, shared, require, _server, client)
 		for _, fluid in Fluids.list do
 			t.ok(Sounds.find(fluid.fillSound) ~= nil and Sounds.find(fluid.emptySound) ~= nil, `{fluid.name}'s buckets`)
 		end
-		-- (By name, not by place in the list: event numbers move as content is added.) SoundList's
-		-- own events, not the cave moods it builds from MusicList.
-		local function listed(name: string): boolean
-			for _, event in SoundList.EVENTS do
-				if event.name == name then
-					return true
-				end
-			end
-			return false
-		end
+		-- (By name, not by place in the list: event numbers move as content is added.) The
+		-- Minecraft pack's sounds (SoundList's events before they moved into the packs), not the
+		-- cave moods Shared/Sounds makes from the packs' music.
 		for _, name in { "block.lava.pop", "entity.generic.extinguish_fire" } do
-			t.ok(listed(name), `{name} is SoundList's`)
-			t.eq(table.find(SoundList.MOODS, name), nil, `{name} is no cave mood`)
+			local origin = Content.default.origin("sound", name)
+			t.eq(origin and origin.pack, "Minecraft", `{name} is the Minecraft pack's`)
+			t.eq(table.find(Sounds.MOODS, name), nil, `{name} is no cave mood`)
 		end
 
 		-- A lava sea at y 10 under air, and a random that always rolls 0: every sample lands on the

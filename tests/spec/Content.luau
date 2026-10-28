@@ -2224,20 +2224,12 @@ return function(t, shared, require, _server, _client)
 
 	t.test("content: a registry refuses a value only it can check, naming the entry", function()
 		-- (Content checks the names entries give; what a value means is the registry's to check.)
-		refused(
-			{ blocks = { { name = "Stone", override = true, sounds = { ["break"] = "block.stone.shatter" } } } },
-			{ "Sounds" },
-			{ `Sounds: {STONE}'s break plays unknown event block.stone.shatter` }
-		)
+		-- (An unknown event a block's sounds or an armor piece's equipSound names is Content's to
+		-- refuse now, the events being the packs': "content: sounds and music: ...".)
 		refused(
 			{ blocks = { { name = "Stone", override = true, sounds = { smash = "block.stone.break" } } } },
 			{ "Sounds" },
 			{ `Sounds: {STONE} has unknown action smash` }
-		)
-		refused(
-			{ items = { { name = "IronHelmet", override = true, equipSound = "item.armor.equip_tin" } } },
-			{ "Sounds" },
-			{ `Sounds: {HELMET}'s equipSound is unknown event item.armor.equip_tin` }
 		)
 		refused(
 			{ blocks = { { name = "Stone", override = true, radiation = 0 } } },
@@ -2385,5 +2377,318 @@ return function(t, shared, require, _server, _client)
 			{ "Progression", "Skills" },
 			{ "Skills: ", "nodes, more than the 255 the protocol numbers (a u8 each)" }
 		)
+	end)
+
+	--[[ Sounds and music (the `sounds` and `music` kinds) ]]
+
+	-- The fixture pack of sounds and music, grafted into a fresh game.
+	local CHORUS = "tests/fixtures/content/sounds/Chorus"
+
+	-- A sound event's entry and a track's, with `fields` over them.
+	local function soundEntry(name: string, fields: { [string]: any }?): { [string]: any }
+		local entry: { [string]: any } =
+			{ name = name, id = "rbxasset://sounds/oof.ogg", source = "players", side = "server" }
+		for key, value in fields or {} do
+			entry[key] = value
+		end
+		return entry
+	end
+	local function trackEntry(name: string, fields: { [string]: any }?): { [string]: any }
+		local entry: { [string]: any } = { name = name, id = "rbxassetid://1", set = "surface" }
+		for key, value in fields or {} do
+			entry[key] = value
+		end
+		return entry
+	end
+
+	t.test("content: sounds and music merge by name, each kind's names its own, JSON too", function()
+		local content = fixtures()
+		t.eq(names(content.sounds), "block.beta.chime", "Beta's event (JSON)")
+		local chime = content.sounds[1] :: any
+		t.eq(chime.volume, 0.9, "patched by Gamma")
+		t.eq(chime.pitch, 1.5, "the rest kept")
+		t.eq(chime.limit, 2)
+		t.eq(chime.fallback.id, "rbxasset://sounds/action_jump_land.mp3", "a JSON table")
+		t.eq(chime.override, nil, "no override field left")
+		t.eq(content.where("sound", "block.beta.chime"), "pack Beta (patched by Gamma), sound block.beta.chime")
+		local origin = content.origin("sound", "block.beta.chime") :: Content.Origin
+		t.eq(origin.pack, "Beta", "origin: the pack that made it")
+		t.eq(table.concat(origin.patched, " "), "Gamma", "and the one that patched it")
+		t.eq(names(content.music), "beta_theme")
+		t.eq((content.music[1] :: any).title, "Beta Theme")
+		t.eq((content.music[1] :: any).set, "night")
+		t.eq(content.where("track", "beta_theme"), "pack Beta, track beta_theme")
+		t.eq((content.origin("music", "beta_theme") :: Content.Origin).pack, "Beta", "by kind or by its word")
+		-- The game's, each from its file.
+		local game = Content.default
+		t.eq(game.where("sound", "block.stone.break"), "pack Minecraft, sounds/blocks, sound block.stone.break")
+		t.eq(
+			game.where("sound", "item.firearm.9mm.fire"),
+			"pack Apocalypse, sounds/weapons, sound item.firearm.9mm.fire",
+			"a gun's shot is the Apocalypse pack's"
+		)
+		t.eq(game.where("sound", "ambient.radiation.click"), "pack Ores, sound ambient.radiation.click")
+		t.eq(game.where("track", "mood1"), "pack Minecraft, track mood1")
+		t.eq((game.origin("sound", "entity.zombie.hurt") :: Content.Origin).file, "sounds/zombies")
+		-- A block, a sound and a track may share a name: each kind's names are its own.
+		t.ok(
+			pcall(Content.build, {
+				pack(
+					"P",
+					{ blocks = { { name = "Hum" } }, sounds = { soundEntry("Hum") }, music = { trackEntry("Hum") } }
+				),
+			}),
+			"a block, a sound and a track of one name"
+		)
+	end)
+
+	t.test("content: a pack's sounds and music reach the catalogue, the blocks and the music", function()
+		local env, root = fresh(function(env, packs)
+			env.graft(CHORUS, packs, "Chorus")
+		end)
+		local FreshSounds = env.require(root.Sounds)
+		local FreshBlocks = env.require(root.Blocks)
+		local FreshItems = env.require(root.Items)
+		local FreshMusic = env.require(root.Sounds.MusicList)
+		local FreshDefine = env.require(root.Content.Define)
+		local content = env.require(root.Content).default
+		local GameSounds = require(shared.Sounds)
+		local B = FreshBlocks.id
+		-- A block sound type of its own: its five events make it one, after the Minecraft pack's.
+		t.eq(FreshBlocks.SOUND_TYPES[#FreshBlocks.SOUND_TYPES], "chime", "a type, after every other pack's")
+		local step = FreshSounds.get(FreshSounds.block(B.ChorusBlock, "step") :: number) :: any
+		t.eq(step.name, "block.chime.step", "its block steps with it")
+		t.near(step.pitch, 1.8, 1e-9, "the type's pitch, Minecraft's scaling for a step")
+		t.eq(step.limit, 6, "and a step's limit")
+		t.eq((FreshSounds.get("block.chime.break") :: any).id, FreshDefine.RECORDINGS.BREAK, "the recordings")
+		-- Its events after every other pack's, the cave moods last.
+		local sing = FreshSounds.get("entity.chorus.sing") :: any
+		t.ok(sing.index > FreshSounds.id["ambient.radiation.click"], "after the Ores pack's")
+		t.ok(sing.index < FreshSounds.id[FreshSounds.MOODS[1]], "before the cave moods")
+		t.eq(FreshSounds.count, #content.sounds + #FreshSounds.MOODS)
+		t.eq(sing.limit, 2, "its limit")
+		t.eq(FreshSounds.LIMITS["entity.chorus.sing"], 2, "its kind's")
+		t.eq(sing.fallback.pitch, 2, "its fallback")
+		t.eq(sing.fallback.volume, 0.5, "what the fallback leaves out is the event's")
+		-- An override retunes an event in its place.
+		local click = FreshSounds.get("ui.button.click") :: any
+		t.eq(click.volume, 0.8, "retuned")
+		t.eq(click.id, "rbxasset://sounds/volume_slider.ogg", "its file kept")
+		t.eq(click.index, GameSounds.id["ui.button.click"], "its number kept")
+		t.eq(
+			content.where("sound", "ui.button.click"),
+			"pack Minecraft (patched by Chorus), sounds/interface, sound ui.button.click"
+		)
+		-- A machine's work sound and an armor piece's equip sound, by name.
+		t.eq(FreshSounds.workSound(B.ElectricFurnace), "block.chorus.hum", "workSound")
+		t.eq(FreshSounds.workSound(B.Stone), nil)
+		t.eq(FreshSounds.armorEquip(FreshItems.id.IronHelmet), FreshSounds.id["item.armor.equip_chorus"], "equipSound")
+		-- Music: a track added to a set, an override's title, a cave mood.
+		local surface = FreshMusic.Surface
+		t.eq(surface[#surface].Id, "rbxassetid://1234", "a surface track, after the Minecraft pack's")
+		t.eq(surface[#surface].Title, "Chorus")
+		t.eq(surface[1].Title, "First Light", "an override's title")
+		t.eq(surface[1].Id, "rbxassetid://113907623876478", "its id kept")
+		local mood = FreshSounds.MOODS[#FreshSounds.MOODS]
+		t.eq(mood, "ambient.cave.chorus_mood", "a cave mood, its track's name")
+		local event = FreshSounds.get(mood) :: any
+		t.eq(event.id, "rbxassetid://5678")
+		t.eq(event.category, "ambient.cave")
+		t.eq(event.limit, 1, "one at a time, as every mood")
+		t.eq(FreshMusic.Moods[#FreshMusic.Moods], "rbxassetid://5678")
+	end)
+
+	t.test("content: sounds and music: the schema's checks, names, overrides and the events entries name", function()
+		fails(
+			{ pack("P", { sounds = { soundEntry("a", { volme = 1 }) } }) },
+			{ "pack P, sound a: volme is no field it may have (did you mean volume?)" },
+			"a typo"
+		)
+		fails({ pack("P", { sounds = { soundEntry("a", { id = "sounds/oof.ogg" }) } }) }, {
+			'pack P, sound a: id must be a sound file (rbxasset://sounds/... or rbxassetid://<n>), not the string "sounds/oof.ogg"',
+		}, "a file")
+		fails(
+			{ pack("P", { sounds = { soundEntry("a", { side = "both" }) } }) },
+			{ "pack P, sound a: side must be one of server, predicted, client" },
+			"a side"
+		)
+		fails(
+			{ pack("P", { sounds = { soundEntry("a", { source = "music" }) } }) },
+			{ "pack P, sound a: source must be one of blocks, players, ambient, ui" },
+			"a source"
+		)
+		fails(
+			{ pack("P", { sounds = { { name = "a", id = "rbxasset://sounds/oof.ogg", side = "client" } } }) },
+			{ "pack P, sound a: source is missing" },
+			"a missing field"
+		)
+		fails(
+			{ pack("P", { sounds = { soundEntry("a", { fallback = { pitch = 2 } }) } }) },
+			{ "pack P, sound a: fallback.id is missing" },
+			"a fallback's file"
+		)
+		fails(
+			{ pack("P", { sounds = { soundEntry("a", { limit = "two" }) } }) },
+			{ 'pack P, sound a: limit must be a number, not the string "two"' },
+			"a limit"
+		)
+		fails(
+			{ pack("P", { music = { trackEntry("t", { set = "boss" }) } }) },
+			{ "pack P, track t: set must be one of surface, night, cave, mood" },
+			"a set"
+		)
+		fails(
+			{ pack("P", { music = { { name = "t", set = "cave" } } }) },
+			{ "pack P, track t: id is missing" },
+			"a track's id"
+		)
+		fails(
+			{ pack("P", { music = { trackEntry("t", { titel = "x" }) } }) },
+			{ "pack P, track t: titel is no field it may have (did you mean title?)" },
+			"a track's typo"
+		)
+		-- Names and overrides.
+		fails({
+			pack("P1", { sounds = { soundEntry("a") } }),
+			pack("P2", { sounds = { soundEntry("a") } }, { order = 20 }),
+		}, { "pack P2, sound a: the name is taken by pack P1, sound a" }, "an event twice")
+		fails(
+			{ pack("P1", { music = { trackEntry("t") } }), pack("P2", { music = { trackEntry("t") } }, { order = 20 }) },
+			{ "pack P2, track t: the name is taken by pack P1, track t" },
+			"a track twice"
+		)
+		fails(
+			{ pack("P", { sounds = { { name = "a", override = true, volume = 1 } } }) },
+			{ "pack P, sound a overrides a sound no earlier pack makes" },
+			"an override of nothing"
+		)
+		fails(
+			{ pack("P", { music = { { name = "t", override = true, title = "x" } } }) },
+			{ "pack P, track t overrides a track no earlier pack makes" },
+			"a track's override of nothing"
+		)
+		t.ok(
+			pcall(Content.build, {
+				pack("P1", { sounds = { soundEntry("a") } }),
+				pack("P2", { sounds = { { name = "a", override = true, volume = 0.1 } } }, { order = 20 }),
+			}),
+			"an override needs only its name"
+		)
+		-- The events entries name (blocks' and items' sound fields): one of the packs' sounds.
+		local function with(kinds: { [string]: any }): { Content.PackData }
+			local all = table.clone(kinds)
+			all.sounds = { soundEntry("block.a.break") }
+			return { pack("P", all) }
+		end
+		fails(
+			with({ blocks = { { name = "A", sounds = { ["break"] = "block.a.brake" } } } }),
+			{ "pack P, block A: sounds.break names unknown sound block.a.brake (did you mean block.a.break?)" },
+			"a block's own sounds"
+		)
+		fails(
+			with({ blocks = { { name = "A", workSound = "block.a.hum" } } }),
+			{ "pack P, block A: workSound names unknown sound block.a.hum" },
+			"a machine's work sound"
+		)
+		fails(
+			with({ blocks = { { name = "A", toggle = { to = "A", sound = "block.a.open" } } } }),
+			{ "pack P, block A: toggle sound names unknown sound block.a.open" },
+			"a toggle's sound"
+		)
+		fails(
+			with({
+				items = {
+					{
+						name = "I",
+						model = MODEL,
+						armor = { slot = "Head", defense = 1, toughness = 0 },
+						equipSound = "nope",
+					},
+				},
+			}),
+			{ "pack P, item I: equipSound names unknown sound nope" },
+			"an armor piece's equip sound"
+		)
+		fails(
+			with({ items = { { name = "I", model = MODEL, food = { heal = 1, sound = "nope" } } } }),
+			{ "pack P, item I: food sound names unknown sound nope" },
+			"a food's sound"
+		)
+		t.ok(
+			pcall(Content.build, with({ blocks = { { name = "A", sounds = { ["break"] = "block.a.break" } } } })),
+			"a good name loads"
+		)
+	end)
+
+	t.test("content: the catalogue refuses what only it can check, naming the entry", function()
+		local PATCH = "pack Patch, sound block.patch.hit"
+		-- (A mining hit of its own, in the category every block type's hits share, wanting more.)
+		local hit =
+			soundEntry("block.patch.hit", { category = "block.hit", source = "blocks", side = "client", limit = 5 })
+		refused({ sounds = { hit } }, { "Sounds" }, {
+			`Sounds: {PATCH}'s limit 5 is not 3, the limit pack Minecraft, sounds/blocks, sound block.stone.hit gives its kind block.hit`,
+		})
+		refused(
+			{ sounds = { soundEntry("entity.patch.hum", { limit = 1.5 }) } },
+			{ "Sounds" },
+			{ "Sounds: pack Patch, sound entity.patch.hum's limit must be a whole 1 or more" }
+		)
+		refused(
+			{ sounds = { soundEntry("entity.patch.hum", { pitch = 0 }) } },
+			{ "Sounds" },
+			{ "Sounds: pack Patch, sound entity.patch.hum has a bad volume or pitch" }
+		)
+		refused(
+			{ blocks = { { name = "Stone", override = true, workSound = "block.fan.loop" } } },
+			{ "Sounds" },
+			{ `Sounds: {STONE} has a workSound but is no machine` }
+		)
+		refused(
+			{ blocks = { { name = "Stone", override = true, sound = "chime" } } },
+			{ "Blocks" },
+			{ "Block Stone has unknown sound chime (a type is one once the packs' sounds give block.chime.break" }
+		)
+		-- What the game's code plays by name, a menu's lids, the firearm classes' shots and the
+		-- fluids' buckets must be some pack's events: a game whose packs lack one fails to load.
+		local function loading(path: { string }, edit: (env: Loader.Environment, root: any) -> ()): string
+			local env = Loader.new()
+			local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
+			edit(env, root)
+			local node = root
+			for _, name in path do
+				node = node[name]
+			end
+			local ok, err = pcall(env.require, node)
+			return if ok then "(it loaded)" else tostring(err)
+		end
+		local message = loading({ "Sounds" }, function(_env, root)
+			-- (The Minecraft pack without its interface's sounds.)
+			rawget(root.Content.Packs.Minecraft.sounds, "__children").interface = nil
+		end)
+		t.ok(
+			has(message, { "Sounds: the game (Sounds.PLAYED) plays ui.button.click, which no pack's sounds give" }),
+			message
+		)
+		message = loading({ "Weapons" }, function(env, root)
+			-- (The Apocalypse pack's weapons' sounds without the pistol's shot.)
+			local folder = root.Content.Packs.Apocalypse.sounds
+			local list = env.require(folder.weapons)(env.require(root.Content.Define))
+			local kept = {}
+			for _, entry in list do
+				if entry.name ~= "item.firearm.pistol.fire" then
+					table.insert(kept, entry)
+				end
+			end
+			env.module(folder, "weapons", kept)
+		end)
+		t.ok(
+			has(message, { "Weapons: class pistol's shot item.firearm.pistol.fire is no pack's sound event" }),
+			message
+		)
+		message = loading({ "Fluids" }, function(env, root)
+			local water = env.require(root.Fluids.FluidList)[1]
+			water.fillSound = "item.bucket.fil"
+		end)
+		t.ok(has(message, { "'s bucket sound item.bucket.fil is no pack's sound event" }), message)
 	end)
 end

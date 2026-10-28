@@ -16,7 +16,7 @@
 return function(t, shared, require, _server, client)
 	local Config = require(shared.Config)
 	local Sounds = require(shared.Sounds)
-	local SoundList = require(shared.Sounds.SoundList)
+	local Content = require(shared.Content)
 	local Weather = require(shared.Weather)
 	local DistantStorms = require(client.Weather.DistantStorms)
 	local LightningBolt = require(client.Weather.LightningBolt)
@@ -609,13 +609,11 @@ return function(t, shared, require, _server, client)
 	end)
 
 	t.test("distant storms: their sounds are in the catalogue, played by the client", function()
-		-- (By name, not by place in Shared/Sounds/SoundList: event numbers move as content is added.)
-		local listed: { [string]: boolean } = {}
-		for _, event in SoundList.EVENTS do
-			listed[event.name] = true
-		end
+		-- (By name, not by place in the catalogue: event numbers move as content is added. The
+		-- Minecraft pack's sounds, SoundList's before they moved into the packs.)
 		for _, name in { "entity.lightning_bolt.thunder.far", "weather.rain.far", "weather.wind" } do
-			t.ok(listed[name], `{name} is SoundList's`)
+			local origin = Content.default.origin("sound", name)
+			t.eq(origin and origin.pack, "Minecraft", `{name} is the Minecraft pack's`)
 		end
 		for _, name in { "entity.lightning_bolt.thunder.far", "weather.rain.far" } do
 			local event = Sounds.get(Sounds.id[name]) :: any

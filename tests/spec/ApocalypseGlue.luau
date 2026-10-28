@@ -49,9 +49,10 @@
 	      line's notice and the survivor's count agree tick by tick over ten days
 	  13  every new block, item and sound is reachable: generated in the town or its bunker (the
 	      white Road Line in the streets' crosswalks), made, toggled or turned (blocks); made, found
-	      or dropped (items); played by name or as a mob's voice (sounds); every sound an ordinary
-	      SoundList event (so SoundService.IceVoxelSounds overrides it), every new texture and icon
-	      a blank TexturePack entry
+	      or dropped (items); played by name, as a mob's voice or as a block's or an item's own
+	      sound (sounds); every sound an ordinary event of the packs' sounds (so
+	      SoundService.IceVoxelSounds overrides it), every new texture and icon a blank TexturePack
+	      entry
 ]]
 
 local fs = require("@lune/fs")
@@ -1841,10 +1842,12 @@ return function(t, shared, require, server, client)
 			t.eq(TexturePack.Icons[name], "", `{name}'s icon blank, ready to fill`)
 		end
 		-- Sounds: each new event an ordinary one (SoundService.IceVoxelSounds overrides any event by
-		-- name), and something plays it.
+		-- name), and something plays it: the code by name (the packs, which define the events, left
+		-- out), a mob as its voice, or a block or an item as its own sound (the hatch's toggle, the
+		-- medical supplies' food sound: Shared/Content checks those names).
 		local code = {}
 		for _, path in sources("src", {}) do
-			if not string.find(path, "SoundList", 1, true) then
+			if not string.find(path, "Content/Packs", 1, true) then
 				table.insert(code, fs.readFile(path))
 			end
 		end
@@ -1853,6 +1856,17 @@ return function(t, shared, require, server, client)
 		for _, kind in MobList.kinds do
 			for _, sound in kind.sounds or {} do
 				voices[sound] = true
+			end
+		end
+		local content = require(shared.Content).default
+		for _, spec in content.blocks do
+			if spec.toggle and spec.toggle.sound then
+				voices[spec.toggle.sound] = true
+			end
+		end
+		for _, spec in content.items do
+			if spec.food and spec.food.sound then
+				voices[spec.food.sound] = true
 			end
 		end
 		for _, name in
@@ -1876,12 +1890,12 @@ return function(t, shared, require, server, client)
 			}
 		do
 			local index = SharedSounds.find(name)
-			t.ok(index ~= nil, `{name} is a SoundList event`)
+			t.ok(index ~= nil, `{name} is an event of the packs' sounds`)
 			local event = SharedSounds.get(name) :: any
 			t.ok(event and event.name == name, `{name}: an ordinary event, overridable by its name`)
 			t.ok(
 				string.find(everything, `"{name}"`, 1, true) ~= nil or voices[name],
-				`{name} is played (by name, or as a mob's voice)`
+				`{name} is played (by name, as a mob's voice, or as an entry's own sound)`
 			)
 		end
 	end)

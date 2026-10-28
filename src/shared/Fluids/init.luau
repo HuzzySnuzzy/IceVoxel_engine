@@ -16,16 +16,17 @@
 	the cave twin of its source for lava and oil (CaveLava, CaveOil: generated underground, cave air
 	while caves are hidden, otherwise the source itself). The checks below make the three lists
 	agree when the game loads: every fluid group of BlockList is a fluid here, with this colour and
-	light, and every fluid's bucket is an item of its own.
+	light, every fluid's bucket is an item of its own, and its bucket sounds are the packs' events.
 
-	Requires Blocks, Items (both of which only read FluidList) and Effects (which reads nothing of
-	it), so Protocol, Smelting, machine kinds and Transmitters may require it.
+	Requires Blocks, Items (both of which only read FluidList), Effects and Sounds (which read
+	nothing of it), so Protocol, Smelting, machine kinds and Transmitters may require it.
 ]]
 
 local Blocks = require(script.Parent.Blocks)
 local Effects = require(script.Parent.Effects)
 local FluidList = require(script.FluidList)
 local Items = require(script.Parent.Items)
+local Sounds = require(script.Parent.Sounds)
 
 export type FluidSpec = FluidList.FluidSpec
 
@@ -108,6 +109,9 @@ for id, spec in FluidList do
 		`Fluid {spec.name}'s colour differs from its blocks'`
 	)
 	assert(def.light == spec.light, `Fluid {spec.name}'s light differs from its blocks'`)
+	for _, sound in { spec.fillSound, spec.emptySound } do
+		assert(Sounds.find(sound) ~= nil, `Fluid {spec.name}'s bucket sound {sound} is no pack's sound event`)
+	end
 	local bucket = Items.find(spec.bucket)
 	assert(bucket ~= nil, `Fluid {spec.name} has an unknown bucket {spec.bucket}`)
 	local item = Items.get(bucket)

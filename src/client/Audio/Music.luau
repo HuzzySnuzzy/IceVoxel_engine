@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Background music, as Minecraft's (Audio/MusicRules decides when and which; the tracks are in
-	Shared/Sounds/MusicList).
+	Background music, as Minecraft's (Audio/MusicRules decides when and which; the tracks are the
+	content packs' music, Shared/Sounds/MusicList's sets).
 
 	  Places   surface tracks above ground (night tracks there at night), cave tracks in caves:
 	           the sky light reaching the camera (Rendering/LightingController.skyExposure)

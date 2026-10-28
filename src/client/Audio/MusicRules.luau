@@ -9,10 +9,11 @@
 	           SwitchSeconds, "surface" again once it has stayed above SurfaceExposure as long (the
 	           gap between the two keeps a cave mouth from flipping it). The game starts on the
 	           surface unless the first exposure says otherwise.
-	  Lists    the tracks a place plays (Sounds/MusicList, `listOf`): "cave" underground; on the
-	           surface "night" at night (the caller's `night`: Shared/DayCycle.isDay false at the
-	           game's clock) and "surface" by day, or at night when the night list has nothing to
-	           play (empty, or every track failed to load). The list is chosen when a track is
+	  Lists    the tracks a place plays (Sounds/MusicList, the packs' music sets; `listOf`): "cave"
+	           underground; on the surface "night" at night (the caller's `night`:
+	           Shared/DayCycle.isDay false at the game's clock) and "surface" by day, or at night
+	           when the night list has nothing to play (empty, or every track failed to load). The
+	           list is chosen when a track is
 	           picked: one already playing is never cut at dusk or dawn, as it is no change of
 	           place; the next follows the time then.
 	  Waits    nothing plays for `wait` seconds: FirstDelay after joining (Minecraft's 100 ticks),
@@ -35,7 +36,7 @@
 
 export type Place = "surface" | "cave"
 
--- A list of tracks (Sounds/MusicList: Surface, Night, Cave).
+-- A list of tracks (Sounds/MusicList: Surface, Night, Cave, the packs' music sets).
 export type List = "surface" | "night" | "cave"
 
 export type Settings = {

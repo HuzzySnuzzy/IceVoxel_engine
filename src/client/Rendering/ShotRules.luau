@@ -70,8 +70,9 @@ local ShotRules = {}
 ShotRules.SUPPRESSED = "item.firearm.suppressed"
 ShotRules.FAR = "item.firearm.far"
 
--- The calibres with recorded shots of their own (Sounds/SoundList: item.firearm.<calibre>.fire and
--- .suppressed, the fifth data sheet's), found once: calibre -> { fire, suppressed } event names.
+-- The calibres with recorded shots of their own (the Apocalypse pack's sounds:
+-- item.firearm.<calibre>.fire and .suppressed, the fifth data sheet's), found once by name, so a
+-- calibre without them does without: calibre -> { fire, suppressed } event names.
 local CALIBRE_SHOTS: { [string]: { fire: string?, suppressed: string? } } = {}
 for _, item in Weapons.FIREARMS do
 	local calibre = (Weapons.firearm(item) :: Weapons.FirearmSpec).calibre

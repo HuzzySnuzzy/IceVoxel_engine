@@ -1,0 +1,12 @@
+[
+	{
+		"name": "block.beta.chime",
+		"id": "rbxasset://sounds/volume_slider.ogg",
+		"volume": 0.4,
+		"pitch": 1.5,
+		"fallback": { "id": "rbxasset://sounds/action_jump_land.mp3" },
+		"source": "blocks",
+		"side": "server",
+		"limit": 2
+	}
+]

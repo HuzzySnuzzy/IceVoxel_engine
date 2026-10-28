@@ -13,7 +13,7 @@
 	          While it lasts the eating loop plays at the player (Audio/UseSounds, from
 	          `useLength`; Minecraft's bites, entity.generic.eat every 4 ticks from the 7th, only
 	          when the loop's recording fails to load). Medicine (Foods.isMedical) plays its own
-	          sound (Foods `sound`: item.bandage.apply, item.medkit.use, item.pills.swallow) as
+	          sound (Foods `sound`, its item entry's: item.bandage.apply, item.medkit.use...) as
 	          the use starts, instead of the loop and the burp; the server plays it to everyone
 	          else when it finishes.
 	Only when the player may use it (Foods.canUse, with the effects this client was told of,
@@ -46,16 +46,8 @@ local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local Eating = {}
 
 local TICK = 1 / 20
--- The sounds medicine plays here (Foods `sound`): checked against the table as this loads, so a
--- food naming a sound this client doesn't play fails at once.
-local MEDICINE_SOUNDS: { [string]: boolean } = {
-	["item.bandage.apply"] = true,
-	["item.medkit.use"] = true,
-	["item.pills.swallow"] = true,
-}
-for item, food in Foods.ITEMS do
-	assert(food.sound == nil or MEDICINE_SOUNDS[food.sound], `Food {item}'s sound {food.sound} is not played here`)
-end
+-- (Medicine's sound is any of the packs' sound events: Shared/Content checks its name as the packs
+-- load, so a food naming no event fails at once.)
 
 type Holding = { slot: number, item: number, elapsed: number, ticks: number, length: number, food: Foods.Food }
 local holding: Holding? = nil

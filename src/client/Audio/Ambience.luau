@@ -27,9 +27,9 @@
 	           BaseFireBlock.animateTick), at the fire, cue volume 1..2 and pitch 0.3..1.
 	  Moods    Minecraft's cave mood (Audio/CaveMood): every tick a random block within 8 blocks of
 	           the player's eyes raises the mood when it is dark and lowers it in daylight or near
-	           torches; at 100% one of the cave mood sounds (Sounds.MOODS, from
-	           Sounds/MusicList.Moods; the stand-in ambient.cave while there are none) plays two
-	           blocks beyond that block, and the mood starts over. The light comes from
+	           torches; at 100% one of the cave mood sounds (Sounds.MOODS, from the packs' music of
+	           the set "mood"; the stand-in ambient.cave while there are none) plays two blocks
+	           beyond that block, and the mood starts over. The light comes from
 	           Rendering/LightingController.skyLight and CaveMood.blockLight. Config.Sounds.Ambient
 	           (and the player's Cave Moods setting, SoundPlayer.allows) keeps it quiet; the mood
 	           still counts (F3 shows it, `mood`).

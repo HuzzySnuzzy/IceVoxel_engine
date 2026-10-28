@@ -24,6 +24,8 @@
 	                 blocks/seasons, recipes
 	    insulation   Insulated Planks, Insulated Glass and the Insulated Door: blocks/seasons,
 	                 recipes, textures
+	  Their sounds (drinking, the drinking loop, a bottle filled, boiling, the heaters' loops,
+	  the thermostat, the seasons' turns): sounds
 
 	Each entry carries what the registries make of it: its lore, its texture or icon (blank: still
 	to make), its Age and fuel, the campfire's warmth (`heats`), the armor's equip sound.

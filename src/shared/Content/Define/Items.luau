@@ -116,8 +116,8 @@ end
 	pieces and toughness, and each piece's Tough As Nails insulation (`tan`, Schema's: leather
 	warms a step a piece and is freeze immune, Minecraft's freeze_immune_wearables). What every
 	piece says of itself, each optional (Schema's fields of those names): `equipSound`, the event
-	putting it on plays (SoundList's "item.armor.equip_<material>"; none: what Sounds.armorEquip
-	gives armor naming none), so a set names its sound once; `lore`, its tooltip line; `age`, the
+	putting it on plays (the Minecraft pack's "item.armor.equip_<material>"; none: what
+	Sounds.armorEquip gives armor naming none), so a set names its sound once; `lore`, its tooltip line; `age`, the
 	Age opening its recipes; `icon`, every piece's icon ("" = not made yet); and `icons`, a piece's
 	own icon by its name (ARMOR_PIECES': Helmet, Chestplate, Leggings, Boots), over `icon`.
 ]]
