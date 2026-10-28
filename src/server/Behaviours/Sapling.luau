@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Saplings (BlockList: OakSapling, BirchSapling, SpruceSapling, AcaciaSapling, JungleSapling),
-	Minecraft's SaplingBlock:
+	Saplings (the blocks with behaviour "Sapling": the Minecraft pack's oak, birch, spruce, acacia
+	and jungle saplings), Minecraft's SaplingBlock:
 
 	  Support  a plant like any other (Behaviours/Plant): it pops off with its drop when its soil
 	           goes.
@@ -9,9 +9,9 @@
 	           server's stand-in for Minecraft's light 9), with chance Config.Server.SaplingGrowth
 	           (1/14: Minecraft's 1/7 for each of its two stages) times the season's growth
 	           (server Seasons/SnowWorld.growth: Autumn 0.5, Winter 0, dormant, Spring 1.5,
-	           Summer 1; 1 with the calendar off), it grows into its wood's tree:
-	           the same builders as the world's trees (Generation/Structures/Trees), with a fresh
-	           random size. The tree needs room: every block its trunk takes must be air, a plant
+	           Summer 1; 1 with the calendar off), it grows into its tree (its entry's `tree`):
+	           the same builders as the world's trees (Generation/Structures' registry), with a
+	           fresh random size. The tree needs room: every block its trunk takes must be air, a plant
 	           or leaves (the sapling itself too); if not, it waits for a later tick, as Minecraft's
 	           does. Leaves only go where there is air.
 ]]
@@ -20,9 +20,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local BlockList = require(Shared.Blocks.BlockList)
 local Config = require(Shared.Config)
+local Content = require(Shared.Content)
 local Hash = require(Shared.Util.Hash)
-local Trees = require(Shared.Generation.Structures.Trees)
+local Structures = require(Shared.Generation.Structures)
 
 local Plant = require(script.Parent.Plant)
 local Skylight = require(script.Parent.Parent.World.Skylight)
@@ -32,14 +34,17 @@ local AIR, CAVE_AIR = Blocks.AIR, Blocks.CAVE_AIR
 
 type Builder = (w: any, x: number, y: number, z: number, rng: Hash.Rng) -> ()
 
--- Each sapling's tree.
-local BUILDERS: { [number]: Builder } = {
-	[Blocks.id.OakSapling] = Trees.oak,
-	[Blocks.id.BirchSapling] = Trees.birch,
-	[Blocks.id.SpruceSapling] = Trees.spruce,
-	[Blocks.id.AcaciaSapling] = Trees.acacia,
-	[Blocks.id.JungleSapling] = Trees.jungle,
-}
+-- Each sapling's tree: its entry's `tree`, a builder of Generation/Structures' registry (which
+-- checks the names as the game loads). A sapling growing none is an error, naming its pack.
+local BUILDERS: { [number]: Builder } = {}
+for id = 0, Blocks.count - 1 do
+	local spec = BlockList[id + 1]
+	if spec.tree then
+		BUILDERS[id] = Structures.registry[spec.tree].build
+	elseif spec.behaviour == "Sapling" then
+		error(`Sapling: {Content.default.where("block", spec.name)} grows no tree (its \`tree\`)`, 0)
+	end
+end
 
 local Sapling = {}
 

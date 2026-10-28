@@ -9888,8 +9888,8 @@ sends stay in one ordered stream.
   `Server.LeafDecay` 4-12 ticks, a random tick checks too; leaves with no log within 6 steps
   through leaves, unloaded blocks counting as a log, break with `Items.lootDrop`; leaves in the
   chunk's edit list as leaves were placed by a player and never decay), `Sapling` (stays up like
-  a plant; on a random tick under the sky, chance `Server.SaplingGrowth` 1/14, runs its wood's
-  Trees builder through a recording writer and places it only if every forced cell but its own is
+  a plant; on a random tick under the sky, chance `Server.SaplingGrowth` 1/14, runs its entry's
+  `tree` (a builder of `Generation/Structures`' registry) through a recording writer and places it only if every forced cell but its own is
   air, a plant or leaves; leaves only go into air), `Herb` (Mint and Wild Ginger: stay up like a
   plant; on a random tick, chance `Server.HerbSpread` 1/8, Minecraft's MushroomBlock.randomTick:
   unless 5 of the same herb are in the 9 x 3 x 9 blocks around, a walk of up to four random steps

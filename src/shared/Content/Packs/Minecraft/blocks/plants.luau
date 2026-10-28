@@ -30,8 +30,9 @@
 	    pixel-art circle), the red one domed with a white spot. Minecraft's brown mushroom gives off
 	    a little light (1); this one gives none.
 	  * Saplings, one per wood (Minecraft's SaplingBlock): dropped by their leaves now and then
-	    (blocks/wood's `loot`); under the open sky a random tick grows one into its tree (server
-	    Behaviours/Sapling, World/RandomTicker; about 16 minutes on average) when the tree has room.
+	    (blocks/wood's `loot`); under the open sky a random tick grows one into its `tree` (a tree
+	    builder of Generation/Structures, as the biomes' trees; server Behaviours/Sapling,
+	    World/RandomTicker; about 16 minutes on average) when the tree has room.
 	    Drawn as their texture pack sprite ("sapling": a black and white picture, tinted with each
 	    sapling's colour), else as a stem with leaf lumps.
 	  * What burns (Minecraft's FireBlock.bootStrap): every grass, fern, dead bush and flower, both
@@ -636,6 +637,7 @@ return function(define: Define.Context): { BlockSpec }
 			color = { 72, 124, 44 },
 			texture = { Sprite = "sapling" },
 			lore = "Plant it on dirt and it grows into an oak.",
+			tree = "OakTree",
 		}),
 		define.sapling({
 			name = "BirchSapling",
@@ -643,6 +645,7 @@ return function(define: Define.Context): { BlockSpec }
 			color = { 116, 152, 72 },
 			texture = { Sprite = "sapling" },
 			lore = "Plant it on dirt and it grows into a birch.",
+			tree = "BirchTree",
 		}),
 		define.sapling({
 			name = "SpruceSapling",
@@ -650,6 +653,7 @@ return function(define: Define.Context): { BlockSpec }
 			color = { 50, 92, 58 },
 			texture = { Sprite = "sapling" },
 			lore = "Plant it on dirt and it grows into a spruce.",
+			tree = "SpruceTree",
 		}),
 		define.sapling({
 			name = "AcaciaSapling",
@@ -657,6 +661,7 @@ return function(define: Define.Context): { BlockSpec }
 			color = { 112, 140, 44 },
 			texture = { Sprite = "sapling" },
 			lore = "Plant it on dirt and it grows into an acacia.",
+			tree = "AcaciaTree",
 		}),
 		define.sapling({
 			name = "JungleSapling",
@@ -664,6 +669,7 @@ return function(define: Define.Context): { BlockSpec }
 			color = { 46, 124, 36 },
 			texture = { Sprite = "sapling" },
 			lore = "Plant it on dirt and it grows into a jungle tree.",
+			tree = "JungleTree",
 		}),
 	})
 	return list

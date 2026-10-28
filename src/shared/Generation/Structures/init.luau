@@ -11,8 +11,9 @@
 	  1. write a builder `(writer, x, y, z, rng) -> ()` (see Trees.luau),
 	  2. register it in `Structures.registry` with the surface blocks it may grow on,
 	  3. reference it by name from a biome's `features` list (a pack's `biomes`: the Minecraft
-	     pack's, or an override of one in a pack of your own). A name no builder has is an error
-	     as this module loads, naming the pack and the biome.
+	     pack's, or an override of one in a pack of your own), or a sapling's `tree` (the block
+	     entry's: server Behaviours/Sapling grows it into that tree). A name no builder has is an
+	     error as this module loads, naming the pack and the biome or block.
 
 	Large structures (villages, outposts...) use the same idea with a bigger spacing: the structure
 	library's jigsaw structures are placed by Generation/StructureGen (Minecraft's random_spread
@@ -20,7 +21,9 @@
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
+local BlockList = require(script.Parent.Parent.Blocks.BlockList)
 local Biomes = require(script.Parent.Parent.Biomes)
+local Content = require(script.Parent.Parent.Content)
 local Schema = require(script.Parent.Parent.Content.Schema)
 local Hash = require(script.Parent.Parent.Util.Hash)
 local Trees = require(script.Trees)
@@ -61,21 +64,30 @@ Structures.registry = {
 	Cactus = { build = Trees.cactus, soil = { [id.Sand] = true } },
 } :: { [string]: Structure }
 
--- Fail early on typos in the packs' biomes, and find the highest vegetation chance for early
--- rejection.
+-- " (did you mean X?)" for a name near a builder's, else "".
+local function hint(name: string): string
+	local near = Schema.suggest(name, Structures.registry)
+	return if near then ` (did you mean {near}?)` else ""
+end
+
+-- Fail early on typos in the packs' saplings and biomes, and find the highest vegetation chance
+-- for early rejection.
+for _, spec in BlockList do
+	local tree = spec.tree
+	if tree and Structures.registry[tree] == nil then
+		error(
+			`Structures: {Content.default.where("block", spec.name)}: tree names unknown tree builder {tree}{hint(tree)}`,
+			0
+		)
+	end
+end
 local maxVegetation = 0
 for _, biome in Biomes.list do
 	maxVegetation = math.max(maxVegetation, biome.vegetation)
 	for _, feature in biome.features do
 		local name = feature.structure
 		if Structures.registry[name] == nil then
-			local near = Schema.suggest(name, Structures.registry)
-			error(
-				`Structures: {Biomes.where(biome.name)}: features names unknown tree builder {name}{if near
-					then ` (did you mean {near}?)`
-					else ""}`,
-				0
-			)
+			error(`Structures: {Biomes.where(biome.name)}: features names unknown tree builder {name}{hint(name)}`, 0)
 		end
 	end
 end

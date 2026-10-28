@@ -101,6 +101,9 @@
 	                                id ("chest", "battery"; Shared/Poi): blocks naming it as `item`
 	                                are of its type too (every mode, facing and lit form), and blocks
 	                                giving one id are one type (the four batteries)
+	  tree             block        a sapling's tree: a tree builder of Generation/Structures'
+	                                registry, as biomes' `features` name them ("OakTree"), which
+	                                server Behaviours/Sapling grows it into
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
 	gone: each entry says its own).
@@ -314,6 +317,8 @@ export type BlockSpec = {
 	formerly: { string }?,
 	-- Its point of interest type (the header).
 	poi: string?,
+	-- A sapling's tree builder (the header).
+	tree: string?,
 }
 
 -- One box of an item's model (`model`).
@@ -1259,6 +1264,7 @@ Schema.BLOCK_FIELDS = {
 	-- (The header's.)
 	formerly = STRINGS,
 	poi = SNAKE_ID,
+	tree = STRING,
 } :: { [string]: Check }
 
 --[[

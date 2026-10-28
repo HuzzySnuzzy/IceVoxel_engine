@@ -2532,6 +2532,35 @@ return function(t, shared, require, _server, _client)
 		)
 	end)
 
+	t.test("content: a sapling's tree: a pack's grows its builder; an unknown builder, a sapling with none", function()
+		local function patch(blocks: { any }): (Loader.Environment, any, any)
+			return fresh(function(env, packs)
+				local folder = env.folder(packs, "Patch")
+				env.module(folder, "pack", { order = 900, requires = { "Minecraft" } })
+				env.module(folder, "blocks", blocks)
+			end)
+		end
+		local sapling = { name = "CherrySapling", behaviour = "Sapling", tree = "BirchTree" }
+		local env, root, serverRoot = patch({ sapling })
+		local Sapling = env.require(serverRoot.Behaviours.Sapling)
+		local Trees = env.require(root.Generation.Structures.Trees)
+		local B = env.require(root.Blocks).id
+		t.eq(Sapling.BUILDERS[B.CherrySapling], Trees.birch, "a pack's sapling grows its tree")
+		t.eq(Sapling.BUILDERS[B.OakSapling], Trees.oak, "the game's")
+		t.eq(Sapling.BUILDERS[B.Stone], nil)
+		refused(
+			{ blocks = { { name = "CherrySapling", behaviour = "Sapling", tree = "BirchTre" } } },
+			{ "Generation", "Structures" },
+			{
+				"Structures: pack Patch, block CherrySapling: tree names unknown tree builder BirchTre (did you mean BirchTree?)",
+			}
+		)
+		local bareEnv, _, bareServer = patch({ { name = "CherrySapling", behaviour = "Sapling" } })
+		local ok, err = pcall(bareEnv.require, bareServer.Behaviours.Sapling)
+		local message = if ok then "(it loaded)" else tostring(err)
+		t.ok(has(message, { "Sapling: pack Patch, block CherrySapling grows no tree (its `tree`)" }), message)
+	end)
+
 	t.test("content: a registry's own check names the pack: two effects /effect finds by one word", function()
 		refused({
 			effects = {
