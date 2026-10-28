@@ -13,7 +13,7 @@
 	  * The Glow Block: a full glowing cube of glow dust (Neon, blue), in place of Minecraft's
 	    glowstone (the game has no Nether; its dust comes from glow lichen in caves). Minecraft's
 	    glowstone drops 2-4 dust (random); here always 4, which craft back into the block. It was
-	    named "Glowstone" (Blocks.RENAMED keeps saved structures that name it working).
+	    named "Glowstone" (`formerly`: saves and structures that name it still find it).
 	  * Glow lichen (Minecraft 1.20.1's GlowLichenBlock, a multiface block; here one face per
 	    block): GlowLichen lies on the block below (the item), GlowLichenUp hangs under the one
 	    above and GlowLichenNorth / South / West / East cover the wall on that side (`support`, kept
@@ -104,6 +104,7 @@ return function(define: Define.Context): { BlockSpec }
 			drops = "GlowDust" :: string,
 			dropCount = 4,
 			lore = "A block of glowing dust: a bright, steady light.",
+			formerly = { "Glowstone" },
 		},
 		{
 			name = "Lantern",

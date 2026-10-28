@@ -92,6 +92,11 @@
 	                                lava, fire: they hurt); a fluid's covers every level of it
 	  override         block, item, texture, biome, effect, potion, pool, structure, sound, track
 	                   patches the entry of that name an earlier pack made
+	  formerly         block, item  { "OldName" }: the names it had before, which data saved under
+	                                them (saves, structure palettes, jigsaw final states) still find
+	                                it by (Blocks.find, Items.find: Blocks.RENAMED, Items.RENAMED;
+	                                a block's are its item's too). No two entries may claim one, and
+	                                none may be a name an entry has now.
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
 	gone: each entry says its own).
@@ -301,6 +306,8 @@ export type BlockSpec = {
 	fuse: number?,
 	-- What a spawn keeps clear of it: "on", "in" or "near" (the header).
 	spawnUnsafe: string?,
+	-- Its former names (the header).
+	formerly: { string }?,
 }
 
 -- One box of an item's model (`model`).
@@ -373,6 +380,8 @@ export type ItemSpec = {
 	override: boolean?,
 	-- An empty container: the item it becomes filled at water, by name (the header).
 	fills: string?,
+	-- Its former names (the header).
+	formerly: { string }?,
 }
 
 -- A block's or an item's entry, where either will do (Content `entry`).
@@ -1234,6 +1243,8 @@ Schema.BLOCK_FIELDS = {
 	lit = STRING,
 	fuse = NUMBER,
 	spawnUnsafe = enum({ "on", "in", "near" }),
+	-- (The header's.)
+	formerly = STRINGS,
 } :: { [string]: Check }
 
 --[[
@@ -1410,6 +1421,8 @@ Schema.ITEM_FIELDS = {
 	override = BOOLEAN,
 	-- (The header's: an empty container.)
 	fills = STRING,
+	-- (The header's.)
+	formerly = STRINGS,
 } :: { [string]: Check }
 
 -- Recipes (Recipe above), and the fields each type needs and may have.

@@ -26,15 +26,16 @@ local Blocks = {}
 
 --[[
 	A block's own fields of Content/Schema's per-entry ones, which only the block that is the item
-	carries: its lore, its texture pack faces, the Age and skill that open its recipes, its fuel
-	and its tags, and what makes it an ore of the Metal Miner (`miner`) and of Knowledge
-	(`knowledge`, mining it again). A generator's other blocks (a fluid's flows, a door's other
+	carries: its lore, its texture pack faces, the Age and skill that open its recipes, its fuel,
+	its tags and its former names (`formerly`), and what makes it an ore of the Metal Miner
+	(`miner`) and of Knowledge (`knowledge`, mining it again). A generator's other blocks (a fluid's flows, a door's other
 	halves, a fence's arms, a layered block's heights 2..8) and cave twins never copy them: they
 	are no items, they take their item's or twin's faces (Blocks: a variant group's entry, a
 	twin's twin's), and each would be an ore of its own. Every other field (how it looks, sounds,
 	breaks, burns, radiates, drops...) they keep.
 ]]
-Blocks.OWN_FIELDS = table.freeze({ "lore", "texture", "age", "skill", "fuel", "tags", "knowledge", "miner" })
+Blocks.OWN_FIELDS =
+	table.freeze({ "lore", "texture", "age", "skill", "fuel", "tags", "knowledge", "miner", "formerly" })
 local OWN_FIELDS = Blocks.OWN_FIELDS
 local OWN: { [string]: boolean } = {}
 for _, field in OWN_FIELDS do

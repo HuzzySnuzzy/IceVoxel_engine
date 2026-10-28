@@ -357,11 +357,15 @@ function Items.get(id: number): ItemDef?
 	return defs[id]
 end
 
--- Items that were renamed: old name -> new name (blocks' items through Blocks.RENAMED too).
-Items.RENAMED = table.freeze({
-	GlowstoneDust = "GlowDust",
-	Glowstone = "GlowBlock",
-} :: { [string]: string })
+-- Items that were renamed: old name -> new name, each item entry's `formerly` (Content/Schema) and
+-- each block's (Blocks.RENAMED: a block's former names are its item's too).
+local renamed: { [string]: string } = {}
+for _, spec in Content.default.entries do
+	for _, old in (spec.formerly or {}) :: { string } do
+		renamed[old] = spec.name
+	end
+end
+Items.RENAMED = table.freeze(renamed)
 
 -- The id of the item named `name` (or formerly named, Items.RENAMED), or nil when there is none:
 -- for names that come from data (structure containers), where `Items.id` would error.

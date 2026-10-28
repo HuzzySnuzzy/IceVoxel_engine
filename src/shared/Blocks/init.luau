@@ -2164,11 +2164,16 @@ end
 
 --[[ Structures: creative only blocks, structure block modes, jigsaws, turning, cave twins ]]
 
--- Blocks that were renamed: old name -> new name. Names in data (structure palettes, jigsaw
--- final states) saved before the rename still find their block through `find`.
-Blocks.RENAMED = table.freeze({
-	Glowstone = "GlowBlock",
-} :: { [string]: string })
+-- Blocks that were renamed: old name -> new name, each block entry's `formerly` (Content/Schema;
+-- Content checks no two claim one and none is a name now). Names in data (structure palettes,
+-- jigsaw final states) saved before the rename still find their block through `find`.
+local renamed: { [string]: string } = {}
+for _, spec in BlockList do
+	for _, old in (spec.formerly or {}) :: { string } do
+		renamed[old] = spec.name
+	end
+end
+Blocks.RENAMED = table.freeze(renamed)
 
 -- The id of the block named `name` (or formerly named, Blocks.RENAMED), or nil when there is
 -- none: for names that come from data (structure palettes, jigsaw final states), where

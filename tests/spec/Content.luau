@@ -1419,6 +1419,57 @@ return function(t, shared, require, _server, _client)
 		fails({ pack("P", { effects = effects }) }, { "effect ids must fit a u8" }, "too many effects")
 	end)
 
+	t.test("content: former names: each claimed once, none a name now; saves and structures find them", function()
+		t.ok(
+			pcall(Content.build, {
+				pack("P", {
+					blocks = { { name = "A", formerly = { "OldA", "OlderA" } } },
+					items = { { name = "I", model = MODEL, formerly = { "OldI" } } },
+				}),
+			}),
+			"former names load"
+		)
+		fails(
+			{ pack("P", { blocks = { { name = "A", formerly = "OldA" } } }) },
+			{ 'pack P, block A: formerly must be a list, not the string "OldA"' },
+			"a list"
+		)
+		fails({
+			pack("P1", { blocks = { { name = "A", formerly = { "Old" } } } }),
+			pack("P2", { items = { { name = "I", model = MODEL, formerly = { "Old" } } } }, { order = 20 }),
+		}, { "pack P2, item I: formerly names Old, which pack P1, block A formerly was too" }, "a former name twice")
+		fails({
+			pack("P", {
+				blocks = { { name = "A", formerly = { "I" } } },
+				items = { { name = "I", model = MODEL } },
+			}),
+		}, { "pack P, block A: formerly names I, which is a name now (pack P, item I)" }, "a name now")
+		fails(
+			{ pack("P", { items = { { name = "I", model = MODEL, formerly = { "I" } } } }) },
+			{ "pack P, item I: formerly names I, which is a name now (pack P, item I)" },
+			"its own name"
+		)
+		-- The game's: the Glow Block was Glowstone (its item too), Glow Dust GlowstoneDust.
+		t.eq(Blocks.RENAMED.Glowstone, "GlowBlock")
+		t.eq(Items.RENAMED.Glowstone, "GlowBlock", "a block's former name is its item's")
+		t.eq(Items.RENAMED.GlowstoneDust, "GlowDust")
+		t.eq(Blocks.find("Glowstone"), Blocks.id.GlowBlock)
+		t.eq(Items.find("GlowstoneDust"), Items.id.GlowDust)
+		-- A pack's renamed item: saves and structures that name it by its old name find it.
+		local env, root = fresh(function(env, packs)
+			local folder = env.folder(packs, "Patch")
+			env.module(folder, "pack", { order = 900, requires = { "Minecraft" } })
+			env.module(folder, "items", { { name = "Gizmo", model = MODEL, icon = "", formerly = { "Widget" } } })
+			env.module(folder, "blocks", { { name = "Slab", formerly = { "Plank" } } })
+		end)
+		local PatchedItems = env.require(root.Items)
+		local PatchedBlocks = env.require(root.Blocks)
+		t.eq(PatchedItems.find("Widget"), PatchedItems.id.Gizmo)
+		t.eq(PatchedBlocks.find("Plank"), PatchedBlocks.id.Slab)
+		t.eq(PatchedItems.find("Plank"), PatchedItems.id.Slab, "the block's item too")
+		t.eq(PatchedBlocks.find("Widget"), nil, "an item's former name is no block's")
+	end)
+
 	t.test("content: every cross-reference is checked, naming the pack and the entry", function()
 		local A = { name = "Stone" }
 		local function with(kinds: { [string]: any }): { Content.PackData }

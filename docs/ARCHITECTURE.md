@@ -288,7 +288,8 @@ itself from the packs), so a palette naming a block no pack makes fails the load
 the file and the template. That is the packs' rule only: a template a player saved, pasted or put
 in the place's `IceVoxelStructures` folder keeps the decode's tolerance (an unknown block becomes
 air, an unknown item is left out, with a warning), so saves from older versions still load, and
-`Blocks.RENAMED` keeps old names working there (a pack's template must use today's names). The
+a block's `formerly` (`Blocks.RENAMED`) keeps old names working there (a pack's template must use
+today's names). The
 library (Structures/Library) is built from `content.templates`, `.pools` and `.structures`, then
 the place's folder, whose templates and structures replace the packs' of the same name.
 
@@ -4660,8 +4661,8 @@ torch machinery (`support`, `Attached`, `placementFor`). Light 7 in a cool yello
 in for glowstone and Mekanism's redstone in recipes; also when its wall goes or water washes it
 away), or itself with Shears (`shearDrops`, Minecraft's only drop; Shears mine it at 2,
 `shearSpeed`, Minecraft's ShearsItem.getDestroySpeed); replaceable and `brokenByFluid`. The block
-of 4 Glow Dust is the Glow Block (formerly Glowstone: `Blocks.RENAMED` / `Items.RENAMED` keep
-structure data that names Glowstone or GlowstoneDust working). Its shape is
+of 4 Glow Dust is the Glow Block (formerly Glowstone: the entries' `formerly`, `Blocks.RENAMED` /
+`Items.RENAMED`, keep structure data that names Glowstone or GlowstoneDust working). Its shape is
 a 13 × 13 pixel plate a tenth of a pixel off its face and a 3 × 3 pixel Neon speck, the `glow` box
 that carries the light: two boxes, two parts. Its outline is a pixel thick plate over the face.
 
@@ -8800,8 +8801,8 @@ effect another number. Saves keep names: every record the DataStore commits on i
 player record, a character) carries a palette, the names of the blocks, items, fluids, mob kinds and
 effects it holds, each once in the order first written (per kind a varint count and the texts; id 0,
 Air and nothing, stays 0 in every version), and stores its indices there instead of ids; the reader
-maps each index to today's id of that name (`Blocks.find`, `Items.find`: a RENAMED line keeps
-renamed content). Ids hiding inside data go through it too: a container's numbers (a furnace's
+maps each index to today's id of that name (`Blocks.find`, `Items.find`: an entry's `formerly`
+keeps renamed content). Ids hiding inside data go through it too: a container's numbers (a furnace's
 cooking item, `Crafting/Smelting.ID_FIELDS`; the machine fields a kind types, `types = { mining =
 "block" }`: the Metal Miner's ore, the Electric Furnace's item, and the fluid of each tank taking
 several: `Machines.idFields`) and item data (the keys `ItemData.ID_KEYS` lists once: a weapon's
@@ -10243,7 +10244,7 @@ Saving worlds).
   ServerStorage. Templates are immutable once loaded (Jigsaw caches by table identity), and
   structure placement (StructureGen) must stay stateless and written in its fixed order.
 - IVS1 text is what users keep: palettes name blocks, so renaming a block turns it into air in
-  every saved structure unless `Blocks.RENAMED` keeps the old name (add, don't rename), and fails
+  every saved structure unless the block's `formerly` keeps the old name (add, don't rename), and fails
   the load of a pack's template still naming it (rebuild or re-save it), and a format change needs a new version number
   (`Template.VERSION`; decode refuses newer ones) and must keep reading version 1.
 - Cave twins must look, drop and behave exactly like their twin (Blocks checks it at load; a fluid
