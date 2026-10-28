@@ -16,6 +16,8 @@
 	    campfire     the Campfire: blocks/campfire, recipes
 	    straw        Straw, Straw and Leaf armor: items/gear, recipes
 	    thermometer  the Thermometer: items/gear, recipes
+	    skills       the skill tree's survival branch (Hardy, Firekeeper, Insulation,
+	                 Thermoregulation, Endurance), whose perks are Tough As Nails': skills
 	  The seasons
 	    snow layers  SnowLayer1 .. 8: blocks/seasons, recipes
 	    heaters      the Wood Stove, Oil Heater, Electric Heater, Air Conditioner and Electric Fan:

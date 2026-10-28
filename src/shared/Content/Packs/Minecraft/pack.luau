@@ -23,8 +23,9 @@
 	  workshop    the chest, crafting table and furnace: blocks/crafting, recipes/wood and stone,
 	              textures/crafting
 	  fire        fire, TNT and the Nuke (which came with TNT: its uranium recipe is the Ores
-	              pack's), flint, flint and steel, gunpowder: blocks/fire, items/fire,
-	              recipes/fire, textures/fire
+	              pack's), flint, flint and steel, gunpowder, and the skills that unlock them,
+	              Demolition and Fission: blocks/fire, items/fire, recipes/fire, textures/fire,
+	              skills
 	  wool        White Wool: blocks/wool, recipes/mobs, textures/wool
 	  doors       oak, spruce, birch, jungle and acacia doors: blocks/doors, recipes/doors,
 	              textures/doors

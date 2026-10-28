@@ -38,10 +38,11 @@
 	  summary(view)             a line per pack: its order and how much of each kind it holds
 	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack
 	  show(view, name)          lines about everything named `name` (a block, item, texture, loot
-	                            table, tag, ore feature, Age, biome, effect or potion): its merged
-	                            fields, id, pack and the packs that patched it, and what the
-	                            registries made of it (a potion's brewed items); nil and the
-	                            nearest names when nothing has the name
+	                            table, tag, ore feature, Age, skill, biome, effect or potion): its
+	                            merged fields, id, pack and the packs that patched it, and what the
+	                            registries made of it (a skill's cell, the nodes needing it, the
+	                            entries it gates and their recipes; a potion's brewed items); nil and
+	                            the nearest names when nothing has the name
 	  reach(view)               when survival play first gives each item (an Age index) and how
 	  scaffold(name, order)     a new pack's modules, { { path, text } }: one block, one item, a
 	                            shaped and a smelting recipe, a texture and a loot table, each field
@@ -752,9 +753,9 @@ local function namesOf(content: any, kind: string): { any }
 		for _, entry in content[kind] do
 			table.insert(names, entry.name)
 		end
-	elseif kind == "ages" then
-		for _, age in content.ages do
-			table.insert(names, age.id)
+	elseif kind == "ages" or kind == "skills" then
+		for _, record in content[kind] do
+			table.insert(names, record.id)
 		end
 	elseif kind == "recipes" then
 		for index in content.recipes do
@@ -942,6 +943,20 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 			for index, age in content.ages do
 				if listed(view, each, age.id, pack) then
 					table.insert(rows, { tostring(index), age.id, age.name, packOf(view, each, age.id) })
+				end
+			end
+		elseif each == "skills" then
+			-- (Its place, the protocol's; its id and name; its cell on the skill tree screen.)
+			right[1] = true
+			for index, skill in content.skills or {} do
+				if listed(view, each, skill.id, pack) then
+					table.insert(rows, {
+						tostring(index),
+						skill.id,
+						skill.name,
+						`{skill.age} row {number(skill.row)}`,
+						madeText(view, each, skill.id),
+					})
 				end
 			end
 		elseif each == "biomes" then
@@ -1376,6 +1391,57 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 			end
 		end
 	end
+	for index, skill in content.skills or {} do
+		if skill.id == name then
+			section(
+				`skill {name}: {skill.name}, node {index} of {#content.skills}, pack {packOf(view, "skills", name)}`
+			)
+			patches("skills")
+			table.insert(lines, "  fields:")
+			for _, line in fieldLines(skill, { id = true }) do
+				table.insert(lines, line)
+			end
+			table.insert(lines, "  derived:")
+			local ageName = skill.age
+			for _, age in content.ages do
+				if age.id == skill.age then
+					ageName = age.name
+				end
+			end
+			table.insert(lines, `    cell: the {ageName}'s column, row {number(skill.row)}`)
+			local neededBy = {}
+			for _, other in content.skills do
+				if table.find(other.requires or {}, name) then
+					table.insert(neededBy, other.id)
+				end
+			end
+			for _, line in wrap("    needed by: ", if #neededBy > 0 then neededBy else { "no node" }) do
+				table.insert(lines, line)
+			end
+			-- What it gates: the entries naming it, and the recipes making them.
+			local gated, recipes = {}, {}
+			for _, entry in content.entries do
+				if entry.skill == name then
+					table.insert(gated, entry.name)
+				end
+			end
+			for at, recipe in content.recipes do
+				if table.find(gated, recipe.result) then
+					local from, place = recipeFrom(view, at)
+					table.insert(recipes, `      pack {from}, {place}: {recipeText(recipe)}`)
+				end
+			end
+			for _, line in wrap("    gates: ", if #gated > 0 then gated else { "nothing (no entry names it)" }) do
+				table.insert(lines, line)
+			end
+			if #recipes > 0 then
+				table.insert(lines, "    gated recipes:")
+				for _, line in recipes do
+					table.insert(lines, line)
+				end
+			end
+		end
+	end
 	for index, biome in content.biomes or {} do
 		if biome.name == name then
 			section(`biome {name}: index {index} of {#content.biomes}, pack {packOf(view, "biomes", name)}`)
@@ -1453,6 +1519,9 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	end
 	for _, age in content.ages do
 		names[age.id] = true
+	end
+	for _, skill in content.skills or {} do
+		names[skill.id] = true
 	end
 	for _, biome in content.biomes or {} do
 		names[biome.name] = true

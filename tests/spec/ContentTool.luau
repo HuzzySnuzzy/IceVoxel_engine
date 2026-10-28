@@ -414,6 +414,41 @@ return function(t, shared, require, _server, _client)
 		end
 	)
 
+	t.test("content tool: list the skills by pack; show a skill, its cell and the recipes it gates", function()
+		local view = assert(fresh())
+		local content = view.content
+		local skills = assert(ContentTool.list(view, "skills"))
+		t.eq(skills[1], `skills: {#content.skills}`)
+		local demolition: number? = nil
+		for index, skill in content.skills do
+			if skill.id == "demolition" then
+				demolition = index
+			end
+		end
+		t.ok(
+			has(skills, { tostring(demolition), "demolition", "Demolition", "industrial row 2", "Minecraft" }),
+			"its place, id, name, cell and pack"
+		)
+		local survival = assert(ContentTool.list(view, "skills", "Survival"))
+		t.ok(has(survival, { "hardy" }) and not has(survival, { "forager" }), "a pack's own")
+		local page = assert(ContentTool.show(view, "demolition"))
+		t.ok(has(page, { "skill demolition", "Demolition", `node {demolition} of`, "pack Minecraft" }), page[1])
+		t.ok(has(page, { 'requires = { "prospector" }' }), "its fields")
+		t.ok(has(page, { "cell: the Industrial Age's column, row 2" }))
+		t.ok(has(page, { "needed by: fission" }))
+		t.ok(has(page, { "gates:", "Tnt", "Gunpowder" }), "the entries naming it")
+		t.ok(has(page, { "pack Minecraft, recipes/fire, recipe #", "shaped Tnt" }), "and their recipes")
+		local _, near = ContentTool.show(view, "demolitoin")
+		t.eq((near :: any)[1], "demolition", "a skill's id is a name it knows")
+		-- (A pack patching a node shows on its page and in its list.)
+		local patched = assert(fresh(function(env, packs)
+			env.graft("tests/fixtures/content/skills/Skilled", packs, "Skilled")
+		end))
+		t.ok(has(assert(ContentTool.show(patched, "forager")), { "patched by: Skilled" }), "an override")
+		t.ok(has(assert(ContentTool.list(patched, "skills", "Skilled")), { "forager", "Core (patched by Skilled)" }))
+		t.ok(has(assert(ContentTool.show(patched, "blasting")), { "gates: BlastCharge" }), "a pack's node")
+	end)
+
 	--[[ A new pack ]]
 
 	t.test("content tool: a new pack loads and passes the check as it is made", function()

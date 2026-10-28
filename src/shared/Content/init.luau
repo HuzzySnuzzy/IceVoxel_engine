@@ -10,13 +10,13 @@
 	A pack
 	  A folder holding `pack`, its manifest ({ order = n, description = "...", requires = { pack
 	  names }? }), and any of the kinds Content/Schema lists (blocks, items, recipes, tags, textures,
-	  loot, ores, ages, lore, fuel, biomes, effects, potions), each a module of the kind's name: a
-	  Luau module returning its data, or `function(define) -> data` (define: Content/Define, the
-	  shared helpers and Config, for packs that build entries or read switches), or a `.json` file
-	  holding it (Rojo makes a JSON file a ModuleScript returning its table, and so does the Lune
-	  loader). Any other module in a pack is an error (a misspelt kind would be ignored otherwise)
-	  unless its name starts with "_": the pack's own helpers, which its kind modules require (at
-	  the pack's top only).
+	  loot, ores, ages, skills, lore, fuel, biomes, effects, potions), each a module of the kind's
+	  name: a Luau module returning its data, or `function(define) -> data` (define:
+	  Content/Define, the shared helpers and Config, for packs that build entries or read
+	  switches), or a `.json` file holding it (Rojo makes a JSON file a ModuleScript returning its
+	  table, and so does the Lune loader). Any other module in a pack is an error (a misspelt kind
+	  would be ignored otherwise) unless its name starts with "_": the pack's own helpers, which
+	  its kind modules require (at the pack's top only).
 
 	Kind folders
 	  A kind may also be a folder of the kind's name (`Minecraft/blocks/`), as Minecraft's data
@@ -53,6 +53,9 @@
 	                 field by field in turn, a list (bands, features, plants, species, tags)
 	                 replaces it whole (Schema's BIOME_FIELDS), and the patched biome is checked
 	                 whole again.
+	  skills         by id, the same way ({ id = "forager", override = true, cost = 2 }); a node's
+	                 place among every pack's nodes is its position, sent as a u8
+	                 (Progression/Skills).
 	  tags           a union: each pack's lists in load order, then every entry's `tags`, each
 	                 name once.
 	  recipes        appended in load order; so are ore features (each with a name of its own)
@@ -79,11 +82,14 @@
 	    the Ages' milestones' items, every lore line's item, a lore line both on an entry and in a
 	    pack's `lore`, the blocks a biome names (its ground, and its plants: single plants or lower
 	    halves), and a potion's effect, its ingredient and its variants (Schema.checkVariants: an
-	    instant effect's potion has no seconds and no long variant...).
+	    instant effect's potion has no seconds and no long variant...);
+	  * the skills: each node's Age and icon, its `requires` (known nodes, of its Age or an earlier
+	    one, never in a loop), one node to an Age's row, and every entry's `skill`.
 	  The registries check what only they know of an entry's value as they load, naming the pack
-	  too (`where`): a skill, a sound event or action, a machine kind, the miner's numbers, a
-	  radiation or shielding number, a fuel's ticks, a biome's bands (Biomes) and tree builders
-	  (Generation/Structures), two effects /effect would find by one word (Effects).
+	  too (`where`): a skill's row, icon item and perk numbers, a sound event or action, a machine
+	  kind, the miner's numbers, a radiation or shielding number, a fuel's ticks, a biome's bands
+	  (Biomes) and tree builders (Generation/Structures), two effects /effect would find by one
+	  word (Effects).
 
 	API
 	  Content.default             the packs under Content/Packs, loaded once: what the game uses
@@ -91,7 +97,7 @@
 	  Content.build(packs)        merges and checks packs already loaded ({ PackData })
 	  content.blocks, .items      the merged entries, in id order (Schema's BlockSpec, ItemSpec);
 	                              .entries: both, blocks first
-	  content.recipes, .tags, .textures, .loot, .ores, .ages, .lore, .fuel
+	  content.recipes, .tags, .textures, .loot, .ores, .ages, .skills, .lore, .fuel
 	                              the other kinds, merged
 	  content.biomes              the merged biomes, in load order (Schema's BiomeSpec; a biome's
 	                              place is its index in Shared/Biomes)
@@ -127,6 +133,7 @@ type AgeRecord = Schema.AgeRecord
 type BiomeSpec = Schema.BiomeSpec
 type EffectSpec = Schema.EffectSpec
 type PotionSpec = Schema.PotionSpec
+type SkillRecord = Schema.SkillRecord
 
 -- A pack, as loaded: its folder's name, its manifest's numbers.
 export type PackInfo = { name: string, order: number, description: string, requires: { string } }
@@ -157,6 +164,7 @@ export type Content = {
 	loot: { [string]: { Pool } },
 	ores: { OreFeature },
 	ages: { AgeRecord },
+	skills: { SkillRecord },
 	lore: { [string]: string },
 	fuel: { [string]: number },
 	biomes: { BiomeSpec },
@@ -311,6 +319,9 @@ function Content.build(input: { PackData }): Content
 	local places: { [string]: { [string]: number } } = { blocks = blockAt, items = itemAt, effects = {}, potions = {} }
 	-- Where each pack's own items and recipes end (its potions' go after them).
 	local ends: { [string]: { items: number, recipes: number } } = {}
+	local skills: { SkillRecord } = {}
+	-- Skill id -> its place in `skills`.
+	local skillAt: { [string]: number } = {}
 
 	local function whereOf(kind: string, name: string): string
 		local pack = made[kind][name]
@@ -459,6 +470,34 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
+	-- A skill of `pack` (checked): appended, or patched onto the earlier one of its id.
+	local function mergeSkill(pack: string, file: string?, entry: any)
+		local id = entry.id :: string
+		local here = `{placeOf(pack, file)}, skill {id}`
+		if entry.override then
+			local index = skillAt[id]
+			if index == nil then
+				fail(`{here} overrides a skill no earlier pack makes{hint(id, skillAt)}`)
+			end
+			local target = table.clone(skills[index]) :: any
+			for field, value in entry do
+				if field ~= "override" and field ~= "id" then
+					target[field] = value
+				end
+			end
+			skills[index] = target
+			table.insert(patched.skills[id], pack)
+		elseif skillAt[id] then
+			fail(`{here}: the id is taken by {whereOf("skills", id)} (another id, or override = true to patch it)`)
+		else
+			table.insert(skills, table.clone(entry))
+			skillAt[id] = #skills
+			made.skills[id] = pack
+			madeIn.skills[id] = file
+			patched.skills[id] = {}
+		end
+	end
+
 	for _, data in sorted do
 		local pack = data.name
 		local folders: { [string]: { PackFile } } = data.folders or {}
@@ -498,7 +537,7 @@ function Content.build(input: { PackData }): Content
 					for index, entry in value do
 						local name = if type(entry) ~= "table"
 							then nil
-							elseif kind == "ages" then entry.id
+							elseif kind == "ages" or kind == "skills" then entry.id
 							else entry.name
 						local label = if type(name) == "string" then name else `#{index}`
 						if kind == "recipes" then
@@ -538,6 +577,8 @@ function Content.build(input: { PackData }): Content
 							madeIn.ages[entry.id] = file
 							patched.ages[entry.id] = {}
 							table.insert(ages, table.clone(entry))
+						elseif kind == "skills" then
+							mergeSkill(pack, file, entry)
 						end
 					end
 				else
@@ -862,6 +903,74 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
+	-- The skills: their Ages and icons, one node to an Age's row (the skill tree screen's cell),
+	-- their prerequisites (known, of their Age or an earlier one, never in a loop); then the skills
+	-- entries name.
+	local ageAt: { [string]: number } = {}
+	for index, age in ages do
+		ageAt[age.id] = index
+	end
+	-- (An Age's place and row, "3 2" -> the id of the node there.)
+	local cellOf: { [string]: string } = {}
+	for _, skill in skills do
+		local here = whereOf("skills", skill.id)
+		if not ageIds[skill.age] then
+			fail(`{here}: age names unknown Age {skill.age}{hint(skill.age, ageIds)}`)
+		end
+		needName(here, "icon", skill.icon)
+		local cell = `{ageAt[skill.age]} {skill.row}`
+		local other = cellOf[cell]
+		if other then
+			fail(
+				`{here}: row {skill.row} of the {ages[ageAt[skill.age]].name} is {whereOf("skills", other)}'s (an Age's nodes take a row each)`
+			)
+		end
+		cellOf[cell] = skill.id
+	end
+	for _, skill in skills do
+		local here = whereOf("skills", skill.id)
+		for _, required in (skill.requires or {}) :: { string } do
+			local at = skillAt[required]
+			if at == nil then
+				fail(`{here}: requires names unknown skill {required}{hint(required, skillAt)}`)
+			end
+			local before = skills[at]
+			if ageAt[before.age] > ageAt[skill.age] then
+				fail(`{here}: requires {required}, a node of a later Age ({ages[ageAt[before.age]].name})`)
+			end
+		end
+	end
+	-- (Depth first along `requires`: a node met again while its own prerequisites are being
+	-- followed closes a loop.)
+	local state: { [string]: number } = {}
+	local path: { string } = {}
+	local function follow(id: string)
+		if state[id] == 2 then
+			return
+		elseif state[id] == 1 then
+			local from = table.find(path, id) :: number
+			local loop = table.concat(path, ", ", from) .. `, {id}`
+			fail(`{whereOf("skills", id)}: its requires go round in a loop ({loop})`)
+		end
+		state[id] = 1
+		table.insert(path, id)
+		for _, required in (skills[skillAt[id]].requires or {}) :: { string } do
+			follow(required)
+		end
+		table.remove(path)
+		state[id] = 2
+	end
+	for _, skill in skills do
+		follow(skill.id)
+	end
+	for _, entry in entries do
+		local id = entry.skill
+		if id and skillAt[id] == nil then
+			local kind = if blockAt[entry.name] then "blocks" else "items"
+			fail(`{whereOf(kind, entry.name)}: skill names unknown skill {id}{hint(id, skillAt)}`)
+		end
+	end
+
 	local content = {
 		packs = packs,
 		blocks = blocks,
@@ -873,6 +982,7 @@ function Content.build(input: { PackData }): Content
 		loot = loot,
 		ores = ores,
 		ages = ages,
+		skills = skills,
 		lore = lore,
 		fuel = fuel,
 		biomes = biomes,

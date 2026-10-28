@@ -16,7 +16,11 @@
 	            `icon`), joined to its prerequisites by lines (straight along a row; else out of
 	            the prerequisite into the gap after its column, down or up, then along). The
 	            frame says its state: gold unlocked, white available (Progression.canUnlock),
-	            dark locked (the item dimmed); a line is gold when both ends are unlocked.
+	            dark locked (the item dimmed); a line is gold when both ends are unlocked, and
+	            drawn over the others where they share a stretch. Nodes come from the content
+	            packs (Progression/Skills): the screen lays them out by Age and row only, never by
+	            their place in the list, so a pack's nodes take the cells they name (Content
+	            refuses a taken cell, Skills a row past ROWS) and move no other.
 	  Info      hovering or selecting a node shows its name, what it does, its cost and what it
 	            needs (the Age, the prerequisites, the points), in light text with Minecraft's shadow
 	            on the grid's dark backdrop (the Ages' colours and the red and green read there, not
@@ -199,7 +203,8 @@ local function drawNode(parent: Instance, skill: Skill): NodeView
 	button.BackgroundColor3 = WELL
 	button.Position = UDim2.fromOffset(x - NODE // 2, y - NODE // 2)
 	button.Size = UDim2.fromOffset(NODE, NODE)
-	button.ZIndex = 4
+	-- (Over every line: 3, or 4 when gold.)
+	button.ZIndex = 5
 	button.SelectionImageObject = SELECTION
 	button.Parent = parent
 	local frame = Style.border(button, 0, 0, NODE, NODE, 2, LOCKED, 5)
@@ -329,8 +334,13 @@ function SkillTreeScreen.start()
 		separator.BackgroundTransparency = 0.3
 	end
 
+	-- (By Age, then row: the cells', not the list's order, which follows the packs.)
+	local cells = table.clone(Skills.list)
+	table.sort(cells, function(a: Skill, b: Skill): boolean
+		return if a.age ~= b.age then a.age < b.age else a.row < b.row
+	end)
 	local nodes: { NodeView } = {}
-	for _, skill in Skills.list do
+	for _, skill in cells do
 		table.insert(nodes, drawNode(root, skill))
 	end
 	for _, view in nodes do
@@ -400,10 +410,13 @@ function SkillTreeScreen.start()
 			view.icon:setDimmed(not (unlocked or available), true)
 			for _, line in view.lines do
 				local fromDone = state.skills[line.from.id] == true
-				Style.paint(
-					line.frames,
-					if unlocked and fromDone then LINE_DONE elseif fromDone then LINE_OPEN else LINE_LOCKED
-				)
+				local gold = unlocked and fromDone
+				Style.paint(line.frames, if gold then LINE_DONE elseif fromDone then LINE_OPEN else LINE_LOCKED)
+				-- (A gold line over the others: two lines out of one prerequisite share its stretch
+				-- to the gap, and the unlocked path shows through. Under the nodes, at 5.)
+				for _, frame in line.frames do
+					frame.ZIndex = if gold then 4 else 3
+				end
 			end
 		end
 		local shown = hoveredSkill or selected
@@ -481,17 +494,22 @@ function SkillTreeScreen.start()
 		close()
 	end
 
-	-- Gamepad: down / up through the rows of a column, left / right through the columns.
+	-- Gamepad: down / up through the rows of a column, left / right through the columns: to the
+	-- nearest row of the next column, of two as near the one nearer the tree's middle (the cells
+	-- decide, never the list's order).
+	local middle = (Skills.ROWS + 1) / 2
 	for _, view in nodes do
 		local skill = view.skill
 		local function nearest(age: number, row: number): GuiObject?
 			local best: NodeView? = nil
+			local bestDistance, bestMiddle = math.huge, math.huge
 			for _, other in nodes do
-				if
-					other.skill.age == age
-					and (best == nil or math.abs(other.skill.row - row) < math.abs(best.skill.row - row))
-				then
-					best = other
+				if other.skill.age == age then
+					local distance = math.abs(other.skill.row - row)
+					local fromMiddle = math.abs(other.skill.row - middle)
+					if distance < bestDistance or (distance == bestDistance and fromMiddle < bestMiddle) then
+						best, bestDistance, bestMiddle = other, distance, fromMiddle
+					end
 				end
 			end
 			return if best then best.button else nil

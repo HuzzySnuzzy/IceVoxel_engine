@@ -26,8 +26,8 @@ finds as it loads (Minecraft's data packs). The registries build themselves from
 its name:
 
 ```
-Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, lore, fuel,
-   │                   biomes, effects, potions
+Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, skills,
+   │                   lore, fuel, biomes, effects, potions
    │                   (each a .luau module, its data or function(define) -> data, or a .json
    │                   file; or a kind folder of them: Minecraft/blocks/terrain, .../plants...)
    │  Content.load: find the packs, sort by (order, name), require each kind (a kind folder's
@@ -50,10 +50,11 @@ Content.default ─► Blocks/BlockList ─► Blocks           ─► TexturePa
 any of the kinds: `blocks` and `items` (entries, Schema's BlockSpec and ItemSpec), `recipes`
 (`{ type = "shaped" | "shapeless" | "smelting", ... }`), `tags` (tag -> names), `textures` (name
 -> Texture), `loot` (table name -> pools, ScavengeLoot's format), `ores` (ore features, the block
-by name), `ages` (the Age records), `lore` (name -> line), `fuel` (tag -> burn ticks: Core's
-logs and planks), `biomes` (Schema's BiomeSpec: bands, climate, weather, ground, trees, plants,
-tags), `effects` (status effects, Schema's EffectSpec) and `potions` (Schema's PotionSpec, each
-brewed into its items and their recipes). Each is a module of the kind's name:
+by name), `ages` (the Age records), `skills` (the skill tree's nodes, by id), `lore` (name ->
+line), `fuel` (tag -> burn ticks: Core's logs and planks), `biomes` (Schema's BiomeSpec: bands,
+climate, weather, ground, trees, plants, tags), `effects` (status effects, Schema's EffectSpec)
+and `potions` (Schema's PotionSpec, each brewed into its items and their recipes). Each is a
+module of the kind's name:
 a Luau module returning its data, or a function the loader calls with `Content/Define` (the shared
 helpers and Config, for packs that build entries or read switches), or a `.json` file (Rojo 7
 makes one a ModuleScript returning its table; the Lune loader does the same and skips Rojo's
@@ -94,10 +95,12 @@ error naming both packs, and so is an override of nothing. Textures merge the sa
 override patches a texture's fields: a resource pack's new picture). Tags are a union: each pack's
 lists in load order, then every entry's `tags`, each name once (an entry's `tags = { "coals" }`
 joins Core's tag). Recipes, ore features (each named once) and Ages (each id once) append in load
-order; loot tables, lore lines and fuel tags are named once. Biomes merge by name like blocks,
-keeping their place, but an override patches a table of fields (`weather`, `patches`, `foliage`
-and its `flowers` and `herbs`) field by field in turn, and replaces a list (`bands`, `features`,
-`plants`, `species`, `tags`) whole; the patched biome is checked whole again. Effects and potions
+order; loot tables, lore lines and fuel tags are named once. Skills merge by id as blocks do by
+name: `{ id = "forager", override = true, cost = 2 }` patches a node, keeping its place (each
+node's place among every pack's is its position, what the protocol sends as a u8). Biomes merge
+by name like blocks, keeping their place, but an override patches a table of fields (`weather`,
+`patches`, `foliage` and its `flowers` and `herbs`) field by field in turn, and replaces a list
+(`bands`, `features`, `plants`, `species`, `tags`) whole; the patched biome is checked whole again. Effects and potions
 merge by name as blocks and items do (each kind's names its own: the potion Strength gives the
 effect Strength). Once every pack has merged, each potion is brewed (`Content/Define`'s `brew`,
 Minecraft's brewing in a grid) into its items, a Purified Water Bottle with its ingredient, the
@@ -109,10 +112,10 @@ tooltip included, with one entry, and patches a potion's items by patching the p
 `content.where(kind, name)` says where a thing came from ("pack Minecraft (patched by Patch),
 blocks/terrain, block Stone") for every message, and `content.origin(kind, name)` gives it as
 data: the pack and kind folder file that made it, the packs that patched it in load order (a
-biome's, an effect's and a potion's overrides too; a tag's: the first pack putting names in it
-and the packs adding to it; a brewed item's or recipe's: its potion's pack, its file `potion
-<Name>`), a recipe's (`name` its place in `content.recipes`) pack, file and place in that file's
-list (the content tool reads where things came from this way).
+skill's, a biome's, an effect's and a potion's overrides too; a tag's: the first pack putting
+names in it and the packs adding to it; a brewed item's or recipe's: its potion's pack, its file
+`potion <Name>`), a recipe's (`name` its place in `content.recipes`) pack, file and place in that
+file's list (the content tool reads where things came from this way).
 
 **Per-entry fields.** Every value about an entry is on the entry, and each registry reads it
 from there (`tests/spec/Content` follows each one end to end):
@@ -163,7 +166,10 @@ pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `
   those), a manifest's `order`; an effect's `icon` and `view` are one of the client's closed sets,
   which live in the shared `Effects/Looks` (`ICONS`: client `Ui/EffectIcons` has a glyph for each
   and no other, and asserts so as it loads; `VIEWS`: client `Rendering/EffectView`'s and the
-  server's Glowing), its `command` lower_snake and its `interval` at least 1.
+  server's Glowing), its `command` lower_snake and its `interval` at least 1;
+  a skill's perk is one of the kinds the game codes (SKILL_PERKS: knowledge, mining, wear,
+  thirst, insulation, boiling, none) with that kind's numbers only, each it needs, in range
+  ("perk.factor is no number a wear perk has (it has chance)").
 - Names and packs: a name taken twice, an override of nothing, two packs of one name, a
   `requires` that is not there or loads later, a kind given as the wrong shape, an unknown module.
 - Every cross-reference: the items and blocks recipes, tags and loot tables name; the tags recipes
@@ -175,25 +181,32 @@ pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `
   potion's effect and ingredient, and its variants against its effect (`Schema.checkVariants`: no
   `seconds` and no long variant for an instant effect, `seconds` for a lasting one, `strong` true
   or seconds as the effect takes, no lore line or icon for a variant it has not), and its items'
-  names. Unknown names come with a hint too (`Stnoe` -> Stone).
+  names; a skill's Age and icon, its `requires` (known nodes, of its Age or an earlier one, never
+  in a loop: "its requires go round in a loop (s, t, s)"), one node to an Age's row (the skill
+  tree screen's cell), and every entry's `skill`. Unknown names come with a hint too (`Stnoe` ->
+  Stone).
 - In the registries, as they load (with `where`): what only a registry knows of an entry's
-  value: a skill (Skills), a sound event or action (Sounds), the miner's numbers (MinerRules), a
-  radiation or shielding number (Radiation), a fuel's ticks (Recipes), a biome's bands and that
-  every band has one (Biomes), its tree builders (Generation/Structures), two effects `/effect`
-  would find by one word (Effects).
+  value: a skill's row on the screen (1..6), its icon being an item, its perk's knowledge sources
+  and tool tiers, at most 255 nodes for the protocol's u8 (Skills), a sound event or action
+  (Sounds), the miner's numbers (MinerRules), a radiation or shielding number (Radiation), a
+  fuel's ticks (Recipes), a biome's bands and that every band has one (Biomes), its tree builders
+  (Generation/Structures), two effects `/effect` would find by one word (Effects).
 
 **The packs.** Each manifest's header says what the pack adds, file by file, where the code
 for it lives, and the calls made placing things (what went where when a feature's things are
 another's too); every feature is behind the same switches as before.
 - **Core** (order 0): Air and Cave Air (ids 0 and 1), the Ages (`ages`: stone, iron, industrial,
-  electric, atomic), the base tags (planks, logs, leaves, coals, tulips, stone tool and crafting
-  materials), the fuel tags (logs and planks, 300 ticks) and the texture pack's missing texture.
+  electric, atomic), the skill tree's knowledge and tools branches (`skills`: Forager to
+  Enlightenment, Quarrying to Mastery), the base tags (planks, logs, leaves, coals, tulips, stone
+  tool and crafting materials), the fuel tags (logs and planks, 300 ticks) and the texture pack's
+  missing texture.
 - **Minecraft** (100, requires Core): vanilla 1.20.1 as the game has it, kind folders a feature a
   file: terrain (the ground, stones, sand, snow, ice, water and lava), building blocks, the ores
   and their storage, raw metals, ingots and gems, wood (logs, leaves, planks, the stick), plants,
   lights (torches, lanterns, glow lichen, the Glow Block and Glow Dust), the chest, crafting table
-  and furnace, fire, TNT and the Nuke (whose uranium core is the Ores pack's recipe), wool, doors,
-  fences, the mineshafts' blocks and loot table, structure blocks and jigsaws, tools, armor,
+  and furnace, fire, TNT and the Nuke (whose uranium core is the Ores pack's recipe) with the
+  skills that unlock them (`skills`: Demolition and Fission), wool, doors, fences, the
+  mineshafts' blocks and loot table, structure blocks and jigsaws, tools, armor,
   buckets, mob drops, Minecraft's status effects (`effects`: the eighteen the game has, then
   Hunger, which came with the food bar) and its potions (`potions`, with this game's Haste and
   Resistance: each entry brewed into its items, drinks and recipes, which follow the pack's own),
@@ -205,9 +218,10 @@ another's too); every feature is behind the same switches as before.
   that makes fuel) with the effects they give the skin, Oil Coated and Fuel Soaked.
 - **Survival** (300): Tough As Nails (its four effects, Thirst, Internal Warmth, Internal Chill
   and Climate Clemency; the Glass Bottle and water bottles, the canteen, herbs, bowls and teas,
-  the campfire, straw and its armor, the thermometer) and the seasons (snow layers, the heaters
-  and coolers, insulated planks, glass and door). Its `biomes` are overrides putting the herbs in
-  the Minecraft pack's biomes (`foliage.herbs`), the worked example of a biome override.
+  the campfire, straw and its armor, the thermometer, and the skill tree's survival branch, whose
+  perks are its thirst, temperature and boiling: `skills`) and the seasons (snow layers, the
+  heaters and coolers, insulated planks, glass and door). Its `biomes` are overrides putting the
+  herbs in the Minecraft pack's biomes (`foliage.herbs`), the worked example of a biome override.
 - **Terraria** (400): the accessories, mana (Fallen Stars, Mana Crystals, mana potions, Mana
   Sickness), the magic
   weapons and the vanity clothes (items and recipes only; the chests' accessories are rolled by
@@ -5771,9 +5785,19 @@ Progression is three things, pure and shared (`Shared/Progression`, tested in
   items it opens (`recipes`), the knowledge level it needs and two milestones (discoveries: a key
   of a category, or a count of one), and its reward. Every result no Age names is the Stone Age's,
   so what other parts add later starts open.
-- **Skills** (`Progression/Skills`): 18 nodes, 3-4 per Age, costing the Age's number in skill
-  points (one per level; 51 for the whole tree), each needing its Age, its prerequisites and the
-  points, each with one perk kind (or recipes it unlocks besides their Age).
+- **Skills** (`Progression/Skills`): the content packs' `skills` (Core's knowledge and tools
+  branches, the Minecraft pack's Demolition and Fission, the Survival pack's survival branch: 18
+  nodes, 3-4 per Age), each costing its Age's number in skill points (one per level; 51 for the
+  whole tree), needing its Age, its prerequisites and the points, with one perk (or recipes it
+  unlocks besides their Age: the entries naming it, `skill = "demolition"`). A node is all on its
+  entry: id, name, line, row, icon, Age, cost, `requires`, perk; a pack adds one or overrides
+  another's by id. The perk kinds (knowledge, mining, wear, thirst, insulation, boiling, none)
+  are code, the closed set `Content/Schema`'s SKILL_PERKS checks a perk and its numbers
+  against. A node's position is its place among every pack's nodes in load order, sent as a u8
+  (at most 255 nodes; saves keep ids); Content checks each node's Age, icon, prerequisites (no
+  later Age's, no loop), its cell (one node to an Age's row) and every entry's `skill`, and
+  Skills the row (1..6, the screen's), that the icon is an item and the perk's knowledge sources
+  and tool tiers.
 
 A player's `State` is `{ points, age, skills, found }` (`found`: category -> key -> true, the
 discoveries). A `Session` (per server visit, never saved) holds the repeats' fatigue, the
@@ -5924,8 +5948,11 @@ row, the level's number right-aligned in white and a 2 pixel progress bar beside
 survival and adventure. `Ui/AgeToast` fades a new Age's name in big (its colour,
 "A new Age begins", how many recipes it opens). `Ui/SkillTreeScreen` is a panel (K, D-pad left,
 the touch button over the gear): a column per Age, a row per node (Skills `row`: the knowledge,
-tools and survival branches), lines from prerequisites (along a row, else through the gap after
-the prerequisite's column), nodes in slot-grey wells with frames gold unlocked / white available /
+tools and survival branches), laid out by Age and row alone, never by the list's order (which
+follows the packs; the gamepad goes to the nearest row of the next column, of two as near the one
+nearer the middle), so a pack's node takes the cell it names and moves no other; lines from
+prerequisites (along a row, else through the gap after the prerequisite's column; a gold one over
+the others where two share a stretch), nodes in slot-grey wells with frames gold unlocked / white available /
 dark locked (a locked skill's item mildly dimmed, still recognisable), an info area on the grid's
 dark backdrop for the hovered or selected node or Age title (an Age's level and milestones, green
 when met; wrapped at word breaks by `Ui/TextWrap`, the status line always kept), and Unlock.

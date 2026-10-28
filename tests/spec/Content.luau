@@ -13,11 +13,15 @@
 	grafted into a fresh game); effects and potions: the game's, by pack, and a pack's own status
 	effect and potion (the Brewing fixture pack, grafted the same way: the potion's items, recipes,
 	lore, drink and tooltip from its entry alone, and a patched effect and potion of the Minecraft
-	pack's); and every check: the schema's (unknown fields with their "did you mean", wrong types,
-	missing fields, an effect's icon and view the client has), names and overrides, manifests and
-	`requires`, every cross-reference (a potion's effect, ingredient and variants), discovery's, the
-	registries' own checks on the entries' values (Effects' names among them), and the biome
-	registries' (bands, tree builders, a band without biomes, a biome code needs).
+	pack's); the skill tree's nodes (the `skills` kind: the game's in their features' packs, Beta's
+	in JSON, and the Skilled fixture pack's node, which needs Demolition and gates a recipe, and
+	override, grafted the same way); and every check: the schema's (unknown fields with their "did
+	you mean", wrong types, missing fields, an effect's icon and view the client has, a skill's perk
+	and its numbers), names and overrides, manifests and `requires`, every cross-reference (a
+	potion's effect, ingredient and variants, a skill's Age, icon, prerequisites and cell),
+	discovery's, the registries' own checks on the entries' values (Effects' names among them, the
+	skill tree's rows, icons and perks), and the biome registries' (bands, tree builders, a band
+	without biomes, a biome code needs).
 
 	Nothing here pins an id or a total: the game's content may grow.
 ]]
@@ -29,6 +33,7 @@ local FOLDERS = "tests/fixtures/content/folders"
 local FIELDS = "tests/fixtures/content/fields/Fields"
 local BIOMES = "tests/fixtures/content/biomes/Wilds"
 local BREWING = "tests/fixtures/content/brewing/Brewing"
+local SKILLS = "tests/fixtures/content/skills/Skilled"
 
 return function(t, shared, require, _server, _client)
 	local Content = require(shared.Content)
@@ -442,6 +447,10 @@ return function(t, shared, require, _server, _client)
 		t.eq(ore.texture.Top, "beta ore top")
 		t.eq(content.loot.beta_chest[1].entries[2][1], false, "false in a loot entry")
 		t.eq(content.ages[1].id, "beta_age")
+		local scouting = content.skills[1]
+		t.eq(scouting.id, "beta_scouting", "a skill")
+		t.eq(scouting.perk.sources[1], "discovery", "its perk's list")
+		t.eq(content.where("skill", "beta_scouting"), "pack Beta, skill beta_scouting")
 		t.eq(content.lore.BetaGem, "A gem of the JSON pack.")
 		t.eq(names(content.effects), "BetaGlow AlphaHaste", "effects in load order")
 		t.eq(content.effectId.BetaGlow, 1, "effect ids from 1, by place")
@@ -851,6 +860,96 @@ return function(t, shared, require, _server, _client)
 		t.eq(select(2, single.column(10, 10)), marsh.index, "Single Biome of it")
 	end)
 
+	--[[ The skill tree (the skills kind) ]]
+
+	t.test("content: the skill tree's nodes are their features' packs', placed in load order", function()
+		local content = Content.default
+		local Skills = require(shared.Progression.Skills)
+		for id, pack in
+			{
+				forager = "Core",
+				quarrying = "Core",
+				enlightenment = "Core",
+				demolition = "Minecraft",
+				fission = "Minecraft",
+				hardy = "Survival",
+				endurance = "Survival",
+			}
+		do
+			local origin = content.origin("skill", id)
+			t.eq(origin and origin.pack, pack, `{id}'s pack`)
+		end
+		t.eq(content.where("skill", "demolition"), "pack Minecraft, skill demolition")
+		-- Each node's place (the protocol's u8) is its place among every pack's, dense.
+		t.ok(Skills.count == #content.skills and Skills.count <= Skills.MAX, "every node, a u8 each")
+		for index, record in content.skills do
+			local skill = Skills.get(index) :: any
+			t.eq(skill.id, record.id, `{record.id} at its place`)
+			t.eq(Skills.byId(record.id), skill)
+			t.eq(skill.cost, record.cost, "its cost its own")
+		end
+		-- (Core's, then the Minecraft pack's, then the Survival pack's.)
+		local function at(id: string): number
+			return (Skills.byId(id) :: any).index
+		end
+		t.ok(at("enlightenment") < at("demolition") and at("fission") < at("hardy"), "in pack order")
+		t.eq(table.concat((Skills.byId("demolition") :: any).recipes, " "), "Tnt Gunpowder", "the entries naming it")
+	end)
+
+	t.test("content: a pack's skill: a node needing another, gating a recipe; an override", function()
+		local env, root = fresh(function(env, packs)
+			env.graft(SKILLS, packs, "Skilled")
+		end)
+		local Progression = env.require(root.Progression)
+		local Skills, Ages, Knowledge = Progression.Skills, Progression.Ages, Progression.Knowledge
+		local FreshItems = env.require(root.Items)
+		local content = env.require(root.Content).default
+		local blasting = assert(Skills.byId("blasting"), "the pack's node")
+		t.eq(blasting.index, Skills.count, "the last pack's: the last place")
+		t.eq(Ages.get(blasting.age).id, "electric")
+		t.eq(blasting.row, 2)
+		t.eq(table.concat(blasting.requires, " "), "demolition", "it needs the Minecraft pack's")
+		t.eq(table.concat(blasting.recipes, " "), "BlastCharge", "the entry naming it")
+		t.eq(Skills.ofName("BlastCharge"), blasting)
+		-- Its cell on the skill tree screen: its Age's column, a row of its own.
+		for _, other in Skills.ofAge(blasting.age) do
+			t.ok(other == blasting or other.row ~= blasting.row, `{other.id}'s row is another`)
+		end
+		-- The gate: the Age, then the node, which needs Demolition first.
+		local charge = FreshItems.id.BlastCharge
+		local state = Progression.new()
+		Progression.setAge(state, Ages.byId("electric").index)
+		Progression.setPoints(state, Knowledge.total(40))
+		t.ok(not Progression.allows(state, charge), "locked")
+		t.eq(Progression.lockText(state, charge), "Requires Blasting")
+		t.eq(select(2, Progression.canUnlock(state, "blasting")), "requires", "Demolition first")
+		state.skills.demolition = true
+		t.ok((Progression.unlock(state, "blasting")), "then it unlocks")
+		t.ok(Progression.allows(state, charge), "and its recipe with it")
+		local Crafting = env.require(root.Crafting)
+		local I = FreshItems.id
+		local made = Crafting.match({
+			{ item = I.Tnt, count = 1 },
+			{ item = I.Gunpowder, count = 1 },
+			{
+				item = I.Gunpowder,
+				count = 1,
+			},
+		}, 3)
+		t.eq(made and made.item, charge, "the recipe it gates")
+		local Protocol = env.require(root.Net.Protocol)
+		t.eq(Protocol.decodeUnlockSkill(Protocol.encodeUnlockSkill(blasting.index)), blasting.index, "on the wire")
+		-- The override: Forager's cost and line, the rest and its place Core's.
+		local forager = Skills.byId("forager")
+		t.eq(forager.cost, 2, "patched")
+		t.eq(forager.description, "+10% knowledge from discoveries, dearer")
+		t.eq(forager.name, "Forager", "the rest kept")
+		t.eq(forager.perk.bonus, 0.1)
+		t.eq(forager.index, (require(shared.Progression.Skills).byId("forager") :: any).index, "its place kept")
+		t.eq(content.where("skill", "forager"), "pack Core (patched by Skilled), skill forager")
+		t.eq(table.concat((content.origin("skill", "forager") :: any).patched, " "), "Skilled")
+	end)
+
 	--[[ Checks: Content.build ]]
 
 	local MODEL = { { size = { 1, 1, 1 }, offset = { 0, 0, 0 } } }
@@ -1182,6 +1281,12 @@ return function(t, shared, require, _server, _client)
 			with({ blocks = { { name = "A", age = "bronze" } } }),
 			{ "pack P, block A: age names unknown Age bronze" },
 			"an Age"
+		)
+		-- (Content's check now the skills are a kind; Progression/Skills used to make it.)
+		fails(
+			with({ blocks = { { name = "A", skill = "juggling" } } }),
+			{ "pack P, block A: skill names unknown skill juggling" },
+			"a skill"
 		)
 		fails(
 			with({ items = { { name = "I", model = MODEL, places = "Ghost" } } }),
@@ -1535,6 +1640,119 @@ return function(t, shared, require, _server, _client)
 		}, { "pack P, biomes/hills, biome B: beach names unknown block Ghost" }, "the file named")
 	end)
 
+	t.test("content: skills: their schema and perks, ids and overrides, Ages, icons, prerequisites, cells", function()
+		local AGES = {
+			{ id = "a", name = "First Age", level = 0, milestones = {}, reward = 0, color = { 1, 1, 1 } },
+			{ id = "b", name = "Second Age", level = 1, milestones = {}, reward = 0, color = { 1, 1, 1 } },
+		}
+		-- A node `id` of the first Age, row 1 (`fields` on top).
+		local function node(id: string, fields: { [string]: any }?): { [string]: any }
+			local entry: { [string]: any } = {
+				id = id,
+				name = id,
+				description = "x",
+				row = 1,
+				icon = "Stone",
+				age = "a",
+				cost = 1,
+				perk = { kind = "none" },
+			}
+			for key, value in fields or {} do
+				entry[key] = value
+			end
+			return entry
+		end
+		local function tree(skills: { any }): { Content.PackData }
+			return { pack("P", { blocks = { { name = "Stone" } }, ages = AGES, skills = skills }) }
+		end
+		-- The schema's.
+		fails(
+			tree({ node("s", { rwo = 2 }) }),
+			{ "pack P, skill s: rwo is no field it may have (did you mean row?)" },
+			"a typo"
+		)
+		fails(tree({ node("s", { cost = "1" }) }), { "pack P, skill s: cost must be a whole number" }, "a wrong type")
+		fails(tree({ node("s", { icon = false }) }), { "pack P, skill s: icon must be a string" }, "not a name")
+		local noIcon = node("s")
+		noIcon.icon = nil
+		fails(tree({ noIcon }), { "pack P, skill s: icon is missing" }, "a missing field")
+		fails(
+			tree({ node("s", { perk = { kind = "flying" } }) }),
+			{ "pack P, skill s: perk.kind must be one of knowledge, mining, wear, thirst, insulation, boiling, none" },
+			"a perk kind of none of the code's"
+		)
+		fails(
+			tree({ node("s", { perk = { kind = "wear", factor = 1.1 } }) }),
+			{ "pack P, skill s: perk.factor is no number a wear perk has (it has chance)" },
+			"another kind's number"
+		)
+		fails(
+			tree({ node("s", { perk = { kind = "knowledge", bonus = 0.1 } }) }),
+			{ "pack P, skill s: perk.sources is missing (a knowledge perk's)" },
+			"a number the kind needs"
+		)
+		fails(
+			tree({ node("s", { perk = { kind = "wear", chance = 15 } }) }),
+			{ "pack P, skill s: perk.chance must be a share 0..1, not 15" },
+			"a number out of its range"
+		)
+		-- Ids and overrides.
+		fails({
+			pack("P1", { blocks = { { name = "Stone" } }, ages = AGES, skills = { node("s") } }),
+			pack("P2", { skills = { node("s", { row = 2 }) } }, { order = 20 }),
+		}, { "pack P2, skill s: the id is taken by pack P1, skill s" }, "an id twice")
+		fails(
+			tree({ { id = "ghost", override = true, cost = 2 } }),
+			{ "pack P, skill ghost overrides a skill no earlier pack makes" },
+			"an override of nothing"
+		)
+		local patched = Content.build({
+			pack(
+				"P1",
+				{ blocks = { { name = "Stone" } }, ages = AGES, skills = { node("s"), node("t", { row = 2 }) } }
+			),
+			pack("P2", { skills = { { id = "s", override = true, cost = 3 } } }, { order = 20 }),
+		})
+		t.eq(patched.skills[1].cost, 3, "an override patches")
+		t.eq(patched.skills[1].name, "s", "the rest kept")
+		t.eq(patched.skills[2].id, "t", "and its place")
+		t.eq(patched.where("skill", "s"), "pack P1 (patched by P2), skill s")
+		-- Cross-references.
+		fails(tree({ node("s", { age = "c" }) }), { "pack P, skill s: age names unknown Age c" }, "an Age")
+		fails(
+			tree({ node("s", { icon = "Stnoe" }) }),
+			{ "pack P, skill s: icon names unknown item Stnoe (did you mean Stone?)" },
+			"an icon"
+		)
+		fails(
+			tree({ node("s", { requires = { "ghost" } }) }),
+			{ "pack P, skill s: requires names unknown skill ghost" },
+			"a prerequisite"
+		)
+		fails(
+			tree({ node("s", { requires = { "t" } }), node("t", { row = 2, requires = { "s" } }) }),
+			{ "pack P, skill s: its requires go round in a loop (s, t, s)" },
+			"a loop"
+		)
+		fails(
+			tree({ node("s", { requires = { "t" } }), node("t", { age = "b" }) }),
+			{ "pack P, skill s: requires t, a node of a later Age (Second Age)" },
+			"a prerequisite of a later Age"
+		)
+		fails(
+			tree({ node("s"), node("t", { age = "b" }), node("u") }),
+			{ "pack P, skill u: row 1 of the First Age is pack P, skill s's" },
+			"two nodes in one cell of the screen"
+		)
+		t.ok(
+			pcall(
+				Content.build,
+				tree({ node("s"), node("t", { age = "b", requires = { "s" } }), node("u", { row = 6 }) })
+			),
+			"a good tree loads"
+		)
+	end)
+
 	t.test("content: kind folders: every message names the file", function()
 		-- A pack whose kinds are kind folders: `folders` is { [kind] = { { file, data } } }.
 		local function filed(name: string, folders: { [string]: any }, kinds: { [string]: any }?): Content.PackData
@@ -1765,11 +1983,6 @@ return function(t, shared, require, _server, _client)
 	t.test("content: a registry refuses a value only it can check, naming the entry", function()
 		-- (Content checks the names entries give; what a value means is the registry's to check.)
 		refused(
-			{ blocks = { { name = "Stone", override = true, skill = "juggling" } } },
-			{ "Progression", "Skills" },
-			{ `Skills: {STONE} names an unknown skill juggling` }
-		)
-		refused(
 			{ blocks = { { name = "Stone", override = true, sounds = { ["break"] = "block.stone.shatter" } } } },
 			{ "Sounds" },
 			{ `Sounds: {STONE}'s break plays unknown event block.stone.shatter` }
@@ -1872,5 +2085,63 @@ return function(t, shared, require, _server, _client)
 				{ name = "Quick", command = "speed", color = { 1, 2, 3 }, category = "beneficial", icon = "speed" },
 			},
 		}, { "Effects" }, { 'Effects: pack Patch, effect Quick is found by "speed", and so is Speed' })
+	end)
+
+	t.test("content: the skill tree refuses a row off the screen, an icon no item, a perk's source or tier", function()
+		-- A Patch pack's node `id`, in the Stone Age's free row 2 (`fields` on top).
+		local function node(fields: { [string]: any }): { [string]: any }
+			local entry: { [string]: any } = {
+				id = "clash",
+				name = "Clash",
+				description = "x",
+				row = 2,
+				icon = "Stick",
+				age = "stone",
+				cost = 1,
+				perk = { kind = "none" },
+			}
+			for key, value in fields do
+				entry[key] = value
+			end
+			return { skills = { entry } }
+		end
+		local CLASH = "pack Patch, skill clash"
+		refused(
+			node({ row = 7 }),
+			{ "Progression", "Skills" },
+			{ `Skills: {CLASH}: row 7 is off the skill tree (rows 1..6` }
+		)
+		refused(
+			node({ icon = "Air" }),
+			{ "Progression", "Skills" },
+			{ `Skills: {CLASH}: icon Air is a block that is no item` }
+		)
+		refused(
+			node({ perk = { kind = "knowledge", sources = { "discovry" }, bonus = 0.1 } }),
+			{ "Progression", "Skills" },
+			{ `Skills: {CLASH}'s perk names unknown knowledge source discovry (did you mean discovery?)` }
+		)
+		refused(
+			node({ perk = { kind = "mining", tiers = { "Bronze" }, factor = 1.1 } }),
+			{ "Progression", "Skills" },
+			{ `Skills: {CLASH}'s perk's tier Bronze begins no tool's name` }
+		)
+		-- More nodes than the protocol's u8 numbers: Ages enough for their cells.
+		local ages, skills = {}, {}
+		for a = 1, 43 do
+			table.insert(
+				ages,
+				{ id = `age{a}`, name = `Age {a}`, level = a, milestones = {}, reward = 0, color = { 1, 1, 1 } }
+			)
+			for row = 1, 6 do
+				local id = `node{a}_{row}`
+				table.insert(skills, node({ id = id, age = `age{a}`, row = row }).skills[1])
+			end
+		end
+		refused(
+			{ ages = ages, skills = skills },
+			{ "Progression", "Skills" },
+			{ "Skills: ", "nodes, more than the 255 the protocol numbers (a u8 each)" }
+		)
 	end)
 end

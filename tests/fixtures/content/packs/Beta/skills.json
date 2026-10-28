@@ -1,0 +1,13 @@
+[
+	{
+		"id": "beta_scouting",
+		"name": "Beta Scouting",
+		"description": "A skill tree node of the JSON pack",
+		"row": 2,
+		"icon": "BetaGem",
+		"age": "beta_age",
+		"cost": 1,
+		"requires": [],
+		"perk": { "kind": "knowledge", "sources": ["discovery"], "bonus": 0.5 }
+	}
+]

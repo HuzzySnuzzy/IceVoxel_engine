@@ -16,6 +16,8 @@
 	            bunkers', the mineshafts')
 	  ores      { OreFeature }: ore features (Generation/Ores' format, the block by name)
 	  ages      { AgeRecord }: the Ages, in order (Core's; Progression/Ages)
+	  skills    { SkillRecord }: the skill tree's nodes, by id (Progression/Skills; SKILL_FIELDS,
+	            their perks' kinds SKILL_PERKS)
 	  lore      { [name]: line }: tooltip lore of items no entry carries its own of
 	  fuel      { [tag]: ticks }: furnace fuel by item tag (Core's logs and planks: every item in
 	            the tag burns this long, unless its entry gives its own `fuel`)
@@ -475,6 +477,33 @@ export type PotionSpec = {
 	lore: PotionText?,
 	icon: PotionText?,
 	age: PotionText?,
+	override: boolean?,
+}
+
+-- A skill tree node's perk (SKILL_PERKS; Progression/Skills says what each kind does): its kind and
+-- that kind's numbers.
+export type SkillPerk = {
+	kind: string,
+	sources: { string }?,
+	bonus: number?,
+	tiers: { string }?,
+	factor: number?,
+	chance: number?,
+	steps: number?,
+	speed: number?,
+}
+
+-- A skill tree node (the `skills` kind; Progression/Skills, SKILL_FIELDS below).
+export type SkillRecord = {
+	id: string,
+	name: string,
+	description: string,
+	row: number,
+	icon: string,
+	age: string,
+	cost: number,
+	requires: { string }?,
+	perk: SkillPerk,
 	override: boolean?,
 }
 
@@ -1637,6 +1666,110 @@ Schema.POTION_FIELDS = {
 	override = BOOLEAN,
 } :: { [string]: Check }
 
+--[[
+	Skill tree nodes (the `skills` kind; Progression/Skills says how the tree plays). Every field is
+	needed but `requires`; an override (`override = true`) needs only the `id` of the node it
+	patches, field by field (a pack retuning a node's cost: { id = "forager", override = true,
+	cost = 2 }).
+	  id           what saves keep and what entries name (`skill = "demolition"`: their recipes stay
+	               locked until the node is unlocked)
+	  name, description   what the skill tree screen shows of it
+	  row          its row on the skill tree screen (1..Progression/Skills.ROWS; its column is its
+	               Age): one node to an Age's row
+	  icon         the item drawn in its frame, by name
+	  age          the Age it belongs to, by id: unlocked once the player has reached it
+	  cost         skill points (one a knowledge level); the game's nodes cost their Age's number
+	  requires     the nodes (ids) it needs unlocked first, of its Age or an earlier one
+	  perk         { kind = <a SKILL_PERKS kind>, <that kind's numbers> }: what it does
+]]
+-- A whole number of at least `least`.
+local function whole(least: number): Check
+	return function(value: any): string?
+		if type(value) ~= "number" or value ~= math.floor(value) or value < least then
+			return ` must be a whole number, {least} or more, not {describe(value)}`
+		end
+		return nil
+	end
+end
+
+--[[
+	The perks' kinds: the closed set a node's `perk` is one of, each with its numbers (`fields`) and
+	the ones it needs (`needs`). What each does is code (Shared/Progression's knowledgeFactor,
+	miningFactor, wearChance, thirstRate, insulation, boilSpeed); Progression/Skills' header says
+	what each number means, and checks what only it knows (a knowledge source, a tool tier).
+	  knowledge   sources (Knowledge.SOURCES, or "all"), bonus
+	  mining      factor, tiers? (tools' name prefixes; none: any tool)
+	  wear        chance
+	  thirst      factor
+	  insulation  steps
+	  boiling     speed
+	  none        nothing: the node is there for the recipes naming it (Demolition, Fission)
+]]
+Schema.SKILL_PERKS = table.freeze({
+	knowledge = { fields = { sources = STRINGS, bonus = ABOVE_ZERO }, needs = { "sources", "bonus" } },
+	mining = { fields = { factor = ABOVE_ZERO, tiers = STRINGS }, needs = { "factor" } },
+	wear = { fields = { chance = SHARE }, needs = { "chance" } },
+	thirst = { fields = { factor = ABOVE_ZERO }, needs = { "factor" } },
+	insulation = { fields = { steps = whole(1) }, needs = { "steps" } },
+	boiling = { fields = { speed = ABOVE_ZERO }, needs = { "speed" } },
+	none = { fields = {}, needs = {} },
+}) :: { [string]: { fields: { [string]: Check }, needs: { string } } }
+local PERK_KINDS = { "knowledge", "mining", "wear", "thirst", "insulation", "boiling", "none" }
+
+-- A perk: a kind of SKILL_PERKS, with that kind's numbers only, every one it needs.
+local function PERK(value: any): string?
+	if type(value) ~= "table" then
+		return ` must be a table, not {describe(value)}`
+	end
+	local rule = Schema.SKILL_PERKS[value.kind]
+	if rule == nil then
+		return `.kind must be one of {table.concat(PERK_KINDS, ", ")}, not {describe(value.kind)}`
+	end
+	for key, element in value do
+		if type(key) ~= "string" then
+			return ` must have names as keys, not {describe(key)}`
+		elseif key ~= "kind" then
+			local check = rule.fields[key]
+			if check == nil then
+				local near = Schema.suggest(key, rule.fields)
+				local has: { string } = {}
+				for field in rule.fields do
+					table.insert(has, field)
+				end
+				table.sort(has)
+				local why = if near
+					then `did you mean {near}?`
+					elseif #has > 0 then `it has {table.concat(has, ", ")}`
+					else "it has none"
+				return `.{key} is no number a {value.kind} perk has ({why})`
+			end
+			local problem = check(element)
+			if problem then
+				return `.{key}{problem}`
+			end
+		end
+	end
+	for _, key in rule.needs do
+		if value[key] == nil then
+			return `.{key} is missing (a {value.kind} perk's)`
+		end
+	end
+	return nil
+end
+
+Schema.SKILL_FIELDS = {
+	id = STRING,
+	name = STRING,
+	description = STRING,
+	row = whole(1),
+	icon = STRING,
+	age = STRING,
+	cost = whole(0),
+	requires = STRINGS,
+	perk = PERK,
+	override = BOOLEAN,
+} :: { [string]: Check }
+
 Schema.MANIFEST_FIELDS = {
 	order = NUMBER,
 	description = STRING,
@@ -1655,6 +1788,7 @@ Schema.KINDS = table.freeze({
 	"loot",
 	"ores",
 	"ages",
+	"skills",
 	"lore",
 	"fuel",
 	"biomes",
@@ -1671,6 +1805,7 @@ Schema.SINGULAR = table.freeze({
 	loot = "loot table",
 	ores = "ore feature",
 	ages = "Age",
+	skills = "skill",
 	lore = "lore",
 	fuel = "fuel tag",
 	biomes = "biome",
@@ -1684,6 +1819,7 @@ Schema.LISTS = table.freeze({
 	recipes = true,
 	ores = true,
 	ages = true,
+	skills = true,
 	biomes = true,
 	effects = true,
 	potions = true,
@@ -1697,6 +1833,7 @@ local ENTRY_FIELDS: { [string]: { [string]: Check } } = {
 	textures = Schema.TEXTURE_FIELDS,
 	ores = Schema.ORE_FIELDS,
 	ages = Schema.AGE_FIELDS,
+	skills = Schema.SKILL_FIELDS,
 	biomes = Schema.BIOME_FIELDS,
 	effects = Schema.EFFECT_FIELDS,
 	potions = Schema.POTION_FIELDS,
@@ -1747,6 +1884,9 @@ function Schema.check(kind: string, entry: any): string?
 		elseif kind == "textures" then (if override then {} else { "Color", "Material" })
 		elseif kind == "ores" then { "name", "block", "veins", "size", "minY", "maxY" }
 		elseif kind == "ages" then { "id", "name", "level", "milestones", "reward", "color" }
+		elseif kind == "skills" then (if override
+			then { "id" }
+			else { "id", "name", "description", "row", "icon", "age", "cost", "perk" })
 		elseif kind == "biomes" then (if override then { "name" } else Schema.BIOME_NEEDS)
 		elseif kind == "effects" then (if override
 			then { "name" }

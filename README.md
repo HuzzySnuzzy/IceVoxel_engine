@@ -2292,7 +2292,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             Order, Outcome and Service the machine kind and the simulation share)
   Progression/              knowledge, Ages and skills, pure: Knowledge (Minecraft's experience
                             curve, the sources and their numbers, fatigue and the budget), Ages
-                            (what each opens and needs), Skills (the tree and its perks), init
+                            (what each opens and needs), Skills (the tree from the packs'
+                            `skills`, its perks' kinds), init
                             (the state: awards, discoveries, advancing, unlocking, the recipe
                             gate, perks, death, the saved record, the client's status)
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
@@ -3350,24 +3351,24 @@ screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"voi
 
 ## Extending
 
-**Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages, lore
-lines, biomes, status effects and potions come from content packs, folders under
-`src/shared/Content/Packs/` that the game finds and checks as it loads, like Minecraft's data packs
-(docs/ARCHITECTURE.md, "Content packs"). A pack is a `pack` manifest
+**Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages, the
+skill tree's nodes, lore lines, biomes, status effects and potions come from content packs, folders
+under `src/shared/Content/Packs/` that the game finds and checks as it loads, like Minecraft's data
+packs (docs/ARCHITECTURE.md, "Content packs"). A pack is a `pack` manifest
 (`{ order = 300, description = "..." }`) and any of `blocks`, `items`, `recipes`, `tags`,
-`textures`, `loot`, `ores`, `ages`, `lore`, `biomes`, `effects` and `potions`, each a Luau module
-(its data, or a function of `define`, the helpers in `Content/Define`) or a `.json` file. An entry
-carries what other registries used to keep in tables of their own: `lore`, `texture`, `icon`, `age`,
-`skill`, `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`... (`Content/Schema`
-lists them all, and a misspelt field is an error naming the pack and the entry). Ids are given at
-load in pack order, so content may be added anywhere; `override = true` patches another pack's
-entry. A kind may also be a folder of files merged in name order (`Minecraft/blocks/terrain.luau`,
-`blocks/plants.luau`...: a file a feature), so adding content may be adding a file. The game's
-content is feature packs: Core (air, the Ages, the base tags), Minecraft, Mekanism, Survival (Tough
-As Nails and the seasons), Terraria, Apocalypse, Turrets and Ores; each `pack` manifest says what is
-in which file and where its code lives, and the examples below go in any of them.
-`Content/Packs/Ores` is a whole feature (the new ores, the Hazmat suit) in a pack of its own, the
-worked example.
+`textures`, `loot`, `ores`, `ages`, `skills`, `lore`, `biomes`, `effects` and `potions`, each a Luau
+module (its data, or a function of `define`, the helpers in `Content/Define`) or a `.json` file. An
+entry carries what other registries used to keep in tables of their own: `lore`, `texture`, `icon`,
+`age`, `skill`, `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `loot`...
+(`Content/Schema` lists them all, and a misspelt field is an error naming the pack and the entry).
+Ids are given at load in pack order, so content may be added anywhere; `override = true` patches
+another pack's entry. A kind may also be a folder of files merged in name order
+(`Minecraft/blocks/terrain.luau`, `blocks/plants.luau`...: a file a feature), so adding content may
+be adding a file. The game's content is feature packs: Core (air, the Ages, the core skills, the
+base tags), Minecraft, Mekanism, Survival (Tough As Nails and the seasons), Terraria, Apocalypse,
+Turrets and Ores; each `pack` manifest says what is in which file and where its code lives, and the
+examples below go in any of them. `Content/Packs/Ores` is a whole feature (the new ores, the Hazmat
+suit) in a pack of its own, the worked example.
 `lune run tests/content new <Pack>` starts a pack with an example of each kind, and
 `lune run tests/content` says what a pack is missing (the content tool, under Development).
 
@@ -3736,19 +3737,46 @@ with nutrition out of 1..20 and one that does nothing, naming the pack and the e
 pack's `items/mobs` (the meat, Minecraft's numbers) and the Apocalypse pack's `items/supplies` (the
 tins and medicine) list theirs in their headers.
 
-**Ages, skills and knowledge.** A new result belongs to the Stone Age (open to everyone) unless
-an Age names it: add its name to that Age's `recipes` in `src/shared/Progression/Ages.luau` (a
-spec checks every name is an item a recipe makes). An Age is `{ id, name, level, milestones,
-reward, recipes, color }`; milestones are discoveries, `{ category = "craft", key = "Furnace",
-text = ... }` or `{ category = "biome", count = 6, text = ... }`; ids are what saves keep, so
-Ages may be renamed or inserted. A skill is an entry at the end of `SPECS` in
-`Progression/Skills.luau` (the protocol numbers them): `{ id, row, icon, name, description,
-age, requires, perk, recipes }`, its cost its Age's number, its `perk` one of the kinds there
-(knowledge, mining, wear, thirst, insulation, boiling), `recipes` results it unlocks besides
-their Age. Knowledge numbers are tables in `Progression/Knowledge.luau` (DISCOVERY, ORES,
-SMELTED, MOBS). From server code, `Players/Progression`: `award(player, points, reason)`,
+**Ages and knowledge.** A new result belongs to the Stone Age (open to everyone) unless its entry
+names a later one, `age = "iron"` (Core's `ages` are the Ages: stone, iron, industrial, electric,
+atomic). An Age is `{ id, name, level, milestones, reward, color }`; milestones are discoveries,
+`{ category = "craft", key = "Furnace", text = ... }` or `{ category = "biome", count = 6, text =
+... }`; ids are what saves keep, so Ages may be renamed or inserted. Knowledge numbers are tables in
+`Progression/Knowledge.luau` (DISCOVERY, MOBS) and the entries' own `knowledge = { mine = n }` /
+`{ smelt = n }`. From server code, `Players/Progression`: `award(player, points, reason)`,
 `discover(player, category, key)` (true when it was new), `killed(player, mobName)`, `state(player)`,
 `allows(player, item)`.
+
+**A skill.** The skill tree's nodes are the packs' `skills` (Core's knowledge and tools branches,
+the Minecraft pack's Demolition and Fission, the Survival pack's survival branch), each entry all
+there is to its node; `lune run tests/content list skills` shows every node's place, Age and
+row. A node that needs Demolition and gates a recipe, in a pack's `skills.luau`:
+
+```lua
+{
+	id = "blasting",                 -- what saves keep and entries name
+	name = "Blasting",
+	description = "Unlocks the Blast Charge",
+	row = 2,                         -- its row on the screen (1..6); its column is its Age
+	icon = "Tnt",                    -- the item drawn in its frame
+	age = "electric",                -- unlocked once the player reaches this Age
+	cost = 4,                        -- skill points (the game's nodes: their Age's number)
+	requires = { "demolition" },     -- nodes unlocked first, of its Age or an earlier one
+	perk = { kind = "none" },        -- no effect of its own: it is there for its recipes
+}
+```
+
+and on the item its recipe makes, `skill = "blasting"` (besides `age = "electric"`): that recipe
+stays locked until the node is unlocked. A `perk` is one of the kinds the game codes, with that
+kind's numbers (`Content/Schema`'s SKILL_PERKS; `Progression/Skills` says what each does):
+`{ kind = "knowledge", sources = { "ore" }, bonus = 0.5 }`, `{ kind = "mining", tiers = {
+"Iron" }, factor = 1.1 }`, `{ kind = "wear", chance = 0.15 }`, `{ kind = "thirst", factor = 0.9 }`,
+`{ kind = "insulation", steps = 1 }`, `{ kind = "boiling", speed = 2 }`. A pack retunes another's
+node with an override, `{ id = "forager", override = true, cost = 2 }`. The game checks it as it
+loads, naming the pack, the file and the node: the Age, the icon, the `requires` (known, of no later
+Age, never in a loop), the row (one node to an Age's row, on the screen's six) and the perk's kind
+and numbers, and every entry's `skill`. A node's place among every pack's nodes is what the protocol
+sends (a u8), so nodes may go anywhere; saves keep ids.
 
 **Block textures (the texture pack).** Every block texture is in one hand-edited module,
 `src/shared/TexturePack.luau`, like a Minecraft resource pack. Its `Textures` table lists the

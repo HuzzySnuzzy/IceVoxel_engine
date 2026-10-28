@@ -560,10 +560,12 @@ return function(t, shared, require, server, client)
 
 	t.test("skills: data (ids, rows, icons, prerequisites, costs)", function()
 		t.ok(Skills.count >= 15, "a tree")
-		t.eq(Skills.totalCost(), 51)
+		-- (Not a total: the content packs' nodes may grow. The tree costs more than the last Age's
+		-- level, so a player picks a path first.)
+		t.ok(Skills.totalCost() > Ages.list[Ages.count].level, "more points than the last Age's level")
 		for index = 1, Ages.count do
 			local nodes = Skills.ofAge(index)
-			t.ok(#nodes >= 3 and #nodes <= 6, `{Ages.list[index].id}: 3-6 nodes`)
+			t.ok(#nodes >= 3 and #nodes <= Skills.ROWS, `{Ages.list[index].id}: 3 nodes to a row each`)
 		end
 		for index, skill in Skills.list do
 			t.eq(skill.index, index)
@@ -573,9 +575,11 @@ return function(t, shared, require, server, client)
 			end)
 			t.ok(ok and id, `{skill.id}'s icon {skill.icon} is an item`)
 			t.ok(skill.perk.kind ~= "none" or #skill.recipes > 0, `{skill.id} does something`)
+			-- (A node of its Age or an earlier one: the packs' nodes may need a later pack's, so
+			-- not an earlier place; Content refuses unknown ones and loops.)
 			for _, required in skill.requires do
 				local before = Skills.byId(required)
-				t.ok(before and before.index < index, `{skill.id} needs an earlier node`)
+				t.ok(before and before.age <= skill.age, `{skill.id} needs a node of its Age or an earlier one`)
 			end
 			for _, name in skill.recipes do
 				t.eq(select(2, Progression.requirement(I[name])), skill, `{name} needs {skill.id}`)
