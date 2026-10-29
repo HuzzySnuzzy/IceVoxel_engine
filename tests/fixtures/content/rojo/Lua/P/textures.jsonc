@@ -1,0 +1,4 @@
+{
+	// A .jsonc kind module: comments and a trailing comma.
+	"lua block": { "Color": "", "Material": "Slate" },
+}

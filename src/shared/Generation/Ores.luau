@@ -178,15 +178,23 @@ do
 		})
 	end
 end
--- Each feature's stream salt, by its name (the packs' ore names are unique).
+-- Each feature's stream salt, by its name (the packs' ore names are unique). A feature's numbers
+-- only this module can check name its pack.
 local FEATURE_SALT: { [string]: number } = {}
 for _, ore in ORES do
+	local where = Content.default.where("ores", ore.name)
 	assert(FEATURE_SALT[ore.name] == nil, `Ores: two features named {ore.name}`)
 	FEATURE_SALT[ore.name] = Hash.string("ores.feature." .. ore.name)
-	assert(ore.minY < ore.maxY, `Ores: empty height range of {ore.name}`)
-	assert(ore.shape == nil or (ore.shape == "trapezoid" and ore.maxY < math.huge), `Ores: bad shape of {ore.name}`)
-	assert(ore.depth == nil or (ore.shape == nil and ore.maxY < math.huge), `Ores: bad depth range of {ore.name}`)
-	assert(ore.dry == nil or ore.depth, `Ores: {ore.name} is dry but not under the surface`)
+	assert(ore.minY < ore.maxY, `Ores: {where} has an empty height range (minY {ore.minY}, maxY {ore.maxY})`)
+	assert(
+		ore.shape == nil or (ore.shape == "trapezoid" and ore.maxY < math.huge),
+		`Ores: {where} is a trapezoid without a top (maxY)`
+	)
+	assert(
+		ore.depth == nil or (ore.shape == nil and ore.maxY < math.huge),
+		`Ores: {where} counts its height down from the surface (depth), so it has no shape and a maxY`
+	)
+	assert(ore.dry == nil or ore.depth, `Ores: {where} is dry but not under the surface (depth)`)
 	table.freeze(ore)
 end
 

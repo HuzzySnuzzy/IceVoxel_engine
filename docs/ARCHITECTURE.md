@@ -110,14 +110,15 @@ joins Core's tag). Recipes, ore features (each named once) and Ages (each id onc
 order; loot tables, lore lines, fuel tags and structure templates are named once. Skills merge
 by id as blocks do by name: `{ id = "forager", override = true, cost = 2 }` patches a node,
 keeping its place (each node's place among every pack's is its position, what the protocol sends
-as a u8). Biomes merge by name like blocks, keeping their place, but an override patches a table
+as a u8). Biomes merge by name like blocks, keeping their place: an override patches a table
 of fields (`weather`, `patches`, `foliage` and its `flowers` and `herbs`) field by field in turn,
-and replaces a list (`bands`, `features`, `plants`, `species`, `tags`) whole; the patched biome is
-checked whole again. Template pools and structures merge by name with `override = true` as
-blocks do (structures keep their load order), and an override's list field replaces the earlier
-list whole, as every kind's does: a block's `tags` or `shape`, a pool's `elements`, a structure's
-`biomes` (Minecraft's data packs replace a template_pool file whole too); to add an element to a
-pool, an override lists the pool's own elements and the new one. Effects and potions merge by name
+replaces a list (`bands`, `features`, `plants`, `species`) whole and adds its `tags`; the patched
+biome is checked whole again. Template pools and structures merge by name with `override = true`
+as blocks do (structures keep their load order), and an override's list field replaces the
+earlier list whole, as every kind's does: a block's `shape`, a pool's `elements`, a structure's
+`biomes` (Minecraft's data packs replace a template_pool file whole too), but `tags`, which add
+(Content/Schema's `patch`); to add an element to a pool, an override lists the pool's own
+elements and the new one. Effects and potions merge by name
 as blocks and items do (each kind's names its own: the potion Strength gives the effect
 Strength). Once every pack has merged, each potion is brewed (`Content/Define`'s `brew`,
 Minecraft's brewing in a grid) into its items, a Purified Water Bottle with its ingredient, the

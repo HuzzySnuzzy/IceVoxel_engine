@@ -1,6 +1,10 @@
 --[[
-	Crafting recipes (Minecraft's shaped, shapeless and repair matching) and furnaces.
+	Crafting recipes (Minecraft's shaped, shapeless and repair matching) and furnaces; a later
+	pack's recipe never replacing an earlier one's (crafting and smelting take the first).
 ]]
+
+local GamePacks = require("../lib/GamePacks")
+local Loader = require("../lib/Loader")
 
 return function(t, shared, require)
 	local Items = require(shared.Items)
@@ -341,5 +345,28 @@ return function(t, shared, require)
 		Smelting.tick(idle)
 		t.eq(idle.slots[2].count, 1, "nothing to smelt: no fire")
 		t.ok(not Smelting.active({ slots = {}, data = Smelting.newData() }))
+	end)
+
+	t.test("smelting: the first recipe for an input wins, as crafting's first that fits does", function()
+		-- (A pack after every other smelting Cobblestone into Glass, in a fresh game.)
+		local env = Loader.new()
+		local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
+		local packs = (root :: any).Content.Packs
+		local order = GamePacks.orderAfter(env, packs, 900)
+		local later = env.folder(packs, "Later")
+		env.module(later, "pack", { order = order, requires = { "Minecraft" } })
+		env.module(later, "recipes", { { type = "smelting", input = "Cobblestone", result = "Glass" } })
+		local FreshItems = env.require((root :: any).Items)
+		local FreshSmelting = env.require((root :: any).Crafting.Smelting)
+		local made = FreshSmelting.result(FreshItems.id.Cobblestone)
+		t.eq(made and made.item, FreshItems.id.Stone, "Minecraft's Cobblestone -> Stone kept")
+		t.eq((Smelting.result(id.Cobblestone) :: any).item, id.Stone, "as in the game's own")
+		-- (Recipe browsers still list the later one; tests/content check warns it never smelts.)
+		local listed = false
+		for _, recipe in FreshSmelting.recipes() do
+			listed = listed
+				or recipe.result.item == FreshItems.id.Glass and recipe.inputs[1] == FreshItems.id.Cobblestone
+		end
+		t.ok(listed, "listed")
 	end)
 end

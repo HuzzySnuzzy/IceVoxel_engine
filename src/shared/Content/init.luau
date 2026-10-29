@@ -17,7 +17,16 @@
 	  that build entries or read switches), or a `.json` file holding it (Rojo makes a JSON file a
 	  ModuleScript returning its table, and so does the Lune loader). Any other module in a pack is
 	  an error (a misspelt kind would be ignored otherwise) unless its name starts with "_": the
-	  pack's own helpers, which its kind modules require (at the pack's top only).
+	  pack's own helpers, which its kind modules require (at the pack's top only). A module must
+	  give its data: nil (a function that forgets `return list`) is an error naming the pack and
+	  the kind.
+	  A pack is read as Rojo builds it, the same in Roblox and in Lune (tests/lib/Loader follows
+	  Rojo's rules), and what Rojo would make of a file that is no pack data is an error: a name
+	  with a dot (`ores.old.luau`, Rojo's module "ores.old"), anything but a module or a folder (a
+	  `.txt` file's StringValue), a name twice (`blocks.luau` beside `blocks.json`, or beside a
+	  `blocks` folder: Rojo keeps both, and which one a script finds by the name is not said, so
+	  a client and the server could load different ones) and a module with modules in it (a folder
+	  holding an `init.luau`, whose other files would never load).
 
 	Kind folders
 	  A kind may also be a folder of the kind's name (`Minecraft/blocks/`), as Minecraft's data
@@ -29,7 +38,7 @@
 	  (textures, loot, lore, fuel, templates, pools) may not name one thing twice, and tags join as
 	  across packs. Messages name the file: "pack Minecraft, blocks/plants, block Poppy". A pack has
 	  a kind as a module or as a folder, not both; a kind folder holds only modules and folders (no
-	  "_" helpers).
+	  "_" helpers, and no `init.luau`: its files merge by their names).
 
 	Order and ids
 	  Packs load sorted by (`order`, name), and a pack's entries keep their order. A block's id is
@@ -44,16 +53,24 @@
 
 	Merging
 	  blocks, items  by name: an entry with `override = true` patches the entry of that name an
-	                 earlier pack made, field by field ({ name = "Stone", override = true, hardness
-	                 = 2 }: Minecraft's data pack override); without it a name already taken, by a
-	                 block or an item, is an error naming both packs, and so is an override of
-	                 nothing.
+	                 earlier pack made ({ name = "Stone", override = true, hardness = 2 }:
+	                 Minecraft's data pack override), as every override does (Schema.patch):
+	                   * each field it gives replaces the entry's;
+	                   * but a table of fields is patched the same way, key by key: a record (a
+	                     block's `texture` faces, an item's `food`) or a map of names (a block's
+	                     `sounds`), so { name = "Grass", override = true, texture = { Top = "..."
+	                     } } keeps Grass's Sides and Bottom;
+	                   * and its `tags` add to the entry's (a union);
+	                   * a list (`shape`, `model`, `color`) replaces the entry's whole, and nothing
+	                     takes a field away.
+	                 The patched entry is checked whole again. Without `override` a name already
+	                 taken, by a block or an item, is an error naming both packs, and so is an
+	                 override of nothing.
 	  textures       by name, the same way (an override patches the texture's fields).
-	  biomes         by name, the same way, keeping their place; an override's table of fields
-	                 (weather, patches, foliage and its flowers and herbs) patches the biome's
-	                 field by field in turn, a list (bands, features, plants, species, tags)
-	                 replaces it whole (Schema's BIOME_FIELDS), and the patched biome is checked
-	                 whole again.
+	  biomes         by name, the same way, keeping their place: weather, patches, foliage and its
+	                 flowers and herbs are patched key by key, bands, features, plants and species
+	                 replaced whole (Schema's BIOME_FIELDS), tags added; the patched biome is
+	                 checked whole again.
 	  skills         by id, the same way ({ id = "forager", override = true, cost = 2 }); a node's
 	                 place among every pack's nodes is its position, sent as a u8
 	                 (Progression/Skills).
@@ -63,7 +80,12 @@
 	  tags           a union: each pack's lists in load order, then every entry's `tags`, each
 	                 name once.
 	  recipes        appended in load order; so are ore features (each with a name of its own)
-	                 and Ages (each id once).
+	                 and Ages (each id once). A recipe has no name to override: crafting takes the
+	                 first recipe that fits a grid (Crafting) and smelting the first for an input
+	                 (Crafting/Smelting), so a later pack's recipe for the same grid or input never
+	                 replaces an earlier one; it is never made, which `tests/content check` warns
+	                 of (and tests/spec/CraftingGrids fails on). A pack changes another's recipe
+	                 only through that pack (a Config switch it reads).
 	  loot, lore     by name, each once; so is fuel (by tag: every item in the tag burns that
 	                 long, unless its entry gives its own `fuel`, Crafting/Recipes), and so are
 	                 structure templates.
@@ -82,32 +104,38 @@
 
 	Checks, as packs load (each message names the pack, the kind and the entry):
 	  * the manifest and every entry against Content/Schema: unknown fields (with "did you mean"),
-	    wrong types, missing fields;
+	    wrong types, missing fields, a name outside a closed set the Schema gives (with "did you
+	    mean": a block's `tool`, `menu`, `material` and `behaviour`, an item's `tool.kind`, an
+	    Age's milestones' `category`...), a loot pool's rolls (its fewest above its most);
 	  * names taken twice, overrides of nothing, a `requires` that does not load first;
 	  * every cross-reference: the names recipes, tags and loot tables give (items or blocks), the
 	    tags recipes and fuel name, `drops`, `shearDrops`, `item`, `places`, `caveTwin`, a plant's
-	    other half, a toggle's `to`, a block's loot table, an ore feature's block, the Ages entries
-	    name (`age`), the textures blocks name (`texture`) and the blocks textures are tinted like,
-	    the Ages' milestones' items, every lore line's item, a lore line both on an entry and in a
-	    pack's `lore`, the blocks a biome names (its ground, and its plants: single plants or lower
-	    halves), and a potion's effect, its ingredient and its variants (Schema.checkVariants: an
-	    instant effect's potion has no seconds and no long variant...); a template's text (IVS1
-	    that reads, under the name it holds) and its palette's blocks, the templates pools'
-	    elements give, pools' fallbacks and structures' start pools (each a pool, a template, or
-	    the templates named under it: Structures/Library's lookup), and a structure's biomes (by
-	    their exact names, at least one); the sound events entries name (a block's `sounds`,
-	    `workSound` and toggle's `sound`, an item's `equipSound` and food's `sound`); an
-	    explosive's `lit` block (one with a `fuse`), an empty container's `fills` and dirty
-	    water's `purified` (its drink's); an entry's former names (`formerly`: each claimed once,
-	    none a name an entry has now);
+	    other half, a toggle's `to`, a block's loot table, a fluid block's `fluid.group` (one of
+	    Fluids/FluidList's), an ore feature's block, the Ages entries name (`age`), the textures
+	    blocks name (`texture`) and the blocks textures are tinted like, the Ages' milestones (a
+	    key or a count, each; a key an item, a block, a biome or an Age, as its category says: a
+	    mob's is Progression/Ages' to check), every lore line's item, a lore line both on an entry
+	    and in a pack's `lore`, the blocks a biome names (its ground, and its plants: single plants
+	    or lower halves), and a potion's effect, its ingredient and its variants
+	    (Schema.checkVariants: an instant effect's potion has no seconds and no long variant...);
+	    a template's text (IVS1 that reads, under the name it holds) and its palette's blocks, the
+	    templates pools' elements give, pools' fallbacks and structures' start pools (each a pool,
+	    a template, or the templates named under it: Structures/Library's lookup), and a
+	    structure's biomes (by their exact names, at least one); the sound events entries name (a
+	    block's `sounds`, `workSound` and toggle's `sound`, an item's `equipSound` and food's
+	    `sound`); an explosive's `lit` block (one with a `fuse`), an empty container's `fills` and
+	    dirty water's `purified` (its drink's); an entry's former names (`formerly`: each
+	    claimed once, none a name an entry has now);
 	  * the skills: each node's Age and icon, its `requires` (known nodes, of its Age or an earlier
 	    one, never in a loop), one node to an Age's row, and every entry's `skill`.
 	  The registries check what only they know of an entry's value as they load, naming the pack
-	  too (`where`): a skill's row, icon item and perk numbers, a block's sound action, a sound
-	  event's numbers and limit, a machine kind, the miner's numbers, a radiation or shielding
-	  number, a fuel's ticks, a biome's bands (Biomes) and tree builders (Generation/Structures), two
-	  effects /effect would find by one word (Effects), a structure's numbers, start jigsaw and its
-	  templates' jigsaws and chests (Structures/Library).
+	  too (`where`): a skill's row, icon item and perk numbers, a block's sound action, its sound
+	  type and a texture's Material (Blocks), an item's icon (Items), a recipe's key and `keep`
+	  (Crafting), a sound event's numbers and limit, a machine kind, the miner's numbers, a
+	  radiation or shielding number, a fuel's ticks, an ore feature's heights (Generation/Ores), a
+	  mob a milestone names (Progression/Ages), a biome's bands (Biomes) and tree builders
+	  (Generation/Structures), two effects /effect would find by one word (Effects), a structure's
+	  numbers, start jigsaw and its templates' jigsaws and chests (Structures/Library).
 
 	API
 	  Content.default             the packs under Content/Packs, loaded once: what the game uses
@@ -132,16 +160,23 @@
 	                              an entry by name, nil when there is none
 	  content.where(kind, name)   "pack Minecraft, blocks/terrain, block Stone" (kind: Schema
 	                              .SINGULAR's word: "block", "item", "texture"..., or the kind;
-	                              the file only for a kind folder's), for registries' messages
+	                              the file only for a kind folder's; the overrides' packs too,
+	                              "(patched by Patch's blocks/stone)"), for registries' messages;
+	                              a recipe's by its place in content.recipes ("pack Minecraft,
+	                              recipes/tools, recipe #3 (WoodenPickaxe)")
 	  content.origin(kind, name)  the same as data (Origin, nil when nothing has the name): the
 	                              pack that made it, its kind folder's file (nil: the kind's
-	                              module), the packs that patched it in load order. A tag's: the
+	                              module), the packs that patched it in load order (`patched`)
+	                              and each override's pack and file (`overrides`). A tag's: the
 	                              first pack putting names in it, then (`patched`) the packs adding
-	                              to it. A recipe's (`name`: its place in content.recipes): its
-	                              pack, file and `index`, its place in that file's list.
+	                              to it, an override's `tags` its pack's. A recipe's (`name`: its
+	                              place in content.recipes): its pack, file and `index`, its place
+	                              in that file's list. A potion's brewed items and recipes: patched
+	                              by the packs that patched the potion.
 ]]
 
 local Define = require(script.Define)
+local FluidList = require(script.Parent.Fluids.FluidList)
 local Schema = require(script.Schema)
 local TemplateText = require(script.Parent.Structures.TemplateText)
 
@@ -175,10 +210,12 @@ export type PackData = {
 	folders: { [string]: { PackFile } }?,
 }
 
+-- An override: its pack and the kind folder's file it is in (nil: the kind's module).
+export type Patch = { pack: string, file: string? }
 -- Where something came from (`origin`): the pack that made it and the kind folder's file it is in
--- (nil: the kind's module), the packs that patched it in load order; a recipe's place in its file's
--- list (`index`).
-export type Origin = { pack: string, file: string?, patched: { string }, index: number? }
+-- (nil: the kind's module), the packs that patched it in load order (`overrides`: each one's pack
+-- and file); a recipe's place in its file's list (`index`).
+export type Origin = { pack: string, file: string?, patched: { string }, overrides: { Patch }, index: number? }
 
 export type Content = {
 	packs: { PackInfo },
@@ -209,7 +246,7 @@ export type Content = {
 	item: (name: string) -> ItemSpec?,
 	entry: (name: string) -> Entry?,
 	biome: (name: string) -> BiomeSpec?,
-	where: (kind: string, name: string) -> string,
+	where: (kind: string, name: string | number) -> string,
 	origin: (kind: string, name: string | number) -> Origin?,
 }
 
@@ -244,21 +281,6 @@ end
 local function hint(name: string, names: { [string]: any }): string
 	local near = Schema.suggest(name, names)
 	return if near then ` (did you mean {near}?)` else ""
-end
-
--- `base` with `patch`'s fields over it, a new table: where `base` has a table of fields (no list)
--- `patch` patches it the same way, field by field; anything else (a list, a value) is replaced.
-local function patchFields(base: { [string]: any }, patch: { [string]: any }): { [string]: any }
-	local out = table.clone(base)
-	for field, value in patch do
-		local old = out[field]
-		if type(value) == "table" and type(old) == "table" and next(old) ~= nil and not isList(old) then
-			out[field] = patchFields(old, value)
-		else
-			out[field] = value
-		end
-	end
-	return out
 end
 
 --[[
@@ -318,15 +340,21 @@ function Content.build(input: { PackData }): Content
 	-- (The kind folder's file it is in, for a kind folder's.)
 	local madeIn: { [string]: { [string]: string? } } = {}
 	local patched: { [string]: { [string]: { string } } } = {}
+	-- (Each override's pack and file, in the same order.)
+	local overrides: { [string]: { [string]: { Patch } } } = {}
 	for kind in SINGULAR do
 		made[kind] = {}
 		madeIn[kind] = {}
 		patched[kind] = {}
+		overrides[kind] = {}
 	end
+	-- A block's or an item's own tags and the pack (and file) that gave each: its maker's, or an
+	-- override's that added it (kind -> name -> tag -> where).
+	local tagsBy: { [string]: { [string]: { [string]: Patch } } } = { blocks = {}, items = {} }
 	local recipes: { Recipe } = {}
-	-- Each recipe's pack and file ("pack P, recipes/tools", and apart) and its place in the file's
-	-- list.
-	local recipeFrom: { { from: string, pack: string, file: string?, index: number } } = {}
+	-- Each recipe's pack and file ("pack P, recipes/tools", and apart), its place in the file's
+	-- list, and the packs that patched what made it (a brewed recipe's potion).
+	local recipeFrom: { { from: string, pack: string, file: string?, index: number, patched: { Patch }? } } = {}
 	local tags: { [string]: { string } } = {}
 	local tagHas: { [string]: { [string]: boolean } } = {}
 	-- Who put each name in a tag: tag -> name -> "pack X" or "pack X, block Y".
@@ -374,10 +402,26 @@ function Content.build(input: { PackData }): Content
 		if pack == nil then
 			return `{SINGULAR[kind]} {name}`
 		end
-		local by = patched[kind][name]
-		local patches = if by and #by > 0 then ` (patched by {table.concat(by, ", ")})` else ""
+		-- (Each override's pack, and its file when it is a kind folder's: "Patch's blocks/stone".)
+		local by: { string } = {}
+		for _, patch in (overrides[kind][name] or {}) :: { Patch } do
+			table.insert(by, if patch.file then `{patch.pack}'s {patch.file}` else patch.pack)
+		end
+		local patches = if #by > 0 then ` (patched by {table.concat(by, ", ")})` else ""
 		local file = madeIn[kind][name]
 		return `pack {pack}{patches}{if file then `, {file}` else ""}, {SINGULAR[kind]} {name}`
+	end
+
+	-- `name` of `kind` made by `pack` (`file`: its kind folder's), or patched by it.
+	local function madeBy(kind: string, name: string, pack: string, file: string?)
+		made[kind][name] = pack
+		madeIn[kind][name] = file
+		patched[kind][name] = {}
+		overrides[kind][name] = {}
+	end
+	local function patchedBy(kind: string, name: string, pack: string, file: string?)
+		table.insert(patched[kind][name], pack)
+		table.insert(overrides[kind][name], { pack = pack, file = file })
 	end
 
 	-- "pack P", or "pack P, blocks/plants" for a kind folder's file: where a module's data is.
@@ -417,6 +461,31 @@ function Content.build(input: { PackData }): Content
 		end
 	end
 
+	-- An override of `kind` (`entry`, at `here`) merged onto the entry it patches (`base`:
+	-- Schema.patch), and the patched entry checked whole (the override's own check needs none of
+	-- a table's fields).
+	local function patchOnto(kind: string, base: any, entry: any, here: string): any
+		local target = Schema.patch(kind, base, entry)
+		local problem = Schema.check(kind, target)
+		if problem then
+			fail(`{here}: once patched, {problem}`)
+		end
+		return target
+	end
+
+	-- A block's or an item's `tags` (`entry`'s) given by `pack` (`file`), each it has not yet.
+	local function tagsOf(kind: string, entry: any, pack: string, file: string?)
+		local by = tagsBy[kind]
+		if by == nil then
+			return
+		end
+		local own = by[entry.name] or {}
+		by[entry.name] = own
+		for _, tag in (entry.tags or {}) :: { string } do
+			own[tag] = own[tag] or { pack = pack, file = file }
+		end
+	end
+
 	-- An entry of a kind merged by name (`lists`: a block, an item, an effect, a potion, a
 	-- structure, a sound, a track) of `pack` (checked; `file`: its kind folder's file): appended,
 	-- or patched onto the earlier one.
@@ -435,14 +504,9 @@ function Content.build(input: { PackData }): Content
 						else hint(name, at)}`
 				)
 			end
-			local target = table.clone(list[index])
-			for field, value in entry do
-				if field ~= "override" and field ~= "name" then
-					target[field] = value
-				end
-			end
-			list[index] = target
-			table.insert(patched[kind][name], pack)
+			list[index] = patchOnto(kind, list[index], entry, here)
+			patchedBy(kind, name, pack, file)
+			tagsOf(kind, entry, pack, file)
 		else
 			local other = takenBy(kind, name)
 			if other then
@@ -450,9 +514,8 @@ function Content.build(input: { PackData }): Content
 			end
 			table.insert(list, table.clone(entry))
 			at[name] = #list
-			made[kind][name] = pack
-			madeIn[kind][name] = file
-			patched[kind][name] = {}
+			madeBy(kind, name, pack, file)
+			tagsOf(kind, entry, pack, file)
 		end
 	end
 
@@ -472,26 +535,19 @@ function Content.build(input: { PackData }): Content
 			if before == nil then
 				fail(`{here} overrides a {SINGULAR[kind]} no earlier pack makes{hint(name, into)}`)
 			end
-			local target = table.clone(into[name])
-			for field, v in value do
-				if field ~= "override" then
-					target[field] = v
-				end
-			end
-			into[name] = target
-			table.insert(patched[kind][name], pack)
+			into[name] = patchOnto(kind, into[name], value, here)
+			patchedBy(kind, name, pack, file)
 			return
 		end
 		if before then
 			fail(`{here}: {placeOf(before, madeIn[kind][name])} has one by that name already`)
 		end
 		into[name] = if type(value) == "table" then table.clone(value) else value
-		made[kind][name] = pack
-		madeIn[kind][name] = file
-		patched[kind][name] = {}
+		madeBy(kind, name, pack, file)
 	end
 
-	-- A biome of `pack` (checked): appended, or patched onto the earlier one (`patchFields`).
+	-- A biome of `pack` (checked): appended, or patched onto the earlier one (Schema.patch; checked
+	-- whole with the cross-references).
 	local function mergeBiome(pack: string, file: string?, entry: any)
 		local name = entry.name :: string
 		local here = `{placeOf(pack, file)}, biome {name}`
@@ -500,11 +556,8 @@ function Content.build(input: { PackData }): Content
 			if index == nil then
 				fail(`{here} overrides a biome no earlier pack makes{hint(name, biomeAt)}`)
 			end
-			local patch = table.clone(entry)
-			patch.override = nil
-			patch.name = nil
-			biomes[index] = patchFields(biomes[index], patch) :: any
-			table.insert(patched.biomes[name], pack)
+			biomes[index] = Schema.patch("biomes", biomes[index], entry) :: any
+			patchedBy("biomes", name, pack, file)
 		elseif index then
 			fail(
 				`{here}: the name is taken by {whereOf("biomes", name)} (another name, or override = true to patch it)`
@@ -512,9 +565,7 @@ function Content.build(input: { PackData }): Content
 		else
 			table.insert(biomes, table.clone(entry))
 			biomeAt[name] = #biomes
-			made.biomes[name] = pack
-			madeIn.biomes[name] = file
-			patched.biomes[name] = {}
+			madeBy("biomes", name, pack, file)
 		end
 	end
 
@@ -527,22 +578,14 @@ function Content.build(input: { PackData }): Content
 			if index == nil then
 				fail(`{here} overrides a skill no earlier pack makes{hint(id, skillAt)}`)
 			end
-			local target = table.clone(skills[index]) :: any
-			for field, value in entry do
-				if field ~= "override" and field ~= "id" then
-					target[field] = value
-				end
-			end
-			skills[index] = target
-			table.insert(patched.skills[id], pack)
+			skills[index] = patchOnto("skills", skills[index], entry, here)
+			patchedBy("skills", id, pack, file)
 		elseif skillAt[id] then
 			fail(`{here}: the id is taken by {whereOf("skills", id)} (another id, or override = true to patch it)`)
 		else
 			table.insert(skills, table.clone(entry))
 			skillAt[id] = #skills
-			made.skills[id] = pack
-			madeIn.skills[id] = file
-			patched.skills[id] = {}
+			madeBy("skills", id, pack, file)
 		end
 	end
 
@@ -610,9 +653,7 @@ function Content.build(input: { PackData }): Content
 									`{place}, ore feature {entry.name}: {placeOf(before, madeIn.ores[entry.name])} has one by that name`
 								)
 							end
-							made.ores[entry.name] = pack
-							madeIn.ores[entry.name] = file
-							patched.ores[entry.name] = {}
+							madeBy("ores", entry.name, pack, file)
 							table.insert(ores, table.clone(entry))
 						elseif kind == "ages" then
 							local before = made.ages[entry.id]
@@ -621,9 +662,7 @@ function Content.build(input: { PackData }): Content
 									`{place}, Age {entry.id}: {placeOf(before, madeIn.ages[entry.id])} has an Age with that id`
 								)
 							end
-							made.ages[entry.id] = pack
-							madeIn.ages[entry.id] = file
-							patched.ages[entry.id] = {}
+							madeBy("ages", entry.id, pack, file)
 							table.insert(ages, table.clone(entry))
 						elseif kind == "skills" then
 							mergeSkill(pack, file, entry)
@@ -703,14 +742,22 @@ function Content.build(input: { PackData }): Content
 					`{placeOf(pack, file)}, item {spec.name}: the name is taken by {other} (rename the potion or the item)`
 				)
 			end
-			made.items[spec.name] = pack
-			madeIn.items[spec.name] = file
-			patched.items[spec.name] = {}
+			-- (Patched by the packs that patched the potion: what it is brewed from.)
+			madeBy("items", spec.name, pack, file)
+			for _, patch in overrides.potions[potion.name] do
+				patchedBy("items", spec.name, patch.pack, patch.file)
+			end
 			table.insert(into.items, spec)
 		end
 		for index, recipe in brew.recipes do
 			table.insert(into.recipes, recipe)
-			table.insert(into.from, { from = placeOf(pack, file), pack = pack, file = file, index = index })
+			table.insert(into.from, {
+				from = placeOf(pack, file),
+				pack = pack,
+				file = file,
+				index = index,
+				patched = overrides.potions[potion.name],
+			})
 		end
 	end
 	-- (The lists put back in pack order, each pack's potions' after its own.)
@@ -753,11 +800,14 @@ function Content.build(input: { PackData }): Content
 		table.insert(entries, spec)
 	end
 
-	-- Entries' own tags, after every pack's lists.
+	-- Entries' own tags, after every pack's lists: each the pack's (and file's) that gave it, its
+	-- maker's or an override's.
 	for _, entry in entries do
 		local kind = if blockAt[entry.name] then "blocks" else "items"
+		local by = tagsBy[kind][entry.name] or {}
 		for _, tag in (entry.tags or {}) :: { string } do
-			addToTag(tag, entry.name, whereOf(kind, entry.name), made[kind][entry.name], madeIn[kind][entry.name])
+			local from = by[tag] or { pack = made[kind][entry.name], file = madeIn[kind][entry.name] }
+			addToTag(tag, entry.name, whereOf(kind, entry.name), from.pack, from.file)
 		end
 	end
 
@@ -803,6 +853,12 @@ function Content.build(input: { PackData }): Content
 				end
 			end
 		end
+	end
+
+	-- The fluids a fluid block's `group` may name (Fluids/FluidList's, by name).
+	local fluidNames: { [string]: boolean } = {}
+	for _, fluid in FluidList do
+		fluidNames[fluid.name] = true
 	end
 
 	-- A sound event an entry names: one of the packs' sounds.
@@ -853,6 +909,10 @@ function Content.build(input: { PackData }): Content
 		end
 		if spec.workSound then
 			needSound(here, "workSound", spec.workSound)
+		end
+		local group = spec.fluid and spec.fluid.group
+		if group and fluidNames[group] == nil then
+			fail(`{here}: fluid.group names unknown fluid {group}{hint(group, fluidNames)}`)
 		end
 		if spec.texture then
 			for face, texture in spec.texture :: { [string]: string } do
@@ -957,13 +1017,23 @@ function Content.build(input: { PackData }): Content
 	for _, ore in ores do
 		needName(whereOf("ores", ore.name), "block", ore.block, true)
 	end
+	-- An Age's milestones: a key or a count each, a key of what its category counts (an item
+	-- crafted or smelted, a block mined, a biome visited, an Age reached; a mob killed is
+	-- Progression/Ages' to check, the mobs being no content).
 	for _, age in ages do
-		for _, milestone in age.milestones do
-			local key = milestone.key
-			if key and (milestone.category == "craft" or milestone.category == "smelt") then
-				needName(whereOf("ages", age.id), `milestone {milestone.category}`, key)
-			elseif key and milestone.category == "mine" then
-				needName(whereOf("ages", age.id), "milestone mine", key, true)
+		local here = whereOf("ages", age.id)
+		for index, milestone in age.milestones do
+			local key, category = milestone.key, milestone.category
+			if (key == nil) == (milestone.count == nil) then
+				fail(`{here}: milestone {index} needs a key or a count (one of them)`)
+			elseif key and (category == "craft" or category == "smelt") then
+				needName(here, `milestone {category}`, key)
+			elseif key and category == "mine" then
+				needName(here, "milestone mine", key, true)
+			elseif key and category == "biome" and biomeAt[key] == nil then
+				fail(`{here}: milestone biome names unknown biome {key}{hint(key, biomeAt)}`)
+			elseif key and category == "age" and not ageIds[key] then
+				fail(`{here}: milestone age names unknown Age {key}{hint(key, ageIds)}`)
 			end
 		end
 	end
@@ -1204,9 +1274,16 @@ function Content.build(input: { PackData }): Content
 		kindOfWord[word] = kind
 		kindOfWord[kind] = kind
 	end
-	function content.where(kind: string, name: string): string
+	function content.where(kind: string, name: string | number): string
 		local plural = kindOfWord[kind]
-		return if plural then whereOf(plural, name) else `{kind} {name}`
+		if plural == "recipes" then
+			-- (A recipe by its place in content.recipes, as Content's own messages name it.)
+			local from = if type(name) == "number" then recipeFrom[name] else nil
+			return if from
+				then `{from.from}, recipe #{from.index} ({recipes[name :: number].result})`
+				else `recipe {name}`
+		end
+		return if plural and type(name) == "string" then whereOf(plural, name) else `{kind} {name}`
 	end
 	-- (Each pack's place in load order, to give a tag's packs in that order.)
 	local packAt: { [string]: number } = {}
@@ -1217,7 +1294,15 @@ function Content.build(input: { PackData }): Content
 		local plural = kindOfWord[kind]
 		if plural == "recipes" then
 			local from = if type(name) == "number" then recipeFrom[name] else nil
-			return if from then { pack = from.pack, file = from.file, patched = {}, index = from.index } else nil
+			if from == nil then
+				return nil
+			end
+			local by: { Patch } = table.clone(from.patched or {})
+			local packs: { string } = {}
+			for _, patch in by do
+				table.insert(packs, patch.pack)
+			end
+			return { pack = from.pack, file = from.file, patched = packs, overrides = by, index = from.index }
 		elseif plural == "tags" then
 			local by = if type(name) == "string" then tagPacks[name] else nil
 			if by == nil then
@@ -1231,28 +1316,81 @@ function Content.build(input: { PackData }): Content
 				return packAt[a] < packAt[b]
 			end)
 			local first = table.remove(order, 1) :: string
-			return { pack = first, file = by[first].file, patched = order }
+			local adding: { Patch } = {}
+			for _, pack in order do
+				table.insert(adding, { pack = pack, file = by[pack].file })
+			end
+			return { pack = first, file = by[first].file, patched = order, overrides = adding }
 		elseif plural == nil or type(name) ~= "string" or made[plural][name] == nil then
 			return nil
 		end
-		return { pack = made[plural][name], file = madeIn[plural][name], patched = table.clone(patched[plural][name]) }
+		local by: { Patch } = {}
+		for _, patch in overrides[plural][name] do
+			table.insert(by, table.clone(patch))
+		end
+		return {
+			pack = made[plural][name],
+			file = madeIn[plural][name],
+			patched = table.clone(patched[plural][name]),
+			overrides = by,
+		}
 	end
 	return content
 end
 
-local function sortedChildren(folder: Instance): { Instance }
+--[[
+	`folder`'s children sorted by name, each a name once (`place`: "pack P", "pack P, blocks/stone"
+	or the packs' folder, for the message). Rojo keeps both of two files of one name (`blocks.luau`
+	beside `blocks.json`, `recipes.luau` beside a `recipes` folder), and which one a script finds by
+	the name is not said: a client and the server could load different ones.
+]]
+local function childrenOf(folder: Instance, place: string): { Instance }
 	local children = folder:GetChildren()
 	table.sort(children, function(a: Instance, b: Instance): boolean
 		return a.Name < b.Name
 	end)
+	for index = 2, #children do
+		local a, b = children[index - 1], children[index]
+		if a.Name == b.Name then
+			fail(
+				`{place} has two things named {b.Name} (a {a.ClassName} and a {b.ClassName}: {b.Name}.luau beside {b.Name}.json, or a module beside a folder of that name?); keep one`
+			)
+		end
+	end
 	return children
 end
 
--- A pack module's data: its value, or what its function makes with Content/Define.
-local function loadModule(module: Instance): any
-	local data = (require :: any)(module)
-	if type(data) == "function" then
-		data = data(Define)
+--[[
+	What a pack holds that Rojo makes into something no pack reads (`child` at `path` in pack
+	`pack`, a module or a folder), as an error: a name with a dot (Rojo makes `ores.old.luau` the
+	module "ores.old"), and a module with modules in it (a folder holding an `init.luau`: Rojo makes
+	the folder that module, and its other files would never load).
+]]
+local function checkChild(pack: string, child: Instance, path: string)
+	if string.find(child.Name, ".", 1, true) then
+		fail(
+			`pack {pack} has {path}, a name with a dot (Rojo makes {child.Name}.luau a module of that name, which no pack reads): rename it, or move it out of the pack`
+		)
+	elseif child:IsA("ModuleScript") and #child:GetChildren() > 0 then
+		fail(
+			`pack {pack} has {path}, a module with modules in it (a folder holding an init.luau): a kind folder has no init, its files merge by their names, so give it a name of its own ({path}/init.luau -> {path}/main.luau)`
+		)
+	end
+end
+
+-- A pack module's data (`place`: "pack P's blocks", "pack P, blocks/stone"): its value, or what its
+-- function makes with Content/Define. An error in it names the place too; nothing (nil) is one.
+local function loadModule(module: Instance, place: string): any
+	local ok, data = pcall(function(): any
+		local value = (require :: any)(module)
+		return if type(value) == "function" then value(Define) else value
+	end)
+	if not ok then
+		fail(`{place} does not load: {data}`)
+	elseif data == nil then
+		fail(
+			`{place} gives nothing (nil): a module returns its data, a function its list (does it end with "return list"?)`
+		)
 	end
 	return data
 end
@@ -1262,16 +1400,19 @@ end
 	order, the folders inside it in their place among them (depth first), into `into`.
 ]]
 local function loadFolder(pack: string, folder: Instance, path: string, into: { PackFile })
-	for _, child in sortedChildren(folder) do
+	for _, child in childrenOf(folder, `pack {pack}, {path}`) do
 		local file = `{path}/{child.Name}`
+		checkChild(pack, child, file)
 		if string.sub(child.Name, 1, 1) == "_" then
 			fail(`pack {pack} has {file}: a helper goes at the pack's top, not in a kind folder`)
 		elseif child:IsA("ModuleScript") then
-			table.insert(into, { file = file, data = loadModule(child) })
+			table.insert(into, { file = file, data = loadModule(child, `pack {pack}, {file}`) })
 		elseif child:IsA("Folder") then
 			loadFolder(pack, child, file, into)
 		else
-			fail(`pack {pack} has {file}, which is no module or folder`)
+			fail(
+				`pack {pack} has {file}, a {child.ClassName}, which is no module or folder (a pack's data is .luau and .json files)`
+			)
 		end
 	end
 end
@@ -1283,41 +1424,45 @@ end
 ]]
 function Content.load(root: Instance): Content
 	local packs: { PackData } = {}
-	for _, folder in sortedChildren(root) do
+	for _, folder in childrenOf(root, root.Name) do
 		if not folder:IsA("Folder") then
 			fail(`{root.Name}/{folder.Name} is no pack folder`)
 		end
 		local manifest: any = nil
 		local kinds: { [string]: any } = {}
 		local folders: { [string]: { PackFile } } = {}
-		for _, module in sortedChildren(folder) do
+		local pack = folder.Name
+		for _, module in childrenOf(folder, `pack {pack}`) do
 			local name = module.Name
 			if string.sub(name, 1, 1) == "_" then
 				continue
 			end
+			checkChild(pack, module, name)
 			if module:IsA("Folder") then
 				if SINGULAR[name] == nil then
-					fail(`pack {folder.Name} has a folder {name}, which is no kind{hint(name, SINGULAR)}`)
+					fail(`pack {pack} has a folder {name}, which is no kind{hint(name, SINGULAR)}`)
 				end
 				local files: { PackFile } = {}
-				loadFolder(folder.Name, module, name, files)
+				loadFolder(pack, module, name, files)
 				folders[name] = files
 			elseif not module:IsA("ModuleScript") then
-				fail(`pack {folder.Name} has {name}, which is no module (a helper's name starts with "_")`)
+				fail(
+					`pack {pack} has {name}, a {module.ClassName}, which is no module (a pack's data is .luau and .json files; a helper's name starts with "_")`
+				)
 			elseif name == "pack" then
-				manifest = loadModule(module)
+				manifest = loadModule(module, `pack {pack}'s manifest`)
 			elseif SINGULAR[name] then
-				kinds[name] = loadModule(module)
+				kinds[name] = loadModule(module, `pack {pack}'s {name}`)
 			else
 				fail(
-					`pack {folder.Name} has a module {name}, which is no kind{hint(name, SINGULAR)} (a helper's name starts with "_")`
+					`pack {pack} has a module {name}, which is no kind{hint(name, SINGULAR)} (a helper's name starts with "_")`
 				)
 			end
 		end
 		if manifest == nil then
-			fail(`pack {folder.Name} has no manifest (a module named pack)`)
+			fail(`pack {pack} has no manifest (a module named pack)`)
 		end
-		table.insert(packs, { name = folder.Name, manifest = manifest, kinds = kinds, folders = folders })
+		table.insert(packs, { name = pack, manifest = manifest, kinds = kinds, folders = folders })
 	end
 	return Content.build(packs)
 end

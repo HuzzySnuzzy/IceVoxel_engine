@@ -323,13 +323,14 @@ end
 -- Every item, in creative inventory order.
 Items.list = list
 
--- Item icons (TexturePack.Icons): every name an item's, every id "" (not made yet) or an image.
+-- Item icons (TexturePack.Icons: the entries' `icon`): every name an item's, every id "" (not made
+-- yet) or an image; a wrong one names the item's pack.
 local icons: { [number]: string } = {}
 for name, image in TexturePack.Icons do
 	assert(ids[name] ~= nil, `TexturePack.Icons names unknown item {name}`)
 	assert(
 		type(image) == "string" and (image == "" or string.match(image, "^rbxassetid://%d+$") ~= nil),
-		`TexturePack.Icons.{name} must be "" or "rbxassetid://<number>"`
+		`Items: {Content.default.where("item", name)}'s icon must be "" or "rbxassetid://<number>", not "{image}"`
 	)
 	if image ~= "" then
 		icons[ids[name]] = image

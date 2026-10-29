@@ -16,6 +16,10 @@
 
 	`recipes()` and `fuels()` list the same recipes and fuels for recipe browsers (Ui/Jei).
 
+	An input smelts by the first recipe that takes it (Recipes.smelting's order: the packs' load
+	order), as a crafting grid makes the first recipe that fits it (Crafting): a later pack's
+	recipe for the same input never replaces an earlier one's (`tests/content check` warns of one).
+
 	Fuels are Recipes.fuel's (an item's own beating its tag's), plus the buckets of the fluids that
 	burn (Shared/Fluids `furnaceFuel`: Minecraft's Lava Bucket, 20 000 ticks). Oil and fuel are no
 	furnace fuel: furnaces burn solid fuels only, as in Minecraft.
@@ -44,29 +48,33 @@ export type Fuel = { item: number, ticks: number }
 local recipeList: { Recipe } = {}
 local fuelList: { Fuel } = {}
 
--- Item ids named by an ingredient string (an item or "#tag").
-local function namesOf(name: string): { number }
+-- Item ids named by an ingredient string (an item or "#tag"; `from`: where it is named, for the
+-- message: a recipe's place, Recipes `from`).
+local function namesOf(name: string, from: string?): { number }
 	local names = { name }
+	local named = if from then `{from} names ` else ""
 	if string.sub(name, 1, 1) == "#" then
 		names = (Recipes.tags :: any)[string.sub(name, 2)]
-		assert(names, `Smelting: unknown tag '{name}'`)
+		assert(names, `Smelting: {named}unknown tag '{name}'`)
 	end
 	local ids = {}
 	for _, item in names do
 		local ok, id = pcall(function()
 			return Items.id[item]
 		end)
-		assert(ok, `Smelting: unknown item '{item}'`)
+		assert(ok, `Smelting: {named}unknown item '{item}'`)
 		table.insert(ids, id)
 	end
 	return ids
 end
 
 for _, recipe in Recipes.smelting do
-	local result = namesOf(recipe.result)[1]
-	local inputs = namesOf(recipe.input)
+	local result = namesOf(recipe.result, recipe.from)[1]
+	local inputs = namesOf(recipe.input, recipe.from)
 	for _, input in inputs do
-		results[input] = { item = result, count = recipe.count or 1 }
+		if results[input] == nil then
+			results[input] = { item = result, count = recipe.count or 1 }
+		end
 	end
 	table.insert(recipeList, { inputs = inputs, result = { item = result, count = recipe.count or 1 } })
 end

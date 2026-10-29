@@ -54,7 +54,9 @@
 	crafted a Furnace at least once), or `count` of a category ("biome" 6). `level` is the
 	knowledge level it needs. Reaching an Age is automatic once all are met (the server checks
 	after every change), Ages one after another; it gives `reward` points (a discovery: Forager's
-	perk counts).
+	perk counts). Content checks the milestones as packs load (their categories, Content/Schema's
+	MILESTONES, which must be Knowledge's CATEGORIES, and their keys), but for a mob's, which this
+	module checks against the mobs (Entities/MobList), naming the pack.
 
 	Ids (`id`) are what saves keep, so an Age may be renamed or a new one inserted without
 	breaking them; the list's order is the order they come in.
@@ -86,8 +88,30 @@ export type Age = {
 }
 
 local Content = require(script.Parent.Parent.Content)
+local Knowledge = require(script.Parent.Knowledge)
+local MobList = require(script.Parent.Parent.Entities.MobList)
+local Schema = require(script.Parent.Parent.Content.Schema)
 
 local content = Content.default
+
+-- (The categories the packs' milestones are checked against are the ones Knowledge counts.)
+for _, category in Schema.MILESTONES do
+	assert(
+		table.find(Knowledge.CATEGORIES, category),
+		`Ages: Content/Schema's MILESTONES lists {category}, no Knowledge category`
+	)
+end
+for _, category in Knowledge.CATEGORIES do
+	assert(
+		table.find(Schema.MILESTONES, category),
+		`Ages: Knowledge category {category} is not in Content/Schema's MILESTONES`
+	)
+end
+-- The mobs a "mob" milestone may name: each kind's exact name (what a kill discovers).
+local mobs: { [string]: boolean } = {}
+for _, kind in MobList.kinds do
+	mobs[kind.name] = true
+end
 
 -- The Ages: the packs' records, each with the results it opens (below: every entry naming it).
 local list: { Age } = {}
@@ -119,6 +143,16 @@ for _, age in list do
 	byId[age.id] = age
 	for _, milestone in age.milestones do
 		assert((milestone.key == nil) ~= (milestone.count == nil), `Ages: {age.id} milestone needs a key or a count`)
+		local key = milestone.key
+		if milestone.category == "mob" and key and not mobs[key] then
+			local near = Schema.suggest(key, mobs)
+			error(
+				`Ages: {content.where("ages", age.id)}: milestone mob names unknown mob {key}{if near
+					then ` (did you mean {near}?)`
+					else ""}`,
+				0
+			)
+		end
 		table.insert(milestones, milestone)
 	end
 end

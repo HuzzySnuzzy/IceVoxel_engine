@@ -28,7 +28,9 @@
 	    recipe    warning  a crafting recipe that never crafts: its own grid (one of each key or
 	                       ingredient, a tag's first name, from the top left of the 3 x 3 grid)
 	                       makes something else, since Crafting.match takes the first recipe that
-	                       fits (every shaped one before any shapeless one)
+	                       fits (every shaped one before any shapeless one); and a smelting recipe
+	                       that never smelts, as an earlier one takes its input (or one of its
+	                       tag's items: Crafting/Smelting takes the first recipe for an input)
 	    loot      warning  a loot table nothing rolls: no block's `loot` names it and it is no
 	                       chest's (the View's `chests`: the ruins', bunkers' and mineshafts')
 	    requires  warning  a pack naming entries of a pack that loads before it (its own modules'
@@ -1390,6 +1392,37 @@ function ContentTool.check(view: any): { Finding }
 				if made == nil
 					then "never crafted: its own grid makes nothing"
 					else `never crafted: its own grid makes {what}, as {winner} fits first (shaped recipes before shapeless)`
+			)
+		end
+	end
+	-- Smelting recipes that never smelt: a furnace takes the first recipe for an input
+	-- (Crafting/Smelting), so one for an input an earlier recipe takes is never used.
+	local smeltedBy: { [string]: number } = {}
+	for index, recipe in content.recipes do
+		if recipe.type ~= "smelting" then
+			continue
+		end
+		local input = recipe.input :: string
+		local inputs = if string.sub(input, 1, 1) == "#" then content.tags[string.sub(input, 2)] or {} else { input }
+		local taken: { string } = {}
+		for _, name in inputs do
+			if smeltedBy[name] then
+				table.insert(taken, name)
+			else
+				smeltedBy[name] = index
+			end
+		end
+		if #taken > 0 then
+			local name = taken[1]
+			local first = smeltedBy[name]
+			local pack = recipeFrom(view, index)
+			local otherPack, otherPlace = recipeFrom(view, first)
+			add(
+				pack,
+				"warning",
+				"recipe",
+				recipeSubject(view, index),
+				`never smelted{if #taken < #inputs then ` from {name}` else ""}: {name} smelts into {content.recipes[first].result}, as pack {otherPack}'s {otherPlace} comes first (a furnace takes the first recipe for an input)`
 			)
 		end
 	end

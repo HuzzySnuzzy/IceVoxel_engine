@@ -118,7 +118,8 @@
 	                                (water, cobwebs), "near" never stood on, in or beside (cactus,
 	                                lava, fire: they hurt); a fluid's covers every level of it
 	  override         block, item, texture, biome, effect, potion, pool, structure, sound, track
-	                   patches the entry of that name an earlier pack made
+	                   patches the entry of that name an earlier pack made (Schema.patch: field
+	                   by field, a table of fields key by key, `tags` adding to its own)
 	  formerly         block, item  { "OldName" }: the names it had before, which data saved under
 	                                them (saves, structure palettes, jigsaw final states) still find
 	                                it by (Blocks.find, Items.find: Blocks.RENAMED, Items.RENAMED;
@@ -720,21 +721,6 @@ local function FALSE_ONLY(value: any): string?
 	return nil
 end
 
--- One of `values` (strings).
-local function enum(values: { string }): Check
-	local set: { [string]: boolean } = {}
-	for _, value in values do
-		set[value] = true
-	end
-	local text = table.concat(values, ", ")
-	return function(value: any): string?
-		if type(value) ~= "string" or not set[value] then
-			return ` must be one of {text}, not {describe(value)}`
-		end
-		return nil
-	end
-end
-
 -- Any of `checks`; the message lists what each wants.
 local function oneOf(text: string, checks: { Check }): Check
 	return function(value: any): string?
@@ -780,9 +766,12 @@ local function listOf(item: Check, length: number?): Check
 	end
 end
 
+-- The maps of names (mapOf): an override patches them key by key too (Schema.patch).
+local maps: { [Check]: boolean } = {}
+
 -- A table of string keys to `item`s.
 local function mapOf(item: Check): Check
-	return function(value: any): string?
+	local check = function(value: any): string?
 		if type(value) ~= "table" then
 			return ` must be a table, not {describe(value)}`
 		end
@@ -797,25 +786,39 @@ local function mapOf(item: Check): Check
 		end
 		return nil
 	end
+	maps[check] = true
+	return check
 end
 
 --[[
-	Edit distance between two names (Levenshtein's, ignoring case), for "did you mean" hints.
+	Edit distance between two names, ignoring case, for "did you mean" hints: Damerau-Levenshtein's
+	(its optimal string alignment form), where a letter added, dropped or changed, or two letters
+	next to each other swapped, is one edit each. So "Stnoe" is one edit from Stone (a swap) and
+	two from Snow.
 ]]
 local function distance(a: string, b: string): number
 	a, b = string.lower(a), string.lower(b)
-	-- (previous[j + 1]: the distance from a's first i - 1 letters to b's first j.)
+	-- (previous[j + 1]: the distance from a's first i - 1 letters to b's first j; before[j + 1]:
+	-- from its first i - 2.)
+	local before: { number } = {}
 	local previous: { number } = {}
 	for j = 1, #b + 1 do
 		previous[j] = j - 1
 	end
 	for i = 1, #a do
 		local current: { number } = { i }
+		local letter = string.byte(a, i)
 		for j = 1, #b do
-			local cost = if string.byte(a, i) == string.byte(b, j) then 0 else 1
-			current[j + 1] = math.min(previous[j + 1] + 1, current[j] + 1, previous[j] + cost)
+			local other = string.byte(b, j)
+			local cost = if letter == other then 0 else 1
+			local d = math.min(previous[j + 1] + 1, current[j] + 1, previous[j] + cost)
+			-- (Two letters swapped: "no" for "on".)
+			if i > 1 and j > 1 and letter == string.byte(b, j - 1) and string.byte(a, i - 1) == other then
+				d = math.min(d, before[j - 1] + 1)
+			end
+			current[j + 1] = d
 		end
-		previous = current
+		before, previous = previous, current
 	end
 	return previous[#b + 1]
 end
@@ -838,35 +841,64 @@ local function unknownField(name: string, fields: { [string]: any }): string
 	return `{name} is no field it may have{if hint then ` (did you mean {hint}?)` else ""}`
 end
 
+-- One of `values` (strings), a closed set, with a "did you mean" for a near miss (`what`: what
+-- the message calls them, for a set too long to list: "a Roblox material").
+local function enum(values: { string }, what: string?): Check
+	local set: { [string]: boolean } = {}
+	for _, value in values do
+		set[value] = true
+	end
+	local text = what or `one of {table.concat(values, ", ")}`
+	return function(value: any): string?
+		if type(value) ~= "string" or not set[value] then
+			local near = if type(value) == "string" then Schema.suggest(value, set) else nil
+			return ` must be {text}, not {describe(value)}{if near then ` (did you mean {near}?)` else ""}`
+		end
+		return nil
+	end
+end
+
+-- Each record's fields (a table of fields: an override patches it key by key, Schema.patch), and
+-- its patch form: the same check needing none of its fields, its own records' patch forms
+-- inside (what an override's fields are checked with; Content checks the patched entry whole).
+local recordFields: { [Check]: { [string]: Check } } = {}
+local patchForms: { [Check]: Check } = {}
+
 --[[
 	A table with only `fields` (name -> Check), `required` of them always there. Problems read
 	".field must be ..." or ".field is no field it may have (did you mean ...?)".
 ]]
 local function record(fields: { [string]: Check }, required: { string }?): Check
-	return function(value: any): string?
-		if type(value) ~= "table" then
-			return ` must be a table, not {describe(value)}`
+	local function make(patch: boolean): Check
+		return function(value: any): string?
+			if type(value) ~= "table" then
+				return ` must be a table, not {describe(value)}`
+			end
+			for key, element in value do
+				if type(key) ~= "string" then
+					return ` must have names as keys, not {describe(key)}`
+				end
+				local check = fields[key]
+				if check == nil then
+					return `.{unknownField(key, fields)}`
+				end
+				local problem = (if patch then patchForms[check] or check else check)(element)
+				if problem then
+					return `.{key}{problem}`
+				end
+			end
+			for _, key in (if patch then {} else required or {}) :: { string } do
+				if value[key] == nil then
+					return `.{key} is missing`
+				end
+			end
+			return nil
 		end
-		for key, element in value do
-			if type(key) ~= "string" then
-				return ` must have names as keys, not {describe(key)}`
-			end
-			local check = fields[key]
-			if check == nil then
-				return `.{unknownField(key, fields)}`
-			end
-			local problem = check(element)
-			if problem then
-				return `.{key}{problem}`
-			end
-		end
-		for _, key in (required or {}) :: { string } do
-			if value[key] == nil then
-				return `.{key} is missing`
-			end
-		end
-		return nil
 	end
+	local check = make(false)
+	recordFields[check] = fields
+	patchForms[check] = make(true)
+	return check
 end
 
 Schema.STRING = STRING
@@ -895,12 +927,96 @@ local PAIR = listOf(NUMBER, 2)
 local STRINGS = listOf(STRING)
 local NAMES_MAP = mapOf(STRING)
 
+--[[
+	The closed sets of names fields take: each an `enum`, so a name outside it fails the load with
+	a "did you mean" (`tool = "pikaxe"`). Most are written out at their field; these are the long
+	ones, and the ones code elsewhere keeps too, which it checks against these lists as it loads
+	(shared code can't require the server's):
+	  MATERIALS    Roblox's Enum.Material names: a block's, an item's or a box's `material`, a
+	               texture's `Material` (Lune has no Enum, so a list; tests/spec/Content checks it
+	               against Lune's Roblox library)
+	  BEHAVIOURS   a block's `behaviour`: the server's block behaviours, each a module of that name
+	               in server Behaviours (which checks its modules against this list)
+	  PROJECTILES  an item's `magic.projectile`: Magic/Projectiles' kinds (which it checks against
+	               this list)
+	  MILESTONES   an Age's milestones' `category`: the discoveries Progression/Knowledge counts
+	               (its CATEGORIES, which Progression/Ages checks against this list)
+]]
+Schema.MATERIALS = table.freeze({
+	"Plastic",
+	"SmoothPlastic",
+	"Neon",
+	"Wood",
+	"WoodPlanks",
+	"Marble",
+	"Basalt",
+	"Slate",
+	"CrackedLava",
+	"Concrete",
+	"Limestone",
+	"Granite",
+	"Pavement",
+	"Brick",
+	"Pebble",
+	"Cobblestone",
+	"Rock",
+	"Sandstone",
+	"CorrodedMetal",
+	"DiamondPlate",
+	"Foil",
+	"Metal",
+	"Grass",
+	"LeafyGrass",
+	"Sand",
+	"Fabric",
+	"Snow",
+	"Mud",
+	"Ground",
+	"Asphalt",
+	"Salt",
+	"Ice",
+	"Glacier",
+	"Glass",
+	"ForceField",
+	"Air",
+	"Water",
+	"Cardboard",
+	"Carpet",
+	"CeramicTiles",
+	"ClayRoofTiles",
+	"RoofShingles",
+	"Leather",
+	"Plaster",
+	"Rubber",
+})
+Schema.BEHAVIOURS = table.freeze({
+	"Attached",
+	"Door",
+	"Fence",
+	"Fire",
+	"Fluid",
+	"Grass",
+	"Gravity",
+	"Herb",
+	"Leaves",
+	"Plant",
+	"Sapling",
+	"SnowLayer",
+	"Tnt",
+})
+Schema.PROJECTILES = table.freeze({ "spark", "bolt", "water" })
+Schema.MILESTONES = table.freeze({ "mine", "craft", "smelt", "biome", "mob", "age" })
+local MATERIAL = enum(Schema.MATERIALS, "a Roblox material (an Enum.Material name)")
+-- Minecraft's directions (North = -Z...): a door faces a horizontal one, a jigsaw any.
+local HORIZONTAL = { "North", "South", "West", "East" }
+local DIRECTIONS = { "Up", "Down", "North", "South", "West", "East" }
+
 local SHAPE_BOX = record({
 	size = VEC3,
 	offset = VEC3,
 	rotation = VEC3,
 	color = RGB,
-	material = STRING,
+	material = MATERIAL,
 	glow = BOOLEAN,
 	transparency = NUMBER,
 }, { "size", "offset" })
@@ -944,7 +1060,19 @@ local function LOOT_ENTRY(value: any): string?
 	end
 	return nil
 end
-local POOL = record({ rolls = PAIR, entries = listOf(LOOT_ENTRY) }, { "rolls", "entries" })
+-- { fewest, most }: how many times a pool rolls, 0 or more, the most no fewer than the fewest.
+local function ROLLS(value: any): string?
+	local problem = PAIR(value)
+	if problem then
+		return problem
+	elseif value[1] < 0 then
+		return ` has its fewest ({value[1]}) below 0`
+	elseif value[2] < value[1] then
+		return ` has its most ({value[2]}) under its fewest ({value[1]})`
+	end
+	return nil
+end
+local POOL = record({ rolls = ROLLS, entries = listOf(LOOT_ENTRY) }, { "rolls", "entries" })
 local LOOT_TABLE = listOf(POOL)
 Schema.LOOT_TABLE = LOOT_TABLE
 
@@ -968,7 +1096,8 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	  breakable     Players can break it. Default true.
 	  placeable     Is an item players can hold and place (creative inventory, drops). Default true
 	                for drawn, solid blocks.
-	  behaviour     Name of a server block behaviour (see ServerScriptService.IceVoxel.Behaviours).
+	  behaviour     Name of a server block behaviour (see ServerScriptService.IceVoxel.Behaviours;
+	                BEHAVIOURS lists them).
 	  friction      How slippery the block is to walk on (Minecraft's block friction): 0.6 by
 	                default, 0.98 for ice. Higher keeps more of the speed from tick to tick.
 	  fluid         { group, level, tickDelay } for fluids (filled in by `fluid()` below; every
@@ -976,7 +1105,7 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	  displayName   Shown in the inventory (default: the name with spaces, "OakLog" -> "Oak Log").
 	  hardness      Minecraft's destroy time (0 = breaks at once). Default 1. See Shared/Mining.
 	  tool          The tool that mines it fast: "pickaxe", "axe", "shovel" or "hoe" (Minecraft's
-	                mineable tags).
+	                mineable tags), or "sword" (the cobweb).
 	  toolLevel     Set when the block only drops with that tool, of at least this tier (0 wood /
 	                gold, 1 stone, 2 iron, 3 diamond): Minecraft's requiresCorrectToolForDrops. It
 	                also mines 3.3 times slower without it. nil: drops by hand.
@@ -995,7 +1124,9 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	  container     Number of item slots the block keeps (a chest's 27, a furnace's 3); breaking it
 	                drops what is inside.
 	  menu          What right clicking opens: "Chest", "Crafting" (a crafting table's 3 x 3 grid),
-	                "Furnace", "StructureBlock" or "Jigsaw" (their settings screens).
+	                "Furnace", "Machine" (a machine's panel, its default), "StructureBlock" or
+	                "Jigsaw" (their settings screens); or what it does: "Door" (opens and shuts),
+	                "Toggle" (`toggle` below).
 	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace",
 	                "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace", "BasicBattery",
 	                "AdvancedBattery", "EliteBattery", "UltimateBattery", "OilRefinery",
@@ -1213,7 +1344,7 @@ Schema.BLOCK_FIELDS = {
 	name = STRING,
 	render = enum({ "Opaque", "Transparent", "Fluid", "None" }),
 	color = RGB,
-	material = STRING,
+	material = MATERIAL,
 	transparency = NUMBER,
 	reflectance = NUMBER,
 	solid = BOOLEAN,
@@ -1221,19 +1352,19 @@ Schema.BLOCK_FIELDS = {
 	replaceable = BOOLEAN,
 	breakable = BOOLEAN,
 	placeable = BOOLEAN,
-	behaviour = STRING,
+	behaviour = enum(Schema.BEHAVIOURS),
 	friction = NUMBER,
 	fluid = record({ group = STRING, level = NUMBER, tickDelay = NUMBER }, { "group", "level", "tickDelay" }),
 	displayName = STRING,
 	hardness = NUMBER,
-	tool = STRING,
+	tool = enum({ "pickaxe", "axe", "shovel", "hoe", "sword" }),
 	toolLevel = NUMBER,
 	blastResistance = NUMBER,
 	drops = oneOf("an item name or false", { STRING, FALSE_ONLY }),
 	dropCount = NUMBER,
 	maxStack = NUMBER,
 	container = NUMBER,
-	menu = STRING,
+	menu = enum({ "Chest", "Crafting", "Furnace", "Machine", "StructureBlock", "Jigsaw", "Door", "Toggle" }),
 	decor = STRING,
 	sound = STRING,
 	light = NUMBER,
@@ -1257,7 +1388,7 @@ Schema.BLOCK_FIELDS = {
 	energy = record({ capacity = NUMBER, input = NUMBER, output = NUMBER }, { "capacity" }),
 	plant = record({ soil = enum({ "dirt", "deadbush", "mushroom" }), top = STRING, bottom = STRING }),
 	door = record(
-		{ facing = STRING, hinge = STRING, open = BOOLEAN, upper = BOOLEAN },
+		{ facing = enum(HORIZONTAL), hinge = enum({ "Left", "Right" }), open = BOOLEAN, upper = BOOLEAN },
 		{ "facing", "hinge", "open", "upper" }
 	),
 	tinted = BOOLEAN,
@@ -1267,8 +1398,8 @@ Schema.BLOCK_FIELDS = {
 	shearCount = NUMBER,
 	shearSpeed = NUMBER,
 	creativeOnly = BOOLEAN,
-	structureMode = STRING,
-	jigsaw = record({ front = STRING, top = STRING }, { "front", "top" }),
+	structureMode = enum({ "save", "load", "corner", "data" }),
+	jigsaw = record({ front = enum(DIRECTIONS), top = enum(DIRECTIONS) }, { "front", "top" }),
 	caveTwin = STRING,
 	seasonless = BOOLEAN,
 	flammable = record({ ignite = NUMBER, burn = NUMBER }, { "ignite", "burn" }),
@@ -1394,7 +1525,7 @@ local MODEL_BOX = record({
 	size = VEC3,
 	offset = VEC3,
 	color = RGB,
-	material = STRING,
+	material = MATERIAL,
 	rotation = NUMBER,
 	shape = enum({ "Ball", "Cylinder" }),
 }, { "size", "offset" })
@@ -1439,11 +1570,14 @@ Schema.ITEM_FIELDS = {
 	maxStack = NUMBER,
 	armor = record({ slot = ARMOR_SLOT, defense = NUMBER, toughness = NUMBER }, { "slot", "defense", "toughness" }),
 	tan = record({ warmth = NUMBER, cooling = NUMBER, freezeImmune = BOOLEAN }),
-	tool = record({ kind = STRING, speed = NUMBER, level = NUMBER }, { "kind", "speed", "level" }),
+	tool = record(
+		{ kind = enum({ "pickaxe", "axe", "shovel", "hoe", "sword", "shears" }), speed = NUMBER, level = NUMBER },
+		{ "kind", "speed", "level" }
+	),
 	durability = NUMBER,
 	attack = record({ damage = NUMBER, speed = NUMBER }, { "damage", "speed" }),
 	color = RGB,
-	material = STRING,
+	material = MATERIAL,
 	model = listOf(MODEL_BOX),
 	tilt = NUMBER,
 	places = STRING,
@@ -1460,14 +1594,14 @@ Schema.ITEM_FIELDS = {
 		knockback = NUMBER,
 		swim = NUMBER,
 		attackSpeed = NUMBER,
-		worn = STRING,
+		worn = enum({ "Feet", "Hand", "Back", "Waist", "Face", "Head", "Neck" }),
 	}),
 	vanity = ARMOR_SLOT,
 	magic = record({
 		mana = NUMBER,
 		damage = NUMBER,
 		useTicks = NUMBER,
-		projectile = STRING,
+		projectile = enum(Schema.PROJECTILES),
 		fire = NUMBER,
 		knockback = NUMBER,
 	}, { "mana", "damage", "useTicks", "projectile" }),
@@ -1513,7 +1647,7 @@ Schema.TEXTURE_FIELDS = {
 	Normal = STRING,
 	Roughness = STRING,
 	Metalness = STRING,
-	Material = STRING,
+	Material = MATERIAL,
 	Tint = oneOf("true, false or a block name", { BOOLEAN, STRING }),
 	Average = RGB,
 	Align = BOOLEAN,
@@ -1540,7 +1674,10 @@ Schema.ORE_FIELDS = {
 	buried = NUMBER,
 } :: { [string]: Check }
 
-local MILESTONE = record({ category = STRING, key = STRING, count = NUMBER, text = STRING }, { "category", "text" })
+local MILESTONE = record(
+	{ category = enum(Schema.MILESTONES), key = STRING, count = NUMBER, text = STRING },
+	{ "category", "text" }
+)
 Schema.AGE_FIELDS = {
 	id = STRING,
 	name = STRING,
@@ -1610,9 +1747,9 @@ Schema.AGE_FIELDS = {
 	                 Its fields replace the biome's, but a table of fields (weather, patches,
 	                 foliage, and foliage's flowers and herbs) is patched field by field in turn:
 	                 { name = "Taiga", override = true, foliage = { herbs = ... } } keeps the
-	                 taiga's grass and flowers. A list (bands, features, plants, species, tags) is
-	                 replaced whole: to add a flower, give the species list with it. Nothing takes a
-	                 field away.
+	                 taiga's grass and flowers. A list (bands, features, plants, species) is
+	                 replaced whole: to add a flower, give the species list with it; but `tags` add
+	                 to the biome's own. Nothing takes a field away (Schema.patch).
 	  seasonClass    Optional: how the seasons treat it (Shared/Seasons/SeasonClimate.CLASSES):
 	                 "cold" (the most snow, white from late autumn to mid spring), "dry" (no snow, 0.75
 	                 of the seasons' swing), "tropical" (a little snow, half the swing, colours kept
@@ -2292,7 +2429,8 @@ end
 --[[
 	What is wrong with one entry of `kind` (nil: nothing): an unknown field ("harndess is no field
 	it may have (did you mean hardness?)"), a wrong type ("color[2] must be a number 0..255, not
-	300") or a missing field the kind needs.
+	300") or a missing field the kind needs. An override (`override = true`) needs only its name,
+	and its tables of fields none of theirs: Content checks the entry it patches whole again.
 ]]
 function Schema.check(kind: string, entry: any): string?
 	local fields = ENTRY_FIELDS[kind]
@@ -2319,7 +2457,8 @@ function Schema.check(kind: string, entry: any): string?
 		if check == nil then
 			return unknownField(key, fields)
 		end
-		local problem = check(value)
+		-- (An override's tables of fields need none of theirs: it patches them, Schema.patch.)
+		local problem = (if override then patchForms[check] or check else check)(value)
 		if problem then
 			return `{key}{problem}`
 		end
@@ -2361,6 +2500,53 @@ function Schema.check(kind: string, entry: any): string?
 		end
 	end
 	return nil
+end
+
+-- `patch` over `base`, a value of a field checked by `check` (Schema.patch).
+local function patchValue(check: Check?, base: any, patch: any): any
+	local fields = if check then recordFields[check] else nil
+	if type(base) ~= "table" or type(patch) ~= "table" or (fields == nil and not (check and maps[check])) then
+		return patch
+	end
+	local out = table.clone(base)
+	for key, value in patch do
+		out[key] = if fields then patchValue(fields[key], base[key], value) else value
+	end
+	return out
+end
+
+--[[
+	An override of `kind` (`patch`, checked) merged onto the entry of its name an earlier pack
+	made (`base`), as a new table: Content merges every override so. Each field the override gives
+	replaces the entry's, except that
+	  * a table of fields is patched the same way, key by key: a record (a block's `texture` faces,
+	    an item's `food`, a potion's `lore`, a biome's `foliage` and its `flowers`) or a map of
+	    names (a block's `sounds`). So { name = "Grass", override = true, texture = { Top = "..." } }
+	    keeps Grass's Sides and Bottom;
+	  * `tags` add to the entry's own (a union, each name once, as Minecraft's tags).
+	A list (`shape`, `model`, `color`, a biome's `bands`, a pool's `elements`...) or any other value
+	replaces the entry's whole, and so does a table of another kind (a skill's `perk`, a block's
+	`loot`). Nothing takes a field away. (`override` itself is left out.)
+]]
+function Schema.patch(kind: string, base: { [string]: any }, patch: { [string]: any }): { [string]: any }
+	local fields = ENTRY_FIELDS[kind] or {}
+	local out = table.clone(base)
+	for key, value in patch do
+		if key == "override" then
+			continue
+		elseif key == "tags" and type(base.tags) == "table" then
+			local tags = table.clone(base.tags)
+			for _, tag in value do
+				if not table.find(tags, tag) then
+					table.insert(tags, tag)
+				end
+			end
+			out.tags = tags
+		else
+			out[key] = patchValue(fields[key], base[key], value)
+		end
+	end
+	return out
 end
 
 --[[

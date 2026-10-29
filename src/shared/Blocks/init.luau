@@ -413,7 +413,8 @@ end
 	drawn, is no fluid and no cave twin (twins take their twin's textures), every face name is
 	known and names a texture, every texture's Material can take a MaterialVariant and every Tint
 	naming a block names one. (Ids are checked by tests/build_textures, which turns the pack into
-	the MaterialVariants.)
+	the MaterialVariants.) A texture's or a block's message names the pack it is from (Content's
+	`where`).
 ]]
 
 -- Enum.Material names a MaterialVariant can be based on (every one but Neon, Glass, ForceField,
@@ -479,15 +480,16 @@ do
 	end
 	-- (Named in the message: a texture's Material may be a typo, or no material at all.)
 	local takes = table.concat(Blocks.VARIANT_MATERIALS, ", ")
+	local where = Content.default.where
 	for name, texture in packTextures do
 		assert(
 			variantMaterials[texture.Material],
-			`TexturePack: texture "{name}" has Material {texture.Material}: a texture's Material must be one that takes a MaterialVariant ({takes})`
+			`TexturePack: {where("texture", name)} has Material {texture.Material}: a texture's Material must be one that takes a MaterialVariant ({takes})`
 		)
 		local tint = texture.Tint
 		assert(
 			type(tint) ~= "string" or specs[tint] ~= nil,
-			`TexturePack: texture "{name}" is tinted like unknown block {tint}`
+			`TexturePack: {where("texture", name)} is tinted like unknown block {tint}`
 		)
 	end
 	assert(
@@ -759,10 +761,15 @@ for index, spec in BlockList do
 		def.maxStack >= 1 and def.maxStack <= 64 and def.maxStack == math.floor(def.maxStack),
 		`Block {spec.name} has a bad maxStack`
 	)
-	assert(
-		def.sound == nil or soundIndex[def.sound],
-		`Block {spec.name} has unknown sound {def.sound} (a type is one once the packs' sounds give block.{def.sound}.break, .place, .hit, .step and .fall)`
-	)
+	if def.sound and soundIndex[def.sound] == nil then
+		local near = Schema.suggest(def.sound, soundIndex)
+		error(
+			`Blocks: {Content.default.where("block", spec.name)} has unknown sound {def.sound}{if near
+				then ` (did you mean {near}?)`
+				else ""} (a type is one once the packs' sounds give block.{def.sound}.break, .place, .hit, .step and .fall)`,
+			0
+		)
+	end
 	local transmitter = spec.transmitter
 	assert(
 		transmitter == nil

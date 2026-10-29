@@ -40,7 +40,9 @@
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
+local Content = require(script.Parent.Parent.Content)
 local Items = require(script.Parent.Parent.Items)
+local Schema = require(script.Parent.Parent.Content.Schema)
 local MagicSync = require(script.Parent.Parent.Net.MagicSync)
 local VoxelRaycast = require(script.Parent.Parent.World.VoxelRaycast)
 
@@ -139,11 +141,25 @@ for index, kind in Projectiles.KINDS do
 	assert(kind.speed <= MagicSync.MAX_SPEED, `Projectile {kind.name} is faster than MagicSync.MAX_SPEED`)
 	byName[kind.name] = index
 end
+-- The kinds a pack's item may name are Content/Schema's PROJECTILES (packs are checked against
+-- them as they load): the same names.
+for _, name in Schema.PROJECTILES do
+	assert(byName[name], `Projectiles: Content/Schema's PROJECTILES lists {name}, which is no kind here`)
+end
+for name in byName do
+	assert(
+		table.find(Schema.PROJECTILES, name),
+		`Projectiles: kind {name} is not in Content/Schema's PROJECTILES (so no pack may name it)`
+	)
+end
 -- Every magic weapon casts a kind there is (ItemList `magic.projectile`).
 for _, def in Items.list do
 	local magic = def.magic
 	if magic then
-		assert(byName[magic.projectile], `Item {def.name} casts an unknown projectile {magic.projectile}`)
+		assert(
+			byName[magic.projectile],
+			`Projectiles: {Content.default.where("item", def.name)} casts an unknown projectile {magic.projectile}`
+		)
 	end
 end
 

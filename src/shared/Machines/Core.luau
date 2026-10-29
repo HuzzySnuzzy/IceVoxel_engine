@@ -158,6 +158,8 @@
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
+local Content = require(script.Parent.Parent.Content)
+local Schema = require(script.Parent.Parent.Content.Schema)
 local Fluids = require(script.Parent.Parent.Fluids)
 local Items = require(script.Parent.Parent.Items)
 local ItemData = require(script.Parent.Parent.Items.ItemData)
@@ -895,14 +897,26 @@ function Machines.bind(block: number, kindName: string, energy: EnergySpec?): ()
 	end
 end
 
--- Binds every BlockList block with `machine` (Shared/Machines does, once every kind is loaded).
+-- Binds every BlockList block with `machine` (Shared/Machines does, once every kind is loaded);
+-- a pack's block naming a kind there is not, or with energy and no `machine`, is an error naming
+-- the pack.
 function Machines.bindBlocks()
+	local content = Content.default
 	for id = 0, Blocks.count - 1 do
 		local def = Blocks.get(id)
 		local machine = def.machine
-		assert(def.energy == nil or machine ~= nil, `Block {def.name} has energy but is no machine`)
+		local where = content.where("block", def.name)
+		assert(def.energy == nil or machine ~= nil, `Machines: {where} has energy but is no machine`)
 		if machine then
-			Machines.bind(id, machine.kind)
+			local kind = machine.kind
+			if kinds[kind] == nil then
+				local near = Schema.suggest(kind, kinds)
+				error(
+					`Machines: {where} names unknown machine kind {kind}{if near then ` (did you mean {near}?)` else ""} (a kind is defined in Machines/Kinds)`,
+					0
+				)
+			end
+			Machines.bind(id, kind)
 		end
 	end
 end

@@ -34,6 +34,7 @@
 
 local Loader = require("../lib/Loader")
 local GamePacks = require("../lib/GamePacks")
+local roblox = require("@lune/roblox")
 
 local PACKS = "tests/fixtures/content/packs"
 local FOLDERS = "tests/fixtures/content/folders"
@@ -41,6 +42,7 @@ local FIELDS = "tests/fixtures/content/fields/FixtureFields"
 local BIOMES = "tests/fixtures/content/biomes/FixtureWilds"
 local BREWING = "tests/fixtures/content/brewing/FixtureBrewing"
 local SKILLS = "tests/fixtures/content/skills/FixtureSkilled"
+local ROJO = "tests/fixtures/content/rojo"
 
 return function(t, shared, require, _server, _client)
 	local Content = require(shared.Content)
@@ -429,7 +431,12 @@ return function(t, shared, require, _server, _client)
 			"FixtureBrewing potion FixtureLuck []",
 			"a brewed item: its potion's"
 		)
-		t.eq(origin("item", "PotionOfSwiftness"), "Minecraft potion Swiftness []")
+		-- (A patched potion's items are brewed from its patched fields: patched by its patchers.)
+		t.ok(
+			string.match(origin("item", "PotionOfSwiftness"), "^Minecraft potion Swiftness %[.*FixtureBrewing%]$")
+				~= nil,
+			"a patched potion's item: patched by its patchers"
+		)
 		local brewedAt: number? = nil
 		for index, recipe in content.recipes do
 			if recipe.result == "LongPotionOfFixtureLuck" then
@@ -2521,10 +2528,11 @@ return function(t, shared, require, _server, _client)
 			{ "Crafting", "Recipes" },
 			stone("Recipes: ", " burns for 0 ticks")
 		)
-		-- A texture's Material: one that takes a MaterialVariant, the message naming them (a typo
-		-- is no Roblox material at all).
-		refused({ textures = { ["patch marbel"] = { Color = "", Material = "Marbel" } } }, { "Blocks" }, {
-			'TexturePack: texture "patch marbel" has Material Marbel: a texture\'s Material must be one that takes a MaterialVariant (',
+		-- A texture's Material: one that takes a MaterialVariant, the message naming them. (A typo,
+		-- no Roblox material at all, is Content's to refuse, with a "did you mean": "content: a name
+		-- outside a closed set...".)
+		refused({ textures = { ["patch glass"] = { Color = "", Material = "Glass" } } }, { "Blocks" }, {
+			"TexturePack: pack Patch, texture patch glass has Material Glass: a texture's Material must be one that takes a MaterialVariant (",
 			"Slate",
 		})
 		-- A loot entry's count: at least one (Content checks the names).
@@ -3150,7 +3158,12 @@ return function(t, shared, require, _server, _client)
 		refused(
 			{ blocks = { { name = "Stone", override = true, sound = "chime" } } },
 			{ "Blocks" },
-			{ "Block Stone has unknown sound chime (a type is one once the packs' sounds give block.chime.break" }
+			stone("Blocks: ", " has unknown sound chime (a type is one once the packs' sounds give block.chime.break")
+		)
+		refused(
+			{ blocks = { { name = "Stone", override = true, sound = "stnoe" } } },
+			{ "Blocks" },
+			stone("Blocks: ", " has unknown sound stnoe (did you mean stone?)")
 		)
 		-- What the game's code plays by name, a menu's lids, the firearm classes' shots and the
 		-- fluids' buckets must be some pack's events: a game whose packs lack one fails to load.
@@ -3194,5 +3207,429 @@ return function(t, shared, require, _server, _client)
 			water.fillSound = "item.bucket.fil"
 		end)
 		t.ok(has(message, { "'s bucket sound item.bucket.fil is no pack's sound event" }), message)
+	end)
+
+	--[[ Discovery as Rojo builds a pack (tests/fixtures/content/rojo: a folder of packs a case) ]]
+
+	t.test(
+		"content: a pack as Rojo builds it: a kind giving nothing, a dotted name, text, a name twice, an init",
+		function()
+			-- What Content.load makes of the fixture `case`'s packs, through the Lune loader (which
+			-- builds the tree `rojo build` does from the same files).
+			local function loading(case: string): string
+				local env, root = fresh()
+				local packs = env.mount(`{ROJO}/{case}`, "ReplicatedStorage", `Rojo{case}`)
+				local ok, err = pcall(env.require(root.Content).load, packs)
+				return if ok then "(it loaded)" else tostring(err)
+			end
+			local function refuses(case: string, parts: { string })
+				local message = loading(case)
+				t.ok(has(message, parts), `{case}: {message}`)
+			end
+			refuses("TwoFiles", {
+				"pack P has two things named blocks (a ModuleScript and a ModuleScript: blocks.luau beside blocks.json",
+				"keep one",
+			})
+			refuses("ModuleAndFolder", { "pack P has two things named recipes (a " })
+			refuses("InFolder", { "pack P, blocks has two things named ores (a ModuleScript and a ModuleScript" })
+			refuses("Text", { "pack P has notes, a StringValue, which is no module" })
+			refuses("Dotted", { "pack P has ores.old, a name with a dot (Rojo makes ores.old.luau a module" })
+			refuses("DottedInFolder", { "pack P has blocks/terrain.old, a name with a dot" })
+			refuses("Init", {
+				"pack P has tags, a module with modules in it (a folder holding an init.luau)",
+				"(tags/init.luau -> tags/main.luau)",
+			})
+			t.eq(loading("Lua"), "(it loaded)", "a .lua and a .jsonc module, read as Rojo reads them")
+			-- A module that gives nothing: a function forgetting its list, a module without a return.
+			local env, root = fresh()
+			local Fresh = env.require(root.Content)
+			local made = 0
+			local function load(build: (pack: Loader.Node) -> ()): string
+				made += 1
+				local packs = env.folder(root, `Nothing{made}`)
+				local p = env.folder(packs, "P")
+				env.module(p, "pack", { order = 1 })
+				build(p)
+				local ok, err = pcall(Fresh.load, packs)
+				return if ok then "(it loaded)" else tostring(err)
+			end
+			local FORGETS = "return function(define)\n\tlocal list = { { name = 'Marble' } }\nend\n"
+			local message = load(function(p)
+				env.source(p, "blocks", FORGETS)
+			end)
+			t.ok(has(message, { "pack P's blocks gives nothing (nil)", '"return list"' }), message)
+			message = load(function(p)
+				env.source(env.folder(p, "blocks"), "stone", FORGETS)
+			end)
+			t.ok(has(message, { "pack P, blocks/stone gives nothing (nil)" }), message)
+			message = load(function(p)
+				env.source(p, "blocks", "local list = { { name = 'Marble' } }\n")
+			end)
+			t.ok(
+				has(message, { "pack P's blocks does not load:", "Module code did not return exactly one value" }),
+				message
+			)
+			message = load(function(p)
+				env.source(p, "pack", "return function(define)\nend\n")
+			end)
+			t.ok(has(message, { "pack P's manifest gives nothing (nil)" }), message)
+		end
+	)
+
+	--[[ Overrides: what they patch, and who is credited ]]
+
+	t.test("content: an override patches tables of fields key by key, adds tags, replaces lists", function()
+		local BOX = { size = { 16, 16, 16 }, offset = { 0, 0, 0 } }
+		local texture = { Color = "", Material = "Grass" }
+		local age = { id = "a", name = "A", level = 0, milestones = {}, reward = 0, color = { 1, 1, 1 } }
+		local node = {
+			id = "n",
+			name = "N",
+			description = "d",
+			row = 1,
+			icon = "Apple",
+			age = "a",
+			cost = 1,
+			perk = { kind = "wear", chance = 0.5 },
+		}
+		local moor = {
+			name = "Moor",
+			bands = { "Lowland" },
+			temperature = 0,
+			humidity = 0,
+			vegetation = 0.1,
+			top = "Grass",
+			filler = "Grass",
+			fillerDepth = 3,
+			underwater = "Grass",
+			beach = "Grass",
+			features = {},
+			weather = { temperature = 0.5, precipitation = false },
+			tags = { "is_old" },
+		}
+		local base = pack("A", {
+			blocks = {
+				{
+					name = "Grass",
+					texture = { Top = "top", Sides = "side", Bottom = "dirt" },
+					sounds = { ["break"] = "e.break", step = "e.step" },
+					tags = { "dirt" },
+					shape = { BOX, BOX },
+					color = { 1, 2, 3 },
+				},
+			},
+			items = { { name = "Apple", model = MODEL, food = { heal = 1, nutrition = 2, saturation = 0.3 } } },
+			textures = { top = texture, side = texture, dirt = texture, new = texture },
+			sounds = { soundEntry("e.break"), soundEntry("e.step"), soundEntry("e.new") },
+			ages = { age },
+			skills = { node },
+			biomes = { moor },
+		})
+		local function over(kinds: { [string]: any }): { Content.PackData }
+			return { base, pack("B", kinds, { order = 20 }) }
+		end
+		local content = Content.build(over({
+			blocks = {
+				{
+					name = "Grass",
+					override = true,
+					texture = { Top = "new" },
+					sounds = { step = "e.new" },
+					tags = { "green", "dirt" },
+					shape = { BOX },
+					color = { 4, 5, 6 },
+				},
+			},
+			items = { { name = "Apple", override = true, food = { nutrition = 4 } } },
+			skills = { { id = "n", override = true, perk = { kind = "thirst", factor = 0.5 } } },
+			biomes = { { name = "Moor", override = true, weather = { temperature = 0.2 }, tags = { "is_new" } } },
+		}))
+		local grass = content.block("Grass") :: any
+		t.eq(grass.texture.Top, "new", "a face patched")
+		t.ok(grass.texture.Sides == "side" and grass.texture.Bottom == "dirt", "the other faces kept")
+		t.ok(grass.sounds["break"] == "e.break" and grass.sounds.step == "e.new", "a map of names, key by key")
+		t.eq(table.concat(grass.tags, " "), "dirt green", "tags added, each once")
+		t.eq(table.concat(content.tags.green, " "), "Grass", "and in the tag")
+		t.eq(#grass.shape, 1, "a list replaced whole")
+		t.eq(table.concat(grass.color, " "), "4 5 6", "a colour too")
+		local apple = content.item("Apple") :: any
+		t.ok(
+			apple.food.heal == 1 and apple.food.nutrition == 4 and apple.food.saturation == 0.3,
+			"a record, key by key"
+		)
+		local perk = (content.skills[1] :: any).perk
+		t.ok(perk.kind == "thirst" and perk.factor == 0.5 and perk.chance == nil, "a perk of another kind replaced")
+		local patched = content.biome("Moor") :: any
+		t.ok(patched.weather.temperature == 0.2 and patched.weather.precipitation == false, "a biome's weather")
+		t.eq(table.concat(patched.tags, " "), "is_old is_new", "a biome's tags added")
+		t.eq(base.kinds.blocks[1].texture.Top, "top", "the earlier pack's tables untouched")
+		-- An override's own tables need none of their fields, but know them; the patched entry is
+		-- checked whole.
+		fails(
+			over({ items = { { name = "Apple", override = true, food = { nutriton = 4 } } } }),
+			{ "pack B, item Apple: food.nutriton is no field it may have (did you mean nutrition?)" },
+			"a typo inside a patched table"
+		)
+		fails(
+			over({ blocks = { { name = "Grass", override = true, fluid = { level = 1 } } } }),
+			{ "pack B, block Grass: once patched, fluid.group is missing" },
+			"a patch leaving out what the whole needs"
+		)
+		fails(
+			over({ skills = { { id = "n", override = true, perk = { kind = "thirst", chance = 0.5 } } } }),
+			{ "pack B, skill n: perk.chance is no number a thirst perk has" },
+			"a perk replaced, checked as one"
+		)
+	end)
+
+	t.test("content: an override's tags, file and potion's items are its pack's", function()
+		local function file(path: string, data: any): Content.PackFile
+			return { file = path, data = data }
+		end
+		local content = Content.build({
+			pack("A", { blocks = { { name = "Stone", tags = { "rock" } } } }),
+			{
+				name = "B",
+				manifest = { order = 20 },
+				kinds = {},
+				folders = {
+					blocks = {
+						file("blocks/patches", { { name = "Stone", override = true, tags = { "hard", "rock" } } }),
+					},
+				},
+			},
+			pack("C", { blocks = { { name = "Stone", override = true, hardness = 3 } } }, { order = 30 }),
+		})
+		t.eq(content.where("block", "Stone"), "pack A (patched by B's blocks/patches, C), block Stone", "each override")
+		local origin = content.origin("block", "Stone") :: Content.Origin
+		t.eq(table.concat(origin.patched, " "), "B C")
+		local files = {}
+		for _, patch in origin.overrides do
+			table.insert(files, `{patch.pack} {patch.file or "-"}`)
+		end
+		t.eq(table.concat(files, ", "), "B blocks/patches, C -", "each override's pack and file")
+		local hard = content.origin("tag", "hard") :: Content.Origin
+		t.ok(hard.pack == "B" and hard.file == "blocks/patches" and #hard.patched == 0, "a tag the override added")
+		t.eq((content.origin("tag", "rock") :: Content.Origin).pack, "A", "a tag the entry had")
+	end)
+
+	--[[ Closed sets and the names code elsewhere keeps ]]
+
+	t.test("content: a name outside a closed set the Schema gives fails, with a did you mean", function()
+		local function block(fields: { [string]: any }): { Content.PackData }
+			local spec: { [string]: any } = { name = "X" }
+			for key, value in fields do
+				spec[key] = value
+			end
+			return { pack("P", { blocks = { spec } }) }
+		end
+		local function item(fields: { [string]: any }): { Content.PackData }
+			local spec: { [string]: any } = { name = "I", model = MODEL }
+			for key, value in fields do
+				spec[key] = value
+			end
+			return { pack("P", { items = { spec } }) }
+		end
+		fails(block({ tool = "pikaxe" }), {
+			'pack P, block X: tool must be one of pickaxe, axe, shovel, hoe, sword, not the string "pikaxe" (did you mean pickaxe?)',
+		}, "a block's tool")
+		fails(block({ menu = "Chets" }), { "menu must be one of Chest,", "(did you mean Chest?)" }, "a menu")
+		fails(block({ material = "Marbel" }), {
+			'material must be a Roblox material (an Enum.Material name), not the string "Marbel" (did you mean Marble?)',
+		}, "a material")
+		fails(
+			block({ behaviour = "Gras" }),
+			{ "behaviour must be one of Attached,", "(did you mean Grass?)" },
+			"a behaviour"
+		)
+		fails(
+			block({ structureMode = "lod" }),
+			{ "structureMode must be one of save, load", "(did you mean load?)" },
+			"a mode"
+		)
+		fails(
+			block({ door = { facing = "Nrth", hinge = "Left", open = false, upper = false } }),
+			{ "door.facing must be one of North, South, West, East", "(did you mean North?)" },
+			"a door's facing"
+		)
+		fails(
+			block({ jigsaw = { front = "Upp", top = "North" } }),
+			{ "jigsaw.front must be one of Up,", "(did you mean Up?)" },
+			"a jigsaw"
+		)
+		fails(
+			block({ shape = { { size = { 1, 1, 1 }, offset = { 0, 0, 0 }, material = "Neonn" } } }),
+			{ "shape[1].material must be a Roblox material", "(did you mean Neon?)" },
+			"a box's material"
+		)
+		fails(item({ tool = { kind = "pickax", speed = 2, level = 1 } }), {
+			"pack P, item I: tool.kind must be one of pickaxe, axe, shovel, hoe, sword, shears",
+			"(did you mean pickaxe?)",
+		}, "an item's tool")
+		fails(
+			item({ material = "Metl" }),
+			{ "material must be a Roblox material", "(did you mean Metal?)" },
+			"an item's material"
+		)
+		fails(
+			item({ accessory = { worn = "Feat" } }),
+			{ "accessory.worn must be one of Feet,", "(did you mean Feet?)" },
+			"a place worn"
+		)
+		fails(
+			item({ magic = { mana = 1, damage = 1, useTicks = 1, projectile = "sprak" } }),
+			{ "magic.projectile must be one of spark, bolt, water", "(did you mean spark?)" },
+			"a projectile"
+		)
+		fails(
+			{ pack("P", { textures = { t = { Color = "", Material = "Slaet" } } }) },
+			{ "pack P, texture t: Material must be a Roblox material", "(did you mean Slate?)" },
+			"a texture's Material"
+		)
+		local function ageOf(milestone: any): { Content.PackData }
+			local record =
+				{ id = "a", name = "A", level = 0, milestones = { milestone }, reward = 0, color = { 1, 1, 1 } }
+			local old = { id = "iron", name = "Iron", level = 0, milestones = {}, reward = 0, color = { 1, 1, 1 } }
+			return { pack("P", { blocks = { { name = "Stone" } }, ages = { old, record } }) }
+		end
+		fails(ageOf({ category = "crafts", key = "Stone", text = "x" }), {
+			"pack P, Age a: milestones[1].category must be one of mine, craft, smelt, biome, mob, age",
+			"(did you mean craft?)",
+		}, "a milestone's category")
+		fails(
+			ageOf({ category = "biome", key = "Plians", text = "x" }),
+			{ "pack P, Age a: milestone biome names unknown biome Plians" },
+			"a biome milestone"
+		)
+		fails(
+			ageOf({ category = "age", key = "iorn", text = "x" }),
+			{ "pack P, Age a: milestone age names unknown Age iorn (did you mean iron?)" },
+			"an Age milestone"
+		)
+		fails(
+			ageOf({ category = "mine", key = "Stone", count = 2, text = "x" }),
+			{ "pack P, Age a: milestone 1 needs a key or a count (one of them)" },
+			"a key and a count"
+		)
+		fails(
+			ageOf({ category = "biome", text = "x" }),
+			{ "pack P, Age a: milestone 1 needs a key or a count" },
+			"neither"
+		)
+		fails(
+			{ pack("P", { blocks = { { name = "X", fluid = { group = "Watr", level = 0, tickDelay = 5 } } } }) },
+			{ "pack P, block X: fluid.group names unknown fluid Watr (did you mean Water?)" },
+			"a fluid's group"
+		)
+		fails(
+			{ pack("P", { loot = { chest = { { rolls = { 2, 1 }, entries = { { false, 1, 1, 1 } } } } } }) },
+			{ "pack P, loot table chest: pool 1: rolls has its most (1) under its fewest (2)" },
+			"rolls"
+		)
+		fails(
+			{ pack("P", { loot = { chest = { { rolls = { -1, 1 }, entries = { { false, 1, 1, 1 } } } } } }) },
+			{ "pack P, loot table chest: pool 1: rolls has its fewest (-1) below 0" },
+			"rolls below 0"
+		)
+	end)
+
+	t.test("content: the closed sets code elsewhere keeps: materials, behaviours, projectiles, discoveries", function()
+		local Schema = require(shared.Content.Schema)
+		-- (Sorted, joined.)
+		local function set(list: { string }): string
+			local copy = table.clone(list)
+			table.sort(copy)
+			return table.concat(copy, " ")
+		end
+		local materials = {}
+		for _, material in roblox.Enum.Material:GetEnumItems() do
+			table.insert(materials, material.Name)
+		end
+		t.eq(set(Schema.MATERIALS), set(materials), "Roblox's Enum.Material, as Lune's Roblox library has it")
+		local kinds = {}
+		for _, kind in require(shared.Magic.Projectiles).KINDS do
+			table.insert(kinds, kind.name)
+		end
+		t.eq(set(Schema.PROJECTILES), set(kinds), "Magic's projectiles")
+		t.eq(set(Schema.MILESTONES), set(require(shared.Progression.Knowledge).CATEGORIES), "Knowledge's categories")
+		-- The server's behaviours: its modules, each listed (its own check, as it loads).
+		local env, _root, serverRoot = fresh()
+		t.ok(pcall(env.require, serverRoot.Behaviours), "the server's behaviours are the list's")
+		env, _root, serverRoot = fresh()
+		env.module(serverRoot.Behaviours, "Spin", { onTick = function() end })
+		local ok, err = pcall(env.require, serverRoot.Behaviours)
+		t.ok(
+			not ok
+				and string.find(
+					tostring(err),
+					"Behaviours: Spin is a behaviour, which Content/Schema's BEHAVIOURS must list",
+					1,
+					true
+				),
+			tostring(err)
+		)
+		-- A mob a milestone names: the mobs' own list's (Progression/Ages).
+		refused({
+			ages = {
+				{
+					id = "patch_age",
+					name = "Patch Age",
+					level = 99,
+					milestones = { { category = "mob", key = "Zombi", text = "Kill a zombie" } },
+					reward = 0,
+					color = { 1, 1, 1 },
+				},
+			},
+		}, { "Progression", "Ages" }, {
+			"Ages: pack Patch, Age patch_age: milestone mob names unknown mob Zombi (did you mean Zombie?)",
+		})
+	end)
+
+	--[[ Hints, and the registries' messages ]]
+
+	t.test("content: did you mean counts two letters swapped as one edit; registries' errors name the pack", function()
+		local Schema = require(shared.Content.Schema)
+		t.eq(Schema.suggest("Stnoe", { Stone = true, Snow = true }), "Stone", "a swap is one edit (Snow is two)")
+		fails({
+			pack("P", {
+				blocks = { { name = "Stone" }, { name = "Snow" } },
+				recipes = { { type = "smelting", input = "Stnoe", result = "Stone" } },
+			}),
+		}, { "pack P, recipe #1 (Stone): input names unknown item Stnoe (did you mean Stone?)" }, "a recipe's input")
+		refused(
+			{ blocks = { { name = "Stone", override = true, machine = { kind = "smeltr" } } } },
+			{ "Machines" },
+			stone("Machines: ", " names unknown machine kind smeltr (did you mean smelter?)")
+		)
+		refused(
+			{ textures = { stone = { override = true, Material = "Glass" } } },
+			{ "Blocks" },
+			patched("TexturePack: ", "textures/terrain", "texture stone", " has Material Glass: a texture's Material")
+		)
+		refused(
+			{ items = { { name = "IronHelmet", override = true, icon = "7" } } },
+			{ "Items" },
+			patched(
+				"Items: ",
+				"items/armor",
+				"item IronHelmet",
+				`'s icon must be "" or "rbxassetid://<number>", not "7"`
+			)
+		)
+		refused(
+			{ recipes = { { type = "shaped", pattern = { "XY" }, key = { X = "Stone" }, result = "Stone" } } },
+			{ "Crafting" },
+			{ "Crafting: pack Patch, recipe #1 (Stone): its pattern's 'Y' has no key" }
+		)
+		refused({
+			recipes = {
+				{ type = "shapeless", ingredients = { "Stone", "Stone" }, keep = "Stone", result = "Cobblestone" },
+			},
+		}, { "Crafting" }, { "Crafting: pack Patch, recipe #1 (Cobblestone) keeps 'Stone', which it lists twice" })
+		refused(
+			{ ores = { { name = "patch_ore", block = "Stone", veins = 1, size = 4, minY = 10, maxY = 5 } } },
+			{ "Generation", "Ores" },
+			{ "Ores: pack Patch, ore feature patch_ore has an empty height range (minY 10, maxY 5)" }
+		)
 	end)
 end

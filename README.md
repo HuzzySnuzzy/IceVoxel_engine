@@ -4217,7 +4217,8 @@ generator's per-biome arrays and climate picks follow: a pack loading after the 
 (order over 100) adds its biomes after the vanilla ones, which keep their places. A pack may also
 patch another's biome by name with `override = true`: its fields replace the biome's, a table of
 fields (`weather`, `patches`, `foliage` and its `flowers` and `herbs`) is patched field by field,
-and a list is replaced whole, so to add a flower give the species list with it:
+its `tags` add to the biome's, and any other list is replaced whole, so to add a flower give the
+species list with it:
 
 ```lua
 {
@@ -4388,8 +4389,8 @@ its entry `Minecraft/structures.luau`.
 
 **A structure's pool, changed by another pack.** A later pack overrides a pool by name, as blocks
 are: `override = true` patches the pool's fields, and its `elements` replace the earlier list
-whole (every override's list field does: a block's `tags`, a structure's `biomes`; Minecraft's
-data packs replace a template_pool the same way), so to add a piece it lists the pool's own
+whole (every override's list field does, `tags` aside, which add: a block's `shape`, a
+structure's `biomes`; Minecraft's data packs replace a template_pool the same way), so to add a piece it lists the pool's own
 elements and the new one. A pack giving the outpost a well among its houses:
 
 ```lua

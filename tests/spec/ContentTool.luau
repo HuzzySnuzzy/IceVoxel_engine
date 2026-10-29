@@ -196,6 +196,43 @@ return function(t, shared, require, _server, _client)
 		end
 	end)
 
+	t.test("content tool: a smelting recipe for an input an earlier one takes never smelts", function()
+		-- (A pack after every other smelting the Minecraft pack's Cobblestone, and Core's logs, into
+		-- Glass: a furnace takes the first recipe for an input, Crafting/Smelting.)
+		local view, problem = fresh(function(env, packs)
+			local order = GamePacks.orderAfter(env, packs, 900)
+			local later = env.folder(packs, "Later")
+			env.module(later, "pack", { order = order, requires = { "Core", "Minecraft" } })
+			env.module(later, "recipes", {
+				{ type = "smelting", input = "Cobblestone", result = "Glass" },
+				{ type = "smelting", input = "#logs", result = "Glass" },
+			})
+		end)
+		assert(view, problem)
+		local findings = ContentTool.check(view)
+		local clash = finding(findings, "recipe", "recipe #1 (Glass)")
+		t.ok(clash and clash.pack == "Later" and clash.level == "warning", "a warning against the later pack")
+		local text = if clash then clash.text else "(none)"
+		t.ok(
+			string.find(
+				text,
+				"never smelted: Cobblestone smelts into Stone, as pack Minecraft's recipes/smelting",
+				1,
+				true
+			),
+			text
+		)
+		local logs = finding(findings, "recipe", "recipe #2 (Glass)")
+		local logText = if logs then logs.text else "(none)"
+		t.ok(
+			string.find(logText, "never smelted: ", 1, true) and string.find(logText, "smelts into Charcoal", 1, true),
+			logText
+		)
+		for _, each in of(findings, "Minecraft") do
+			t.ok(string.sub(each, 1, 7) ~= "recipe ", `nothing against the earlier one: {each}`)
+		end
+	end)
+
 	t.test("content tool: survival's reach follows drops, recipes and Ages", function()
 		local view = withLint()
 		local reach = ContentTool.reach(view)

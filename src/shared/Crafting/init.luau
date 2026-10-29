@@ -45,25 +45,26 @@ export type Recipe = {
 
 local Crafting = {}
 
-local function itemId(name: string): number
+-- (`from`: the recipe's place, Recipes `from`, for the message.)
+local function itemId(name: string, from: string): number
 	local ok, id = pcall(function()
 		return Items.id[name]
 	end)
-	assert(ok, `Crafting: unknown item '{name}'`)
+	assert(ok, `Crafting: {from} names unknown item '{name}'`)
 	return id
 end
 
 -- The item ids an ingredient string accepts.
-local function ingredient(name: string): Ingredient
+local function ingredient(name: string, from: string): Ingredient
 	local set: Ingredient = {}
 	if string.sub(name, 1, 1) == "#" then
 		local tag = (Recipes.tags :: any)[string.sub(name, 2)]
-		assert(tag, `Crafting: unknown tag '{name}'`)
+		assert(tag, `Crafting: {from} names unknown tag '{name}'`)
 		for _, item in tag do
-			set[itemId(item)] = true
+			set[itemId(item, from)] = true
 		end
 	else
-		set[itemId(name)] = true
+		set[itemId(name, from)] = true
 	end
 	return set
 end
@@ -85,25 +86,22 @@ for _, spec in Recipes.shaped do
 				table.insert(cells, false)
 			else
 				local key = spec.key[char]
-				assert(key, `Crafting: no key for '{char}' in the {spec.result} recipe`)
-				table.insert(cells, ingredient(key))
+				assert(key, `Crafting: {spec.from}: its pattern's '{char}' has no key`)
+				table.insert(cells, ingredient(key, spec.from))
 				if char == spec.keep then
-					assert(keep == nil, `Crafting: the {spec.result} recipe keeps '{char}', which it uses twice`)
+					assert(keep == nil, `Crafting: {spec.from} keeps '{char}', which it uses twice`)
 					keep = #cells
 				end
 			end
 		end
 	end
-	assert(
-		spec.keep == nil or keep ~= nil,
-		`Crafting: the {spec.result} recipe keeps '{spec.keep}', which it never uses`
-	)
+	assert(spec.keep == nil or keep ~= nil, `Crafting: {spec.from} keeps '{spec.keep}', which it never uses`)
 	table.insert(recipes, {
 		kind = "shaped",
 		width = width,
 		height = height,
 		cells = cells,
-		result = itemId(spec.result),
+		result = itemId(spec.result, spec.from),
 		count = spec.count or 1,
 		keep = keep,
 	})
@@ -112,22 +110,19 @@ for _, spec in Recipes.shapeless do
 	local cells: { Ingredient | false } = {}
 	local keep: number? = nil
 	for i, name in spec.ingredients do
-		table.insert(cells, ingredient(name))
+		table.insert(cells, ingredient(name, spec.from))
 		if name == spec.keep then
-			assert(keep == nil, `Crafting: the {spec.result} recipe keeps '{name}', which it lists twice`)
+			assert(keep == nil, `Crafting: {spec.from} keeps '{name}', which it lists twice`)
 			keep = i
 		end
 	end
-	assert(
-		spec.keep == nil or keep ~= nil,
-		`Crafting: the {spec.result} recipe keeps '{spec.keep}', which it never lists`
-	)
+	assert(spec.keep == nil or keep ~= nil, `Crafting: {spec.from} keeps '{spec.keep}', which it never lists`)
 	table.insert(recipes, {
 		kind = "shapeless",
 		width = #cells,
 		height = 1,
 		cells = cells,
-		result = itemId(spec.result),
+		result = itemId(spec.result, spec.from),
 		count = spec.count or 1,
 		keep = keep,
 	})
