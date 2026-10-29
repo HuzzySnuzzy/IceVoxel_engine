@@ -4,7 +4,10 @@
 	(FixtureLint, one of each finding, and FixtureLintPatch, a JSON pack patching it), grafted into
 	a fresh game after every pack there (lib/GamePacks); what each finding says (an item out of
 	reach named by its cause, a brewed potion item's fix on its potion, a pack naming another's
-	entries without requiring it, or one loading after it); the game's packs, which load, the
+	entries without requiring it, or one loading after it, a recipe never used and how to replace
+	the one winning over it); named recipes (tests/spec/Content's FixtureRecipes pack, overriding
+	and removing the Minecraft pack's: no finding, listed and shown by name, the override's file
+	named); the game's packs, which load, the
 	shipped ones with no warning, and whose faces rule agrees with the TexturePack spec's; a load
 	error, named; what each entry came from (the loader's record, content.origin: the fixture packs
 	of tests/spec/Content, Gamma's overrides; a kind folder's recipes by their file); the lists
@@ -198,19 +201,28 @@ return function(t, shared, require, _server, _client)
 
 	t.test("content tool: a smelting recipe for an input an earlier one takes never smelts", function()
 		-- (A pack after every other smelting the Minecraft pack's Cobblestone, and Core's logs, into
-		-- Glass: a furnace takes the first recipe for an input, Crafting/Smelting.)
+		-- Glass: a furnace takes the first recipe for an input, Crafting/Smelting. Each named: a
+		-- recipe's name is its result's, and the Minecraft pack's sand has Glass's. And a torch's
+		-- grid making a Lantern: Torch's recipe fits it first.)
 		local view, problem = fresh(function(env, packs)
 			local order = GamePacks.orderAfter(env, packs, 900)
 			local later = env.folder(packs, "Later")
 			env.module(later, "pack", { order = order, requires = { "Core", "Minecraft" } })
 			env.module(later, "recipes", {
-				{ type = "smelting", input = "Cobblestone", result = "Glass" },
-				{ type = "smelting", input = "#logs", result = "Glass" },
+				{ type = "smelting", input = "Cobblestone", result = "Glass", name = "GlassFromCobblestone" },
+				{ type = "smelting", input = "#logs", result = "Glass", name = "GlassFromLogs" },
+				{
+					type = "shaped",
+					pattern = { "X", "#" },
+					key = { X = "Coal", ["#"] = "Stick" },
+					result = "Lantern",
+					name = "LanternFromCoal",
+				},
 			})
 		end)
 		assert(view, problem)
 		local findings = ContentTool.check(view)
-		local clash = finding(findings, "recipe", "recipe #1 (Glass)")
+		local clash = finding(findings, "recipe", "recipe #1 (GlassFromCobblestone)")
 		t.ok(clash and clash.pack == "Later" and clash.level == "warning", "a warning against the later pack")
 		local text = if clash then clash.text else "(none)"
 		t.ok(
@@ -222,15 +234,91 @@ return function(t, shared, require, _server, _client)
 			),
 			text
 		)
-		local logs = finding(findings, "recipe", "recipe #2 (Glass)")
+		-- (How to replace that one: an override of its name.)
+		t.ok(
+			string.find(text, "(Stone) comes first", 1, true)
+				and string.find(text, 'to replace that recipe, override it (name = "Stone", override = true)', 1, true),
+			text
+		)
+		local logs = finding(findings, "recipe", "recipe #2 (GlassFromLogs)")
 		local logText = if logs then logs.text else "(none)"
 		t.ok(
 			string.find(logText, "never smelted: ", 1, true) and string.find(logText, "smelts into Charcoal", 1, true),
 			logText
 		)
+		t.ok(string.find(logText, 'override it (name = "Charcoal", override = true)', 1, true), logText)
+		local lantern = finding(findings, "recipe", "recipe #3 (LanternFromCoal)")
+		local lanternText = if lantern then lantern.text else "(none)"
+		t.ok(
+			string.find(lanternText, "never crafted: its own grid makes Torch x4, as pack Minecraft's", 1, true)
+				and string.find(lanternText, "(Torch) fits first", 1, true)
+				and string.find(lanternText, 'override it (name = "Torch", override = true)', 1, true),
+			lanternText
+		)
 		for _, each in of(findings, "Minecraft") do
 			t.ok(string.sub(each, 1, 7) ~= "recipe ", `nothing against the earlier one: {each}`)
 		end
+	end)
+
+	t.test("content tool: a pack's recipe overrides and removal: no finding, listed and shown by name", function()
+		-- (The FixtureRecipes pack of tests/spec/Content: Torch's and IronIngotFromRawIron's
+		-- replaced, Ladder's removed, FixtureStickFromFlint its own.)
+		local view, problem = fresh(function(env, packs)
+			GamePacks.graftLast(env, "tests/fixtures/content/recipes/FixtureRecipes", packs, "FixtureRecipes")
+		end)
+		assert(view, problem)
+		local findings = ContentTool.check(view)
+		t.eq(table.concat(of(findings, "FixtureRecipes"), ", "), "", "no finding: an override never hides")
+		for _, each in of(findings, "Minecraft") do
+			t.ok(string.sub(each, 1, 7) ~= "recipe ", `nothing against the recipes it replaced: {each}`)
+		end
+		-- Listed: its merged place, its name, what it is, its maker and the override's file.
+		local list = assert(ContentTool.list(view, "recipes", "FixtureRecipes"))
+		t.ok(
+			has(list, {
+				"Torch",
+				"shaped Torch x8",
+				"Minecraft (patched by FixtureRecipes's recipes/a_overrides), recipes/lights, recipe #1",
+			}),
+			"an override: listed under the pack patching it"
+		)
+		t.ok(has(list, { "IronIngotFromRawIron", "smelting RawIron -> IronIngot x2" }), "by the name it gives")
+		t.ok(
+			has(list, { "FixtureStickFromFlint", "shapeless Stick x2", "FixtureRecipes, recipes/b_new, recipe #1" }),
+			"its own"
+		)
+		t.ok(not has(assert(ContentTool.list(view, "recipes")), { "Ladder", "shaped Ladder" }), "Ladder's gone")
+		-- Shown by name: its place, its maker and the override's file, its fields.
+		local torch = assert(ContentTool.show(view, "Torch"))
+		t.ok(has(torch, { "recipe Torch: #", "pack Minecraft, recipes/lights, recipe #1" }), "the recipe's head")
+		t.ok(has(torch, { "patched by: ", "FixtureRecipes's recipes/a_overrides" }), "the override's file")
+		t.ok(has(torch, { "count = 8" }), "its merged fields")
+		t.ok(has(torch, { "block Torch: id" }), "and the block of that name")
+		local ingot = assert(ContentTool.show(view, "IronIngotFromRawIron"))
+		t.ok(has(ingot, { "recipe IronIngotFromRawIron: #", "pack Minecraft, recipes/smelting" }), ingot[1])
+		t.ok(not has(assert(ContentTool.show(view, "Ladder")), { "recipe Ladder" }), "no recipe Ladder")
+		t.ok(
+			has(assert(ContentTool.show(view, "Stick")), { "(FixtureStickFromFlint): shapeless Stick x2" }),
+			"an item's recipes, each by its name"
+		)
+		local missing, near = ContentTool.show(view, "FixtureStickFromFlnit")
+		t.eq(missing, nil)
+		t.eq((near :: any)[1], "FixtureStickFromFlint", "a recipe's name is a name it knows")
+		-- What it names for `requires`: the recipes it overrides or removes.
+		local named = {}
+		ContentTool.references(
+			"recipes",
+			{
+				{ name = "Ladder", remove = true },
+				{ type = "smelting", override = true, input = "Sand", result = "Glass" },
+			},
+			"recipes/a",
+			function(space, name, where)
+				table.insert(named, `{space} {name} ({where})`)
+			end
+		)
+		t.ok(table.find(named, "recipe Ladder (recipes/a, recipe #1 (Ladder))") ~= nil, table.concat(named, "; "))
+		t.ok(table.find(named, "recipe Glass (recipes/a, recipe #2 (Glass))") ~= nil, table.concat(named, "; "))
 	end)
 
 	t.test("content tool: survival's reach follows drops, recipes and Ages", function()
@@ -283,7 +371,8 @@ return function(t, shared, require, _server, _client)
 		)
 		t.ok(has(lines, { "info", "pack FixtureLint, item FixtureLintLost:" }), "an info")
 		local counts = lines[#lines]
-		t.ok(string.find(counts, "warnings (", 1, true) and string.find(counts, "1 never crafted", 1, true), counts)
+		-- ("never used": the recipe check counts a recipe never crafted or never smelted.)
+		t.ok(string.find(counts, "warnings (", 1, true) and string.find(counts, "1 never used", 1, true), counts)
 		t.ok(string.find(counts, "1 unused loot", 1, true) and string.find(counts, "requires", 1, true), counts)
 		-- (The fixture's own: the game's packs carry no warnings.)
 		local lint: { any } = {}
@@ -441,7 +530,10 @@ return function(t, shared, require, _server, _client)
 		t.ok(origin.file and string.sub(origin.file, 1, 8) == "recipes/", `its file ({origin.file})`)
 		local name = `{origin.file}, recipe #{origin.index}`
 		t.ok(has(assert(ContentTool.list(view, "recipes", "Minecraft")), { "Torch", `Minecraft, {name}` }), name)
-		t.ok(has(assert(ContentTool.show(view, "Torch")), { `pack Minecraft, {name}:` }), "and on its page")
+		-- (Its page: the item's "made by" line, its name after its place; and the recipe's own.)
+		local page = assert(ContentTool.show(view, "Torch"))
+		t.ok(has(page, { `pack Minecraft, {name} (Torch):` }), "and on its page")
+		t.ok(has(page, { "recipe Torch: #", `pack Minecraft, {name}` }), "the recipe of that name")
 	end)
 
 	--[[ Lists and pages ]]
@@ -493,7 +585,10 @@ return function(t, shared, require, _server, _client)
 		t.ok(has(page, { "Age: Stone Age" }), "the default")
 		t.ok(has(page, { "survival: from the Stone Age" }))
 		t.ok(
-			has(page, { "pack FixtureLint, recipe #1: smelting FixtureLintClean -> FixtureLintNoIcon" }),
+			has(
+				page,
+				{ "pack FixtureLint, recipe #1 (FixtureLintNoIcon): smelting FixtureLintClean -> FixtureLintNoIcon" }
+			),
 			"a recipe using it"
 		)
 		local item = assert(ContentTool.show(view, "FixtureLintPart"))
@@ -598,8 +693,11 @@ return function(t, shared, require, _server, _client)
 			local item = assert(ContentTool.show(view, "PotionOfStrength"))
 			t.ok(has(item, { "item PotionOfStrength", "pack Minecraft" }), "a potion's item, its pack's")
 			t.ok(
-				has(item, { "pack Minecraft, potion Strength, recipe #1: shapeless PotionOfStrength" }),
-				"made by its brewed recipe, named by its potion as the loader names it"
+				has(
+					item,
+					{ "pack Minecraft, potion Strength, recipe #1 (PotionOfStrength): shapeless PotionOfStrength" }
+				),
+				"made by its brewed recipe, named by its potion as the loader names it (and by its item)"
 			)
 			local recipes = assert(ContentTool.list(view, "recipes", "Minecraft"))
 			t.ok(has(recipes, { "StrongPotionOfStrength", "Minecraft" }), "brewed recipes are their pack's")

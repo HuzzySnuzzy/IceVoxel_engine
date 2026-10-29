@@ -17,8 +17,9 @@
 	`recipes()` and `fuels()` list the same recipes and fuels for recipe browsers (Ui/Jei).
 
 	An input smelts by the first recipe that takes it (Recipes.smelting's order: the packs' load
-	order), as a crafting grid makes the first recipe that fits it (Crafting): a later pack's
-	recipe for the same input never replaces an earlier one's (`tests/content check` warns of one).
+	order), as a crafting grid makes the first recipe that fits it (Crafting): a later pack's new
+	recipe for the same input never replaces an earlier one's (`tests/content check` warns of one);
+	a pack replaces it by overriding it by name (Content).
 
 	Fuels are Recipes.fuel's (an item's own beating its tag's), plus the buckets of the fluids that
 	burn (Shared/Fluids `furnaceFuel`: Minecraft's Lava Bucket, 20 000 ticks). Oil and fuel are no

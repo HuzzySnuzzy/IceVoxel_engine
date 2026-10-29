@@ -355,7 +355,12 @@ return function(t, shared, require)
 		local order = GamePacks.orderAfter(env, packs, 900)
 		local later = env.folder(packs, "Later")
 		env.module(later, "pack", { order = order, requires = { "Minecraft" } })
-		env.module(later, "recipes", { { type = "smelting", input = "Cobblestone", result = "Glass" } })
+		-- (A name of its own: the Minecraft pack's sand has Glass's, its result's.)
+		env.module(
+			later,
+			"recipes",
+			{ { type = "smelting", input = "Cobblestone", result = "Glass", name = "GlassFromCobblestone" } }
+		)
 		local FreshItems = env.require((root :: any).Items)
 		local FreshSmelting = env.require((root :: any).Crafting.Smelting)
 		local made = FreshSmelting.result(FreshItems.id.Cobblestone)

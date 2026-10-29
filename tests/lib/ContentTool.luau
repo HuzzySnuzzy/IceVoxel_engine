@@ -30,7 +30,10 @@
 	                       makes something else, since Crafting.match takes the first recipe that
 	                       fits (every shaped one before any shapeless one); and a smelting recipe
 	                       that never smelts, as an earlier one takes its input (or one of its
-	                       tag's items: Crafting/Smelting takes the first recipe for an input)
+	                       tag's items: Crafting/Smelting takes the first recipe for an input).
+	                       The finding names the recipe that wins, and when it is an earlier
+	                       pack's how to replace it: an override of its name (name = "Stone",
+	                       override = true)
 	    loot      warning  a loot table nothing rolls: no block's `loot` names it and it is no
 	                       chest's (the View's `chests`: the ruins', bunkers' and mineshafts')
 	    requires  warning  a pack naming entries of a pack that loads before it (its own modules'
@@ -52,16 +55,18 @@
 	  summary(view)             a line per pack: its order and how much of each kind it holds
 	  count(findings, level), verdict(findings)   how many of a level; what `new` says ("1 finding")
 	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack (a sound
-	                            event with its number, a track with its set, every lore line the
-	                            game has, fuel by tag and by entry); nil and why for a kind or pack
-	                            it has not, with the nearest ("no kind or pack block (did you mean
-	                            blocks?)")
-	  show(view, name)          lines about everything named `name` (a block, item, texture, loot
-	                            table, tag, ore feature, Age, skill, biome, effect, potion,
-	                            structure template, pool, structure, sound event or track): its
-	                            merged fields (whole: a long one over several lines, `valueLines`),
-	                            id, pack and the packs that patched it, and what the registries
-	                            made of it (every way survival gets an item in its first Age; a
+	                            event with its number, a track with its set, a recipe by its place
+	                            and name, every lore line the game has, fuel by tag and by entry);
+	                            nil and why for a kind or pack it has not, with the nearest ("no
+	                            kind or pack block (did you mean blocks?)")
+	  show(view, name)          lines about everything named `name` (a block, item, recipe,
+	                            texture, loot table, tag, ore feature, Age, skill, biome, effect,
+	                            potion, structure template, pool, structure, sound event or
+	                            track): its merged fields (whole: a long one over several lines,
+	                            `valueLines`), id, pack and the overrides that patched it (each
+	                            one's pack, and its file in a kind folder: "Patch's
+	                            blocks/stone"), and what the registries made of it (every way
+	                            survival gets an item in its first Age; a recipe's place; a
 	                            skill's cell, the nodes needing it, the entries it gates and their
 	                            recipes; a potion's brewed items; a template's size and palette;
 	                            an event's number and the entries naming it; a cave mood's event);
@@ -106,8 +111,8 @@
 	                   `requires` check without it)
 
 	Where an entry comes from is the loader's own record (content.origin): the pack and file that
-	made it, the packs whose overrides patched it, a recipe's place in its file, the packs that
-	put names in a tag. A potion's brewed items and recipes are its pack's, their file
+	made it, the packs whose overrides patched it, a recipe's place in its file and its name, the
+	packs that put names in a tag. A potion's brewed items and recipes are its pack's, their file
 	"potion <Name>" (as the loader names them).
 ]]
 
@@ -130,7 +135,8 @@ ContentTool.CHECKS = table.freeze({
 	{ id = "icon", label = "no icon" },
 	{ id = "texture", label = "unused" },
 	{ id = "age", label = "Age" },
-	{ id = "recipe", label = "never crafted" },
+	-- (A recipe never crafted or never smelted.)
+	{ id = "recipe", label = "never used" },
 	{ id = "loot", label = "unused loot" },
 	{ id = "requires", label = "requires" },
 	{ id = "survival", label = "out of reach" },
@@ -331,9 +337,20 @@ end
 ContentTool.packOf = packOf
 
 -- The packs whose overrides patched `name` of `kind`, in load order.
-local function patchedBy(view: any, kind: string, name: string): { string }
+local function patchedBy(view: any, kind: string, name: string | number): { string }
 	local origin = view.content.origin(kind, name)
 	return if origin then origin.patched else {}
+end
+
+-- The same, each override's pack and its kind folder's file when it is one ("Patch's
+-- blocks/stone", "Gamma"), as the loader's `where` names them.
+local function overridesOf(view: any, kind: string, name: string | number): { string }
+	local origin = view.content.origin(kind, name)
+	local list = {}
+	for _, patch in if origin then origin.overrides or {} else {} do
+		table.insert(list, if patch.file then `{patch.pack}'s {patch.file}` else patch.pack)
+	end
+	return list
 end
 
 -- The packs that put names in tag `tag`, in load order.
@@ -372,10 +389,16 @@ local function recipeFrom(view: any, index: number): (string, string)
 	return origin.pack, if origin.file then `{origin.file}, {name}` else name
 end
 
--- "recipe #3 (Torch)": as the loader names it, by the recipe's place in its pack (or file).
+-- A merged recipe's name (the loader gives each one: its own, else its result's).
+local function recipeName(recipe: any): string
+	return recipe.name or recipe.result
+end
+
+-- "recipe #3 (Torch)": as the loader names it, by the recipe's place in its pack (or file) and
+-- its name.
 local function recipeSubject(view: any, index: number): string
 	local _, place = recipeFrom(view, index)
-	return `{place} ({view.content.recipes[index].result})`
+	return `{place} ({recipeName(view.content.recipes[index])})`
 end
 
 -- What a recipe is, in short: "shaped Torch x4", "smelting RawIron -> IronIngot".
@@ -692,13 +715,15 @@ end
 	an override's own fields, not the entry it patches): `add(space, name, where)` for each, where
 	`space` is what the name is looked up among ("entry": a block's or an item's name, "block",
 	"tag", "texture", "loot", "sound", "effect", "biome", "skill", "age", "template", "pool",
-	"potion", "structure", "track") and `where` the entry giving it ("block OilHeater", "recipes/
-	fire, recipe #2 (Tnt)"). An override names the entry it patches. Joining a tag names no pack
-	(an entry's `tags`, a `tags` module's tag: the Ores pack's ores join the Minecraft pack's
-	"ores", which would be theirs alone without it); the names a tags module lists do, and so does
-	a "#tag" an ingredient takes (its first pack's). `kind` is the module's kind, `data` its data,
-	`file` its kind folder's file (nil: the kind's module); `head(text)` reads a template's palette
-	(Structures/TemplateText.head; nil: templates name nothing here).
+	"potion", "structure", "track", "recipe") and `where` the entry giving it ("block OilHeater",
+	"recipes/fire, recipe #2 (Tnt)"). An override names the entry it patches (a recipe's, or a
+	recipe's removal, the recipe of its name: a removed one's pack is no longer known, so it counts
+	for none). Joining a tag names no pack (an entry's `tags`, a `tags` module's tag: the Ores
+	pack's ores join the Minecraft pack's "ores", which would be theirs alone without it); the
+	names a tags module lists do, and so does a "#tag" an ingredient takes (its first pack's).
+	`kind` is the module's kind, `data` its data, `file` its kind folder's file (nil: the kind's
+	module); `head(text)` reads a template's palette (Structures/TemplateText.head; nil: templates
+	name nothing here).
 ]]
 function ContentTool.references(
 	kind: string,
@@ -825,8 +850,15 @@ function ContentTool.references(
 		entries("item", "name", blockOrItem)
 	elseif kind == "recipes" then
 		for index, recipe in data do
-			local where = `{if file then `{file}, ` else ""}recipe #{index} ({recipe.result})`
-			add("entry", recipe.result, where)
+			local name = recipe.name or recipe.result
+			local where = `{if file then `{file}, ` else ""}recipe #{index} ({name})`
+			-- (An override or a removal names the recipe it replaces.)
+			if recipe.override == true or recipe.remove == true then
+				add("recipe", name, where)
+			end
+			if recipe.result then
+				add("entry", recipe.result, where)
+			end
 			for _, name in recipe.ingredients or {} do
 				ingredient(name, where)
 			end
@@ -968,6 +1000,7 @@ local SPACES = table.freeze({
 	structure = "structures",
 	track = "music",
 	ore = "ores",
+	recipe = "recipes",
 })
 
 -- The pack that made what `name` names among `space` (ContentTool.references'), nil when none
@@ -1070,7 +1103,7 @@ local function requiresFindings(view: any): { Finding }
 			local origin = content.origin("recipe", index)
 			if origin and origin.pack == pack and origin.file and string.sub(origin.file, 1, 7) == "potion " then
 				ContentTool.references("recipes", { recipe }, origin.file, function(space, name, _where)
-					add(space, name, `{origin.file}, recipe #{origin.index} ({recipe.result})`)
+					add(space, name, `{origin.file}, recipe #{origin.index} ({recipeName(recipe)})`)
 				end)
 			end
 		end
@@ -1353,6 +1386,18 @@ function ContentTool.check(view: any): { Finding }
 		end
 	end
 
+	-- How a recipe that never works replaces the one winning over it (merged place `winner`), when
+	-- that one is a pack's loading before its own: by an override of its name (a recipe's override
+	-- replaces it whole, in its place: Content).
+	local loadsAt = packIndexOf(view)
+	local function replacing(pack: string, winner: number): string
+		local winnerPack = recipeFrom(view, winner)
+		if (loadsAt[winnerPack] or INF) >= (loadsAt[pack] or INF) then
+			return ""
+		end
+		return `: to replace that recipe, override it (name = "{recipeName(content.recipes[winner])}", override = true)`
+	end
+
 	-- Recipes that never craft.
 	local order = craftingOrder(view)
 	for index, recipe in content.recipes do
@@ -1377,10 +1422,11 @@ function ContentTool.check(view: any): { Finding }
 					table.insert(winners, other)
 				end
 			end
-			local winner = "another recipe"
+			local winner, fix = "another recipe", ""
 			if #winners == 1 then
 				local otherPack, otherPlace = recipeFrom(view, winners[1])
-				winner = `pack {otherPack}'s {otherPlace}`
+				winner = `pack {otherPack}'s {otherPlace} ({recipeName(content.recipes[winners[1]])})`
+				fix = replacing(pack, winners[1])
 			elseif #winners > 1 then
 				winner = `one of the {#winners} recipes for {made}`
 			end
@@ -1391,7 +1437,7 @@ function ContentTool.check(view: any): { Finding }
 				subject,
 				if made == nil
 					then "never crafted: its own grid makes nothing"
-					else `never crafted: its own grid makes {what}, as {winner} fits first (shaped recipes before shapeless)`
+					else `never crafted: its own grid makes {what}, as {winner} fits first (shaped recipes before shapeless){fix}`
 			)
 		end
 	end
@@ -1422,7 +1468,9 @@ function ContentTool.check(view: any): { Finding }
 				"warning",
 				"recipe",
 				recipeSubject(view, index),
-				`never smelted{if #taken < #inputs then ` from {name}` else ""}: {name} smelts into {content.recipes[first].result}, as pack {otherPack}'s {otherPlace} comes first (a furnace takes the first recipe for an input)`
+				`never smelted{if #taken < #inputs then ` from {name}` else ""}: {name} smelts into {content.recipes[first].result}, as pack {otherPack}'s {otherPlace} ({recipeName(
+					content.recipes[first]
+				)}) comes first (a furnace takes the first recipe for an input){replacing(pack, first)}`
 			)
 		end
 	end
@@ -1664,11 +1712,12 @@ end
 
 --[[
 	Lines listing the entries of `kind` (every kind when nil), of `pack` only when given (what it
-	made or patched): blocks and items with their ids, recipes by their merged place, biomes by
-	their index (Shared/Biomes) with their bands, lore lines (every one the game has: an entry's
-	own or a pack's `lore`) and fuel (a tag's, an entry's own) by name with their pack, the rest by
-	name; nil and why when the kind or the pack is unknown (with the nearest kind or pack: `list
-	block` is no kind, but "blocks?").
+	made or patched): blocks and items with their ids, recipes by their merged place with their
+	names (and the overrides that replaced them, by pack and file), biomes by their index
+	(Shared/Biomes) with their bands, lore lines (every one the game has: an entry's own or a
+	pack's `lore`) and fuel (a tag's, an entry's own) by name with their pack, the rest by name;
+	nil and why when the kind or the pack is unknown (with the nearest kind or pack: `list block`
+	is no kind, but "blocks?").
 ]]
 function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?, string?)
 	local content = view.content
@@ -1717,11 +1766,17 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 				end
 			end
 		elseif each == "recipes" then
+			-- (Its merged place, its name, what it is, where it is from: made or patched there.)
 			right[1] = true
 			for index, recipe in content.recipes do
 				local from, place = recipeFrom(view, index)
-				if pack == nil or from == pack then
-					table.insert(rows, { `#{index}`, recipeText(recipe), `{from}, {place}` })
+				local by = overridesOf(view, "recipes", index)
+				if pack == nil or from == pack or table.find(patchedBy(view, "recipes", index), pack) then
+					local patches = if #by > 0 then ` (patched by {table.concat(by, ", ")})` else ""
+					table.insert(
+						rows,
+						{ `#{index}`, recipeName(recipe), recipeText(recipe), `{from}{patches}, {place}` }
+					)
 				end
 			end
 		elseif each == "ores" then
@@ -1874,13 +1929,14 @@ local function fieldLines(entry: { [string]: any }, skip: { [string]: boolean }?
 	return lines
 end
 
--- The recipes that make `name` and the ones that use it, a line each.
+-- The recipes that make `name` and the ones that use it, a line each ("pack Minecraft,
+-- recipes/lights, recipe #1 (Torch): shaped Torch x4": where, its name, what it is).
 local function recipeLines(view: any, name: string): { string }
 	local content = view.content
 	local makes, uses = {}, {}
 	for index, recipe in content.recipes do
-		local from, place = recipeFrom(view, index)
-		local text = `pack {from}, {place}: {recipeText(recipe)}`
+		local from = recipeFrom(view, index)
+		local text = `pack {from}, {recipeSubject(view, index)}: {recipeText(recipe)}`
 		if recipe.result == name then
 			table.insert(makes, text)
 		end
@@ -2120,7 +2176,7 @@ local function structureLines(view: any, name: string): { string }
 	local content = view.content
 	local lines = {}
 	local function patches(kind: string)
-		local by = patchedBy(view, kind, name)
+		local by = overridesOf(view, kind, name)
 		if #by > 0 then
 			table.insert(lines, `  patched by: {table.concat(by, ", ")}`)
 		end
@@ -2230,9 +2286,9 @@ local function structureLines(view: any, name: string): { string }
 end
 
 --[[
-	Lines about everything named `name`: its kind, id and pack, the packs that patched it, its
-	merged fields, and for blocks and items what the registries made of it. nil and the nearest
-	names when nothing has the name.
+	Lines about everything named `name`: its kind, id and pack, the overrides that patched it (each
+	one's pack and file), its merged fields, and for blocks and items what the registries made of
+	it. nil and the nearest names when nothing has the name.
 ]]
 function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	local content = view.content
@@ -2243,8 +2299,9 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 		end
 		table.insert(lines, head)
 	end
-	local function patches(kind: string)
-		local by = patchedBy(view, kind, name)
+	-- (Each override's pack and file: "Patch's blocks/stone".)
+	local function patches(kind: string, key: (string | number)?)
+		local by = overridesOf(view, kind, key or name)
 		if #by > 0 then
 			table.insert(lines, `  patched by: {table.concat(by, ", ")}`)
 		end
@@ -2271,6 +2328,19 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 		end
 		for _, line in derivedLines(view, item, false) do
 			table.insert(lines, line)
+		end
+	end
+	-- A recipe by its name (its own, or its result's: Content), its place among every recipe and in
+	-- its file.
+	for index, recipe in content.recipes do
+		if recipeName(recipe) == name then
+			local from, place = recipeFrom(view, index)
+			section(`recipe {name}: #{index} of {#content.recipes}, pack {from}, {place}`)
+			patches("recipes", index)
+			table.insert(lines, "  fields:")
+			for _, line in fieldLines(recipe, { name = true }) do
+				table.insert(lines, line)
+			end
 		end
 	end
 	local texture = content.textures[name]
@@ -2416,8 +2486,8 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 			end
 			for at, recipe in content.recipes do
 				if table.find(gated, recipe.result) then
-					local from, place = recipeFrom(view, at)
-					table.insert(recipes, `      pack {from}, {place}: {recipeText(recipe)}`)
+					local from = recipeFrom(view, at)
+					table.insert(recipes, `      pack {from}, {recipeSubject(view, at)}: {recipeText(recipe)}`)
 				end
 			end
 			for _, line in wrap("    gates: ", if #gated > 0 then gated else { "nothing (no entry names it)" }) do
@@ -2534,10 +2604,7 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	for _, spec in content.music or {} do
 		if spec.name == name or (spec.set == "mood" and spec.name == moodName) then
 			section(`track {spec.name}: {spec.set}, pack {packOf(view, "music", spec.name)}`)
-			local by = patchedBy(view, "music", spec.name)
-			if #by > 0 then
-				table.insert(lines, `  patched by: {table.concat(by, ", ")}`)
-			end
+			patches("music", spec.name)
 			table.insert(lines, "  fields:")
 			for _, line in fieldLines(spec, { name = true }) do
 				table.insert(lines, line)
@@ -2554,6 +2621,9 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	local names: { [string]: boolean } = {}
 	for _, entry in content.entries do
 		names[entry.name] = true
+	end
+	for _, recipe in content.recipes do
+		names[recipeName(recipe)] = true
 	end
 	for _, map in { content.textures, content.loot, content.tags, content.templates, content.pools } do
 		for key in map do
@@ -2835,10 +2905,12 @@ return {
 	  shapeless  `ingredients` in any slots
 	  smelting   one `input` cooks into `result` in a furnace
 	A crafting grid makes the first recipe it fits (every shaped one before any shapeless one), so
-	a recipe whose grid an earlier one takes never crafts: `lune run tests/content` says so. (A
-	module may also be `return function(define) ... end`, building recipes with Content/Define's
-	`define.shaped`, `define.shapeless`, `define.smelting` and `define.storage`, as the Ores
-	pack's does.)
+	a recipe whose grid an earlier one takes never crafts: `lune run tests/content` says so. A
+	recipe's name is its result's (or its `name`, which a second recipe for a result needs); with
+	`override = true` a recipe replaces an earlier pack's of its name, and { name = "Torch",
+	remove = true } removes one. (A module may also be `return function(define) ... end`,
+	building recipes with Content/Define's `define.shaped`, `define.shapeless`, `define.smelting`,
+	`define.named` and `define.storage`, as the Ores pack's does.)
 ]]
 
 local Schema = require(script.Parent.Parent.Parent.Schema)

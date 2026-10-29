@@ -16,7 +16,10 @@
 	recipes, lore, drink and tooltip from its entry alone, and a patched effect and potion of the
 	Minecraft pack's); the skill tree's nodes (the `skills` kind: the game's in their features'
 	packs, Beta's in JSON, and the FixtureSkilled pack's node, which needs Demolition and gates a
-	recipe, and override, grafted the same way); and every check: the schema's (unknown fields with
+	recipe, and override, grafted the same way); recipes by name (each its result's or its own,
+	once; an override replacing one whole in its place, a removal; the FixtureRecipes pack's
+	reaching crafting and smelting, grafted the same way); lib/GamePacks' shippedOnly; and every
+	check: the schema's (unknown fields with
 	their "did you mean", wrong types, missing fields, an effect's icon and view the client has, a
 	skill's perk and its numbers), names and overrides, manifests and `requires`, every
 	cross-reference (a potion's effect, ingredient and variants, a skill's Age, icon, prerequisites
@@ -43,6 +46,7 @@ local BIOMES = "tests/fixtures/content/biomes/FixtureWilds"
 local BREWING = "tests/fixtures/content/brewing/FixtureBrewing"
 local SKILLS = "tests/fixtures/content/skills/FixtureSkilled"
 local ROJO = "tests/fixtures/content/rojo"
+local RECIPES = "tests/fixtures/content/recipes/FixtureRecipes"
 
 return function(t, shared, require, _server, _client)
 	local Content = require(shared.Content)
@@ -447,6 +451,16 @@ return function(t, shared, require, _server, _client)
 			origin("recipe", brewedAt),
 			"FixtureBrewing potion FixtureLuck #2 []",
 			"a brewed recipe: its potion's, its place"
+		)
+		-- (By its name too: a brewed recipe's is its item's, as any recipe's its result's.)
+		t.eq(origin("recipe", "LongPotionOfFixtureLuck"), "FixtureBrewing potion FixtureLuck #2 []", "by its name")
+		local swift = content.where("recipe", "PotionOfSwiftness")
+		t.ok(
+			has(
+				swift,
+				{ "pack Minecraft (patched by ", "FixtureBrewing), potion Swiftness, recipe #1 (PotionOfSwiftness)" }
+			),
+			`a patched potion's recipe: patched by its patchers: {swift}`
 		)
 		t.eq(origin("effect", "Nothing"), "nil")
 	end)
@@ -2243,7 +2257,8 @@ return function(t, shared, require, _server, _client)
 				blocks = { stone },
 				recipes = {
 					file("recipes/tools", {
-						{ type = "smelting", input = "Stone", result = "Stone" },
+						-- (Named: a second recipe for Stone takes its result's name.)
+						{ type = "smelting", input = "Stone", result = "Stone", name = "StoneSmelted" },
 						{ type = "shaped", pattern = { "X" }, key = { X = "Stnoe" }, result = "Stone" },
 					}),
 				},
@@ -3616,11 +3631,12 @@ return function(t, shared, require, _server, _client)
 				`'s icon must be "" or "rbxassetid://<number>", not "7"`
 			)
 		)
-		refused(
-			{ recipes = { { type = "shaped", pattern = { "XY" }, key = { X = "Stone" }, result = "Stone" } } },
-			{ "Crafting" },
-			{ "Crafting: pack Patch, recipe #1 (Stone): its pattern's 'Y' has no key" }
-		)
+		-- (Named: the Minecraft pack's smelting has Stone's name, its result's.)
+		refused({
+			recipes = {
+				{ type = "shaped", pattern = { "XY" }, key = { X = "Stone" }, result = "Stone", name = "PatchStone" },
+			},
+		}, { "Crafting" }, { "Crafting: pack Patch, recipe #1 (PatchStone): its pattern's 'Y' has no key" })
 		refused({
 			recipes = {
 				{ type = "shapeless", ingredients = { "Stone", "Stone" }, keep = "Stone", result = "Cobblestone" },
@@ -3631,5 +3647,242 @@ return function(t, shared, require, _server, _client)
 			{ "Generation", "Ores" },
 			{ "Ores: pack Patch, ore feature patch_ore has an empty height range (minY 10, maxY 5)" }
 		)
+	end)
+
+	--[[ Recipes by name: each once, an override replacing one whole in its place, a removal ]]
+
+	-- A pack whose recipes are kind folder files (`files`: { { path, list } }), of order `order`.
+	local function recipeFiles(
+		name: string,
+		order: number,
+		files: { { any } },
+		kinds: { [string]: any }?
+	): Content.PackData
+		local folder: { Content.PackFile } = {}
+		for _, each in files do
+			table.insert(folder, { file = each[1], data = each[2] })
+		end
+		return { name = name, manifest = { order = order }, kinds = kinds or {}, folders = { recipes = folder } }
+	end
+	local GEMS = { { name = "Stone" }, { name = "Ore" }, { name = "Gem" } }
+	local GEM = { type = "shaped", pattern = { "SS" }, key = { S = "Stone" }, result = "Gem" }
+
+	t.test(
+		"content: recipes by name, their result's or their own, each once; overrides and removals of none",
+		function()
+			local content = Content.build({
+				pack("P", {
+					blocks = GEMS,
+					recipes = { GEM, { type = "smelting", input = "Ore", result = "Gem", name = "GemFromOre" } },
+				}),
+			})
+			t.eq(names(content.recipes), "Gem GemFromOre", "its result's name, or its own: each recipe carries it")
+			t.eq(content.where("recipe", "GemFromOre"), "pack P, recipe #2 (GemFromOre)", "where: by its name")
+			t.eq(content.where("recipe", 2), "pack P, recipe #2 (GemFromOre)", "or its place")
+			t.eq((content.origin("recipe", "GemFromOre") :: Content.Origin).index, 2, "origin: by its name")
+			-- A second recipe for a result: the name, its result's, is taken (both named, and a name
+			-- suggested from what it takes that the first does not).
+			fails({
+				pack("P1", { blocks = GEMS, recipes = { GEM } }),
+				pack("P2", { recipes = { { type = "smelting", input = "Ore", result = "Gem" } } }, { order = 20 }),
+			}, {
+				`pack P2, recipe #1 (Gem): the name, its result's, is taken by pack P1, recipe #1 (Gem) (a name of its own, name = "GemFromOre", or override = true to replace it)`,
+			}, "a result's name twice")
+			fails({
+				recipeFiles(
+					"P",
+					10,
+					{ { "recipes/a", { GEM } }, { "recipes/b", { table.clone(GEM) } } },
+					{ blocks = GEMS }
+				),
+			}, {
+				"pack P, recipes/b, recipe #1 (Gem): the name, its result's, is taken by pack P, recipes/a, recipe #1 (Gem)",
+			}, "in two files: both")
+			fails(
+				{
+					pack("P", {
+						blocks = GEMS,
+						recipes = { GEM, { type = "smelting", input = "Ore", result = "Stone", name = "Gem" } },
+					}),
+				},
+				{ "pack P, recipe #2 (Gem): the name is taken by pack P, recipe #1 (Gem) (a name of its own" },
+				"a name given twice"
+			)
+			-- An override or a removal of a name no earlier pack gave, with "did you mean".
+			local P1 = pack("P1", { blocks = GEMS, recipes = { GEM } })
+			local OVER = { type = "shaped", override = true, pattern = { "S" }, key = { S = "Stone" }, result = "Gem" }
+			local misspelt = table.clone(OVER)
+			misspelt.name = "Gme"
+			fails(
+				{ P1, pack("P2", { recipes = { misspelt } }, { order = 20 }) },
+				{ "pack P2, recipe #1 (Gme) overrides a recipe no earlier pack makes (did you mean Gem?)" },
+				"an override of none"
+			)
+			fails(
+				{ P1, pack("P2", { recipes = { { name = "Gme", remove = true } } }, { order = 20 }) },
+				{ "pack P2, recipe #1 (Gme) removes a recipe no earlier pack makes (did you mean Gem?)" },
+				"a removal of none"
+			)
+			fails(
+				{ pack("P0", { recipes = { { name = "Gem", remove = true } } }, { order = 5 }), P1 },
+				{ "pack P0, recipe #1 (Gem) removes a recipe no earlier pack makes" },
+				"a removal loading before the recipe"
+			)
+			fails({
+				P1,
+				pack("P2", { recipes = { { name = "Gem", remove = true } } }, { order = 20 }),
+				pack("P3", { recipes = { OVER } }, { order = 30 }),
+			}, {
+				"pack P3, recipe #1 (Gem) overrides a recipe no earlier pack makes (pack P2, recipe #1 (Gem) removed it)",
+			}, "an override of one removed")
+			-- The schema: a removal is its name alone, an override a whole recipe.
+			fails(
+				{ P1, pack("P2", { recipes = { { name = "Gem", remove = true, result = "Gem" } } }, { order = 20 }) },
+				{ 'pack P2, recipe #1 (Gem): result is no field a removal has (it is { name = "...", remove = true })' },
+				"a removal's fields"
+			)
+			fails(
+				{ P1, pack("P2", { recipes = { { name = "Gem", remove = false } } }, { order = 20 }) },
+				{ "pack P2, recipe #1 (Gem): remove must be true (or left out), not false" },
+				"remove = false"
+			)
+			fails(
+				{ P1, pack("P2", { recipes = { { remove = true } } }, { order = 20 }) },
+				{ "pack P2, recipe #1: name is missing" },
+				"a removal's name"
+			)
+			fails({ P1, pack("P2", { recipes = { { name = "Gem", override = true, count = 2 } } }, { order = 20 }) }, {
+				"pack P2, recipe #1 (Gem): type is missing (shaped, shapeless or smelting: an override is a whole recipe)",
+			}, "an override's fields")
+			fails({
+				P1,
+				pack("P2", { recipes = { { type = "smelting", override = true, result = "Gem" } } }, { order = 20 }),
+			}, { "pack P2, recipe #1 (Gem): input is missing" }, "an override checked whole, where it is")
+		end
+	)
+
+	t.test("content: an override replaces a recipe whole, in its place; a removal takes it away", function()
+		local P1 = pack("P1", {
+			blocks = GEMS,
+			recipes = {
+				GEM,
+				{ type = "smelting", input = "Ore", result = "Stone" },
+				{ type = "shapeless", ingredients = { "Gem" }, result = "Stone", count = 2, name = "StoneFromGem" },
+			},
+		})
+		local P2 = recipeFiles("P2", 20, {
+			{
+				"recipes/patch",
+				{
+					-- (Gem's, by its result's name: a smelting recipe now, nothing of the shaped one
+					-- kept.)
+					{ type = "smelting", override = true, input = "Ore", result = "Gem", count = 3 },
+					{ name = "Stone", remove = true },
+				},
+			},
+		})
+		local content = Content.build({ P1, P2 })
+		t.eq(names(content.recipes), "Gem StoneFromGem", "Gem's in its place, Stone's gone")
+		local gem = content.recipes[1]
+		t.ok(
+			gem.type == "smelting" and gem.input == "Ore" and gem.count == 3 and gem.pattern == nil,
+			"replaced whole: its type, fields and count the override's"
+		)
+		t.ok(gem.name == "Gem" and gem.override == nil, "its name kept, `override` left out")
+		-- Where each is from: the override credited, as a block's.
+		local from = content.origin("recipe", "Gem") :: Content.Origin
+		t.ok(from.pack == "P1" and from.index == 1 and from.file == nil, "made by P1, its place in its list")
+		t.eq(table.concat(from.patched, " "), "P2", "patched by P2")
+		t.ok(from.overrides[1].pack == "P2" and from.overrides[1].file == "recipes/patch", "in its file")
+		t.eq((content.origin("recipe", 1) :: Content.Origin).pack, "P1", "by its place too")
+		t.eq(content.where("recipe", "Gem"), "pack P1 (patched by P2's recipes/patch), recipe #1 (Gem)")
+		t.eq(content.origin("recipe", "Stone"), nil, "a removed recipe: nothing has the name")
+		t.eq(content.where("recipe", "Stone"), "recipe Stone")
+		t.eq((content.origin("recipe", "StoneFromGem") :: Content.Origin).index, 3, "the rest keep their places")
+		-- A later pack may make a recipe of a removed name: a new one, after every other.
+		local again = Content.build({
+			P1,
+			P2,
+			pack("P3", { recipes = { { type = "smelting", input = "Gem", result = "Stone" } } }, { order = 30 }),
+		})
+		t.eq(names(again.recipes), "Gem StoneFromGem Stone", "made again, last")
+		-- The override's own names are checked where it now is: its pack named.
+		fails({
+			P1,
+			pack("P2", {
+				recipes = {
+					{ type = "shaped", override = true, pattern = { "S" }, key = { S = "Stnoe" }, result = "Gem" },
+				},
+			}, { order = 20 }),
+		}, {
+			"pack P1 (patched by P2), recipe #1 (Gem): key S names unknown item Stnoe (did you mean Stone?)",
+		}, "a cross-reference")
+	end)
+
+	t.test("content: a pack's recipe overrides and removal reach crafting and smelting (FixtureRecipes)", function()
+		local env, root = fresh(function(env, packs)
+			GamePacks.graftLast(env, RECIPES, packs, "FixtureRecipes")
+		end)
+		local content = env.require(root.Content).default
+		local FreshItems = env.require(root.Items)
+		local FreshCrafting = env.require(root.Crafting)
+		local FreshSmelting = env.require(root.Crafting.Smelting)
+		local I = FreshItems.id
+		local function stack(item: number)
+			return { item = item, count = 1 }
+		end
+		-- Every other recipe in its place: the game's names, Ladder's left out, the pack's own last.
+		local expected = {}
+		for _, recipe in Content.default.recipes do
+			if recipe.name ~= "Ladder" then
+				table.insert(expected, recipe.name)
+			end
+		end
+		table.insert(expected, "FixtureStickFromFlint")
+		t.eq(names(content.recipes), table.concat(expected, " "), "the overrides where they were")
+		-- Torch's recipe makes eight; raw iron smelts into two ingots, iron ore still one.
+		local torch = FreshCrafting.match({ [1] = stack(I.Coal), [4] = stack(I.Stick) }, 3)
+		t.ok(torch and torch.item == I.Torch and torch.count == 8, "Torch's recipe replaced")
+		local ingots = FreshSmelting.result(I.RawIron)
+		t.ok(ingots and ingots.item == I.IronIngot and ingots.count == 2, "IronIngotFromRawIron replaced")
+		t.eq((FreshSmelting.result(I.IronOre) :: any).count, 1, "IronIngotFromIronOre kept")
+		-- No recipe makes the Ladder; three Flint make two Sticks.
+		local S = stack(I.Stick)
+		t.eq(FreshCrafting.match({ S, nil, S, S, S, S, S, nil, S }, 3), nil, "Ladder's recipe removed")
+		local sticks = FreshCrafting.match({ stack(I.Flint), stack(I.Flint), stack(I.Flint) }, 3)
+		t.ok(sticks and sticks.item == I.Stick and sticks.count == 2, "a second recipe for Stick, named")
+		-- Where each is from: the Minecraft pack's, replaced in the fixture's file.
+		t.eq(maker("recipe", "Torch", content), "Minecraft")
+		local overrides = (content.origin("recipe", "Torch") :: Content.Origin).overrides
+		local last = overrides[#overrides]
+		t.ok(last.pack == "FixtureRecipes" and last.file == "recipes/a_overrides", "the override's pack and file")
+		local where = content.where("recipe", "Torch")
+		t.ok(
+			has(where, { "pack Minecraft (patched by ", "FixtureRecipes's recipes/a_overrides), recipes/lights" }),
+			where
+		)
+		t.eq(content.origin("recipe", "Ladder"), nil, "Ladder's recipe gone")
+		t.eq(maker("recipe", "FixtureStickFromFlint", content), "FixtureRecipes")
+		-- The game's own untouched.
+		t.eq(table.find(patchers("recipe", "Torch"), "FixtureRecipes"), nil, "the game's Torch")
+		local GameItems = Items.id
+		local G = { item = GameItems.Stick, count = 1 }
+		local ladder = require(shared.Crafting).match({ G, nil, G, G, G, G, G, nil, G }, 3)
+		t.eq(ladder and ladder.item, GameItems.Ladder, "the game's Ladder recipe")
+	end)
+
+	--[[ lib/GamePacks ]]
+
+	t.test("content: GamePacks.shippedOnly takes every other pack out, and what shares a pack's name", function()
+		-- (Core and FixtureExtra, each a folder beside a module of its name, as Rojo keeps both.)
+		local env = Loader.new()
+		local packs = env.mount("tests/fixtures/content/extra", "ReplicatedStorage", "FixtureExtraPacks")
+		t.eq(#packs:GetChildren(), 4, "two folders, two modules")
+		t.eq(table.concat(GamePacks.shippedOnly(packs), " "), "FixtureExtra", "the author's pack taken")
+		local left = {}
+		for _, child in packs:GetChildren() do
+			table.insert(left, `{child.Name} {child.ClassName}`)
+		end
+		t.eq(table.concat(left, ", "), "Core Folder", "the shipped pack's folder alone: nothing beside it")
 	end)
 end

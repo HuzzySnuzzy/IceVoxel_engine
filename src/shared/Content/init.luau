@@ -79,13 +79,18 @@
 	                 one).
 	  tags           a union: each pack's lists in load order, then every entry's `tags`, each
 	                 name once.
-	  recipes        appended in load order; so are ore features (each with a name of its own)
-	                 and Ages (each id once). A recipe has no name to override: crafting takes the
-	                 first recipe that fits a grid (Crafting) and smelting the first for an input
-	                 (Crafting/Smelting), so a later pack's recipe for the same grid or input never
-	                 replaces an earlier one; it is never made, which `tests/content check` warns
-	                 of (and tests/spec/CraftingGrids fails on). A pack changes another's recipe
-	                 only through that pack (a Config switch it reads).
+	  recipes        by name, in load order: a recipe's name is its `name`, else its result's
+	                 ("Torch", as Minecraft's recipe ids), and a name taken twice is an error
+	                 naming both (a second recipe for a result gives a name of its own:
+	                 "IronIngotFromRawIron"). A recipe with `override = true` replaces the earlier
+	                 recipe of its name whole, in its place (so the recipes' order, JEI's with
+	                 it, stays), and { name = "Torch", remove = true } takes it away; either of a
+	                 name no earlier pack gave is an error. Crafting takes the first recipe that
+	                 fits a grid (Crafting) and smelting the first for an input
+	                 (Crafting/Smelting), so a later pack's new recipe for the same grid or input
+	                 never replaces an earlier one: it is never made, which `tests/content check`
+	                 warns of (and tests/spec/CraftingGrids fails on); an override replaces it.
+	  ores, ages     appended in load order (an ore feature's name and an Age's id each once).
 	  loot, lore     by name, each once; so is fuel (by tag: every item in the tag burns that
 	                 long, unless its entry gives its own `fuel`, Crafting/Recipes), and so are
 	                 structure templates.
@@ -97,7 +102,8 @@
 	                 Strength gives the effect Strength). Once every pack has merged, each potion
 	                 is brewed (Content/Define's `brew`: Minecraft's brewing in a grid) from its
 	                 final fields and its effect's colour into its items (each with its `drink`)
-	                 and their recipes, which go after its pack's own items and recipes ("pack
+	                 and their recipes (each its item's name, PotionOfSwiftness, as any recipe's
+	                 result), which go after its pack's own items and recipes ("pack
 	                 Minecraft, potion Swiftness, item PotionOfSwiftness"); so a pack patches a
 	                 potion's items by patching the potion (its lore, icon, Age...), as they are
 	                 made after every pack's items.
@@ -107,7 +113,8 @@
 	    wrong types, missing fields, a name outside a closed set the Schema gives (with "did you
 	    mean": a block's `tool`, `menu`, `material` and `behaviour`, an item's `tool.kind`, an
 	    Age's milestones' `category`...), a loot pool's rolls (its fewest above its most);
-	  * names taken twice, overrides of nothing, a `requires` that does not load first;
+	  * names taken twice (a recipe's: with a name to give it), overrides of nothing (a recipe's
+	    removal too, with "did you mean"), a `requires` that does not load first;
 	  * every cross-reference: the names recipes, tags and loot tables give (items or blocks), the
 	    tags recipes and fuel name, `drops`, `shearDrops`, `item`, `places`, `caveTwin`, a plant's
 	    other half, a toggle's `to`, a block's loot table, a fluid block's `fluid.group` (one of
@@ -162,17 +169,19 @@
 	                              .SINGULAR's word: "block", "item", "texture"..., or the kind;
 	                              the file only for a kind folder's; the overrides' packs too,
 	                              "(patched by Patch's blocks/stone)"), for registries' messages;
-	                              a recipe's by its place in content.recipes ("pack Minecraft,
-	                              recipes/tools, recipe #3 (WoodenPickaxe)")
+	                              a recipe's by its name or its place in content.recipes ("pack
+	                              Minecraft, recipes/tools, recipe #3 (WoodenPickaxe)": its place
+	                              in its file, and its name)
 	  content.origin(kind, name)  the same as data (Origin, nil when nothing has the name): the
 	                              pack that made it, its kind folder's file (nil: the kind's
 	                              module), the packs that patched it in load order (`patched`)
 	                              and each override's pack and file (`overrides`). A tag's: the
 	                              first pack putting names in it, then (`patched`) the packs adding
 	                              to it, an override's `tags` its pack's. A recipe's (`name`: its
-	                              place in content.recipes): its pack, file and `index`, its place
-	                              in that file's list. A potion's brewed items and recipes: patched
-	                              by the packs that patched the potion.
+	                              name, or its place in content.recipes): its pack, file and
+	                              `index`, its place in that file's list, and the overrides that
+	                              replaced it. A potion's brewed items and recipes: patched by the
+	                              packs that patched the potion.
 ]]
 
 local Define = require(script.Define)
@@ -216,6 +225,12 @@ export type Patch = { pack: string, file: string? }
 -- (nil: the kind's module), the packs that patched it in load order (`overrides`: each one's pack
 -- and file); a recipe's place in its file's list (`index`).
 export type Origin = { pack: string, file: string?, patched: { string }, overrides: { Patch }, index: number? }
+-- A recipe entry as its pack gives it (checked), in load order: its pack and kind folder's file,
+-- its place in that file's list, and the overrides of what made it (a brewed recipe's potion's).
+type RecipeStep = { entry: any, pack: string, file: string?, index: number, patched: { Patch }? }
+-- Where a merged recipe is from: the pack and file that made it, its place in that file's list,
+-- and the overrides that replaced it since, in load order (a brewed recipe's: its potion's first).
+type RecipeFrom = { pack: string, file: string?, index: number, overrides: { Patch } }
 
 export type Content = {
 	packs: { PackInfo },
@@ -351,10 +366,13 @@ function Content.build(input: { PackData }): Content
 	-- A block's or an item's own tags and the pack (and file) that gave each: its maker's, or an
 	-- override's that added it (kind -> name -> tag -> where).
 	local tagsBy: { [string]: { [string]: { [string]: Patch } } } = { blocks = {}, items = {} }
+	-- The recipes, merged by name once every pack's are in (`recipeSteps`, each pack's potions'
+	-- after its own): each one's origin, and name -> its place.
 	local recipes: { Recipe } = {}
-	-- Each recipe's pack and file ("pack P, recipes/tools", and apart), its place in the file's
-	-- list, and the packs that patched what made it (a brewed recipe's potion).
-	local recipeFrom: { { from: string, pack: string, file: string?, index: number, patched: { Patch }? } } = {}
+	local recipeFrom: { RecipeFrom } = {}
+	local recipeAt: { [string]: number } = {}
+	-- Each pack's recipe entries, in order.
+	local recipeSteps: { [string]: { RecipeStep } } = {}
 	local tags: { [string]: { string } } = {}
 	local tagHas: { [string]: { [string]: boolean } } = {}
 	-- Who put each name in a tag: tag -> name -> "pack X" or "pack X, block Y".
@@ -391,8 +409,8 @@ function Content.build(input: { PackData }): Content
 	}
 	local places: { [string]: { [string]: number } } =
 		{ blocks = blockAt, items = itemAt, effects = {}, potions = {}, structures = {}, sounds = {}, music = {} }
-	-- Where each pack's own items and recipes end (its potions' go after them).
-	local ends: { [string]: { items: number, recipes: number } } = {}
+	-- Where each pack's own items end (its potions' go after them).
+	local ends: { [string]: number } = {}
 	local skills: { SkillRecord } = {}
 	-- Skill id -> its place in `skills`.
 	local skillAt: { [string]: number } = {}
@@ -591,6 +609,7 @@ function Content.build(input: { PackData }): Content
 
 	for _, data in sorted do
 		local pack = data.name
+		recipeSteps[pack] = {}
 		local folders: { [string]: { PackFile } } = data.folders or {}
 		for kind in data.kinds do
 			if SINGULAR[kind] == nil then
@@ -632,8 +651,12 @@ function Content.build(input: { PackData }): Content
 							else entry.name
 						local label = if type(name) == "string" then name else `#{index}`
 						if kind == "recipes" then
-							local result = if type(entry) == "table" then entry.result else nil
-							label = `#{index}{if type(result) == "string" then ` ({result})` else ""}`
+							-- (Its place in the list, and its name: its own, or its result's.)
+							local called = if type(entry) ~= "table"
+								then nil
+								elseif type(entry.name) == "string" then entry.name
+								else entry.result
+							label = `#{index}{if type(called) == "string" then ` ({called})` else ""}`
 						end
 						local problem = Schema.check(kind, entry)
 						if problem then
@@ -644,8 +667,7 @@ function Content.build(input: { PackData }): Content
 						elseif kind == "biomes" then
 							mergeBiome(pack, file, entry)
 						elseif kind == "recipes" then
-							table.insert(recipes, table.clone(entry))
-							table.insert(recipeFrom, { from = place, pack = pack, file = file, index = index })
+							table.insert(recipeSteps[pack], { entry = entry, pack = pack, file = file, index = index })
 						elseif kind == "ores" then
 							local before = made.ores[entry.name]
 							if before then
@@ -701,7 +723,7 @@ function Content.build(input: { PackData }): Content
 				end
 			end
 		end
-		ends[pack] = { items = #items, recipes = #recipes }
+		ends[pack] = #items
 	end
 
 	if #blocks >= Content.ITEM_BASE then
@@ -716,8 +738,8 @@ function Content.build(input: { PackData }): Content
 	--[[ Potions: each brewed into its items and their recipes, after its pack's own ]]
 
 	local effectAt = places.effects
-	-- Each pack's potions' items and recipes, and where each recipe is from.
-	local brewed: { [string]: { items: { ItemSpec }, recipes: { Recipe }, from: typeof(recipeFrom) } } = {}
+	-- Each pack's potions' items (their recipes go after the pack's own, `recipeSteps`).
+	local brewed: { [string]: { ItemSpec } } = {}
 	for _, potion in potions do
 		local here = whereOf("potions", potion.name)
 		local at = effectAt[potion.effect]
@@ -732,7 +754,7 @@ function Content.build(input: { PackData }): Content
 		local pack = made.potions[potion.name]
 		-- (Its items and recipes are its own file's, as messages and `origin` name them.)
 		local file = `potion {potion.name}`
-		local into = brewed[pack] or { items = {}, recipes = {}, from = {} }
+		local into = brewed[pack] or {}
 		brewed[pack] = into
 		local brew = Define.brew(potion, effect.color)
 		for _, spec in brew.items do
@@ -747,41 +769,160 @@ function Content.build(input: { PackData }): Content
 			for _, patch in overrides.potions[potion.name] do
 				patchedBy("items", spec.name, patch.pack, patch.file)
 			end
-			table.insert(into.items, spec)
+			table.insert(into, spec)
 		end
+		-- (Each named by its item, as any recipe its result, after its pack's own.)
 		for index, recipe in brew.recipes do
-			table.insert(into.recipes, recipe)
-			table.insert(into.from, {
-				from = placeOf(pack, file),
-				pack = pack,
-				file = file,
-				index = index,
-				patched = overrides.potions[potion.name],
-			})
+			table.insert(
+				recipeSteps[pack],
+				{ entry = recipe, pack = pack, file = file, index = index, patched = overrides.potions[potion.name] }
+			)
 		end
 	end
-	-- (The lists put back in pack order, each pack's potions' after its own.)
+	-- (The items put back in pack order, each pack's potions' after its own.)
 	if next(brewed) then
-		local ownItems, ownRecipes, ownFrom = table.clone(items), table.clone(recipes), table.clone(recipeFrom)
+		local ownItems = table.clone(items)
 		table.clear(items)
-		table.clear(recipes)
-		table.clear(recipeFrom)
-		local item, recipe = 0, 0
+		local item = 0
 		for _, info in packs do
 			local mark = ends[info.name]
-			table.move(ownItems, item + 1, mark.items, #items + 1, items)
-			table.move(ownRecipes, recipe + 1, mark.recipes, #recipes + 1, recipes)
-			table.move(ownFrom, recipe + 1, mark.recipes, #recipeFrom + 1, recipeFrom)
-			item, recipe = mark.items, mark.recipes
+			table.move(ownItems, item + 1, mark, #items + 1, items)
+			item = mark
 			local more = brewed[info.name]
 			if more then
-				table.move(more.items, 1, #more.items, #items + 1, items)
-				table.move(more.recipes, 1, #more.recipes, #recipes + 1, recipes)
-				table.move(more.from, 1, #more.from, #recipeFrom + 1, recipeFrom)
+				table.move(more, 1, #more, #items + 1, items)
 			end
 		end
 		for index, spec in items do
 			itemAt[spec.name] = index
+		end
+	end
+
+	--[[ Recipes: by name, in load order (each pack's potions' after its own) ]]
+
+	-- Where recipe `at` is from, as messages name it: "pack Minecraft, recipes/tools, recipe #3
+	-- (WoodenPickaxe)", its place in its file and its name, the overrides that replaced it as
+	-- whereOf names a block's ("(patched by Patch's recipes/torch)").
+	local function recipeWhere(at: number): string
+		local from = recipeFrom[at]
+		local by: { string } = {}
+		for _, patch in from.overrides do
+			table.insert(by, if patch.file then `{patch.pack}'s {patch.file}` else patch.pack)
+		end
+		local patches = if #by > 0 then ` (patched by {table.concat(by, ", ")})` else ""
+		local file = if from.file then `, {from.file}` else ""
+		return `pack {from.pack}{patches}{file}, recipe #{from.index} ({recipes[at].name})`
+	end
+	-- The ingredients a recipe names, in its order (a shaped one's by its pattern), each once.
+	local function ingredientsOf(recipe: any): { string }
+		local list: { string } = {}
+		local function add(name: any)
+			if type(name) == "string" and not table.find(list, name) then
+				table.insert(list, name)
+			end
+		end
+		for _, row in (recipe.pattern or {}) :: { string } do
+			for x = 1, #row do
+				add((recipe.key or {})[string.sub(row, x, x)])
+			end
+		end
+		for _, name in (recipe.ingredients or {}) :: { string } do
+			add(name)
+		end
+		add(recipe.input)
+		return list
+	end
+	-- A name for `entry`, whose name another recipe (`other`) has: its result's from its first
+	-- ingredient that one lacks ("GunpowderFromSaltpetre"; a tag's words, "#coals" "Coals"), one
+	-- no recipe has yet.
+	local function nameFor(entry: any, other: any): string
+		local mine, theirs = ingredientsOf(entry), ingredientsOf(other)
+		local from = mine[1] or "Something"
+		for _, name in mine do
+			if not table.find(theirs, name) then
+				from = name
+				break
+			end
+		end
+		local words = string.gsub(string.gsub(from, "^#", ""), "_(%l)", string.upper)
+		local base = `{entry.result}From{string.upper(string.sub(words, 1, 1))}{string.sub(words, 2)}`
+		local name, n = base, 1
+		while recipeAt[name] do
+			n += 1
+			name = `{base}{n}`
+		end
+		return name
+	end
+	-- (The places of recipes removed, taken out once every pack's are in; a removed name ->
+	-- where it was removed.)
+	local gone: { [number]: boolean } = {}
+	local removedBy: { [string]: string } = {}
+	for _, info in packs do
+		for _, step in recipeSteps[info.name] do
+			local entry = step.entry
+			local name = (entry.name or entry.result) :: string
+			local here = `{placeOf(step.pack, step.file)}, recipe #{step.index} ({name})`
+			local at = recipeAt[name]
+			if entry.override or entry.remove then
+				local verb = if entry.remove then "removes" else "overrides"
+				if at == nil then
+					local removed = removedBy[name]
+					fail(
+						`{here} {verb} a recipe no earlier pack makes{if removed
+							then ` ({removed} removed it)`
+							else hint(name, recipeAt)}`
+					)
+				end
+				if entry.remove then
+					gone[at] = true
+					recipeAt[name] = nil
+					removedBy[name] = here
+				else
+					local recipe = table.clone(entry)
+					recipe.override = nil
+					recipe.name = name
+					recipes[at] = recipe
+					table.insert(recipeFrom[at].overrides, { pack = step.pack, file = step.file })
+				end
+			elseif at then
+				local own = if entry.name then "" else ", its result's,"
+				fail(
+					`{here}: the name{own} is taken by {recipeWhere(at)} (a name of its own, name = "{nameFor(
+						entry,
+						recipes[at]
+					)}", or override = true to replace it)`
+				)
+			else
+				local recipe = table.clone(entry)
+				recipe.name = name
+				table.insert(recipes, recipe)
+				table.insert(recipeFrom, {
+					pack = step.pack,
+					file = step.file,
+					index = step.index,
+					overrides = table.clone(step.patched or {}),
+				})
+				recipeAt[name] = #recipes
+				removedBy[name] = nil
+			end
+		end
+	end
+	-- (The removed ones taken out, the rest in their order.)
+	if next(gone) then
+		local kept, keptFrom = {}, {}
+		for index, recipe in recipes do
+			if not gone[index] then
+				table.insert(kept, recipe)
+				table.insert(keptFrom, recipeFrom[index])
+			end
+		end
+		table.clear(recipes)
+		table.move(kept, 1, #kept, 1, recipes)
+		table.clear(recipeFrom)
+		table.move(keptFrom, 1, #keptFrom, 1, recipeFrom)
+		table.clear(recipeAt)
+		for index, recipe in recipes do
+			recipeAt[recipe.name :: string] = index
 		end
 	end
 
@@ -986,8 +1127,7 @@ function Content.build(input: { PackData }): Content
 		needIngredient(whereOf("potions", potion.name), "ingredient", potion.ingredient)
 	end
 	for index, recipe in recipes do
-		local from = recipeFrom[index]
-		local here = `{from.from}, recipe #{from.index} ({recipe.result})`
+		local here = recipeWhere(index)
 		needName(here, "result", recipe.result)
 		for _, name in (recipe.ingredients or {}) :: { string } do
 			needIngredient(here, "ingredients", name)
@@ -1277,11 +1417,10 @@ function Content.build(input: { PackData }): Content
 	function content.where(kind: string, name: string | number): string
 		local plural = kindOfWord[kind]
 		if plural == "recipes" then
-			-- (A recipe by its place in content.recipes, as Content's own messages name it.)
-			local from = if type(name) == "number" then recipeFrom[name] else nil
-			return if from
-				then `{from.from}, recipe #{from.index} ({recipes[name :: number].result})`
-				else `recipe {name}`
+			-- (A recipe by its name or its place in content.recipes, as Content's own messages
+			-- name it.)
+			local at = if type(name) == "number" then name else recipeAt[name]
+			return if at and recipeFrom[at] then recipeWhere(at) else `recipe {name}`
 		end
 		return if plural and type(name) == "string" then whereOf(plural, name) else `{kind} {name}`
 	end
@@ -1293,13 +1432,15 @@ function Content.build(input: { PackData }): Content
 	function content.origin(kind: string, name: string | number): Origin?
 		local plural = kindOfWord[kind]
 		if plural == "recipes" then
-			local from = if type(name) == "number" then recipeFrom[name] else nil
+			local at = if type(name) == "number" then name else recipeAt[name]
+			local from = if at then recipeFrom[at] else nil
 			if from == nil then
 				return nil
 			end
-			local by: { Patch } = table.clone(from.patched or {})
+			local by: { Patch } = {}
 			local patchers: { string } = {}
-			for _, patch in by do
+			for _, patch in from.overrides do
+				table.insert(by, table.clone(patch))
 				table.insert(patchers, patch.pack)
 			end
 			return { pack = from.pack, file = from.file, patched = patchers, overrides = by, index = from.index }

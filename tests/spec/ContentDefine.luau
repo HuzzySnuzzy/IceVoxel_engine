@@ -3,8 +3,9 @@
 	the fields it sets and the ones it leaves to the pack), every field an author gives reaching
 	what it makes (its defaults only where one is left out; the item's own fields, OWN_FIELDS, on
 	the item alone, never on a variant or a cave twin), what it is given checked (Define/Fields:
-	unknown fields with a "did you mean", the fields it makes refused), and every helper its
-	header lists being there as `define.<name>`.
+	unknown fields with a "did you mean", the fields it makes refused), the recipes' names (`named`,
+	a storage pair's and a metal's, never one twice), and every helper its header lists being there
+	as `define.<name>`.
 ]]
 
 return function(t, shared, require)
@@ -405,6 +406,37 @@ return function(t, shared, require)
 		t.eq(brew.recipes[2].result, "LongPotionOfTest")
 		valid("items", brew.items)
 		valid("recipes", brew.recipes)
+	end)
+
+	t.test("define: recipes' names: `named`, a storage pair's unpacking one, a metal's smelting", function()
+		local smelt = Define.smelting("RawTin", "TinIngot")
+		local named = Define.named("TinIngotFromRawTin", smelt)
+		t.ok(named.name == "TinIngotFromRawTin" and named.input == "RawTin", "named, its fields kept")
+		t.eq(smelt.name, nil, "a new table: the recipe it was given unnamed")
+		-- (Two pairs sharing the ingot never take one name: the block's recipe its block's, the
+		-- unpacking one "<item>From<block>".)
+		local storageNames = {}
+		for _, recipe in Define.storage("TinNugget", "TinIngot") do
+			table.insert(storageNames, recipe.name or recipe.result)
+		end
+		for _, recipe in Define.storage("TinIngot", "TinBlock") do
+			table.insert(storageNames, recipe.name or recipe.result)
+		end
+		t.eq(table.concat(storageNames, " "), "TinIngot TinNuggetFromTinIngot TinBlock TinIngotFromTinBlock")
+		local metal = Define.metal({
+			name = "Tin",
+			level = 1,
+			colors = { ore = { 1, 1, 1 }, block = { 2, 2, 2 }, ingot = { 3, 3, 3 } },
+		})
+		local all, seen = {}, {}
+		for _, recipe in metal.recipes do
+			local name = recipe.name or recipe.result
+			t.ok(not seen[name], `{name} once`)
+			seen[name] = true
+			table.insert(all, name)
+		end
+		t.ok(seen.TinIngotFromRawTin and seen.TinIngotFromTinOre, `its smelting named: {table.concat(all, " ")}`)
+		valid("recipes", metal.recipes)
 	end)
 
 	t.test("define: a block sound type's five events and a mob's voice, sound events of the schema", function()
@@ -809,6 +841,7 @@ return function(t, shared, require)
 				"shaped",
 				"shapeless",
 				"smelting",
+				"named",
 				"storage",
 				"metal",
 				"SHIPPED",

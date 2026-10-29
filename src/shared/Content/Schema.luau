@@ -9,7 +9,8 @@
 	The kinds (a pack's modules, each optional; Content's header says how they load and merge):
 	  blocks    { BlockSpec }: block entries (BLOCK_FIELDS below)
 	  items     { ItemSpec }: items that are no blocks (every placeable block is an item too)
-	  recipes   { Recipe }: { type = "shaped" | "shapeless" | "smelting", ... } (RECIPE_FIELDS)
+	  recipes   { Recipe }: { type = "shaped" | "shapeless" | "smelting", ... } (RECIPE_FIELDS), each
+	            by a name of its own (its result's unless it gives one: Recipe below)
 	  tags      { [tag]: { name } }: item tags, "#planks" in a recipe (Minecraft's item tags)
 	  textures  { [texture name]: Texture }: the texture pack's textures (Shared/TexturePack)
 	  loot      { [table name]: { Pool } }: loot tables (ScavengeLoot's format: the ruins', the
@@ -119,7 +120,8 @@
 	                                lava, fire: they hurt); a fluid's covers every level of it
 	  override         block, item, texture, biome, effect, potion, pool, structure, sound, track
 	                   patches the entry of that name an earlier pack made (Schema.patch: field
-	                   by field, a table of fields key by key, `tags` adding to its own)
+	                   by field, a table of fields key by key, `tags` adding to its own); a
+	                   recipe's replaces the recipe of its name whole (Recipe below)
 	  formerly         block, item  { "OldName" }: the names it had before, which data saved under
 	                                them (saves, structure palettes, jigsaw final states) still find
 	                                it by (Blocks.find, Items.find: Blocks.RENAMED, Items.RENAMED;
@@ -448,6 +450,11 @@ export type Entry = BlockSpec | ItemSpec
 	  shapeless  `ingredients` in any slots; `keep`, an ingredient listed once, the same way.
 	  smelting   one `input` cooks into `result` in a furnace.
 	`count` of `result` (default 1).
+	Its name is its `name`, else its result's ("Torch"), and one recipe's among every pack's (a
+	second recipe for a result gives a name of its own, as Minecraft's recipe ids do:
+	"IronIngotFromRawIron"). By its name a later pack replaces it (`override = true`: a whole
+	recipe, in its place) or removes it ({ name = "Torch", remove = true }, its name alone), as
+	Content merges them. The merged recipes (content.recipes) each carry their `name`.
 ]]
 export type Recipe = {
 	type: string,
@@ -458,6 +465,12 @@ export type Recipe = {
 	result: string,
 	count: number?,
 	keep: string?,
+	-- Its name, when not its result's (the header).
+	name: string?,
+	-- true: it replaces the earlier recipe of its name, whole (the header).
+	override: boolean?,
+	-- true: { name, remove } takes the earlier recipe of that name away (the header).
+	remove: boolean?,
 }
 
 -- An ore feature (the `ores` kind; Generation/Ores' header says what each field does).
@@ -1635,11 +1648,15 @@ Schema.RECIPE_FIELDS = {
 	result = STRING,
 	count = NUMBER,
 	keep = STRING,
+	-- (Recipe's header: its name, an override of an earlier one, a removal.)
+	name = STRING,
+	override = BOOLEAN,
+	remove = BOOLEAN,
 } :: { [string]: Check }
 Schema.RECIPE_TYPES = table.freeze({
-	shaped = { needs = { "pattern", "key", "result" }, may = { "count", "keep" } },
-	shapeless = { needs = { "ingredients", "result" }, may = { "count", "keep" } },
-	smelting = { needs = { "input", "result" }, may = { "count" } },
+	shaped = { needs = { "pattern", "key", "result" }, may = { "count", "keep", "name", "override" } },
+	shapeless = { needs = { "ingredients", "result" }, may = { "count", "keep", "name", "override" } },
+	smelting = { needs = { "input", "result" }, may = { "count", "name", "override" } },
 })
 
 Schema.TEXTURE_FIELDS = {
@@ -2430,7 +2447,8 @@ end
 	What is wrong with one entry of `kind` (nil: nothing): an unknown field ("harndess is no field
 	it may have (did you mean hardness?)"), a wrong type ("color[2] must be a number 0..255, not
 	300") or a missing field the kind needs. An override (`override = true`) needs only its name,
-	and its tables of fields none of theirs: Content checks the entry it patches whole again.
+	and its tables of fields none of theirs: Content checks the entry it patches whole again. (A
+	recipe's override is a whole recipe, checked as one; a recipe's removal is its name alone.)
 ]]
 function Schema.check(kind: string, entry: any): string?
 	local fields = ENTRY_FIELDS[kind]
@@ -2445,7 +2463,8 @@ function Schema.check(kind: string, entry: any): string?
 	if type(entry) ~= "table" then
 		return `it must be a table, not {describe(entry)}`
 	end
-	local override = entry.override == true
+	-- (A recipe's override replaces the recipe whole: it is checked whole.)
+	local override = entry.override == true and kind ~= "recipes"
 	if kind == "biomes" and override then
 		fields = BIOME_PATCH_FIELDS
 	end
@@ -2482,10 +2501,23 @@ function Schema.check(kind: string, entry: any): string?
 		elseif kind == "sounds" then (if override then { "name" } else { "name", "id", "source", "side" })
 		elseif kind == "music" then (if override then { "name" } else { "name", "id", "set" })
 		else {}
-	if kind == "recipes" then
+	if kind == "recipes" and entry.remove ~= nil then
+		-- (A removal: the name of the recipe it takes away, alone.)
+		if entry.remove ~= true then
+			return `remove must be true (or left out), not {describe(entry.remove)}`
+		end
+		for key in entry do
+			if key ~= "name" and key ~= "remove" then
+				return `{key} is no field a removal has (it is \{ name = "...", remove = true })`
+			end
+		end
+		needs = { "name" }
+	elseif kind == "recipes" then
 		local rule = Schema.RECIPE_TYPES[entry.type]
 		if rule == nil then
-			return "type is missing (shaped, shapeless or smelting)"
+			return `type is missing (shaped, shapeless or smelting{if entry.override == true
+				then ": an override is a whole recipe"
+				else ""})`
 		end
 		needs = rule.needs
 		for key in entry do

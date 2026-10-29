@@ -1,3 +1,9 @@
 [
-	{ "type": "shapeless", "ingredients": ["EpsilonOne", "EpsilonTwo"], "result": "DeltaGem", "count": 3 }
+	{
+		"type": "shapeless",
+		"name": "DeltaGemFromEpsilon",
+		"ingredients": ["EpsilonOne", "EpsilonTwo"],
+		"result": "DeltaGem",
+		"count": 3
+	}
 ]

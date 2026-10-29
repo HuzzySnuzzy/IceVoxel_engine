@@ -12,12 +12,13 @@
 	                                                 potions, templates, pools, structures, sounds,
 	                                                 music), of one pack (one word: a kind, else a
 	                                                 pack)
-	    lune run tests/content show <name>           an entry's merged fields, its id and pack, the
-	                                                 packs that patched it, and what the registries
-	                                                 made of it (lore, faces or icon, Age, recipes;
-	                                                 a skill's cell and the recipes it gates;
-	                                                 a template's size and palette, a pool's
-	                                                 elements, what starts from it)
+	    lune run tests/content show <name>           an entry's (or a recipe's, by its name) merged
+	                                                 fields, its id and pack, the overrides that
+	                                                 patched it (each pack's file), and what the
+	                                                 registries made of it (lore, faces or icon,
+	                                                 Age, recipes; a skill's cell and the recipes
+	                                                 it gates; a template's size and palette, a
+	                                                 pool's elements, what starts from it)
 	    lune run tests/content new <Pack> [--order n]
 	                                                 a new pack, src/shared/Content/Packs/<Pack>/
 	                                                 (never over a folder that is there), with an

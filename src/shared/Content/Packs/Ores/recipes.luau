@@ -11,6 +11,9 @@
 	  * the Hazmat suit (Mekanism's, Shared/Radiation): lead sheet in White Wool padding, each piece
 	    in its armor shape (the mask with a glass visor): 12 lead ingots, 12 wool and a glass for
 	    the suit.
+	A recipe's name is its result's unless it gives one, so brass's alloy and black powder have
+	names of their own (the brass nuggets' recipe is "BrassIngot", the Minecraft pack's field mix
+	"Gunpowder"): BrassIngotFromCopperIngot, GunpowderFromSaltpetre.
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Define)
@@ -22,11 +25,20 @@ return function(define: Define.Context): { Schema.Recipe }
 	for _, name in { "Copper", "Lead", "Zinc", "Brass", "Uranium" } do
 		define.append(list, define.metal(metals[name]).recipes)
 	end
-	local shaped, shapeless, smelting = define.shaped, define.shapeless, define.smelting
-	table.insert(list, shapeless({ "CopperIngot", "CopperIngot", "CopperIngot", "ZincIngot" }, "BrassIngot", 4))
+	local shaped, shapeless, smelting, named = define.shaped, define.shapeless, define.smelting, define.named
+	table.insert(
+		list,
+		named(
+			"BrassIngotFromCopperIngot",
+			shapeless({ "CopperIngot", "CopperIngot", "CopperIngot", "ZincIngot" }, "BrassIngot", 4)
+		)
+	)
 	table.insert(list, smelting("SulfurOre", "Sulfur"))
 	table.insert(list, smelting("SaltpetreOre", "Saltpetre"))
-	table.insert(list, shapeless({ "Saltpetre", "Saltpetre", "Sulfur", "#coals" }, "Gunpowder", 4))
+	table.insert(
+		list,
+		named("GunpowderFromSaltpetre", shapeless({ "Saltpetre", "Saltpetre", "Sulfur", "#coals" }, "Gunpowder", 4))
+	)
 	table.insert(list, shaped({ "TTT", "TUT", "TTT" }, { T = "Tnt", U = "UraniumBlock" }, "Nuke"))
 	local key = { L = "LeadIngot", W = "WhiteWool", G = "Glass" }
 	table.insert(list, shaped({ "WLW", "LGL" }, key, "HazmatHelmet"))

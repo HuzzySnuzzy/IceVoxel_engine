@@ -7,8 +7,9 @@
 	                                  an author's ore feature or biome then moves nothing it pins.
 	                                  A pack the game ships from now on goes here.
 	  shippedOnly(packs)              takes every other pack out of a mounted Content/Packs folder
-	                                  (before anything in its environment requires Content); the
-	                                  names it took, sorted
+	                                  (before anything in its environment requires Content), and
+	                                  whatever shares a shipped pack's name; the names it took,
+	                                  sorted
 	  mountShipped()                  a fresh environment with src/shared mounted and its packs the
 	                                  shipped ones alone: the environment and the shared root
 	  orderAfter(env, packs, wanted)  an order after every pack in `packs`: `wanted` when it is, else
@@ -49,6 +50,9 @@ function GamePacks.shippedOnly(packs: Loader.Node): { string }
 	for _, name in taken do
 		children[name] = nil
 	end
+	-- (The children sharing a name with another go too, which the Loader keeps apart as Rojo keeps
+	-- both: `Core.luau` beside the Core folder, which the Loader's sorted scan finds first.)
+	table.clear(rawget(packs :: any, "__extra"))
 	return taken
 end
 

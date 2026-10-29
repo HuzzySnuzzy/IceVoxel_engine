@@ -80,7 +80,10 @@
 
 	Recipes (Define/Recipes) and metals (Define/Metal)
 	  shaped, shapeless, smelting   recipe records
-	  storage(item, block)   nine of `item` into `block` and back (two recipes)
+	  named(name, recipe)   the recipe with a name of its own (a recipe's is its result's unless
+	                  it gives one: a second recipe for a result is named, "IronIngotFromRawIron")
+	  storage(item, block)   nine of `item` into `block` and back (two recipes: the block's, and
+	                  "<item>From<block>")
 	  metal(spec)     a metal's whole set (Define/Metal's MetalSpec): its ore, storage block and
 	                  raw block, its raw lump, ingot and nugget, the recipes between them and their
 	                  textures, as { blocks, items, recipes, textures } for a pack's kind modules
@@ -215,6 +218,7 @@ Define.herb = PlantsDefine.herb
 Define.shaped = RecipesDefine.shaped
 Define.shapeless = RecipesDefine.shapeless
 Define.smelting = RecipesDefine.smelting
+Define.named = RecipesDefine.named
 Define.storage = RecipesDefine.storage
 Define.metal = MetalDefine.metal
 

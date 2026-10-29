@@ -15,8 +15,9 @@
 	without a fire: a dirty bottle, bowl or canteen with Mint Leaves in any slots (shapeless) makes
 	its purified twin, in the inventory's own 2 x 2 grid too. The water keeps its wear (`keep`): a
 	part-drunk dirty canteen comes out with the sips it had, as from a campfire
-	(ToughAsNails/Boiling), so a mint leaf cures water and never makes more of it far from any. A
-	Purified Water Bowl brews a tea with a herb: Mint Leaves make Mint Tea (Internal Chill), Ginger
+	(ToughAsNails/Boiling), so a mint leaf cures water and never makes more of it far from any;
+	these are named by the mint ("PurifiedWaterBottleFromMintLeaves"), as the smelting recipe has
+	the twin's name (a recipe's is its result's unless it gives one). A Purified Water Bowl brews a tea with a herb: Mint Leaves make Mint Tea (Internal Chill), Ginger
 	Root Ginger Tea (Internal Warmth), both Herbal Tea. A bowl burns 100 ticks as fuel
 	(Minecraft's; the Bowl's `fuel`).
 
@@ -58,7 +59,10 @@ return function(define: Define.Context): { Schema.Recipe }
 	for _, water in { "Bottle", "Bowl", "Canteen" } do
 		table.insert(
 			list,
-			shapeless({ "DirtyWater" .. water, "MintLeaves" }, "PurifiedWater" .. water, nil, "DirtyWater" .. water)
+			define.named(
+				`PurifiedWater{water}FromMintLeaves`,
+				shapeless({ "DirtyWater" .. water, "MintLeaves" }, "PurifiedWater" .. water, nil, "DirtyWater" .. water)
+			)
 		)
 	end
 	define.append(list, {

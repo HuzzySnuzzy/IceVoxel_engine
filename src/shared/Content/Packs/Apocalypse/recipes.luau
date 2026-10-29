@@ -22,8 +22,10 @@
 	  Concrete              Gravel and Sand on the diagonals make four
 	  Mossy Concrete, Mossy Bricks   Concrete or Bricks with a Vine
 	Smelting: Concrete cracks into Cracked Concrete, Bricks into Cracked Bricks, and Scrap Metal
-	melts into an Iron Nugget. The results' entries name their Ages (`age`): the iron ones (and
-	the hatch and lamp) the Iron Age's, concrete the Industrial Age's.
+	melts into an Iron Nugget (IronNuggetFromScrapMetal: a recipe's name is its result's unless
+	it gives one, and the Minecraft pack has nuggets' recipes). The results' entries name their
+	Ages (`age`): the iron ones (and the hatch and lamp) the Iron Age's, concrete the Industrial
+	Age's.
 
 	Weapons (Shared/Weapons; DayZ makes no gun, magazine or round: the ruins and bunkers hide them;
 	the Turrets pack's Ammo Press presses rounds from iron and gunpowder):
@@ -56,7 +58,7 @@ return function(define: Define.Context): { Schema.Recipe }
 		shapeless({ "Brick", "Vine" }, "MossyBricks"),
 		smelting("Concrete", "CrackedConcrete"),
 		smelting("Brick", "CrackedBricks"),
-		smelting("ScrapMetal", "IronNugget"),
+		define.named("IronNuggetFromScrapMetal", smelting("ScrapMetal", "IronNugget")),
 		-- Weapons.
 		shapeless({ "GlassBottle", "DuctTape" }, "ImprovisedSuppressor"),
 		shaped({ "N", "S", "F" }, { N = "IronNugget", S = "Stick", F = "Feather" }, "CrossbowBolt", 4),

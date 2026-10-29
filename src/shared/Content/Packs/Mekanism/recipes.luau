@@ -55,7 +55,8 @@
 	    osmium, a bucket (the fuel inlet) and osmium, over iron, a furnace (the combustion chamber)
 	    and iron, over osmium, glow dust and osmium (the power out) ("OBO", "IFI", "ODO").
 	  * Osmium: 9 nuggets <-> an ingot, 9 ingots <-> a block, 9 raw <-> a raw block; Raw Osmium and
-	    Osmium Ore smelt into an ingot.
+	    Osmium Ore smelt into an ingot (OsmiumIngotFromRawOsmium, OsmiumIngotFromOsmiumOre: a
+	    recipe's name is its result's unless it gives one, and the nuggets' recipe has the ingot's).
 ]]
 
 local Define = require(script.Parent.Parent.Parent.Define)
@@ -156,8 +157,8 @@ return function(define: Define.Context): { Schema.Recipe }
 		)
 	)
 
-	-- Smelting osmium.
-	add(smelting("RawOsmium", "OsmiumIngot"))
-	add(smelting("OsmiumOre", "OsmiumIngot"))
+	-- Smelting osmium (named: the nuggets' recipe is "OsmiumIngot").
+	add(define.named("OsmiumIngotFromRawOsmium", smelting("RawOsmium", "OsmiumIngot")))
+	add(define.named("OsmiumIngotFromOsmiumOre", smelting("OsmiumOre", "OsmiumIngot")))
 	return list
 end

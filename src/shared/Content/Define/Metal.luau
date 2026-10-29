@@ -17,7 +17,9 @@
 	6, a pickaxe of `level`; the block of Metal, the raw block of Rock. The lump, ingot (tilted 25
 	degrees) and nugget: Define's models in the metal's colours, blank icons. Their textures are
 	"<name> ore", "<name> block" and "raw <name> block" (lower case), blank and untinted, each on
-	its block's material.
+	its block's material. Its recipes are named as Define/Recipes' storage names them (the ingot's
+	from nuggets "<Name>Ingot", from its block "<Name>IngotFrom<Name>Block"...), its smelting
+	"<Name>IngotFromRaw<Name>" and "<Name>IngotFrom<Name>Ore".
 
 	What a metal is given is checked first (Define/Fields): its own fields and colours, and each
 	piece's fields against Content/Schema's block or item fields (an unknown one gets a "did you
@@ -186,8 +188,9 @@ local function metal(spec: MetalSpec): Metal
 	append(recipes, Recipes.storage(`{name}Ingot`, `{name}Block`))
 	if hasOre then
 		append(recipes, Recipes.storage(`Raw{name}`, `Raw{name}Block`))
-		table.insert(recipes, Recipes.smelting(`Raw{name}`, `{name}Ingot`))
-		table.insert(recipes, Recipes.smelting(`{name}Ore`, `{name}Ingot`))
+		-- (Named, as the nuggets' recipe takes the ingot's name: "CopperIngotFromRawCopper".)
+		table.insert(recipes, Recipes.named(`{name}IngotFromRaw{name}`, Recipes.smelting(`Raw{name}`, `{name}Ingot`)))
+		table.insert(recipes, Recipes.named(`{name}IngotFrom{name}Ore`, Recipes.smelting(`{name}Ore`, `{name}Ingot`)))
 	end
 	return { blocks = blocks, items = items, recipes = recipes, textures = textures }
 end

@@ -4,8 +4,10 @@
 	each feature pack's, Minecraft's, Mekanism's, Survival's... the Ores pack's its metals'), merged
 	in load order, split by type, each type in that order (Crafting.match answers the first that
 	matches, and a furnace smelts an input by the first recipe taking it: tests/spec/CraftingGrids
-	checks no recipe hides another). Each says where it is from (`from`, Content's `where`: "pack
-	Minecraft, recipes/tools, recipe #3 (WoodenPickaxe)"), for Crafting's and Smelting's messages.
+	checks no recipe hides another; a pack replaces another's by overriding it by name, in its
+	place: Content). Each carries its `name` (its result's unless its entry gives one) and says
+	where it is from (`from`, Content's `where`: "pack Minecraft, recipes/tools, recipe #3
+	(WoodenPickaxe)"), for Crafting's and Smelting's messages.
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
@@ -35,9 +37,19 @@ export type Shaped = {
 	count: number?,
 	keep: string?,
 	from: string,
+	-- Its name (the header).
+	name: string,
 }
-export type Shapeless = { ingredients: { string }, result: string, count: number?, keep: string?, from: string }
-export type Smelting = { input: string, result: string, count: number?, from: string }
+export type Shapeless = {
+	ingredients: { string },
+	result: string,
+	count: number?,
+	keep: string?,
+	from: string,
+	-- Its name (the header).
+	name: string,
+}
+export type Smelting = { input: string, result: string, count: number?, from: string, name: string }
 
 local Recipes = {}
 
@@ -50,6 +62,7 @@ local shapeless: { Shapeless } = {}
 local smelting: { Smelting } = {}
 for index, recipe: Schema.Recipe in content.recipes do
 	local from = content.where("recipe", index)
+	local name = recipe.name :: string
 	if recipe.type == "shaped" then
 		table.insert(shaped, {
 			pattern = recipe.pattern :: { string },
@@ -58,6 +71,7 @@ for index, recipe: Schema.Recipe in content.recipes do
 			count = recipe.count,
 			keep = recipe.keep,
 			from = from,
+			name = name,
 		})
 	elseif recipe.type == "shapeless" then
 		table.insert(shapeless, {
@@ -66,11 +80,12 @@ for index, recipe: Schema.Recipe in content.recipes do
 			count = recipe.count,
 			keep = recipe.keep,
 			from = from,
+			name = name,
 		})
 	else
 		table.insert(
 			smelting,
-			{ input = recipe.input :: string, result = recipe.result, count = recipe.count, from = from }
+			{ input = recipe.input :: string, result = recipe.result, count = recipe.count, from = from, name = name }
 		)
 	end
 end
