@@ -1,16 +1,18 @@
 --!strict
 --[[
-	Grass blocks (Grass, DryGrass, Mycelium, Podzol), Minecraft's SpreadingSnowyDirtBlock:
+	Grass blocks (the blocks with behaviour "Grass": Grass, DryGrass, Mycelium, Podzol), Minecraft's
+	SpreadingSnowyDirtBlock:
 
 	  Dying    something opaque placed on top turns it into dirt (20 ticks after it lands, and on
 	           a random tick). A neighbour change schedules that tick only while something opaque
 	           is on top, so the snow falling on grass (server Seasons/SnowWorld: snow layers are
 	           not opaque) costs no block ticks.
-	  Spread   on a random tick (World/RandomTicker), grass, dry grass and mycelium under the open
-	           sky (the server's stand-in for Minecraft's light 9: World/Skylight) try four times to
-	           spread: a random block within one block sideways, three below and one above that is
-	           Dirt, with nothing opaque on it and the open sky above it (light 4 in Minecraft),
-	           becomes the same kind of grass. Podzol never spreads, as in Minecraft. The tries are
+	  Spread   on a random tick (World/RandomTicker), the blocks in the packs' `spreads_onto_dirt`
+	           block tag (grass, dry grass and mycelium) under the open sky (the server's stand-in
+	           for Minecraft's light 9: World/Skylight) try four times to spread: a random block
+	           within one block sideways, three below and one above that is Dirt, with nothing
+	           opaque on it and the open sky above it (light 4 in Minecraft), becomes the same kind
+	           of grass. Podzol never spreads, as in Minecraft (it is not in the tag). The tries are
 	           four times the season's growth (server Seasons/SnowWorld.growth: none in winter, two
 	           in autumn, six in spring; a share of one is a try with that chance), four with the
 	           calendar off.
@@ -25,18 +27,16 @@ local Skylight = require(script.Parent.Parent.World.Skylight)
 local SnowWorld = require(script.Parent.Parent.Seasons.SnowWorld)
 
 local DIRT = Blocks.id.Dirt
--- The kinds that spread onto dirt (Podzol doesn't).
-local SPREADS: { [number]: boolean } = {
-	[Blocks.id.Grass] = true,
-	[Blocks.id.DryGrass] = true,
-	[Blocks.id.Mycelium] = true,
-}
+-- The kinds that spread onto dirt: the `spreads_onto_dirt` block tag (Podzol isn't in it).
+local SPREADS: { [number]: boolean } = Blocks.tagged("spreads_onto_dirt", "Behaviours/Grass")
 -- Tries per random tick (Minecraft's 4).
 local TRIES = 4
 
 local Grass = {}
 
 Grass.tickDelay = 20
+-- The blocks that spread (read only).
+Grass.SPREADS = SPREADS
 
 -- Is something opaque on top of (x, y, z)?
 local function covered(world: any, x: number, y: number, z: number): boolean

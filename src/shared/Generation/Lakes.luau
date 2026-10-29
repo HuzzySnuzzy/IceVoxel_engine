@@ -105,19 +105,13 @@ local id = Blocks.id
 local WATER = Blocks.fluidId("Water", 0)
 local ICE, DIRT, SAND, GRAVEL, SNOW, BEDROCK = id.Ice, id.Dirt, id.Sand, id.Gravel, id.Snow, id.Bedrock
 
--- Soil under water becomes the lake's floor block.
-local SOIL: { [number]: boolean } = {}
-for _, name in { "Dirt", "Grass", "DryGrass", "Podzol", "Mycelium", "CoarseDirt", "Snow" } do
-	SOIL[id[name]] = true
-end
--- Tops that grow back on the dirt a lake's bowl uncovers (as SurfaceCaves).
-local GRASSY: { [number]: boolean } = {
-	[id.Grass] = true,
-	[id.DryGrass] = true,
-	[id.Podzol] = true,
-	[id.Mycelium] = true,
-	[id.Snow] = true,
-}
+-- Soil under water becomes the lake's floor block: the `natural_dirt` block tag and snow.
+local SOIL: { [number]: boolean } = Blocks.tagged("natural_dirt", "Generation/Lakes (its soil)")
+SOIL[SNOW] = true
+-- Tops that grow back on the dirt a lake's bowl uncovers (as SurfaceCaves): the `grass_blocks` block
+-- tag and snow.
+local GRASSY: { [number]: boolean } = Blocks.tagged("grass_blocks", "Generation/Lakes (its tops)")
+GRASSY[SNOW] = true
 
 local water = Config.Lakes.Water
 local puddleCfg = Config.Lakes.Puddles
@@ -227,6 +221,9 @@ Lakes.SHORE = SHORE
 -- Per biome index (read only): a water lake candidate's weight and a puddle cell's chance.
 Lakes.lakeWeight = lakeWeight
 Lakes.puddleChance = puddleChance
+-- Block id sets (read only): the soil a lake's floor replaces, the tops that grow back.
+Lakes.SOIL = SOIL
+Lakes.GRASSY = GRASSY
 
 -- Is column (x, z) one of the puddle's?
 function Lakes.inPuddle(puddle: Puddle, x: number, z: number): boolean

@@ -16,6 +16,7 @@
 	    emerald 3600 and diamond 4800 at 800.
 	  * age: iron and gold blocks are the Iron Age's (with the metals' tools), diamond and emerald
 	    blocks the Industrial Age's (Progression/Ages).
+	  * tags: the ores are in the `ores` block tag (a tool's tooltip lists them first).
 ]]
 
 local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
@@ -35,6 +36,7 @@ return {
 		lore = "Stone veined with coal: fuel for furnaces, torches and generators.",
 		knowledge = { mine = 1 },
 		miner = { ticks = 600, joules = 800, floor = 400000 },
+		tags = { "ores" },
 	},
 	{
 		name = "IronOre",
@@ -48,6 +50,7 @@ return {
 		lore = "Gives Raw Iron. Smelting iron opens the way to the Iron Age.",
 		knowledge = { mine = 2 },
 		miner = { ticks = 400, joules = 200 },
+		tags = { "ores" },
 	},
 	{
 		name = "GoldOre",
@@ -61,6 +64,7 @@ return {
 		lore = "Gives Raw Gold, for golden tools and Mekanism's alloys.",
 		knowledge = { mine = 3 },
 		miner = { ticks = 800, joules = 300 },
+		tags = { "ores" },
 	},
 	{
 		name = "DiamondOre",
@@ -74,6 +78,7 @@ return {
 		lore = "Deep and rare. Gives a Diamond.",
 		knowledge = { mine = 5 },
 		miner = { ticks = 4800, joules = 800 },
+		tags = { "ores" },
 	},
 	{
 		name = "EmeraldOre",
@@ -87,6 +92,7 @@ return {
 		lore = "Gives an Emerald, for staffs, anklets and elite gear.",
 		knowledge = { mine = 5 },
 		miner = { ticks = 3600, joules = 800 },
+		tags = { "ores" },
 	},
 	{
 		name = "CoalBlock",

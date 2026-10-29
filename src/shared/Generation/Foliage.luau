@@ -9,8 +9,9 @@
 
 	Every padded column is decided on its own, from the seed, its world (x, z) and its own blocks,
 	so a column in a chunk's padding gets exactly the plant its neighbour's core gets:
-	  1. the surface is the column's top cell from the fill step; it must be ground (the dead
-	     bush's soil set: Minecraft's dirt tag and sand) and in the plant's soil set
+	  1. the surface is the column's top cell from the fill step; it must be ground (the packs'
+	     `natural_dirt` and `sand` block tags: the dirt generation lays, not the ruins' moss) and
+	     in the plant's soil set
 	     (Blocks.mayPlaceOn), and the cell above must be air: a trunk, leaves, a cactus, water or
 	     ice there means no plant. (Mushrooms, which may stand on any sturdy block, therefore only
 	     grow on that ground too: none on beach gravel or bare rock.)
@@ -60,10 +61,11 @@ local id = Blocks.id
 local mayPlaceOn = Blocks.mayPlaceOn
 local plantTop = Blocks.plantTop
 
--- Plants grow on this ground only (and each on its own soil set within it).
-local GROUND: { [number]: boolean } = {}
-for _, name in { "Grass", "DryGrass", "Dirt", "CoarseDirt", "Podzol", "Mycelium", "Sand" } do
-	GROUND[id[name]] = true
+-- Plants grow on this ground only (and each on its own soil set within it): the `natural_dirt`
+-- and `sand` block tags.
+local GROUND: { [number]: boolean } = Blocks.tagged("natural_dirt", "Generation/Foliage (its ground)")
+for block in Blocks.tagged("sand", "Generation/Foliage (its ground)") do
+	GROUND[block] = true
 end
 
 -- A tall plant without room for its top grows as this instead (others: nothing).

@@ -6,13 +6,15 @@
 	budgeted sweep and the far meshes; Rendering/TextureLooks.seasonalTint turns a colour into the
 	parts', images' and decals' colours). Items, icons and the map keep the authored colours.
 
-	  Kinds      `kindOf(appearance)`: GRASS (Grass, DryGrass: their top texture follows the block's
-	             colour), LEAVES (every *Leaves block), PLANT (tinted plants: grass and ferns, which
-	             scale with the grass palette as their soil's tint does) and VINE, else NONE (also
-	             BlockList's `seasonless` blocks: the mineshafts' cave vines, underground). Each
-	             follows a foliage class's palette (`foliageOf`): "grass" (grass blocks and
-	             plants), "deciduous" (oak and acacia leaves, vines), "birch", "evergreen" (spruce)
-	             or "tropical" (jungle).
+	  Kinds      `kindOf(appearance)`, from the block entries: GRASS (a block whose `foliageClass` is
+	             "grass": Grass, DryGrass, whose top texture follows the block's colour), LEAVES (a
+	             block with a `foliageClass` in the packs' `leaves` tag), PLANT (tinted plants: grass
+	             and ferns, which scale with the grass palette as their soil's tint does) and VINE
+	             (any other block with a `foliageClass`: the vines), else NONE (also `seasonless`
+	             blocks: the mineshafts' cave vines, underground). Each follows its foliage class's
+	             palette (`foliageOf`; a tinted plant's "grass"): "grass" (grass blocks and plants),
+	             "deciduous" (oak and acacia leaves, vines), "birch", "evergreen" (spruce) or
+	             "tropical" (jungle).
 	  Palettes   Keyframes over the year's progress p (`progress`: (season - 1 + progress) / 4,
 	             Autumn 0..0.25, Winter, Spring, Summer 0.75..1, whatever the seasons' lengths),
 	             each { at, colour, keep }: a keyframe stands for lerp(colour, authored, keep) in
@@ -25,8 +27,9 @@
 	             Grass block's authored one (per channel), as Blocks.FOLIAGE_TINTS scale it by
 	             soil: plants are authored in the Grass block's green.
 	  Snow dust  `w = cover x Dust` (cover: SeasonClimate.snowCover of the biome class, the far
-	             landscape's white; Dust per kind: grass and plants `grass`, leaves and vines
-	             `leaves`, spruce `evergreen`, jungle `tropical`) moves the colour towards
+	             landscape's white; Dust by foliage class (DUST): grass blocks and plants `grass`,
+	             deciduous and birch leaves and vines `leaves`, spruce `evergreen`, jungle
+	             `tropical`) moves the colour towards
 	             SnowColour in CIELAB, so the far landscape reads white in winter beyond the real
 	             snow layers.
 	  Steps      `stepOf(time)`: calendar time in steps of BlendDays / 24 days (100 s of play at
@@ -41,12 +44,14 @@
 	             Config.Seasons.Foliage.Enabled and the calendar's state): the authored colours,
 	             which callers leave untouched.
 
-	Requires Config, Blocks, Calendar and SeasonClimate only (Rendering/ChunkRenderer and
-	Rendering/SeasonTint require this, never the reverse).
+	Requires Config, Blocks, Content/Schema, Calendar and SeasonClimate only (Rendering/
+	ChunkRenderer and Rendering/SeasonTint require this, never the reverse).
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
+local BlockList = require(script.Parent.Parent.Blocks.BlockList)
 local Config = require(script.Parent.Parent.Config)
+local Schema = require(script.Parent.Parent.Content.Schema)
 local Calendar = require(script.Parent.Calendar)
 local SeasonClimate = require(script.Parent.SeasonClimate)
 
@@ -106,13 +111,22 @@ end
 
 --[[ Seasonal appearances ]]
 
-local LEAF_CLASS: { [string]: FoliageClass } = {
-	OakLeaves = "deciduous",
-	AcaciaLeaves = "deciduous",
-	BirchLeaves = "birch",
-	SpruceLeaves = "evergreen",
-	JungleLeaves = "tropical",
+-- The snow dust each foliage class takes (Config.Seasons.Foliage.Dust's keys).
+local DUST: { [string]: string } = {
+	grass = "grass",
+	deciduous = "leaves",
+	birch = "leaves",
+	evergreen = "evergreen",
+	tropical = "tropical",
 }
+-- (A block's `foliageClass`: Content/Schema's FOLIAGE_CLASSES, each a palette of Config's.)
+for _, class in Schema.FOLIAGE_CLASSES do
+	assert(
+		DUST[class] and (Settings.Keyframes :: any)[class],
+		`Seasons/Foliage: Content/Schema's foliage class {class} has no Keyframes or dust`
+	)
+end
+local LEAVES = Blocks.tagged("leaves", "Seasons/Foliage (the leaves' kind)")
 
 -- Per appearance: its kind (u8) and its foliage class, authored colour and dust.
 Foliage.kindLut = buffer.create(#Blocks.appearances + 1)
@@ -143,21 +157,20 @@ for id = 0, Blocks.count - 1 do
 	if info == nil or info.seasonless then
 		continue
 	end
-	local name = def.name
-	if name == "Grass" or name == "DryGrass" then
-		register(appearance, Foliage.GRASS, "grass", "grass")
-	elseif LEAF_CLASS[name] then
-		local class: FoliageClass = LEAF_CLASS[name] :: FoliageClass
-		register(
-			appearance,
-			Foliage.LEAVES,
-			class,
-			if class == "evergreen" then "evergreen" elseif class == "tropical" then "tropical" else "leaves"
-		)
+	-- (Content/Schema checked it is one of FOLIAGE_CLASSES.)
+	local class: FoliageClass? = BlockList[id + 1].foliageClass :: any
+	if class == nil then
+		if info.tinted then
+			register(appearance, Foliage.PLANT, "grass", DUST.grass)
+		end
+	elseif class == "grass" and not info.tinted then
+		register(appearance, Foliage.GRASS, class, DUST[class])
+	elseif LEAVES[id] then
+		register(appearance, Foliage.LEAVES, class, DUST[class])
 	elseif info.tinted then
-		register(appearance, Foliage.PLANT, "grass", "grass")
-	elseif name == "Vine" or string.sub(name, 1, 4) == "Vine" then
-		register(appearance, Foliage.VINE, "deciduous", "leaves")
+		register(appearance, Foliage.PLANT, "grass", DUST.grass)
+	else
+		register(appearance, Foliage.VINE, class, DUST[class])
 	end
 end
 table.sort(seasonalList)

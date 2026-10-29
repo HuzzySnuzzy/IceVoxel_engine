@@ -132,18 +132,18 @@ end
 --[[ Blocks the tools harvest ]]
 
 -- Per tool kind: the highest `toolLevel` any block of that kind needs, and the blocks by level,
--- ores first then in BlockList order (their items' names).
+-- ores (the packs' `ores` block tag) first then in BlockList order (their items' names).
 local maxLevel: { [string]: number } = {}
 local byLevel: { [string]: { [number]: { string } } } = {}
 do
 	local ores: { [string]: { [number]: { string } } } = {}
+	local isOre = Blocks.tagged("ores", "Items/Tooltip (a tool's ores, first)")
 	for id = 0, Blocks.count - 1 do
 		local def = Blocks.get(id)
 		local kind, level = def.tool, def.toolLevel
 		if kind and level and def.placeable and not def.creativeOnly then
 			maxLevel[kind] = math.max(maxLevel[kind] or 0, level)
-			local isOre = string.sub(def.name, -3) == "Ore"
-			local into = if isOre then ores else byLevel
+			local into = if isOre[id] then ores else byLevel
 			into[kind] = into[kind] or {}
 			into[kind][level] = into[kind][level] or {}
 			table.insert(into[kind][level], Items.displayName(id))

@@ -230,6 +230,9 @@ return function(define: Define.Context): { BlockSpec }
 		zombieBreak = 300,
 		texture = { All = "moss block" },
 		lore = "Soft green moss. Makes mossy cobblestone and carpets.",
+		-- (Minecraft's dirt tag: plants stand on it. Only structures lay it, so it is no
+		-- `natural_dirt`: ground plants never grow on the ruins' moss.)
+		tags = { "dirt" },
 	})
 	local carpet: BlockSpec = {
 		name = "MossCarpet",
@@ -285,6 +288,8 @@ return function(define: Define.Context): { BlockSpec }
 			-- (The item's; its picture covers the four.)
 			texture = if base then { Front = "vine" } else nil,
 			lore = if base then "Climbable greenery that hangs from walls." else nil,
+			-- (Its colour follows the seasons as oak leaves do; the cave twins' never does.)
+			foliageClass = "deciduous",
 		}
 		table.insert(list, vine)
 		table.insert(twinned, vine)

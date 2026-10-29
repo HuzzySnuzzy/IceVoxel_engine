@@ -40,7 +40,7 @@
 	           that is within LagCompMax of where it is; `playerTarget`: a player's boxes at their
 	           pose-aware eyes (the body box rising beside the head: `crown`). `blockRules`:
 	           glass (ShatterBlocks by name, shattered only when ShatterGlass and the shooter may
-	           build), leaves (names ending "Leaves", passed with PassLeaves).
+	           build), leaves (the packs' `leaves` block tag, passed with PassLeaves).
 	  Damage   `tally`: each pellet's last impact; every pellet on one target summed, the head's
 	           share (Ballistics.damage: the head factor per pellet) apart from the body's (the
 	           server hurts a head through no armour, Mobs/Mobs.weaponDamage, or only the helmet's,
@@ -394,10 +394,8 @@ end
 
 -- (Block lookups: 1 per block id.)
 local leavesLut = buffer.create(Blocks.count)
-for id, def in Blocks.defs do
-	if string.sub(def.name, -6) == "Leaves" then
-		buffer.writeu8(leavesLut, id, 1)
-	end
+for id in Blocks.tagged("leaves", "Weapons/FireRules (what bullets pass)") do
+	buffer.writeu8(leavesLut, id, 1)
 end
 
 local function isLeaves(block: number): boolean

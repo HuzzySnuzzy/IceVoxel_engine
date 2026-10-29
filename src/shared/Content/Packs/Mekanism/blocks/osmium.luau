@@ -31,6 +31,8 @@ return {
 		lore = "Gives Raw Osmium, Mekanism's machine metal.",
 		knowledge = { mine = 2 },
 		miner = { ticks = 400, joules = 200 },
+		-- (The `ores` block tag: a tool's tooltip lists it first.)
+		tags = { "ores" },
 	},
 	{
 		name = "OsmiumBlock",

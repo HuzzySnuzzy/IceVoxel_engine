@@ -1347,8 +1347,9 @@ full detail chunks only: LOD cells are 2+ blocks wide, and every box of a plant 
 
 Every padded column is decided alone, from the seed, its world (x, z) and its own blocks, so a
 chunk's padding grows exactly what its neighbour's core grows:
-- the surface (the column's top cell from the fill) must be ground (Grass, DryGrass, Dirt,
-  CoarseDirt, Podzol, Mycelium, Sand: `Foliage.GROUND`) in the plant's soil set
+- the surface (the column's top cell from the fill) must be ground (the `natural_dirt` and `sand`
+  block tags: Grass, DryGrass, Dirt, CoarseDirt, Podzol, Mycelium, Sand: `Foliage.GROUND`) in the
+  plant's soil set
   (`Blocks.mayPlaceOn`), with air above it: a trunk, leaves, a cactus, water or ice there means no
   plant. Mushrooms, which may stand on any sturdy opaque block, also grow on that ground only (no
   beach gravel or bare rock);
@@ -4593,8 +4594,10 @@ whichever way the client's scatter turns it. They are not solid and do not `obst
 walk through them, and a plant may be placed where a player stands), break at once, sound like
 grass, are `brokenByFluid` and stand through the attached-block machinery:
 - Standing: a single plant or lower half has `support = "Down"`, but needs a block of its soil set
-  below instead of a sturdy one (`Blocks.mayPlaceOn`: "dirt" = Grass, DryGrass, Dirt, CoarseDirt,
-  Podzol, Mycelium; "deadbush" adds Sand; "mushroom" = Mycelium, Podzol or any sturdy opaque cube,
+  below instead of a sturdy one (`Blocks.mayPlaceOn`, from the packs' block tags: "dirt" = the
+  `dirt` tag, Grass, DryGrass, Dirt, CoarseDirt, Podzol, Mycelium, the Moss Block; "deadbush" adds
+  the `sand` tag; "mushroom" = the `mushroom_grow_block` tag, Mycelium and Podzol, or any sturdy
+  opaque cube,
   without Minecraft's light check, as there are no block light levels). An upper half
   (`plant.bottom`) needs its own lower half below. That is `Blocks.canSurvive`; `Blocks.canPlace`
   adds room for a tall plant's top (y + 1 below `Config.WorldHeight` and replaceable), and

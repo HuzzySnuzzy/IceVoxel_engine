@@ -11,9 +11,9 @@
 	           (server Seasons/SnowWorld.growth: Autumn 0.5, Winter 0, dormant, Spring 1.5,
 	           Summer 1; 1 with the calendar off), it grows into its tree (its entry's `tree`):
 	           the same builders as the world's trees (Generation/Structures' registry), with a
-	           fresh random size. The tree needs room: every block its trunk takes must be air, a plant
-	           or leaves (the sapling itself too); if not, it waits for a later tick, as Minecraft's
-	           does. Leaves only go where there is air.
+	           fresh random size. The tree needs room: every block its trunk takes must be air, a
+	           plant or leaves (the packs' `leaves` tag; the sapling itself too); if not, it waits
+	           for a later tick, as Minecraft's does. Leaves only go where there is air.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -52,6 +52,9 @@ Sapling.tickDelay = Plant.tickDelay
 Sapling.onTick = Plant.onTick
 Sapling.BUILDERS = BUILDERS
 
+-- The leaves a trunk may take the place of (the `leaves` tag).
+local LEAVES = Blocks.tagged("leaves", "Behaviours/Sapling (what a trunk may replace)")
+
 -- Can a trunk take this block (air, a plant, leaves)?
 local function clear(block: number?): boolean
 	if block == nil then
@@ -60,8 +63,7 @@ local function clear(block: number?): boolean
 	if block == AIR or block == CAVE_AIR then
 		return true
 	end
-	local def = Blocks.get(block)
-	return def.plant ~= nil or string.sub(def.name, -6) == "Leaves"
+	return Blocks.get(block).plant ~= nil or LEAVES[block] == true
 end
 
 --[[

@@ -14,6 +14,11 @@
 	  * Logs and planks burn 300 ticks in a furnace, as Minecraft's #logs and #planks: by Core's
 	    tags (Crafting/Recipes' fuel), so another pack's planks in the tag burn too.
 	  * zombieBreak: leaves 120 ticks, logs and planks 600 (half a minute).
+	  * foliageClass: the leaves' colours through the seasons (Shared/Seasons/Foliage): oak and
+	    acacia "deciduous" (autumn reds and browns, bare in winter), birch its yellows, spruce
+	    "evergreen", jungle "tropical" (green all year). Every block in the leaves tag decays
+	    without a log (in the logs tag), lets bullets through (server Weapons/FireRules) and makes
+	    room for a growing sapling's trunk; chopping a log gives knowledge (Progression/Knowledge).
 ]]
 
 local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
@@ -58,6 +63,7 @@ return {
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("OakSapling", 20),
 		spawnUnsafe = "on",
+		foliageClass = "deciduous",
 	},
 	{
 		name = "BirchLog",
@@ -86,6 +92,7 @@ return {
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("BirchSapling", 20),
 		spawnUnsafe = "on",
+		foliageClass = "birch",
 	},
 	{
 		name = "SpruceLog",
@@ -114,6 +121,7 @@ return {
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("SpruceSapling", 20),
 		spawnUnsafe = "on",
+		foliageClass = "evergreen",
 	},
 	{
 		name = "AcaciaLog",
@@ -142,6 +150,7 @@ return {
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("AcaciaSapling", 20),
 		spawnUnsafe = "on",
+		foliageClass = "deciduous",
 	},
 	{
 		name = "JungleLog",
@@ -170,6 +179,7 @@ return {
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("JungleSapling", 40),
 		spawnUnsafe = "on",
+		foliageClass = "tropical",
 	},
 	{
 		name = "Planks",

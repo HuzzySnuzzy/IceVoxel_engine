@@ -2,7 +2,8 @@
 --[[
 	Leaves (all five kinds), Minecraft's LeavesBlock with fast decay:
 
-	  Support  a leaf stays while a log (any *Log) is within 6 blocks of it through leaves
+	  Support  a leaf (a block in the packs' `leaves` tag) stays while a log (one in the `logs`
+	           tag: Core's tags, the five trees') is within 6 blocks of it through leaves
 	           (Minecraft's distance 1..6; a log next to it is 1). Leaves of any kind carry it, as
 	           in Minecraft. A block in a chunk that isn't loaded counts as a log, so trees at the
 	           edge of the loaded world never decay half-seen.
@@ -31,15 +32,8 @@ local SIZE = ChunkLayout.SIZE
 -- Minecraft's DECAY_DISTANCE: a log farther than this (through leaves) doesn't hold a leaf.
 local REACH = 6
 
-local LEAVES: { [number]: boolean } = {}
-local LOGS: { [number]: boolean } = {}
-for id, def in Blocks.defs do
-	if string.sub(def.name, -6) == "Leaves" then
-		LEAVES[id] = true
-	elseif string.sub(def.name, -3) == "Log" then
-		LOGS[id] = true
-	end
-end
+local LEAVES: { [number]: boolean } = Blocks.tagged("leaves", "Behaviours/Leaves")
+local LOGS: { [number]: boolean } = Blocks.tagged("logs", "Behaviours/Leaves (what holds leaves up)")
 
 local NEIGHBOURS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
 

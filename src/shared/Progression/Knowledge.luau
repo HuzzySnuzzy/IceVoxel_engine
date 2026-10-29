@@ -86,8 +86,12 @@ end
 -- too; the Ores pack's metals as iron and osmium, its powders as coal, uranium as gold).
 Knowledge.ORES = pointsOf("mine")
 
--- Points for chopping a log (blocks whose name ends in "Log").
+-- Points for chopping a log (the blocks in the packs' `logs` tag: Core's, the five trees').
 Knowledge.LOG = 0.25
+local LOGS: { [string]: boolean } = {}
+for _, name in assert(Content.default.tags.logs, "Knowledge: chopping a log reads the tag logs, which no pack has") do
+	LOGS[name] = true
+end
 
 -- Points per item smelted, by result name: each result entry's (Minecraft's furnace recipe
 -- experience: an iron ingot 0.7, copper's 0.7 and lead and zinc as it, uranium as gold, the
@@ -190,7 +194,7 @@ function Knowledge.minePoints(blockName: string): (number, string)
 	local ore = Knowledge.ORES[blockName]
 	if ore then
 		return ore, "ore"
-	elseif string.sub(blockName, -3) == "Log" then
+	elseif LOGS[blockName] then
 		return Knowledge.LOG, "mine"
 	end
 	return 0, "mine"

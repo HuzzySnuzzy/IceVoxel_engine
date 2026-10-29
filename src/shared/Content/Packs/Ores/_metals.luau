@@ -25,6 +25,8 @@
 	    1 (as gold).
 	  * The Metal Miner copies each ore (its `miner`): the metals as iron (400 ticks an item at
 	    200 J a tick), uranium as rare as emerald (3600 at 800).
+	  * The ores, with the pack's sulfur and saltpetre ores, are in the `ores` block tag (a tool's
+	    tooltip lists them first).
 	  * Radiation (Sv/h a block away or carried; Shared/Radiation): an ore's uranium is spread
 	    through rock (1), and Raw Uranium is mostly rock too (0.3); an ingot is the refined metal,
 	    forty lumps' worth (12), a nugget a ninth of it (1.33); the storage blocks are nine of their
@@ -56,6 +58,7 @@ local metals: { [string]: Define.MetalSpec } = {
 			lore = "Gives Raw Copper, brass's main metal.",
 			knowledge = { mine = 2 },
 			miner = { ticks = 400, joules = 200 },
+			tags = { "ores" },
 		},
 		storageBlock = { hardness = 3, lore = "Nine copper ingots in one block." },
 		rawBlock = { lore = "Nine Raw Copper, kept compact." },
@@ -79,6 +82,7 @@ local metals: { [string]: Define.MetalSpec } = {
 			lore = "Gives Raw Lead: bullets and radiation shielding.",
 			knowledge = { mine = 2 },
 			miner = { ticks = 400, joules = 200 },
+			tags = { "ores" },
 		},
 		storageBlock = { lore = "Nine lead ingots in one block.", age = "iron", radiationShield = 0.02 },
 		rawBlock = { lore = "Nine Raw Lead, kept compact.", age = "iron", radiationShield = 0.1 },
@@ -106,6 +110,7 @@ local metals: { [string]: Define.MetalSpec } = {
 			lore = "Gives Raw Zinc, alloyed with copper into brass.",
 			knowledge = { mine = 2 },
 			miner = { ticks = 400, joules = 200 },
+			tags = { "ores" },
 		},
 		storageBlock = { lore = "Nine zinc ingots in one block.", age = "iron" },
 		rawBlock = { lore = "Nine Raw Zinc, kept compact.", age = "iron" },
@@ -142,6 +147,7 @@ local metals: { [string]: Define.MetalSpec } = {
 			lore = "Radioactive. Gives Raw Uranium.",
 			knowledge = { mine = 3 },
 			miner = { ticks = 3600, joules = 800 },
+			tags = { "ores" },
 			radiation = 1,
 		},
 		storageBlock = {

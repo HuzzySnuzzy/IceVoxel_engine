@@ -2561,6 +2561,65 @@ return function(t, shared, require, _server, _client)
 		t.ok(has(message, { "Sapling: pack Patch, block CherrySapling grows no tree (its `tree`)" }), message)
 	end)
 
+	t.test("content: block tags: a pack's soil, leaves, logs and ore; a foliage class; a tag no pack has", function()
+		local env, root, serverRoot = fresh(function(env, packs)
+			local folder = env.folder(packs, "Patch")
+			env.module(folder, "pack", { order = 900, requires = { "Minecraft" } })
+			env.module(folder, "blocks", {
+				{ name = "Loam", tags = { "dirt", "natural_dirt", "grass_blocks", "spreads_onto_dirt" } },
+				-- (Colours of their own: blocks that look alike share an appearance, and a season.)
+				{ name = "CherryLeaves", color = { 230, 150, 180 }, tags = { "leaves" }, foliageClass = "birch" },
+				{ name = "CherryLog", color = { 90, 50, 40 }, tags = { "logs" } },
+				{ name = "MithrilOre", tool = "pickaxe", toolLevel = 3, tags = { "ores" } },
+			})
+		end)
+		local PatchedBlocks = env.require(root.Blocks)
+		local B = PatchedBlocks.id
+		t.ok(PatchedBlocks.mayPlaceOn(B.ShortGrass, B.Loam), "grass stands on a pack's dirt")
+		t.ok(PatchedBlocks.mayPlaceOn(B.DeadBush, B.Loam), "so does a dead bush")
+		t.ok(not PatchedBlocks.mayPlaceOn(B.BrownMushroom, B.Loam) or PatchedBlocks.isSturdy(B.Loam), "mushrooms")
+		t.ok(env.require(root.Generation.Foliage).GROUND[B.Loam], "ground plants grow on natural dirt")
+		local Lakes = env.require(root.Generation.Lakes)
+		t.ok(Lakes.SOIL[B.Loam] and Lakes.GRASSY[B.Loam], "a lake floors it and it grows back")
+		t.ok(env.require(root.Generation.SurfaceCaves).GRASSY[B.Loam], "grows back over a surface cave")
+		t.ok(env.require(serverRoot.World.Nuke).SCORCHED[B.Loam], "a nuke scorches it")
+		t.ok(env.require(serverRoot.Behaviours.Grass).SPREADS[B.Loam], "it spreads")
+		local Leaves = env.require(serverRoot.Behaviours.Leaves)
+		t.ok(Leaves.LEAVES[B.CherryLeaves] and Leaves.LOGS[B.CherryLog], "leaves held by a log")
+		t.ok(not Leaves.LEAVES[B.Loam], "not leaves")
+		local Knowledge = env.require(root.Progression.Knowledge)
+		t.eq(Knowledge.minePoints("CherryLog"), Knowledge.LOG, "chopping a pack's log")
+		local rules = env.require(serverRoot.Weapons.FireRules)
+			.blockRules({ PassLeaves = true, ShatterBlocks = {}, ShatterGlass = false, GlassShare = 0 } :: any, false)
+		t.ok(rules.passes(B.CherryLeaves) and not rules.passes(B.CherryLog), "bullets pass leaves")
+		local SeasonFoliage = env.require(root.Seasons.Foliage)
+		local look = PatchedBlocks.get(B.CherryLeaves).appearance
+		t.eq(SeasonFoliage.kindOf(look), SeasonFoliage.LEAVES)
+		t.eq(SeasonFoliage.foliageOf(look), "birch", "its foliage class")
+		t.eq(SeasonFoliage.kindOf(PatchedBlocks.get(B.CherryLog).appearance), SeasonFoliage.NONE)
+		local Tooltip = env.require(root.Items.Tooltip)
+		local pickaxe = table.concat(Tooltip.texts(env.require(root.Items).id.DiamondPickaxe), "\n")
+		t.ok(
+			string.find(pickaxe, "Harvests up to: Mithril Ore, Obsidian", 1, true) ~= nil,
+			`a pack's ore first in a pickaxe's tooltip: {pickaxe}`
+		)
+		-- The tag every reader names must be some pack's; a foliage class one of the palettes.
+		local ok, err = pcall(PatchedBlocks.tagged, "dirtt", "a spec")
+		t.ok(
+			not ok
+				and has(
+					tostring(err),
+					{ "Blocks: a spec reads the block tag dirtt, which no pack has (did you mean dirt?)" }
+				),
+			tostring(err)
+		)
+		fails(
+			{ pack("P", { blocks = { { name = "A", foliageClass = "maple" } } }) },
+			{ "pack P, block A: foliageClass must be one of grass, deciduous, birch, evergreen, tropical" },
+			"a foliage class"
+		)
+	end)
+
 	t.test("content: a registry's own check names the pack: two effects /effect finds by one word", function()
 		refused({
 			effects = {

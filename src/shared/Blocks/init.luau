@@ -83,6 +83,7 @@
 local BlockList = require(script.BlockList)
 local Config = require(script.Parent.Config)
 local Content = require(script.Parent.Content)
+local Schema = require(script.Parent.Content.Schema)
 local TexturePack = require(script.Parent.TexturePack)
 
 export type BlockDef = {
@@ -1514,23 +1515,49 @@ function Blocks.supportOffset(block: number): (number?, number?, number?)
 	return d[1], d[2], d[3]
 end
 
+--[[ Block tags (the packs' `tags`) ]]
+
+--[[
+	The blocks in tag `tag` (the packs' tags: every pack's lists and the entries' own `tags`; names
+	in it that are no block, items, are left out) as a set of ids, for code that reads a block tag
+	(Minecraft's block tags; Content/Schema's `tags` lists the ones the game reads). `who` reads it:
+	a tag no pack has is an error naming both as the game loads, so a typo fails loudly.
+]]
+function Blocks.tagged(tag: string, who: string): { [number]: boolean }
+	local names = Content.default.tags[tag]
+	if names == nil then
+		local near = Schema.suggest(tag, Content.default.tags)
+		error(
+			`Blocks: {who} reads the block tag {tag}, which no pack has{if near then ` (did you mean {near}?)` else ""}`,
+			0
+		)
+	end
+	local set: { [number]: boolean } = {}
+	for _, name in names do
+		local id = rawget(ids :: any, name) :: number?
+		if id then
+			set[id] = true
+		end
+	end
+	return set
+end
+
 --[[ Plants (BlockList `plant`) ]]
 
 --[[
-	Soil sets (BlockList `plant.soil`): "dirt" is Minecraft's DIRT tag as far as this game has it
-	(the Moss Block is in it too), "deadbush" adds sand (DeadBushBlock; there is no terracotta),
-	"mushroom" is Minecraft's MUSHROOM_GROW_BLOCK tag, plus any sturdy opaque full block
-	(`mayPlaceOn`).
+	Soil sets (BlockList `plant.soil`), from the packs' block tags: "dirt" is the `dirt` tag
+	(Minecraft's: grass, dirt, podzol, mycelium, the Moss Block...), "deadbush" adds `sand`
+	(DeadBushBlock; there is no terracotta), "mushroom" is `mushroom_grow_block` (Minecraft's), plus
+	any sturdy opaque full block (`mayPlaceOn`).
 ]]
-local DIRT_SOIL = { "Grass", "DryGrass", "Dirt", "CoarseDirt", "Podzol", "Mycelium", "MossBlock" }
-local soils: { [string]: { [number]: boolean } } = { dirt = {}, deadbush = {}, mushroom = {} }
-for _, name in DIRT_SOIL do
-	soils.dirt[ids[name]] = true
-	soils.deadbush[ids[name]] = true
+local soils: { [string]: { [number]: boolean } } = {
+	dirt = Blocks.tagged("dirt", "Blocks (the dirt soil set)"),
+	deadbush = Blocks.tagged("dirt", "Blocks (the dead bush's soil set)"),
+	mushroom = Blocks.tagged("mushroom_grow_block", "Blocks (the mushroom soil set)"),
+}
+for id in Blocks.tagged("sand", "Blocks (the dead bush's soil set)") do
+	soils.deadbush[id] = true
 end
-soils.deadbush[ids.Sand] = true
-soils.mushroom[ids.Mycelium] = true
-soils.mushroom[ids.Podzol] = true
 
 -- Single plants and lower halves: their soil set; tall plants: each half's other half.
 local plantSoil: { [number]: string } = {}

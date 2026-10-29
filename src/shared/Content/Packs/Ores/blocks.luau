@@ -29,6 +29,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		lore = "Yellow crusts near lava and oil. Gives Sulfur.",
 		knowledge = { mine = 1 },
 		miner = { ticks = 600, joules = 200 },
+		tags = { "ores" },
 	})
 	table.insert(list, {
 		name = "SaltpetreOre",
@@ -42,6 +43,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		lore = "White crusts of dry lands. Gives Saltpetre.",
 		knowledge = { mine = 1 },
 		miner = { ticks = 600, joules = 200 },
+		tags = { "ores" },
 	})
 	define.append(list, define.metal(metals.Uranium).blocks)
 	return list

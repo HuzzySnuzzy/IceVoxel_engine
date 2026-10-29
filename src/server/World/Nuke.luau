@@ -71,9 +71,8 @@ local CRUMBLE = 1
 local SCORCH = 2
 local FIRE_SALT = 3
 
--- Soil that scorches into dirt.
-local SCORCHED: { [number]: boolean } =
-	{ [B.Grass] = true, [B.DryGrass] = true, [B.Podzol] = true, [B.Mycelium] = true }
+-- Soil that scorches into dirt: the `grass_blocks` block tag (dirt under a living top).
+local SCORCHED: { [number]: boolean } = Blocks.tagged("grass_blocks", "World/Nuke (the soil it scorches)")
 
 -- One Nuke's crater: its centre (the cell, and the point), seed and edge noise.
 export type Crater = {
@@ -92,6 +91,9 @@ type Job = { crater: Crater, cursor: number }
 type State = { jobs: { Job } }
 
 local Nuke = {}
+
+-- The soil it scorches into dirt (block ids; read only).
+Nuke.SCORCHED = SCORCHED
 
 local states: { [World]: State } = setmetatable({}, { __mode = "k" }) :: any
 

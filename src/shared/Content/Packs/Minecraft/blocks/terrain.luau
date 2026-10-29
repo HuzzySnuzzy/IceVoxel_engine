@@ -25,6 +25,14 @@
 	    (`heats`: every level, and CaveLava).
 	  * Spawns and teleports never land in water, nor in or beside lava (`spawnUnsafe`: every
 	    level, and CaveLava; server Players/SafeSpot).
+	  * The soils' block tags (Content/Schema's `tags`): `dirt` (Minecraft's: plants stand on it),
+	    `natural_dirt` (the dirt generation lays: ground plants grow on it, a lake's floor replaces
+	    it), `grass_blocks` (dirt under a living top: grass, dry grass, podzol and mycelium die,
+	    scorch and are dug into Dirt, and grow back on the dirt a lake or a cave uncovers),
+	    `spreads_onto_dirt` (grass, dry grass and mycelium; podzol never spreads, as in Minecraft),
+	    `mushroom_grow_block` (Minecraft's: mycelium and podzol) and `sand` (Minecraft's: dead
+	    bushes and ground plants). Grass and dry grass follow the seasons' grass palette
+	    (`foliageClass`).
 	  * knowledge: smelting cobblestone into stone gives Minecraft's furnace experience, 0.1.
 	  * blastResistance: Minecraft 1.20.1's where it differs from the hardness (stone 6, packed mud
 	    3, obsidian 1200; Properties.strength(f) gives both, so the rest keep their hardness).
@@ -80,6 +88,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			zombieBreak = 300,
 			texture = { All = "dirt" },
 			lore = "Soil that plants grow on.",
+			tags = { "dirt", "natural_dirt" },
 		},
 		{
 			name = "Grass",
@@ -92,6 +101,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			zombieBreak = 300,
 			texture = { Top = "grass top", Sides = "grass side", Bottom = "dirt" },
 			lore = "Dirt with a grassy top. Breaks into Dirt.",
+			tags = { "dirt", "natural_dirt", "grass_blocks", "spreads_onto_dirt" },
+			foliageClass = "grass",
 		},
 		{
 			name = "DryGrass",
@@ -109,6 +120,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			-- fringe.)
 			texture = { Top = "grass top", Sides = "dry grass side", Bottom = "dirt" },
 			lore = "Sun-baked savanna turf. Breaks into Dirt.",
+			tags = { "dirt", "natural_dirt", "grass_blocks", "spreads_onto_dirt" },
+			foliageClass = "grass",
 		},
 		{
 			name = "Snow",
@@ -134,6 +147,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			zombieBreak = 300,
 			texture = { All = "sand" },
 			lore = "Loose sand that falls. Smelts into Glass; four make Sandstone.",
+			tags = { "sand" },
 		},
 		{
 			name = "Sandstone",
@@ -234,6 +248,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			zombieBreak = 300,
 			texture = { Top = "mycelium top", Sides = "mycelium side", Bottom = "dirt" },
 			lore = "Mushroom soil from far-off fields. Breaks into Dirt.",
+			tags = { "dirt", "natural_dirt", "grass_blocks", "spreads_onto_dirt", "mushroom_grow_block" },
 		},
 		{
 			name = "Podzol",
@@ -246,6 +261,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			zombieBreak = 300,
 			texture = { Top = "podzol top", Sides = "podzol side", Bottom = "dirt" },
 			lore = "Forest floor of needles. Mushrooms grow on it.",
+			tags = { "dirt", "natural_dirt", "grass_blocks", "mushroom_grow_block" },
 		},
 		{
 			name = "CoarseDirt",
@@ -256,6 +272,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			zombieBreak = 300,
 			texture = { All = "coarse dirt" },
 			lore = "Dirt mixed with gravel.",
+			tags = { "dirt", "natural_dirt" },
 		},
 		-- Stone varieties by altitude (Generation/Ores; the ore features are the pack's `ores`).
 		{

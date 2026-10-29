@@ -57,7 +57,19 @@
 	  shielding        item         armor: the share of radiation it keeps out (Radiation.SHIELDING)
 	  fuel             block, item  burn ticks as furnace fuel (Crafting/Recipes' fuel; it beats
 	                                a tag's, the packs' `fuel`)
-	  tags             block, item  the tags it is in, { "planks" } (the packs' tags)
+	  tags             block, item  the tags it is in, { "planks" } (the packs' tags). The block
+	                                tags the game reads (Blocks.tagged): `dirt` (Minecraft's: plants
+	                                with soil "dirt" stand on it), `sand` (with dirt, dead bushes'),
+	                                `mushroom_grow_block` (Minecraft's: mushrooms'), `natural_dirt`
+	                                (the dirt generation lays: ground plants grow on it with sand,
+	                                a lake's floor replaces it), `grass_blocks` (dirt under a living
+	                                top: covered, scorched or dug it is Dirt, and it grows back on
+	                                the dirt a lake or a surface cave uncovers), `spreads_onto_dirt`
+	                                (grass blocks that spread: server Behaviours/Grass), `leaves`
+	                                and `logs` (leaves decay without a log: server
+	                                Behaviours/Leaves; leaves let bullets through and make room for
+	                                a sapling's trunk; a log chopped gives knowledge) and `ores`
+	                                (listed first in a tool's tooltip)
 	  heats, cools     block        true: it warms / cools a player near it, Tough As Nails
 	                                (ToughAsNails/Temperature.HEATING_BLOCKS / COOLING_BLOCKS)
 	  sounds           block        { [action] = event }: its own action sounds (Sounds.block)
@@ -104,6 +116,12 @@
 	  tree             block        a sapling's tree: a tree builder of Generation/Structures'
 	                                registry, as biomes' `features` name them ("OakTree"), which
 	                                server Behaviours/Sapling grows it into
+	  foliageClass     block        the palette its colour follows through the seasons
+	                                (Shared/Seasons/Foliage; Config.Seasons.Foliage's Keyframes):
+	                                "grass" (grass blocks), "deciduous" (oak and acacia leaves,
+	                                vines), "birch", "evergreen" (spruce) or "tropical" (jungle);
+	                                tinted plants follow "grass" without it, `seasonless` blocks
+	                                never do
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
 	themselves (BlockList's tables BLAST_RESISTANCE, ZOMBIE_BREAK and the fire odds by suffix are
 	gone: each entry says its own).
@@ -319,6 +337,8 @@ export type BlockSpec = {
 	poi: string?,
 	-- A sapling's tree builder (the header).
 	tree: string?,
+	-- The seasons' palette its colour follows (the header).
+	foliageClass: string?,
 }
 
 -- One box of an item's model (`model`).
@@ -1160,6 +1180,8 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	`material` stay the block's plain look (drawn while its texture is blank or textures are off,
 	and on the map) and the colour a tinted texture takes.
 ]]
+-- A block's `foliageClass`: Shared/Seasons/Foliage's classes (which checks Config has each).
+Schema.FOLIAGE_CLASSES = table.freeze({ "grass", "deciduous", "birch", "evergreen", "tropical" })
 -- A snake case id: lower case letters, digits and "_" (a block's `poi`).
 local function SNAKE_ID(value: any): string?
 	if type(value) ~= "string" or not string.match(value, "^[%l%d_]+$") then
@@ -1265,6 +1287,7 @@ Schema.BLOCK_FIELDS = {
 	formerly = STRINGS,
 	poi = SNAKE_ID,
 	tree = STRING,
+	foliageClass = enum(Schema.FOLIAGE_CLASSES),
 } :: { [string]: Check }
 
 --[[

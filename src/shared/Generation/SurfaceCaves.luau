@@ -160,14 +160,9 @@ for id = 0, Blocks.count - 1 do
 		buffer.writeu8(CARVABLE, id, 1)
 	end
 end
--- Tops that grow back on the dirt a carved top uncovers.
-local GRASSY: { [number]: boolean } = {
-	[Blocks.id.Grass] = true,
-	[Blocks.id.DryGrass] = true,
-	[Blocks.id.Podzol] = true,
-	[Blocks.id.Mycelium] = true,
-	[Blocks.id.Snow] = true,
-}
+-- Tops that grow back on the dirt a carved top uncovers: the `grass_blocks` block tag and snow.
+local GRASSY: { [number]: boolean } = Blocks.tagged("grass_blocks", "Generation/SurfaceCaves (its tops)")
+GRASSY[Blocks.id.Snow] = true
 
 local function smoothstep01(t: number): number
 	if t <= 0 then
@@ -295,6 +290,8 @@ local function ravineReach(): number
 end
 SurfaceCaves.entranceReach = entranceReach
 SurfaceCaves.ravineReach = ravineReach
+-- The tops that grow back on the dirt a carved top uncovers (block ids; read only).
+SurfaceCaves.GRASSY = GRASSY
 
 --[[
 	A grid cell of one kind as far as it was looked at: whether it has a candidate (`start`) and
