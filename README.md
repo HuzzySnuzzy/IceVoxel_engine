@@ -77,14 +77,17 @@ A fast, Minecraft-style voxel engine for Roblox.
   keep names, not ids, so content can change between versions: each region, player record and
   character lists once the names of the blocks, items, fluids, mobs and effects it holds (and
   those inside machines and items: a miner's ore, a gun's rounds, a tank's fluid), so content
-  added, reordered or renamed (with the old name in the entry's `formerly`) loads just as it was saved. A name this
-  version doesn't know loads as air or is left out, never refusing the world; each record also
-  keeps the place version that wrote it, which says what the name is: content removed since (in
-  a record this version or an older one wrote) is simply gone, the world, player or character
-  saves as usual and the server's output names what went ("removed content left out of world
-  "Island": 12 OldBlock, 3 OldItem"); content of a newer version (Roblox runs old and new servers
-  side by side during an update, or the version is unknown, as in Studio) leaves that world,
-  player or character played but not saved, so nothing a newer version wrote is ever lost. The
+  added, reordered or renamed (with the old name in the entry's `formerly`) loads just as it was
+  saved. A name this version doesn't know loads as air or is left out, never refusing the world;
+  each record also keeps the place version that wrote it, which says what the name is: content
+  removed since (in a record this version or an older one wrote) is simply gone, the world, player
+  or character saves as usual and the server's output names what went ("removed content left out
+  of world "Island": 12 OldBlock, 3 OldItem"); content of a newer version (Roblox runs old and new
+  servers side by side during an update) or of an unknown one leaves that world, player or
+  character played but not saved, so nothing a newer version wrote is ever lost. Studio counts as
+  place version 0, unknown, whatever `game.PlaceVersion` says there: a Studio session never writes
+  back a record it left names out of, and a live server never writes back one a Studio session
+  wrote that way. The
   same holds for the ids inside machines and items: each record lists which of its numbers are
   ids, so a version that keeps one more or one fewer leaves the other's out and counts it, never
   misreading it as something else. A stack bigger than an item's `maxStack` today (another
@@ -796,8 +799,8 @@ A fast, Minecraft-style voxel engine for Roblox.
     and calibre;
   - **Terraria's** accessories ("When worn:") and mana items, and in survival with the recipe gate
     on, "Crafting requires the Iron Age" in red when your Age can't make it yet.
-  Every item has its lore in `Shared/Items/LoreList` (one line each, easy to edit; a test checks
-  none is missing).
+  Every item's lore line is on its pack entry (`lore`; `Shared/Items/LoreList` gathers them, and a
+  test checks none is missing).
 - **Knowledge, Ages and a skill tree.** Knowledge is this game's experience: Minecraft's curve (2L +
   7 points a level to 15, 5L - 38 to 30, 9L - 158 above), shown as a thin bar with the level under
   the status icons (survival and adventure). It comes from first times above all: a block kind mined
@@ -1840,16 +1843,24 @@ A fast, Minecraft-style voxel engine for Roblox.
   Off, other players are their characters, as before.
 - **Safe spawns.** Spawns and teleports never land in water, lava, oil, fuel or fire, on leaves or
   next to cacti, lava or fire; each block's `spawnUnsafe` says so (`Players/SafeSpot`).
-- **A texture pack.** Every block texture is in one module, `src/shared/TexturePack.luau`, like a
-  Minecraft resource pack: 512 × 512 images, one per 3-stud block face, drawn as MaterialVariants
-  and face images that take each block's own colour (one bark image for every log, each in its
-  wood's colour), plants as crossed images. The 53 textures made so far are in (the roads,
-  concrete, aged bricks, stones, moss, vines, the supply crate and the medicine cabinet the latest),
-  and 82 blank entries wait for the rest (the apocalypse's rusty metal, bunker hatch and items
-  among them, blank on purpose).
+- **Content packs, as Minecraft's data packs.** Every block, item, recipe, tag, texture, loot table,
+  ore feature, Age, skill, biome, status effect, potion, structure, sound event and music track is
+  data in a content pack (`src/shared/Content/Packs/`: Core, Minecraft, Mekanism, Survival,
+  Terraria, Apocalypse, Turrets and Ores), checked as the game loads, and every value about an entry
+  is on the entry (its lore, texture, Age, fuel, loot, tags...). A new pack adds content without
+  touching anything else, and overrides another pack's entries field by field;
+  `lune run tests/content` checks the packs, explains an entry and starts a new pack. See
+  Extending.
+- **A texture pack.** Every block texture is an entry of a content pack's `textures`, like a
+  Minecraft resource pack, and each block names its faces' (`texture`): 512 × 512 images, one per
+  3-stud block face, drawn as MaterialVariants and face images that take each block's own colour
+  (one bark image for every log, each in its wood's colour), plants as crossed images. The 53
+  textures made so far are in (the roads, concrete, aged bricks, stones, moss, vines, the supply
+  crate and the medicine cabinet the latest), and 101 blank entries wait for the rest (the
+  apocalypse's rusty metal, bunker hatch and items among them, blank on purpose).
   Distant chunks take the colour each block averages to on screen, so they match the textured
   terrain near you, or keep their materials and textures with the Far Materials setting. See
-  Block textures.
+  Filling in textures, under Extending.
 - **Far meshes.** Regions of distant chunks that stopped changing are merged into a few MeshParts
   built with EditableMesh ("superchunks"), replacing thousands of parts: at the default view,
   81k parts become 35k parts + 90 meshes in the mountains. Parts stay the fallback, so nothing breaks
@@ -2185,26 +2196,29 @@ or random ticks; Peaceful spawns no monsters in any world.
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
   Content/                  content packs: the loader (discovery, order, ids, overrides, kind
-                            folders, every check), Schema (each kind's fields and types), Define
-                            (the helpers packs share: models, tools and armor, fluids, plants,
-                            doors, recipes, metal(), brewing), Packs/ (Core, Minecraft, Mekanism,
-                            Survival, Terraria, Apocalypse, Turrets, Ores: every block, item,
-                            recipe, texture, loot table, biome, status effect, potion and
-                            structure; the example outpost is Minecraft's templates/outpost,
-                            pools and structures)
+                            folders, every check), Schema (each kind's fields and types, every
+                            field an entry may carry), Define (the helpers packs share: models,
+                            tools and armor, fluids, doors, plants, recipes, metal(), brewing,
+                            block sound types; Fields checks what a helper is given), Packs/
+                            (Core, Minecraft, Mekanism, Survival, Terraria, Apocalypse, Turrets,
+                            Ores: every block, item, recipe, tag, texture, loot table, ore
+                            feature, Age, skill, lore line, fuel tag, biome, status effect,
+                            potion, structure, sound event and music track; the example outpost
+                            is Minecraft's templates/outpost, pools and structures)
   Blocks/  BlockList        the block registry (BlockList: the packs' blocks, merged) -> ids,
                             appearances, lookup tables (hardness, tools, drops, menus, how long
-                            zombies take to break them), plants (soil sets, tall halves, foliage
-                            tints), each block's textures per face from the pack
-                            (`variantTexture`, `alignLut`); Toggles (blocks a use swaps: the
+                            zombies take to break them), plants (soil sets from the block tags,
+                            tall halves, foliage tints), each block's textures per face from the
+                            pack (`variantTexture`, `alignLut`); Toggles (blocks a use swaps: the
                             bunker hatch)
-  TexturePack               the texture pack: every block texture (maps, Material, Tint, Average)
-                            and the texture of each block's faces, from the packs' textures
+  TexturePack               the texture pack: every block texture (maps, Material, Tint, Average),
+                            the texture of each block's faces and each item's icon, from the
+                            packs' `textures` and their entries' `texture` and `icon`
   Items/                    the item registry, stacks and item data (validation, tooltip lines,
                             Mekanism's energy and fluid formats, what a full bucket leaves);
                             ItemList (the packs' items that are not blocks, merged); Tooltip
-                            (every line of an item's tooltip) and LoreList (the lore lines no
-                            entry carries yet)
+                            (every line of an item's tooltip) and LoreList (every item's lore
+                            line: the entries' `lore` and the packs' `lore`)
   Fluids/  FluidList        the fluid registry: water, lava, oil and fuel by id (0 none .. 4 fuel),
                             their blocks and cave twins, buckets, colour, light, movement, harm,
                             furnace fuel, fog and bucket sounds
@@ -2833,7 +2847,7 @@ for performance:
 | `Locate.PoiRadius` / `PoiGeneratedNear` | 256 / false | Points of interest within this many blocks (3D); true: generated ones only in loaded chunks. |
 | `Render.Textures`         | true    | Draw the texture pack's textures (the Textures setting); false: every block in its plain material and colour. |
 | `Render.FarMaterials`     | false   | Materials and textures on merged far chunks, a far mesh per look (the Far Materials setting), instead of plain colours. |
-| `Textures.OddBoxes`       | false   | Odd-sized boxes (in blocks) for textured cubes at full detail, for variants that tile from a face's centre (see Block textures): 14-18% more parts near the player. |
+| `Textures.OddBoxes`       | false   | Odd-sized boxes (in blocks) for textured cubes at full detail, for variants that tile from a face's centre (see Check once in Studio, under Extending): 14-18% more parts near the player. |
 | `Textures.BottomFaces` / `SideImages` | false / false | Draw bottoms (grass's dirt) as images, one more instance per part / the sides as upright images over the top's variant, four more. |
 | `Textures.Sprites`        | true    | Plants, rope, cobwebs and hanging roots with a filled `Sprite` are two crossed images instead of their boxes. |
 | `Textures.MeasureAverages` / `ValidateIds` | true / true | Measure the averages the pack lacks and print them to paste / check every image id once at startup and name each one that fails. |
@@ -2851,6 +2865,7 @@ for performance:
 | `Origin.RebaseDistance` / `SoftDistance` / `Snap` | 8192 / 3072 / 768 | Studs from the render origin that move it at once / at a hidden moment (teleports, screens, menus); its steps. |
 | `Players.ServerPositions` | true    | "Fake coords": characters parked on the server, true positions from checked client moves, relayed by interest; off: read from the characters as before. |
 | `Players.MoveCheck` / `MoveSlack` | "correct" / 2 | Too fast moves: "correct" (sent back), "log" or "off"; seconds of movement at `Players.MoveLimits` (blocks a second per game mode) the checks allow at once. |
+| `Players.SpawnHeadroom` / `SpawnSearchRadius` | 2 / 48 | Spawning and teleporting (`Players/SafeSpot`): free blocks a character needs above its floor, and how far (blocks) around the wanted column it searches for a safe spot. What a spot keeps clear of is each block's `spawnUnsafe`. |
 | `Interest.PlayerDistance` / `PlayerHysteresis` | 256 / 16 | Players are told about others this near (blocks, horizontal), and until this much farther. |
 | `Interest.EditChunkRadius` / `EditSendRadius` | 14 / 14 | Chunks (x 16 blocks, from the feet to the chunk's nearest point): a chunk's edit list and records are sent this near the player (else deferred), live edits this near. An edit within 14 was made by someone within `PlayerDistance`; the client's lists reach 195 blocks at most. |
 | `Interest.LightningDistance` | 184 | Blocks: server lightning strikes are sent this near (strikes fall within 64 of a player, so only of players within `PlayerDistance`). |
@@ -3364,79 +3379,814 @@ screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"voi
 
 ## Extending
 
-**Content packs.** Blocks, items, recipes, tags, textures, loot tables, ore features, the Ages, the
-skill tree's nodes, lore lines, biomes, status effects, potions, jigsaw structures, sound events
-and music come from content packs, folders
-under `src/shared/Content/Packs/` that the game finds and checks as it loads, like Minecraft's data
-packs (docs/ARCHITECTURE.md, "Content packs"). A pack is a `pack` manifest
-(`{ order = 300, description = "..." }`) and any of `blocks`, `items`, `recipes`, `tags`,
-`textures`, `loot`, `ores`, `ages`, `skills`, `lore`, `fuel`, `biomes`, `effects`, `potions`,
-`templates`, `pools`, `structures`, `sounds` and `music`, each a Luau
-module (its data, or a function of `define`, the helpers in `Content/Define`) or a `.json` file. An
-entry carries what other registries used to keep in tables of their own: `lore`, `texture`, `icon`,
-`age`, `skill`, `knowledge`, `miner`, `radiation`, `fuel`, `tags`, `sounds`, `workSound`, `loot`...
-(`Content/Schema` lists them all, and a misspelt field is an error naming the pack and the entry).
-Ids are given at load in pack order, so content may be added anywhere; `override = true` patches
-another pack's entry. A kind may also be a folder of files merged in name order
-(`Minecraft/blocks/terrain.luau`, `blocks/plants.luau`...: a file a feature), so adding content may
-be adding a file. The game's content is feature packs: Core (air, the Ages, the core skills, the
-base tags), Minecraft, Mekanism, Survival (Tough As Nails and the seasons), Terraria, Apocalypse,
-Turrets and Ores; each `pack` manifest says what is in which file and where its code lives, and the
-examples below go in any of them. `Content/Packs/Ores` is a whole feature (the new ores, the Hazmat
-suit) in a pack of its own, the worked example.
-`lune run tests/content new <Pack>` starts a pack with an example block, item, shaped and smelting
-recipe, texture and loot table (its `pack.luau` names a module of the game's packs to copy for
-each other kind), and
-`lune run tests/content` says what a pack is missing (the content tool, under Development).
+The game's content is data: every block, item, recipe, tag, texture, loot table, ore feature, Age,
+skill, lore line, fuel tag, biome, status effect, potion, structure, sound event and music track
+comes from a content pack, a folder under `src/shared/Content/Packs/` that the game finds and
+checks as it loads, like Minecraft's data packs. Every value about an entry is on the entry (its
+lore, texture, Age, fuel, tags, loot, sounds...), and each registry reads it from there, so adding
+content is adding entries to a pack, or a pack, and touching nothing else. The game's own content
+is eight packs: Core (air, the Ages, the core skills, the base tags), Minecraft, Mekanism, Survival
+(Tough As Nails and the seasons), Terraria, Apocalypse, Turrets and Ores; each `pack.luau` says what
+is in which file and where its code lives. A few things are still code (a fluid's flow rules, a
+machine kind, a block behaviour, a world type, a mob...): they are at the end, under What is still
+code. docs/ARCHITECTURE.md, "Content packs", says how the loader works.
 
-**A block.** Add an entry to a pack's blocks: a file of the Minecraft pack's `src/shared/Content/
-Packs/Minecraft/blocks/` (`building.luau` for a building block), or a pack of your own (above;
-ids are given at load, so it may go anywhere):
+### Making a pack
 
-```lua
-table.insert(list, { name = "Marble", color = { 235, 235, 230 }, material = "Marble" })
+**Start one** with the content tool:
+
+```sh
+lune run tests/content new Wetlands
 ```
 
-It is immediately an item: it shows up in the creative picker, and survival players get it by
-mining it (`hardness = 1.5` for stone-like mining time, `tool = "pickaxe"` and `toolLevel = 0` to
-need a pickaxe to drop anything, `drops = "Cobblestone"` or `false` to drop something else or
-nothing, `container = 27, menu = "Chest"` for a chest-like block, `maxStack = 1` for an item that
-doesn't stack). Blocks that look identical share one part template. `color` and `material` are
-its plain look (and the colour a tinted texture takes); its texture goes in the texture pack (see
-Block textures below).
+It writes `src/shared/Content/Packs/Wetlands/` (never over a folder that is there): a manifest and
+one example of five kinds, a block, an item, a shaped and a smelting recipe, a texture and a loot
+table, each field explained, to rename, edit or delete. Its `pack.luau` names a module of the
+game's packs to copy for each other kind. The examples load and pass the check as written, however
+many new packs there are (the recipe takes a grid no recipe has yet), and the tool says so:
 
-**Sounds.** Every sound is a Minecraft sound event (`block.stone.break`, `entity.item.pickup`,
-`ui.button.click`...), an entry of a content pack's `sounds` (the vanilla ones the Minecraft
-pack's `sounds/` folder, each feature's in its pack: the zombies' and the guns' in Apocalypse, the
-Geiger counter's in Ores, Tough As Nails' and the seasons' in Survival...), played with one of the
-sounds every Roblox client ships (`rbxasset://sounds/...`: the character's footsteps, landing,
-get-up rustle (chest lids, armor), free-fall wind (a cave mood that fails to load), swimming and splash, the
-explosion, `oof`, `ouch` and the volume slider's tick; the jump sound is unused), as stand-ins
-told apart by pitch (the weather's too: `weather.rain` and `weather.rain.above` are the wind
-pitched into a hiss, `entity.lightning_bolt.thunder` and `entity.lightning_bolt.impact` the
-explosion pitched down; the distant storms' `entity.lightning_bolt.thunder.far` (a Sound named
-`entity.lightning_bolt.thunder` serves it too) and `weather.rain.far` (looped) the same, lower
-and muffled; each client plays them by itself). The weather ships real sounds this way:
-`src/sounds/Weather.model.json` becomes SoundService.IceVoxelSounds.Weather, with four near and
-ten distant thunder variants (picked at random), a minute-long rain loop (near rain and the
-distant hiss play it looped, duller under a roof) and a wind loop (`weather.wind`: outdoors,
-louder in a strong wind, a storm and high up, silent underground; Config.Weather.Wind). The
-loops heard from all around (the rain on the player, the wind) play flat, so turning the camera
-never pans them; the distant hiss is heard from the storm's side. Roblox's Doppler shift is off
-(SoundService.DopplerScale 0). Edit that file to swap them. The zombies' voices ship the same way,
-in `src/sounds/Zombies.model.json` (SoundService.IceVoxelSounds.Zombies): three groans
-(`entity.zombie.ambient`, one at random, at the gait's pitch), a growl for every zombie voice's
-hurt and two deaths for every voice's death. Each voice has its own Sounds, named by the event
-(`entity.zombie.hurt` for most kinds, `entity.zombie_runner.hurt`, `entity.zombie_brute.hurt`,
-`entity.zombie_screamer.hurt` and the same `.death`s), never by their category `entity.mob.hurt`,
-which would make the cows growl too; their PlaybackSpeed keeps the kinds apart (brute 0.65,
-zombie 1, runner 1.3, screamer 1.6), and each still varies by its event's pitch variance (as a
-share of the event's pitch: about ±13% for the zombie's hurt, ±22% the brute's), never into its
-neighbour's range, as the stand-ins never did. Swap a recording by editing its SoundId there;
-delete a Sound and its event plays the stand-in again, as it does when a shipped Sound's file
-fails to load (the game warns and leaves it out). To use your own, add a Folder named
-`IceVoxelSounds` to SoundService (or ReplicatedStorage) and put Sound instances in it, named like
-the event they replace:
+```
+wrote src/shared/Content/Packs/Wetlands/pack.luau
+wrote src/shared/Content/Packs/Wetlands/blocks.luau
+wrote src/shared/Content/Packs/Wetlands/items.luau
+wrote src/shared/Content/Packs/Wetlands/recipes.luau
+wrote src/shared/Content/Packs/Wetlands/textures.luau
+wrote src/shared/Content/Packs/Wetlands/loot.luau
+Wetlands    order 800  blocks 1, items 1, recipes 2, textures 1, loot 1
+it loads and passes the check
+```
+
+**The manifest**, `pack.luau`, says when the pack loads and what it needs (the examples below are
+this pack's):
+
+```lua
+return {
+	order = 800,
+	description = "Peat bogs: the Marsh, peat and the Marsh Tulip.",
+	requires = { "Core", "Minecraft", "Survival" },
+}
+```
+
+Packs load sorted by `order`, then by name. The game's run from Core's 0 to the Ores pack's 700,
+and `new` gives the next hundred after every pack's (`--order n` picks one). `requires` names the
+packs that must load first (a lower order, or the same and an earlier name): those whose entries
+yours names. Names are checked once every pack has loaded, so an entry may name any pack's, but
+`lune run tests/content` warns about a pack named and not required.
+
+**Kinds.** A pack holds any of these, each a module named after its kind: `blocks`, `items`,
+`recipes`, `tags`, `textures`, `loot`, `ores` (ore features), `ages`, `skills`, `lore`, `fuel`,
+`biomes`, `effects`, `potions`, `templates`, `pools`, `structures`, `sounds` and `music`. A module
+is one of:
+- a Luau module returning its data (`return { ... }`), as `new` writes them;
+- a function of `define` returning it (`return function(define) return { ... } end`), to use
+  Content/Define's helpers (below) or Config (`define.Config`);
+- a `.json` file holding it (Rojo makes it a module returning its table, and so does the Lune
+  loader). The manifest may be `pack.json` too, so a pack may be all JSON
+  (`tests/fixtures/content/packs/Beta` is one).
+
+A kind may also be a folder of the kind's name, a file a feature, as the Minecraft pack's
+`blocks/terrain.luau` and `blocks/plants.luau`: its modules (any of the three) merge in their
+names' order, a list kind's one after another, and a named kind's (textures, loot, lore, fuel,
+templates, pools) never naming one thing twice. A pack has a kind as a module or as a folder, not
+both, and a file in a folder is one level deeper (its `require`s take one more `.Parent`). Any
+other module at a pack's top is an error, so a misspelt kind fails loudly, unless its name starts
+with `_`: the pack's own helpers, which its modules require (the Ores pack's `_metals`). A pack is
+read as Rojo builds it, the same in Studio and in Lune, so these fail the load too, naming the
+file: a name with a dot (`ores.old.luau`), anything but a module or a folder (a `.txt`), two
+children of one name (`blocks.luau` beside `blocks.json`, or beside a `blocks` folder), an
+`init.luau` in a kind folder, and a module that gives nothing (a function without its `return`).
+
+**Content/Define** is what a function of `define` gets, and any pack module may require it. It
+holds the helpers the game's packs share, every one listed in its header: `append(list, more)`;
+item models (`shade`, `lump`, `ingot`, `nugget`, bottles, buckets) and sets (`armorSet`,
+`toolSet`); block generators (`fluid`, `caveTwin`, `door`, `fence`, `layers`, `machine`,
+`transmitter`, `cable`, `tank`, torches and lanterns); plants (`plant`, `flower`, `tulip`,
+`tallFlower`, `tallPlant`, `mushroom`, `sapling`, `herb`); recipes (`shaped`, `shapeless`,
+`smelting`, `storage`); a metal's whole set (`metal`); block sound types and mob voices
+(`blockSounds`, `mobVoice`). A generator keeps every field it is given and fills in only what is
+left out (an iron door is `define.door` with an iron door's `material`, `sound`, `hardness`, `tool`
+and `toolLevel`). It checks what it is given first, naming the generator and the entry: a misspelt
+field gets a "did you mean", and a field it makes itself (a door's `shape`) is refused. Where it
+makes several blocks of one entry (a fluid's flows, a door's 32 halves, a fence's arms, snow layers
+2 to 8, a cave twin), they keep every field but the item's own (`define.OWN_FIELDS`: `lore`,
+`texture`, `age`, `skill`, `fuel`, `tags`, `knowledge`, `miner`, `formerly` and `poi`), which only
+the block that is the item carries.
+
+**Ids and names.** Ids are given as the packs load: a block's is its place among every pack's
+blocks, an item's its place among the items from 4096 up, an effect's its place among the effects.
+Every machine loads the same packs, so the client and the server agree, and saves keep names, not
+ids (Saving and loading worlds, above), so content may go anywhere and be added, moved or removed.
+Code finds content by name (`Blocks.id.Peat`). To rename an entry, keep the old name in its
+`formerly`, as the Glow Block does (`formerly = { "Glowstone" }`): saves, structure templates and
+jigsaw final states naming it still find it.
+
+**Overrides.** An entry with `override = true` patches the entry of that name an earlier pack made,
+keeping its place and id, as a data pack overrides Minecraft's. Blocks, items, textures, biomes,
+skills (by `id`), effects, potions, pools, structures, sounds and music tracks take overrides; ore
+features, Ages, loot tables, lore lines, fuel tags and templates are each one pack's. The overriding
+pack must load later (a higher `order`, or the same and a later name), and its override merges
+field by field:
+- a field it gives replaces the entry's;
+- a table of fields is patched key by key in turn: a record (a block's `texture` faces, an item's
+  `food`, a biome's `foliage`) or a map of names (a block's `sounds`), so `{ name = "Grass",
+  override = true, texture = { Top = "..." } }` keeps the grass's sides and bottom;
+- `tags` add to the entry's own;
+- a list (`shape`, `model`, `color`, a biome's `bands` or `species`, a pool's `elements`) replaces
+  the entry's whole, and nothing takes a field away.
+
+The patched entry is checked whole again. Without `override`, a name already taken fails the load,
+naming both packs, and so does an override of nothing. A pack making the Wetlands' peat harder and
+a ground for generated plants, all in JSON, `src/shared/Content/Packs/WetlandsTweaks/pack.json`:
+
+```json
+{ "order": 900, "description": "Harder peat, which generated plants grow on.", "requires": ["Wetlands"] }
+```
+
+and its `blocks.json` (the peat keeps its `dirt` tag and joins `natural_dirt`):
+
+```json
+[{ "name": "Peat", "override": true, "hardness": 0.8, "tags": ["natural_dirt"] }]
+```
+
+**Checking your work.** `lune run tests/content` loads every pack as the game does, its registries
+too. A mistake stops it with the first error, naming the pack, the entry and (in a kind folder) the
+file, with a "did you mean" for a misspelt field or name:
+
+```
+content error: Content: pack Wetlands, block Peat: harndess is no field it may have (did you mean hardness?)
+```
+
+Otherwise it prints each pack's order and what it holds, then what an author likely forgot.
+Warnings: a block or item without a lore line, a block without texture faces, an item without an
+`icon`, a texture no block uses, a result no Age names that survival can only make in a later Age,
+a recipe that never crafts or smelts (an earlier one takes its grid or its input), a loot table
+nothing rolls, a pack naming an earlier pack's entries without requiring it. Infos: an item
+survival play never gives, with the cause (an ore no feature places...), and a pack naming a later
+pack's entries. `--strict` exits 1 on a warning. `list` gives the entries of a kind or a pack (`list
+biomes`, `list Wetlands`), and `show` what the game made of an entry (Development, Content tool):
+
+```
+block Peat: id 516, pack Wetlands
+  patched by: WetlandsTweaks
+  fields:
+    color = { 74, 56, 40 }
+    hardness = 0.8
+    loot = "peat"
+    lore = "Bog soil, cut for fuel. Flowers grow on it."
+    material = "Ground"
+    tags = { "dirt", "natural_dirt" }
+    texture = { All = "peat" }
+    tool = "shovel"
+  derived:
+    item: yes (id 516)
+    lore: "Bog soil, cut for fuel. Flowers grow on it."
+    texture: All = "peat" (its own entry)
+    Age: Stone Age ("stone": no Age names it, the first is the default)
+    survival: from the Stone Age: breaking Peat (found in the world)
+    made by: no recipe
+    used in:
+      pack Wetlands, recipe #3: smelting Peat -> PeatBrick
+```
+
+Then run the specs (`lune run tests/run`, Development). The Content specs hold with packs added
+(the fixtures they graft load after every pack, and the generation digests pin the shipped packs
+alone: a pack the game comes to ship goes in `tests/lib/GamePacks`' SHIPPED), but not all of them
+do:
+- an override changes the game's own content, and a spec pinning what it changed (Stone's
+  hardness, Speed's colour) fails;
+- the specs' own skill nodes take the Stone and the Electric Ages' row 2, so a pack's node there
+  clashes with them;
+- some specs still count the game's content: PlantsServer its plants, Progression its five Ages,
+  StructureGeneration its one structure (the outpost), and WorldTypeGenerators' structures debug
+  world expects a one-piece structure unturned;
+- FoliageGeneration keeps every biome's plants within its parts budget, and SoundsClient wants
+  client code playing every event a client plays by itself, which a pack's content must meet.
+
+### The kinds
+
+Each example below goes in the Wetlands pack above (the metal in a pack of its own); together
+they load and pass the check.
+
+**A block** is an entry of a pack's `blocks`:
+
+```lua
+-- Wetlands/blocks.luau, in its list
+{
+	name = "Peat",
+	color = { 74, 56, 40 },
+	material = "Ground",
+	hardness = 0.6,
+	tool = "shovel",
+	tags = { "dirt" },
+	loot = "peat",
+	lore = "Bog soil, cut for fuel. Flowers grow on it.",
+	texture = { All = "peat" },
+},
+```
+
+It is an item too: survival players get it by mining it, creative players from the picker. A block
+needs only its `name`; Content/Schema's BLOCK_FIELDS (its header has every field) say the rest:
+`hardness` (Minecraft's destroy time), `tool` (what mines it fast) and `toolLevel` (the tier needed
+for any drop at all), `drops` (another item, or `false`), `container` and `menu` (a chest),
+`maxStack`, `light`, `shape`... `color` and `material` are its plain look while its texture is
+blank. `texture` names its faces' textures (Textures and icons), `lore` its tooltip line, `loot` a
+loot table, and the `dirt` tag lets plants stand on it (Tags).
+
+**An item** that is no block is an entry of `items`, with a `name` and a `model`: boxes in pixels
+(16 to a block) that the hand, dropped items and a blank icon draw.
+
+```lua
+-- Wetlands/items.luau, in its list
+{
+	name = "PeatBrick",
+	color = { 92, 66, 44 },
+	material = "Ground",
+	model = { { size = { 8, 4, 5 }, offset = { 0, 0, 0 } } },
+	fuel = 2400,
+	icon = "",
+	lore = "Dried peat. Burns twice as long as the soil it was cut from.",
+},
+```
+
+`icon` is its inventory picture, `"rbxassetid://<number>"`, or `""` until one is made. ITEM_FIELDS
+has the rest (`armor`, `tool`, `durability`, `attack`, `food`, `drink`, `accessory`, `magic`...).
+On a block or an item, `age = "iron"` puts the recipes making it in that Age (An Age), and `fuel`
+is its burn time in ticks (Fuel).
+
+**A recipe** is an entry of `recipes`, naming items, or a tag with `"#"`:
+
+```lua
+-- Wetlands/recipes.luau, in its list
+{ type = "smelting", input = "Peat", result = "PeatBrick" },
+{ type = "shaped", pattern = { "BBB", "B B", "BBB" }, key = { B = "PeatBrick" }, result = "Furnace" },
+{ type = "shapeless", ingredients = { "PeatBrick", "Stick" }, result = "Torch", count = 2 },
+```
+
+A shaped recipe fits anywhere in the grid, mirrored too; `count` is how many it makes, and `keep`
+hands one ingredient's item data to the result (a battery's charge). In a function of `define`,
+`define.shaped(pattern, key, result, count)`, `shapeless(ingredients, result, count)`,
+`smelting(input, result)` and `storage(item, block)` (nine into a block and back) make the same
+records. Recipes add up in load order; a grid crafts the first recipe that fits it (every shaped
+one before any shapeless one) and a furnace smelts the first recipe for its input, so a later
+recipe for a grid or an input already taken is never made, which the check warns of.
+<!-- recipe overrides: added by the integrator -->
+
+**Tags** are a pack's `tags`, Minecraft's item tags (a recipe's `"#planks"` takes any of them):
+
+```lua
+-- Wetlands/tags.luau
+return {
+	peat = { "Peat", "PeatBrick" },
+}
+```
+
+A tag is every pack's lists in load order, then every entry naming it in its own `tags` (`tags = {
+"coals" }` joins Core's), each name once. Some block tags are the game's rules, read by name: `dirt`
+(plants with soil "dirt" stand on it), `sand` (with dirt, dead bushes'), `mushroom_grow_block`
+(mushrooms'), `natural_dirt` (the dirt generation lays: ground plants grow on it, with sand, and a
+lake's floor replaces it), `grass_blocks` (dirt under a living top: Dirt once covered, scorched or
+dug, and it grows back on dirt a lake or a surface cave uncovers), `spreads_onto_dirt` (grass that
+spreads), `leaves` and `logs` (leaves decay without a log; bullets pass through leaves; a chopped
+log gives knowledge) and `ores` (first in a pickaxe's tooltip).
+
+**Fuel** is a pack's `fuel`: the burn time of a tag's items, in ticks (Core's: logs and planks 300).
+An entry's own `fuel` beats its tag's:
+
+```lua
+-- Wetlands/fuel.luau
+return {
+	peat = 1200, -- 60 s, for all of #peat but the Peat Brick, whose own fuel is 2400
+}
+```
+
+**Textures and icons.** A pack's `textures` are its pictures, by name (lower case words), and a
+block's `texture` names one for each face: `All`, `Sides`, `Top`, `Bottom`, `Front` (ladders, rails,
+vines, glow lichen and doors: the face away from what they hang on), `Sprite` (plants: two crossed
+images); a face given nothing falls back to All, then Sides. A cave twin and a block's variants
+take its faces. An item's picture is its `icon`.
+
+```lua
+-- Wetlands/textures.luau, in its table
+["peat"] = { Color = "", Material = "Ground", Tint = false },
+["marsh tulip"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+```
+
+`Color = ""` is a blank, not made yet: the block keeps its plain colour and material. `Material` is
+the Roblox material the picture's MaterialVariant is based on, and `Tint = false` keeps the
+picture's own colours (Filling in textures, below, has the rest). Fluids, air, torches and lanterns,
+pipes, cables and tanks, machines, structure blocks and the Glow Block are never textured.
+
+**A loot table** is a pack's `loot`, Minecraft's block loot tables in short: pools, each rolled
+`rolls[1]` to `rolls[2]` times, each roll an entry by weight, `{ item or false, weight, min, max }`.
+A block naming it in its `loot` drops the first item its pools roll instead of its usual drop
+(none: its usual drop), both when a player breaks it with what harvests it and when it breaks by
+itself (a blast, leaves decaying); Shears take a block's `shearDrops` instead.
+
+```lua
+-- Wetlands/loot.luau, in its table
+-- One time in ten, digging Peat gives Raw Iron instead: bog iron.
+["peat"] = {
+	{ rolls = { 1, 1 }, entries = { { "RawIron", 1, 1, 1 }, { false, 9, 0, 0 } } },
+},
+```
+
+Loot tables also fill chests: the ruins', the bunkers' and the mineshafts' (Generation/ScavengeLoot
+and Mineshafts name theirs). A table nothing rolls is a warning.
+
+**A plant** is a block made by Content/Define's plant helpers, so its module is a function of
+`define` (wrap the list: `return function(define) return { ... } end`):
+
+```lua
+-- Wetlands/blocks.luau, as a function of define, in its list
+define.tulip({
+	name = "MarshTulip",
+	color = { 150, 90, 200 },
+	flammable = { ignite = 30, burn = 60 },
+	lore = "A tulip of the bogs. Brewed, it slows whoever drinks it.",
+	texture = { Sprite = "marsh tulip" },
+}),
+```
+
+`define.tulip` draws a cup of its colour on a stem and gives it what flowers share: not solid,
+broken at once, grass sounds, washed away by water, standing on `plant = { soil = "dirt" }` (the
+`dirt` tag; `"deadbush"` adds sand, `"mushroom"` any sturdy opaque block) and burning as flowers do,
+though this one burns less readily: what an entry says, the helper keeps. `flower`, `mushroom`,
+`sapling` (with `tree`, the tree builder it grows into: the Oak Sapling's `tree = "OakTree"`),
+`herb`, `tallFlower` and `tallPlant` (two halves, the upper naming the lower) are the others. A
+plant's `shape` is at most 4 boxes (each is a part per plant in the world: tests/spec/Plants checks
+it); `tinted = true` takes its soil's foliage colour, `shearDrops` is what Shears harvest, and a
+plant planted by another item (seeds, the herbs' leaves) is `placeable = false`, named by that
+item's `places`. A biome's `foliage` grows it (A biome). From a server script, place a tall plant
+with `EditRules.setPlaced(world, x, y, z, block)`, which sets both halves.
+
+**A metal**, in a pack of its own as the Ores pack's: `define.metal` makes a metal's ore, storage
+block and raw block, raw lump, ingot and nugget, the recipes between them (storage both ways,
+smelting) and their blank textures, and each kind module takes its part. A `_` helper holds the
+metal, so each module reads the same one:
+
+```lua
+-- src/shared/Content/Packs/Tin/_tin.luau
+return {
+	name = "Tin", -- TinOre, TinBlock, RawTinBlock, RawTin, TinIngot, TinNugget
+	level = 1, -- a stone pickaxe or better
+	colors = {
+		ore = { 150, 150, 156 },
+		block = { 196, 200, 206 },
+		rawBlock = { 150, 152, 158 },
+		raw = { 168, 170, 176 },
+		ingot = { 214, 218, 224 },
+		light = { 236, 238, 242 },
+		dark = { 96, 98, 104 },
+	},
+	oreBlock = {
+		lore = "Grey specks in the stone. Gives Raw Tin.",
+		knowledge = { mine = 2 },
+		miner = { ticks = 400, joules = 200 },
+		tags = { "ores" },
+	},
+	storageBlock = { lore = "Nine tin ingots in one block." },
+	rawBlock = { lore = "Nine Raw Tin, kept compact." },
+	rawItem = { lore = "Smelt it into a Tin Ingot." },
+	ingotItem = { lore = "Soft and bright. Nine nuggets make one.", knowledge = { smelt = 0.7 } },
+}
+```
+
+```lua
+-- Tin/blocks.luau; items.luau, recipes.luau and textures.luau the same, with .items, .recipes and
+-- .textures
+return function(define)
+	return define.metal(require(script.Parent._tin)).blocks
+end
+```
+
+```lua
+-- Tin/pack.luau
+return {
+	order = 900,
+	description = "Tin: its ore, ingots and blocks.",
+	requires = { "Core" },
+}
+```
+
+Each piece takes fields of its own (`oreBlock`, `storageBlock`, `rawBlock`, `rawItem`, `ingotItem`,
+`nuggetItem`: lore, Age, knowledge, the Metal Miner's numbers, radiation...), and `ore = false`
+makes an alloy (no ore, raw lump or smelting: the Ores pack's brass).
+
+**Ore features** are a pack's `ores`: where the world puts an ore, in veins through the stone
+(Generation/Ores' header says what each field does):
+
+```lua
+-- Tin/ores.luau
+return {
+	{ name = "tin", block = "TinOre", veins = 6, size = 8, minY = 5, maxY = 197 },
+}
+```
+
+`veins` is how many veins of `size` blocks for every 128 blocks of height between `minY` and `maxY`
+(the sea is at 64; 5 to 197, the low band, is where Minecraft's ground under its sea maps to);
+`shape = "trapezoid"` makes them densest halfway. Each feature draws from a random stream of its own
+(the seed and its name), so adding one moves no other ore; ores only replace stone, and where two
+features' veins cross the earlier feature keeps the cell. An ore no feature places is survival's
+"out of reach" info. An ore's `miner = { ticks, joules }` lets the Metal Miner copy it, and
+`knowledge = { mine = n }` gives knowledge each time it is mined again.
+
+**Lore.** Every block and item has a line of lore in its tooltip, its entry's `lore` (a test checks
+none is missing). A pack's `lore` gives lines by name instead, for entries without one (an entry
+may not have both), here as JSON in the Tin pack, `Tin/lore.json`:
+
+```json
+{ "TinNugget": "A ninth of a tin ingot." }
+```
+
+**An Age.** Core's `ages` are the Ages, in order: stone, iron, industrial, electric and atomic. An
+entry's `age = "iron"` puts the recipes making it in that Age, locked for a player who hasn't
+reached it; left out, it is the Stone Age's. An Age is reached at its knowledge `level` once its
+`milestones` are met (each a discovery: `category` mine, craft, smelt, biome, mob or age, and a
+`key` or a `count`), and gives `reward` points. A pack's Ages come after Core's:
+
+```lua
+-- Wetlands/ages.luau
+return {
+	{
+		id = "fusion",
+		name = "Fusion Age",
+		level = 45,
+		milestones = {
+			{ category = "craft", key = "Nuke", text = "Craft a Nuke" },
+			{ category = "biome", count = 10, text = "Visit 10 biomes" },
+		},
+		reward = 250,
+		color = { 120, 220, 255 },
+	},
+}
+```
+
+`id` is what saves keep and entries name, so an Age may be renamed. An Age is a column of the
+skill tree too: tests/spec/Progression wants three nodes or more in each Age and a tree costing
+more points than the last Age's level (and pins Core's five Ages), so an Age of your own comes with
+its nodes (A skill). Knowledge (this game's
+experience) comes from discoveries and repeats (Progression/Knowledge's header has the numbers): an
+entry's `knowledge = { mine = 2 }` (an ore mined again) or `{ smelt = 0.7 }` (each one smelted) is
+its own. From server code, `Players/Progression`: `award(player, points, reason)`,
+`discover(player, category, key)` (true when it was new), `killed(player, mobName)`,
+`state(player)`, `allows(player, item)`.
+
+**A skill.** The skill tree's nodes are the packs' `skills` (Core's knowledge and tools branches,
+the Minecraft pack's Demolition and Fission, the Survival pack's survival branch), each entry all
+there is to its node; `lune run tests/content list skills` shows each node's Age and row.
+
+```lua
+-- Wetlands/skills.luau
+return {
+	{
+		id = "peat_cutting", -- what saves keep and entries name
+		name = "Peat Cutting",
+		description = "+25% knowledge from mining",
+		row = 4, -- its row on the screen (1..6); its column is its Age
+		icon = "PeatBrick", -- the item drawn in its frame
+		age = "stone", -- open once the player reaches this Age
+		cost = 1, -- skill points (the game's nodes: their Age's number)
+		perk = { kind = "knowledge", sources = { "mine" }, bonus = 0.25 },
+	},
+}
+```
+
+`requires = { "forager" }` would need that node first (of its Age or an earlier one). A `perk`
+is one of the kinds the game codes, with that kind's numbers (Content/Schema's SKILL_PERKS;
+Progression/Skills says what each does): `{ kind = "knowledge", sources, bonus }`, `{ kind =
+"mining", tiers?, factor }`, `{ kind = "wear", chance }`, `{ kind = "thirst", factor }`, `{ kind =
+"insulation", steps }`, `{ kind = "boiling", speed }`, or `{ kind = "none" }` for a node there for
+its recipes: an entry's `skill = "demolition"` (TNT's) keeps its recipe locked until the node is
+unlocked. A pack retunes another's node with an override, `{ id = "forager", override = true, cost
+= 2 }`. As the packs load, the game checks each node's Age, icon, `requires` (known, of no later
+Age, never in a loop), row (one node to an Age's row, on the screen's six) and perk, and every
+entry's `skill`. A node's place among every pack's nodes is what the protocol sends (a u8), so
+nodes may go anywhere; saves keep ids.
+
+**A biome** is an entry of a pack's `biomes` (Content/Schema's BIOME_FIELDS say what each field
+does; the vanilla ones are the Minecraft pack's `biomes.luau`): the altitude bands it appears in
+(Lowland, Forest, Highland, Meadow, Alpine, Slopes, Peaks: the generator's, in `Shared/Biomes`), a
+climate position, its ground, its trees (`features`, Generation/Structures' builders) and its
+ground plants (`foliage`: an average `density`, weighted `plants`, optional `flowers` and `herbs`
+in patches of their own). The terrain's shape comes from `Relief`, so a biome only decides what
+grows and what the ground is made of.
+
+```lua
+-- Wetlands/biomes.luau
+return {
+	{
+		name = "Marsh",
+		bands = { "Lowland" },
+		temperature = 0.4,
+		humidity = 0.9,
+		vegetation = 0.2,
+		top = "Grass",
+		filler = "Peat",
+		fillerDepth = 3,
+		underwater = "Peat",
+		beach = "Peat",
+		features = { { "OakTree", 1 } },
+		foliage = {
+			density = 0.07,
+			plants = { { "ShortGrass", 3 }, { "Fern", 1 } },
+			flowers = { chance = 0.015, species = { { "MarshTulip", 2 }, { "BlueOrchid", 1 } } },
+		},
+		tags = { "is_swamp" }, -- /locate biome #is_swamp
+		lakes = 3, -- three times the water lakes
+		puddles = 0.15, -- the chance a puddle spot holds one
+		oilWells = 0, -- no oil
+	},
+	-- The Minecraft pack's forest, with the tulip among its flowers.
+	{
+		name = "Forest",
+		override = true,
+		foliage = {
+			flowers = {
+				species = {
+					{ "Dandelion", 2 },
+					{ "Poppy", 2 },
+					{ "LilyOfTheValley", 1 },
+					{ "Lilac", 1 },
+					{ "RoseBush", 1 },
+					{ "Peony", 1 },
+					{ "MarshTulip", 1 },
+				},
+			},
+		},
+	},
+}
+```
+
+`weather` gives Minecraft's biome temperature and whether it rains (deserts: `precipitation =
+false`), `seasonClass` how the seasons treat it (`"cold"`, `"dry"`, `"tropical"`, else
+`"temperate"`), `oilWells` (a share), `lakes` (a weight) and `puddles` (a share) its oil wells,
+lakes and puddles (left out: Config's oil well and puddle chances, and a lake weight of 1). Keep
+`foliage` within the parts budget tests/spec/FoliageGeneration checks. Every block and plant a biome
+names, its bands and its trees are checked as the game loads. A biome's index is its place among
+every pack's biomes, which the generator's climate picks follow, so a pack loading after the
+Minecraft pack adds its biomes after the vanilla ones, which keep their places (and the worlds they
+make). The override patches the forest as overrides do (Overrides, above): `foliage` and its
+`flowers` key by key, the `species` list whole, so it gives the forest's own flowers with the new
+one, and the forest keeps its grass, its flowers' chance and the Survival pack's ginger (`lune run
+tests/content show Forest` shows what it had). The Survival pack's `biomes.luau` is such an
+override.
+
+**A status effect** is an entry of a pack's `effects` (ids are given at load in pack order and sent
+as a u8: 255 effects at most). It has its name, `/effect` id (lower_snake), colour, category and
+HUD glyph (`icon`, one of `Shared/Effects/Looks`' ICONS), and what it does as data: `speed`,
+`mining`, `jump`, `melee` and `resistance` per level, `interval` with `heal` or `damage` (ticked on
+the server), `fireImmune`, `burnFactor`, `burnBonus`, `ignites`, `washOff`, `noSprint`,
+`drainsFood`, or a client `view` (one of Looks' VIEWS); Content/Schema's EFFECT_FIELDS say what
+each does.
+
+```lua
+-- Wetlands/effects.luau
+return {
+	{
+		name = "Leeched",
+		command = "leeched",
+		color = { 110, 30, 40 },
+		category = "harmful",
+		icon = "drop",
+		interval = 40, -- every 2 s...
+		damage = 1, -- ...half a heart, through armor, never the last one (as Poison)
+	},
+}
+```
+
+It then works with `/effect`, potions, the HUD and F3, and code finds it by name
+(`Effects.id.Leeched`). A new glyph or view is code: a glyph in client `Ui/EffectIcons` and its name
+in Looks. Server code gives and reads effects through `Players/Effects`: `Effects.give(player,
+"Leeched", 600, 0)` (ticks, amplifier; `Effects.INFINITE` for good), `giveAll`, `remove`, `clear`,
+`has`, `amplifier`, `levels`; combat changes a hit's half hearts with Strength and Weakness
+(`Effects.meleeDamage(player, base)`), and any hurt goes through `Effects.incomingDamage(player,
+amount)` (Resistance) before `TakeDamage`. A player's mining speed is `Mining.playerFactor(levels,
+progress, tool)`, on the client and the server alike. An effect kept elsewhere (Tough As Nails'
+four) is `external = true` and registered with `Effects.addExternal(id, { get, give, clear })`.
+
+**A potion** is an entry of a pack's `potions`. Content brews it as the packs load, Minecraft's
+brewing in a crafting grid: its items (`PotionOfSlowness`, `LongPotionOfSlowness` with `long`,
+`StrongPotionOfSlowness`, "Potion of Slowness II", with `strong`), stacking to 1, the bottle in its
+effect's colour, after the pack's own items; their recipes (a Purified Water Bottle, the Survival
+pack's, so the pack requires Survival, with the ingredient, an item or "#tag"; the potion with Glow
+Dust for II, with a coal for long); each item's lore line, icon and Age from the entry; and each
+item's `drink` (the effect when the 32 tick drink finishes, the Glass Bottle back, the tooltip's
+"When drunk:").
+
+```lua
+-- Wetlands/potions.luau
+return {
+	{
+		name = "Slowness",
+		ingredient = "MarshTulip",
+		effect = "Slowness",
+		seconds = 90,
+		long = 240,
+		lore = {
+			base = "Brewed from a Marsh Tulip. Slows whoever drinks it.",
+			long = "Brewed longer with coal. Slows for longer.",
+		},
+		age = { base = "iron", long = "industrial" },
+	},
+}
+```
+
+Leave `seconds` out for an instant effect (`strong = true` for its II; it has no long one); the
+effect, the ingredient and the variants are checked as it loads (Content/Schema's POTION_FIELDS),
+and `{ name = "Swiftness", override = true, seconds = 240 }` patches another pack's potion, items
+and drinks included (`tests/fixtures/content/brewing` is a potion end to end).
+
+**A structure** is three kinds, Minecraft's jigsaw structures: `templates` (each structure block
+SAVE's text, under the name inside it), `pools` (template pools: weighted elements, empty plots, a
+fallback, terrain matching) and `structures` (what generation places, where and how often;
+Content/Schema's header has every field). A pool needs no entry: `outpost/houses` is every
+template named `outpost/houses/...`, and a pool named like one template is that template alone.
+
+```lua
+-- Wetlands/templates.luau: a stack of peat, 2 x 2 x 2 (saved with a structure block, below)
+return {
+	["wetlands/peat_stack"] = "IVS1:ASMTd2V0bGFuZHMvcGVhdF9zdGFjawICAgEEUGVhdAEBHwAAABL074k",
+}
+```
+
+```lua
+-- Wetlands/pools.luau: a stack three times in four, else nothing
+return {
+	["wetlands/stacks"] = {
+		elements = {
+			{ template = "wetlands/peat_stack", weight = 3 },
+			{ empty = true, weight = 1 },
+		},
+	},
+}
+```
+
+```lua
+-- Wetlands/structures.luau
+return {
+	-- Peat stacks across the Marsh, about one every 20 x 20 chunks.
+	{
+		name = "peat_stack",
+		startPool = "wetlands/stacks",
+		size = 0, -- the start piece alone
+		biomes = { "Marsh" },
+		spacing = 20,
+		separation = 5,
+	},
+	-- The Minecraft pack's outpost, in the Marsh too.
+	{
+		name = "outpost",
+		override = true,
+		biomes = { "Plains", "Savanna", "Meadow", "Forest", "Marsh" },
+	},
+}
+```
+
+A structure's `biomes` name the packs' biomes exactly (at least one; left out, every biome);
+`spacing` and `separation` are Minecraft's random_spread in chunks (34 and 8 by default, its
+villages'), `size` the jigsaw depth (0..7), `maxDistance` how far pieces reach. An override's
+list replaces the earlier one whole, so the outpost's override names its own biomes with the new
+one, and an override of a pool (`["outpost/houses"] = { override = true, elements = ... }`) names
+its own elements with the new one (`lune run tests/content show outpost/houses` shows them).
+A template's blocks are checked by today's names, and an unknown biome, a number out of range, a
+pool with no templates or a start jigsaw no piece has stops the load, naming the pack and the
+entry. The Minecraft pack's outpost is a whole jigsaw structure to copy: its pieces are built in
+code by `tests/build_structures.luau` into `Minecraft/templates/outpost.luau` (`lune run
+tests/build_structures`; `--check` tells whether that file is up to date, `--print` shows every
+piece), its pools are `Minecraft/pools.luau` and its entry `Minecraft/structures.luau`.
+
+From building a structure to seeing it generate: structure blocks and jigsaws need creative and
+permission, an operator (the game's owner, Studio, `Gameplay.Admins`, `/op`) or a user id in
+`Config.Structures.Permission`.
+
+1. **Build it** in creative. Air you leave inside the region is saved as air and clears whatever
+   is there when the structure is placed; put a Structure Void (creative picker) where the world
+   should stay as it is instead (around a ruin, under a path). For a piece of a bigger structure,
+   put Jigsaw blocks where other pieces attach (step 5).
+2. **Mark the region.** Place a Structure Block (it starts in Save mode) and right click it. Give
+   it a name with slashes, Minecraft style: `wetlands/huts/small` (the part before the last slash
+   is its pool, step 5). Set the relative position (from the block to the region's lowest
+   north-west corner, default one block above it) and the size; the outline shows the box. Or put
+   two Corner structure blocks named alike at opposite corners just outside the region and press
+   DETECT.
+3. **Save** (SAVE). The chat says `Saved structure 'wetlands/huts/small' (N blocks, M characters)`
+   and the data, `IVS1:...`, appears in the box under the size: click it and press `Ctrl` + `C`
+   (`Cmd` + `C`). Long data comes in parts of 16,000 characters ("part 2 of 9"): copy every part in
+   order and put them together.
+4. **Keep it**, any of these ways:
+   - **Send it to Claude** in a chat message (words around it are fine): it goes into a content
+     pack's `templates`.
+   - **Put it in a pack yourself**, in its `templates` (above): the key must be the name inside the
+     text (the load says so when it isn't), and every block its palette names must be one some
+     pack makes, by today's name. In Studio, the text is also in a StringValue named after the
+     structure in `ServerStorage.IceVoxelSavedStructures` during the playtest: copy its Value.
+   - **Keep it in the place**: during a Studio playtest every save is a StringValue named after the
+     structure in `ServerStorage.IceVoxelSavedStructures`. Copy it, stop the playtest and paste it
+     into a Folder named `IceVoxelStructures` in ReplicatedStorage (make it; Folders inside are
+     fine). Saves only last for the session: nothing is written anywhere else. A template there
+     replaces a pack's of the same name, and the place's problems are only warned
+     (`[Structures] ...`): an unknown block there becomes air, as in saves and pastes.
+
+   To place it again by hand, use a Structure Block in Load mode with its name (this session's
+   saves and the library), or paste the data into Paste Data: a LOAD whose size differs from the
+   structure's only sets the size (the outline shows where it goes), the next places it, turned
+   and mirrored as set. The library is read once when the server and each client start (every
+   machine must generate the same structures), so new templates are seen from the next start or
+   playtest on.
+5. **Join pieces with jigsaws** for a structure like a Minecraft village: name the pieces by pool
+   (`wetlands/centres/dock`, `wetlands/huts/small`, `wetlands/huts/large`...). On a piece, a jigsaw
+   whose front faces out of it marks where a child attaches: its **target pool** is where the child
+   comes from, its **target name** the name of the child's jigsaw that attaches here, and **Turns
+   into** what it becomes once generated (air, or `Planks` to close a wall). On the child, a jigsaw
+   facing out with that **name**. Two jigsaws attach when they face each other, the names match
+   and, for jigsaws facing up or down, their tops match unless the source's joint is rollable. Each
+   child must fit beside what is already there. A jigsaw's Generate builds from its pool right
+   there, Levels deep, with this session's saves already in their pools (Keep Jigsaws leaves the
+   jigsaws to look at). A pack's `pools` entry adds weights (1..150), empty elements, a fallback
+   pool (tried after the elements, and alone at the last level: end caps) and terrain matching
+   (`projection = "terrain_matching"`: pieces that follow the ground column by column, paths).
+6. **Make it generate**: an entry of the pack's `structures` (above) with its start pool. In the
+   place instead, set the attribute `Generate = true` on the StringValue whose (first) template is
+   the start, and optionally `Biomes` (`"plains, forest"`: case, spaces, underscores and
+   `minecraft:` are ignored), `Spacing`, `Separation`, `Size`, `Foundation`, `OnLand`,
+   `StartHeight` and `MaxDistance`; `TerrainMatching = true` makes its templates terrain matching
+   in the pools made from their names.
+7. **See it.** Structures generate in terrain nobody has edited, wherever a start lands: while
+   testing, a small spacing (`Spacing = 4`: one start per 64 × 64 blocks) finds one quickly. From a
+   server script, every generated structure with a piece in a rectangle:
+   ```lua
+   local IceVoxel = require(game.ServerScriptService.IceVoxel.Api)
+   local world = IceVoxel.waitForWorld()
+   for _, s in world.generator.structures(-1000, -1000, 1000, 1000) do
+       print(s.name, s.x, s.z) -- the start position (blocks)
+   end
+   ```
+8. **Look inside the data** without the game:
+   `lune run tests/structure decode <file | IVS1:... | ->` prints every structure in a file (a
+   pasted chat message, a library module) or the text given: name, size, palette, every y layer as
+   ASCII, jigsaws, data markers, containers. `--lua hut.luau` writes an editable table ("." air,
+   " " keep), and `lune run tests/structure encode hut.luau --module` turns it back into a pack's
+   templates module (the peat stack above was written this way). `lune run tests/content list
+   templates` (or `pools`, `structures`) lists the packs' ones, and `lune run tests/content show
+   outpost/houses` a pool's elements (or the templates its name gathers) and what starts from it.
+
+**A sound event** is an entry of a pack's `sounds`: Minecraft's events (`block.stone.break`,
+`entity.item.pickup`, `ui.button.click`...), each with its file, volume, pitch and who plays it
+(Content/Schema's SOUND_FIELDS). `define.blockSounds` makes a block sound type's five events
+(`block.<type>.break`, `.place`, `.hit`, `.step`, `.fall`, scaled per action as Minecraft's), which
+a block takes with `sound = "<type>"`:
+
+```lua
+-- Wetlands/sounds.luau
+return function(define)
+	local list = define.blockSounds({
+		name = "peat", -- block.peat.break, .place, .hit, .step, .fall; a block's sound = "peat"
+		volume = 1,
+		pitch = 0.8,
+		dig = { id = define.SHIPPED.LAND, volume = 0.8, pitchVariance = 0.05 },
+		step = { id = define.SHIPPED.STEPS, volume = 1.4, pitchVariance = 0.05, duration = define.ONE_STEP },
+	})
+	define.append(list, {
+		{
+			name = "ambient.marsh.frog", -- a server script plays it: Sounds.play("ambient.marsh.frog", x, y, z)
+			id = "rbxassetid://1234567890", -- your upload's id
+			volume = 0.6,
+			pitchVariance = 0.1,
+			fallback = { id = define.SHIPPED.TICK, pitch = 0.5 }, -- if the upload fails to load
+			maxDistance = 32,
+			source = "ambient", -- the volume it follows: blocks, players, ambient, ui
+			side = "server", -- server, predicted (the actor's client at once) or client (its own code)
+			limit = 2, -- most at once on a client (its category's, else its name's)
+		},
+		{ name = "entity.generic.splash", override = true, volume = 0.3 }, -- a quieter splash
+	})
+	return list
+end
+```
+
+Every file is one every Roblox client ships (`define.SHIPPED`: footsteps, a landing, a splash, the
+explosion, `oof`...) or an upload (`rbxassetid://`). A block's sound type is its `sound`, else its
+material's; a block may have its own action sounds (`sounds = { ["break"] = "block.fire.extinguish"
+}`: punching fire out), a machine the loop it plays while it works (`workSound`), and armor the
+sound putting it on plays (`equipSound = "item.armor.equip_leather"`). Event numbers are given at
+load in pack order (a pack's sounds, then the cave moods), sent as a u16 and never saved, so code
+names events by name. Every name an entry gives, and every event the game's own code plays
+(`Sounds.PLAYED`, the firearm classes' shots, the fluids' buckets, the mobs' voices), is checked as
+the packs load, naming it. An event the client plays by itself (`side = "client"`) needs client
+code naming it, which tests/spec/SoundsClient checks for every one. Server scripts play an event to
+the players near a point, client scripts for the local player alone:
+
+```lua
+local Sounds = require(game.ServerScriptService.IceVoxel.Audio.Sounds)
+Sounds.play("block.glass.break", x + 0.5, y + 0.5, z + 0.5) -- block coordinates
+
+local SoundPlayer = require(game.Players.LocalPlayer.PlayerScripts.IceVoxel.Audio.SoundPlayer)
+SoundPlayer.play("entity.generic.splash", x, y, z)
+SoundPlayer.click() -- ui.button.click
+```
+
+**Sounds in the place.** A Sound in a Folder named `IceVoxelSounds` in SoundService (or
+ReplicatedStorage), named like an event, replaces it, a pack's events too:
 
 ```
 SoundService
@@ -3445,183 +4195,263 @@ SoundService
     block.stone.break       another Sound: a variant, one is picked at random
     block.break             every other block type's break sound
     item.armor.equip        every armor material
-    entity.item.pickup
 ```
 
-A Sound named like the event wins; otherwise one named like its category, the event with the
-variant left out (`block.break` for every `block.<type>.break`, `item.armor.equip` for every
-`item.armor.equip_<material>`). Several Sounds with one name are Minecraft's variants. They play
-with their own Volume and PlaybackSpeed (times the volume settings, varied a little like the
-built-in ones), heard as far as the event (16 blocks). To change the defaults instead, change the
-event in its pack, or retune it from a pack of your own (below). Block sound types are
-`define.blockSounds` in the Minecraft pack's `sounds/blocks.luau`: a type has a `dig` clip and a
-`step` clip (walking, mining hits, falls), scaled per action like Minecraft. Breaking and placing
-play the data sheet's recordings (`define.RECORDINGS.BREAK`, `.PLACE`, given to every type at its
-`dig` volume, pitch and variance, so each material still sounds its own), with the `dig` thud as
-their fallback should one fail to load; glass keeps its shatter for breaking and water its splash
-(`recorded = false`). Swap them there, or override one type (`block.stone.break`) or all
-(`block.break`, `block.place`) with a Sound. A block's sound type is its entry's `sound` (`sound =
-"metal"`), else its material's; a block may also have its own action sounds (`sounds = { ["break"]
-= "block.fire.extinguish" }`: punching fire out), and a machine the loop it plays while it works
-(`workSound = "block.electric_heater.hum"`).
+A Sound named like the event wins; otherwise one named like its category (the event with the
+variant left out: `block.break` for every `block.<type>.break`, `item.armor.equip` for every
+`item.armor.equip_<material>`). Several Sounds of one name are variants. They play with their own
+Volume and PlaybackSpeed (times the volume settings, varied a little), heard as far as the event.
+The game ships some this way: `src/sounds/Weather.model.json` (thunder, rain and wind) and
+`src/sounds/Zombies.model.json` (the zombies' groans, growl and deaths, a Sound per voice event)
+become SoundService.IceVoxelSounds; edit a SoundId to swap one, or delete a Sound to hear its
+event's own file again. Sounds are heard from the camera, never more than 4 blocks from the
+player's eyes (`SoundRules.LISTENER_REACH`). docs/ARCHITECTURE.md, "Sounds", has every event and
+how it plays.
 
-**A sound event.** Add an entry to a pack's `sounds` (a module, or a file of a `sounds/` folder),
-retune one another pack made with `override = true`, or make a block sound type with
-`define.blockSounds`:
+**Music and cave moods** are a pack's `music`, each track by name in its set: `surface` (above
+ground by day), `night` (above ground at night), `cave` (in caves) or `mood` (a cave mood, the
+event `ambient.cave.<name>`). The Minecraft pack's `music.luau` holds the game's.
 
 ```lua
--- src/shared/Content/Packs/MyPack/sounds.luau
-return function(define)
-	local list = define.blockSounds({
-		name = "copper",          -- block.copper.break, .place, .hit, .step, .fall; `sound = "copper"`
-		volume = 1,
-		pitch = 1.4,
-		dig = { id = define.SHIPPED.LAND, volume = 0.8, pitchVariance = 0.05 },
-		step = { id = define.SHIPPED.STEPS, volume = 1.6, pitchVariance = 0.05, duration = define.ONE_STEP },
-	})
-	define.append(list, {
-		{
-			name = "block.bell.ring",   -- play it by name: Sounds.play("block.bell.ring", x, y, z)
-			id = "rbxassetid://1234567890",
-			volume = 0.8,
-			pitchVariance = 0.05,
-			fallback = { id = define.SHIPPED.TICK, pitch = 2 }, -- if the upload fails to load
-			maxDistance = 48,
-			source = "blocks",        -- the volume it follows: blocks, players, ambient, ui
-			side = "server",          -- server, predicted (the actor's client at once) or client
-			limit = 2,                -- most at once on a client (its category's, else its name's)
-		},
-		{ name = "ui.button.click", override = true, volume = 0.3 }, -- a quieter click
-	})
-	return list
-end
-```
-
-The fields are Content/Schema's (`SOUND_FIELDS`: `category` lets one Sound replace a family, as
-`item.armor.equip` does). Event numbers are given at load in pack order (a pack's sounds, then the
-cave moods), sent as a u16 and never saved, so events may be added anywhere; the code names them
-by name. Every name an entry gives (a block's `sounds`, `workSound` and toggle sound, an item's
-`equipSound` and food sound) is checked as the packs load, and so is every event the game's own
-code plays (`Sounds.PLAYED`, the chest lids, the firearm classes' shots, the fluids' buckets, the
-mobs' voices): a pack set without one fails loudly, naming it. A Sound in
-SoundService.IceVoxelSounds still replaces any event, a pack's own too.
-
-Eating and drinking loop the data sheet's recordings (`entity.generic.eating` and
-`entity.generic.drinking`, their ids in the Minecraft and Survival packs' sounds; a Sound of either
-name replaces it and loops too)
-while the use button is held on a food (medicine keeps its own sound) or a drink: the eater hears it
-at once from their own client, other players near hear it too (the server sets the `IceVoxelUse`
-player attribute while the use lasts), and it stops the moment the use ends (finished, cancelled,
-another slot, death, leaving). Should a recording fail to load, Minecraft's clicks every 4 ticks
-(`entity.generic.eat`, `entity.generic.drink`) play instead, never both; the burp after a food and
-the last gulp after a drink stay either way. The apocalypse's sounds are events like the rest, so a
-Sound of the same name replaces each: `entity.zombie.ambient` (a groan, played by each client;
-shipped, as above), `entity.zombie.attack_wooden_door` and `.break_wooden_door` (a zombie bashing a
-block and breaking it through), `entity.zombie_screamer.scream`, the voices' `entity.zombie.hurt` /
-`.death` (and the runner's, brute's and screamer's own), `block.bunker_hatch.open` / `.close`,
-`item.bandage.apply`, `item.medkit.use`, `item.pills.swallow` and `ambient.blood_moon.rise`. Server
-scripts can play any event to the players near a point:
-
-```lua
-local Sounds = require(game.ServerScriptService.IceVoxel.Audio.Sounds)
-Sounds.play("block.glass.break", x + 0.5, y + 0.5, z + 0.5) -- block coordinates
-```
-
-The fifth data sheet's recordings are events like the rest. `entity.player.attack.strong` /
-`.weak` and `entity.bullet.flesh` play "Entity Hit"; a gun of a calibre with its own recording
-plays `item.firearm.<calibre>.fire` (`9mm`, `556`, `308`) and `item.firearm.<calibre>.suppressed`
-through a suppressor (Rendering/ShotRules.fireSound), heard as far as its class's shot, and every
-other calibre keeps its class's (`item.firearm.<class>.fire`, `item.firearm.suppressed`); one Sound
-named `item.firearm.fire` or `item.firearm.suppressed` still replaces them all. Lava's
-`block.lava.ambient` is one loop at the nearest lava open to the air the client has sampled
-(within 16 blocks). The working machines loop their hum: category `machine.hum` for the Electric
-Furnace, Electric Heater, Air Conditioner and Ammo Press, `machine.heavy_hum` for the Metal Miner
-and Oil Refinery (a Sound of either name replaces its group). `ambient.radiation.click` is the
-Geiger counter's click, played flat while the player is exposed to radiation (client Audio/Geiger).
-
-Client scripts can play any event for the local player alone:
-
-```lua
-local SoundPlayer = require(game.Players.LocalPlayer.PlayerScripts.IceVoxel.Audio.SoundPlayer)
-SoundPlayer.play("entity.generic.splash", x, y, z) -- blocks
-SoundPlayer.click()                                -- ui.button.click
-```
-
-Sounds are heard from the camera, but never more than 4 blocks from the player's eyes
-(`SoundRules.LISTENER_REACH`, Minecraft's third person distance), so zooming out does not
-silence the world; a Scriptable camera hears from where it is.
-
-**Music and cave moods.** The tracks are the content packs' `music`, each by name in its set
-(the Minecraft pack's `music.luau` holds every track the data sheets brought; `Sounds/MusicList`
-gives the sets to the client). A pack adds a track to a set with a line, or patches one by name:
-
-```lua
--- src/shared/Content/Packs/MyPack/music.luau
+-- Wetlands/music.luau
 return {
-	{ name = "dawn", id = "rbxassetid://...", title = "Dawn", set = "surface" }, -- above ground by day
-	{ name = "owls", id = "rbxassetid://...", set = "night" },   -- above ground at night
-	{ name = "deep", id = "rbxassetid://...", set = "cave" },    -- in caves, day or night
-	{ name = "drip", id = "rbxassetid://...", set = "mood" },    -- a cave mood: ambient.cave.drip
-	{ name = "surface3", override = true, title = "Morning" },  -- the Minecraft pack's, retitled
+	{ name = "marsh_dawn", id = "rbxassetid://1234567891", title = "Marsh Dawn", set = "surface" },
+	{ name = "drip", id = "rbxassetid://1234567892", set = "mood" }, -- ambient.cave.drip
+	{ name = "surface3", override = true, title = "Morning" }, -- the Minecraft pack's, retitled
 }
 ```
 
-- **Titles:** a track's `title` is what the Now Playing toast shows; none (or `""`) uses the
-  audio's own name on Roblox (looked up once).
-- **Tracks:** Minecraft's MusicManager timing (Config.Music): the first about five seconds after
-  joining, then one at random every 10 to 20 minutes, never the same twice in a row.
-- **Surface or cave:** where the player is comes from the sky light reaching the camera (F3's
-  `exposure`): under 0.2 for 5 seconds is a cave, over 0.5 for 5 seconds the surface again. A track
-  of the wrong kind fades out over 4 seconds and one of the new kind starts within 3; nothing new
-  starts while the light says the other place. A track that fails to load is skipped with a warning.
-- **Night:** on the surface at night (the game's own rule, `DayCycle.isDay` false at the server's
-  clock: from a little before sunset to a little after sunrise, as the sky, the mobs and the
-  zombies have it) a track comes from the `night` set, by day from `surface`. The time is read
-  when a track is picked, so dusk and dawn never cut one. An empty `night` set (or one whose
-  tracks all failed to load) leaves the surface its `surface` tracks at night too.
-- **Moods:** each becomes the event `ambient.cave.<name>` (`ambient.cave.mood1`...; category
-  `ambient.cave`, so a Sound named `ambient.cave` in the override folder replaces them all), played
-  at Minecraft's volume 0.5 like the stand-in `ambient.cave` (heard 16 blocks away, one at a time,
-  its rumble the fallback). The mood itself is Minecraft's
-  (`BiomeAmbientSoundsHandler`, `AmbientMoodSettings.LEGACY_CAVE_SETTINGS`):
-  - every game tick one block within 8 blocks of the eyes (each axis) is picked;
-  - with sky light s > 0 the mood drops s/15 × 0.001;
-  - in the dark it changes by (1 − block light) / 6000, and a dark open (cave air) block counts
-    4 times (`CaveMood.OPEN_WEIGHT`), so bigger caves fill it sooner: 5 minutes / (1 + 3 × the
-    share of open cave around you) — this game's own addition;
-  - at 1 a mood sound plays 2 blocks beyond that block and the mood starts over.
+A track's `title` is what the Now Playing toast shows (none: the audio's own name). The music
+follows Minecraft's MusicManager (Config.Music: the first track about five seconds after joining,
+then one every 10 to 20 minutes, never the same twice); the surface's or the caves' list by the sky
+light reaching the camera, the night's from dusk to dawn (an empty `night` set leaves the surface
+its own tracks). A mood plays at Minecraft's volume 0.5 where its cave mood fills up (Minecraft's
+`AmbientMoodSettings`, faster in bigger caves), and a Sound named `ambient.cave` replaces them all.
+A track that fails to load is skipped with a warning. Music & Sounds has the Music volume, Cave
+Moods and Music Toasts; F3's `music` line shows the list, the track and the mood.
+`tests/spec/DataSheet.luau` lists every id the latest data sheet brought and where each is used;
+copy its table for the next sheet.
 
-  The light is estimated from the blocks, since the engine has no light map: sky light 15 under
-  the open sky, one less per step from it along a few rays into tunnels; block light from the
-  light sources through open cells, one less per block (a few blocks around in big caverns).
-- **Settings:** Music & Sounds has the Music volume, Cave Moods and Music Toasts.
-- **F3:** a `music` line shows the list (surface, night or cave), the track playing (or the time
-  to the next) and the mood.
-- **New data sheets:** `tests/spec/DataSheet.luau` lists every id the latest sheet brought and
-  where each one is used (pack entries, music lists, shipped Sounds, catalogue events); copy its
-  table for the next sheet so the same checks run on it.
+### What else an entry says
 
-**Pipes and tanks.** A transmitter is a block with `transmitter = { kind = "item" | "fluid", tier =
-1..4, restrictive = true? }` and a tank one with `tank = { tier, capacity }` on its entry; the
-per-tier numbers are Mekanism's, in `src/shared/Transmitters/Tiers.luau`. Any block with
-`container` slots is an inventory transporters connect to (all slots from every side, unless it is
-a furnace, `menu = "Furnace"`). Pipes and tanks carry every fluid of `Shared/Fluids` whose record
-says `carriable`.
+These fields go on any pack's entries (Content/Schema's header and its field lists say what each
+does); the game's packs are the examples.
 
-**A fluid.** Append it to `src/shared/Fluids/FluidList.luau` (ids are list positions, sent and
-saved in items: at the end, and at most 255), its blocks with `define.fluid("<Name>", { color,
-material, ... }, tickDelay)` in a pack's blocks (the same colour and light as its record), its
-full bucket in the pack's items, and its flow rules to `RULES` in `src/server/Behaviours/Fluid.luau`
-(slope distance, drop off, infinite sources, whether what it washes away burns). The registry and
-the flow rules check they agree when the game loads. Its record decides the rest: `color` (pipes,
-tanks, gauges, JEI), `light` (a lit fluid gets sparse lights and glows in pipes), `physics` /
-`drag` / `push` / `swim` (players and dropped items), `damage` / `burnSeconds` / `extinguishes`
-(lava's hurt and burning), `furnaceFuel` (its bucket's burn time), `fogColor` / `fogStart` /
-`fogEnd` (the view from inside it) and its bucket sounds.
+**Light and shape.** `light = 0..15` gives a block one PointLight; `shape = { { size, offset,
+rotation?, color?, material?, glow? } }` (pixels from the cell's centre) draws it from boxes, and
+`bounds` is the box players aim at. `support = "Down"` (or "Up", "North"...) makes it need a sturdy
+block there, and with `behaviour = "Attached"` it pops off and drops when that block goes;
+`brokenByFluid = true` lets flowing water wash it away. `item = "Torch"` with `placeable = false`
+makes it a variant placed by and dropping another item; without `placeable = false` it is an item
+of its own. `obstructs = true` keeps a block that is not `solid` (a lantern) from being placed
+inside a player and lets falling sand land on it; `sturdy = false` keeps torches and lanterns off a
+solid cube (leaves, chests, cactus).
 
-**A machine.** A machine is a block with `machine = { kind = "name" }` and `energy = { capacity =
-J, input = J/t?, output = J/t? }` on its entry (output only: a generator; input only: a machine
-that uses energy; both: a battery). Its kind is a module in `src/shared/Machines/Kinds/`,
+**Pipes, tanks and machines.** A transmitter is a block with `transmitter = { kind = "item" |
+"fluid" | "energy", tier = 1..4, restrictive = true? }`, a tank one with `tank = { tier, capacity
+}` (the per-tier numbers are Mekanism's, in `Transmitters/Tiers`); `define.transmitter`, `cable`
+and `tank` draw them. Any block with `container` slots is an inventory transporters connect to
+(every slot from every side, unless it is a furnace, `menu = "Furnace"`). A machine is a block with
+`machine = { kind = "<kind>" }` and `energy = { capacity = J, input = J/t?, output = J/t? }` (its
+kind is code: What is still code); while it works it plays its `workSound` looped, its window glows
+`workGlow` (`{ r, g, b }`: the Electric Heater's red, the Air Conditioner's cyan) and it casts
+`workLight` (0..15: the Wood Stove's 10).
+
+**Food and medicine.** An item's `food` is what using it does (Minecraft 1.20.5's food component;
+`Items/Foods`' header says what each field does): `{ heal = 4, nutrition = 8, saturation = 0.8 }`
+(food points and Minecraft's saturation modifier with hunger on; `heal`, in half hearts, with it off
+and for medicine), an optional `effect = { kind = "hunger", chance = 0.3, ticks = 600 }` (its
+risk), and for tins and medicine `useTicks` (the hold, 32 by default), `cures` (effect names),
+`effects` (`{ effect = "Regeneration", ticks = 200, amplifier = 0 }` when it finishes),
+`aftermath`, `setback`, `sound` (an event) and `burp`. The Bandage's is `{ heal = 2, useTicks = 40,
+cures = { "Bleeding" }, sound = "item.bandage.apply", burp = false }`. A food naming an unknown
+effect or sound, with nutrition out of 1..20, or doing nothing fails the load. Mobs that die
+burning drop their meat cooked (`Foods.COOKED`: every food a furnace smelts into another food), so
+a raw food and its cooked one need only the smelting recipe.
+
+**Drinks and containers (Tough As Nails).** An item's `drink` is what drinking it gives
+(`ToughAsNails/Drinks`' header): `thirst` points and `hydration`, dirty water's `chance` of Thirst
+for `effectTicks`, `warmth` / `chill` ticks, `effects`, `mana`, the `empty` container it leaves and
+`sips` for a canteen (its `durability` is its sips). The entries tie the containers together: an
+empty container's `fills` names the dirty water it becomes at a water source, and dirty water's
+`drink.purified` its purified twin, which a campfire boils it into with nothing more to add (a
+furnace or mint do it by the pack's recipes). The Survival pack's Bowl has `fills =
+"DirtyWaterBowl"`, whose drink has `empty = "Bowl", purified = "PurifiedWaterBowl"`. A new container
+is three entries and their recipes; a drink of its own (a tea) is an entry's `drink` with the
+container it leaves. Drinks with the same numbers are one drink, so bottled water is purified water.
+
+**Insulating armor (Tough As Nails).** An armor piece's `tan = { warmth = n, cooling = n,
+freezeImmune = true }`: `warmth` steps pull a cold body temperature target up towards 0, `cooling`
+steps pull a hot one down, never past it; `freezeImmune` stops hypothermia. A full set at 2 a piece
+keeps a tundra (-10) neutral (-2). `define.armorSet` makes a material's four pieces with every
+field it is given (`tan`, `equipSound`, `lore`, `age`, `icon` or `icons` per piece, `shielding`...),
+as the Survival pack's `items/gear.luau` makes its straw and leaf armor.
+
+**Heat and cold (Tough As Nails and the seasons).** A block's `heats = true` warms a player within
+`Config.ToughAsNails.ProximityRadius` blocks, `cools = true` chills one (lava, fire and the
+campfire heat; ice and snow cool); a fluid's source covers every level and its cave twin. Its
+`roomHeat = { hu, most? }` is what it gives the air of a room it stands in, HU a second (the
+Campfire's 20, each lava block's 10, at most 6 of them counted); a furnace (`menu = "Furnace"`)
+gives it only while lit, a machine only while it works. A source that warms only in some state is
+code (What is still code).
+
+**Spawn safety.** A block's `spawnUnsafe` is what a player must not do with it: `"on"` (stand on it:
+leaves), `"in"` (stand in it: a fluid, every level of it, or a cobweb) or `"near"` (stand on, in or
+beside it: cactus, lava, fire). Spawns and map teleports search outward for the closest spot that
+passes (`Config.Players.SpawnHeadroom` and `SpawnSearchRadius`), and never put players below the
+natural surface (caves) nor at the bottom of a pit or a ravine.
+
+**Fire and blasts.** `flammable = { ignite, burn }` are Minecraft's FireBlock odds (wooden blocks
+5 / 20, wool 30 / 60, plants 60 / 100): fire clings to it, spreads next to it, burns it away and
+lava sets it alight. `blastResistance` is Minecraft's explosion resistance (left out: its
+hardness; the stone family's 6, obsidian's 1200). `silkTouch = true` makes a block's drop need
+Silk Touch, for which its `tool` stands in (packed and blue ice): mined with that tool it drops
+itself, and a blast leaves nothing. An explosive's entry names the block lighting it makes
+(`lit = "LitTnt"`), whose entry has its fuse in ticks (`fuse`) and `behaviour = "Tnt"`; it then goes
+off as TNT does (another blast is code: Behaviours/Tnt's `detonate`, World/Nuke's crater).
+
+**The seasons.** A block's `foliageClass` is the palette its colour follows through the year
+(`"grass"`, `"deciduous"`, `"birch"`, `"evergreen"` or `"tropical"`; tinted plants follow `"grass"`
+without one), and `seasonless = true` keeps its colour all year. A biome's `seasonClass` is above
+(A biome).
+
+**Points of interest.** A block's `poi` is the type `/locate poi` finds it as, a snake case id
+(`poi = "chest"`); blocks naming it as their `item` are of its type too, and blocks giving one id
+are one type (the four batteries).
+
+**Radiation.** `radiation` is the Sv/h a block gives a block away or an item carried (uranium's),
+`radiationShield` the share a block lets through (lead's), and an armor piece's `shielding` the
+share it keeps out (the Hazmat suit): the Ores pack's entries.
+
+### Filling in textures
+
+A texture is an entry of a pack's `textures` (Textures and icons, above), and `Shared/TexturePack`
+gathers every pack's, every block's `texture` and every item's `icon`; its header says what each
+field does. One tile covers one block face (`StudsPerTile = 3`): a 512 × 512 image per 3-stud face.
+Several entries may share one image (cracked and mossy bricks are the bricks' picture in their own
+colours), and the game's sheets are the Minecraft pack's `textures/` and the Apocalypse pack's
+`textures.luau`, whose comments note where an entry differs from its sheet. A filled texture
+changes some shapes: a ladder or rail with a `Front` image draws only that flat picture, rope with
+a `Sprite` becomes two crossed images, and shaped blocks given cube faces draw their boxes in that
+texture (the oak fence post takes `planks`). Blocks checks the textures as it loads and fails
+naming the pack and the mistake (an unknown face or texture, a material that cannot take a
+variant: Neon, Glass, ForceField, Air and Water), so a typo fails loudly in Studio and in the
+tests.
+
+To fill in a texture:
+
+1. Upload the image and paste its **Image** id into its entry: `Color = "rbxassetid://<number>"`
+   (and `Normal`, `Roughness`, `Metalness`). A Decal id is a different number, which Studio
+   converts when you paste it into a property but nothing converts here (Check once in Studio,
+   below). An item's picture goes in its entry's `icon` the same way, and needs nothing more.
+2. Run `lune run tests/build_textures`. It writes `src/textures/Materials.model.json` (a
+   MaterialVariant `IV_<name>` per filled texture, spaces as `_`, e.g. `IV_grass_top`, in
+   `MaterialService.IceVoxel`) and `src/textures/Images.model.json` (a Texture of the same name per
+   filled texture, in `ReplicatedStorage.IceVoxelTextures`: the game clones these for face images,
+   sprites and item cubes, since a clone keeps the normal, roughness and metalness maps that game
+   scripts cannot set). Game scripts cannot make MaterialVariants either, which is why they are
+   made here. Never edit the two files, nor the variants in the Material Manager: the next run and
+   sync overwrite them.
+3. Rojo syncs them into Studio while `rojo serve` runs (`rojo build` puts them in the place file).
+   Save or publish the place so they ship.
+
+`lune run tests/build_textures --list` prints the blank textures with the blocks waiting on each,
+then the filled ones still without an Average; `--check` exits 1 when the files are out of date
+(the TexturePack spec fails then too). The generator writes nothing for textures with errors (ids
+that are not `"rbxassetid://<number>"`, unknown fields, bad averages, and whatever Blocks refuses)
+and warns about a normal map that repeats its colour map and about filled textures no block uses.
+
+**Blank entries.** `Color = ""` means "not made yet": 53 textures are made and 101 wait (`--list`
+names them; the apocalypse's rusty metal and bunker hatch among them, and its items' icons are
+blank too). While a block's sides and top are blank it keeps its plain Roblox material and
+colour. A part takes one MaterialVariant on all six faces, so once its sides' texture is filled in
+(or its top's, when the bottom has no other filled texture) its blank faces show that one: a log's
+ends show the bark until `"log top"` is filled. A filled top that differs from the sides is drawn
+over the top face as an image. `ShowMissing = true` (in `Shared/TexturePack`) draws the missing
+texture in place of blank ones, so you can see in game what is left to make.
+
+**Tint** makes a texture take the voxel colour (the block's `color`): `true` (the default) the
+colour of the block it is drawn on, so one light image serves every wood (`"log"`, `"planks"` and
+`"leaves"` show oak, birch, spruce, acacia and jungle each in its own colour); `false` the image's
+own colours (ores, the grass side, flowers); a block name that block's colour wherever it is drawn
+(`"dirt"` is `Tint = "Dirt"`, so the dirt under grass is dirt coloured). A tint can only darken: a
+part shows its texture times its Color, which stops at white, so a texture shared by tinted blocks
+should be light, ideally greyscale, and at least as light as the lightest block using it. Once a
+texture's Average is known, a block it would leave too dark draws it as tinted images up close
+instead, and the output lists them: `[IceVoxel] textures darker than the blocks they tint (by how
+much, 0-255): ...`.
+
+**Average** (`{ r, g, b }`, 0-255) is the image's average colour (the mean in linear light, as
+sRGB). With it the tint is exact and distant chunks take the colour each block really shows on
+screen; without it the colour is multiplied in and distant chunks guess. With
+`Config.Textures.MeasureAverages` the game measures every texture without one shortly after
+joining and prints a block to the output (Studio's Output, or F9 in game):
+
+```
+[IceVoxel] Texture averages (paste into TexturePack.Textures[...].Average):
+	Average = { 121, 85, 58 }, -- ["dirt"]
+```
+
+Paste each line into the entry the comment names, in its pack's `textures` (TexturePack's
+`Textures` are the packs'), so it is never measured again. docs/ARCHITECTURE.md, "Texture pack",
+says how each look (near, far, plain, sprites, items) is drawn.
+
+**Rojo 7.7.1.** The generated files use properties Rojo 7.4 does not know (`ColorMapContent`,
+`TextureContent`...), so the project needs Rojo 7.7.1 and its Studio plugin (Getting started).
+Delete any `IV_...` MaterialVariants made by hand in MaterialService: one with the same name and
+base material as a generated one leaves Roblox to use either (Rojo manages only
+`MaterialService.IceVoxel`, so other variants are left alone).
+
+**Check once in Studio:**
+- **Image ids.** Every id must be an Image id. To check one, paste it into a Decal's Texture
+  property: if Studio turns it into another number, that number is the Image id. With
+  `Config.Textures.ValidateIds` the game loads every id once at startup and names each one that
+  fails (`[IceVoxel] texture "..." (rbxassetid://..., used by ...) failed to load ... Most likely
+  it is a Decal id`): a failed colour map draws the missing texture, a failed normal, roughness or
+  metalness map leaves the texture without it. Check the missing texture's own id, `925810526`,
+  first: it is an old, short id that may be a Decal id, and if it fails, ShowMissing and failed
+  textures show the plain block instead.
+- **Tiling** (`Config.Textures.OddBoxes`). A part most likely tiles a MaterialVariant from a corner
+  of each face, so boxes of any size show whole tiles. Place parts 3, 6 and 9 studs long (3 × 3
+  across) side by side on the block grid, all in the same variant (e.g. Material Slate,
+  MaterialVariant `IV_stone`). If the tile lines on the 6-stud part fall in the middle of its
+  blocks, tiles are centred: set `OddBoxes = true`. Every box of a textured cube is then an odd
+  number of blocks along each axis at full detail (leaves are left out), for 14-18% more parts
+  near the player (up to 49% on flat plains) and no measurable meshing time. Far levels never use
+  it.
+- **Grass sides** (`Config.Textures.SideImages`). Look at a grass block from the side: the green
+  fringe of `"grass side"` must be along the top. If the variant's sides come out turned, set
+  `SideImages = true`: the four sides are then drawn as upright images over the top's variant
+  (four more instances per part).
+- **Averages.** Measuring needs "Enable Mesh / Image APIs" (Game Settings > Security, or the
+  Creator Dashboard) and images the place's owner owns; otherwise the output names the textures
+  it could not measure and why. Paste the printed averages, so players never need it.
+- **Far Materials**, if you use it: a far MeshPart should show one tile per block, sides upright,
+  tinted by the block colours; if not, adjust `Config.Render.FarMeshes.UvStuds`.
+
+### What is still code
+
+These are rules rather than data, so adding one is code (Luau in `src/`), with the pack's entries
+naming what the code made.
+
+**A fluid.** Add its record to `src/shared/Fluids/FluidList.luau` (a fluid's id is its place in
+the list, sent as a u8, so at most 255; saves keep fluids by name, so a new one may go anywhere),
+its flow rules to `RULES` in `src/server/Behaviours/Fluid.luau` (slope distance, drop off, infinite
+sources, whether what it washes away burns), and its blocks and bucket to a pack: the blocks with
+`define.fluid("<Name>", { color, material, ... }, tickDelay)` (its source, seven flows and the
+falling block: the record's colour and light), the full bucket in the pack's items. The registry,
+the flow rules and the packs check each other when the game loads. Its record decides the rest:
+`color` (pipes, tanks, gauges, JEI), `light`, `physics` / `drag` / `push` / `swim` (players and
+dropped items), `damage` / `burnSeconds` / `extinguishes` (lava's hurt and burning),
+`furnaceFuel` (its bucket's burn time), `fogColor` / `fogStart` / `fogEnd` (the view from inside
+it), its bucket sounds, and `effects`, what touching it gives: `{ effect = "Slowness", seconds = 1,
+amplifier = 1, when = "in" }` (refreshed every tick while in it), `when = "head"` (the eyes in it),
+`when = "left"` (given on leaving it) and `after = 3` (only after 3 s in it without a break).
+Effects with `washOff` come off in a fluid that `extinguishes` (water).
+
+**A machine kind.** A machine is a block with `machine = { kind = "name" }` and `energy = {
+capacity = J, input = J/t?, output = J/t? }` on its entry (output only: a generator; input only: a
+machine that uses energy; both: a battery). Its kind is a module in `src/shared/Machines/Kinds/`,
 required from `Machines/init.luau`:
 
     return Core.define("generator", {
@@ -3634,33 +4464,30 @@ required from `Machines/init.luau`:
 
 The server ticks it 20 times a second, joins it to cables and touching machines, keeps its energy
 in its item and replicates it; the client draws its panel (slots, gauges, energy bar) and WAILA
-lines. Tests bind test-only kinds to spare blocks with `Machines.bind`.
-The Heat Generator (`src/shared/Machines/Kinds/Generator.luau`) is the complete version of this
-example; the Electric Furnace (`Kinds/Smelter.luau`) is a machine that uses energy, with a
-progress arrow, sided slots for transporters, a `rates` override and a `state` field: a code
-saying why it is idle ("No power") that Machines records carry to WAILA.
+lines. A block naming a kind no module defines fails the load, naming the pack. Tests bind
+test-only kinds to spare blocks with `Machines.bind`. The Heat Generator (`Kinds/Generator.luau`)
+is the complete version of this example; the Electric Furnace (`Kinds/Smelter.luau`) is a machine
+that uses energy, with a progress arrow, sided slots for transporters, a `rates` override and a
+`state` field: a code saying why it is idle ("No power") that Machines records carry to WAILA.
 The Solar Panel (`Kinds/Solar.luau`) reads the server's day time and whether its cell sees the sky
 from its tick context (`ctx.dayTime`, `ctx.sky(x, y, z)`: cached, never generating terrain), and
 `Machines/Upgrades` gives any kind Mekanism's upgrade slots (`Upgrades.slots(x, y)`) and maths
-(`ticks`, `energyPerTick`, `capacity`, `production`, `setCapacity`).
-Batteries (`Kinds/Battery.luau`) are storage: the same `input` and `output`, no slots and no tick;
-EnergyNet does the rest. A kind with fluid tanks gives `tanks = { { name = "oil", capacity = mB,
-fluids = { Fluids.OIL }, role = "input" | "output", gauge = { x, y } } }`: the amounts live in its
-data after its fields, and pipes, buckets, the ejector, the panel's gauges, WAILA and its item
-follow from the role (`insertFluid` / `extractFluid`, `pourBucket` / `fillBucket`, `gauges`,
-`tankContents`, `save` / `restore`); its tick uses `tankInsert` / `tankExtract`, and `info` gives
-JEI its numbers. The Oil Refinery (`Kinds/Refinery.luau`) and the Combustion Generator
-(`Kinds/Combustion.luau`) are the examples. A kind's `lines(view)` adds lines under its status
-line (`panel.lines = { x, y }`), and a shaped recipe's `keep` (a key character used once) makes its
-result take that ingredient's item data, as a battery's tier upgrade keeps its charge (a shapeless
-recipe's `keep` names an ingredient listed once; a result that wears takes its wear too, as the
-mint cure keeps a canteen's sips).
+(`ticks`, `energyPerTick`, `capacity`, `production`, `setCapacity`). Batteries
+(`Kinds/Battery.luau`) are storage: the same `input` and `output`, no slots and no tick; EnergyNet
+does the rest. A kind with fluid tanks gives `tanks = { { name = "oil", capacity = mB, fluids = {
+Fluids.OIL }, role = "input" | "output", gauge = { x, y } } }`: the amounts live in its data after
+its fields, and pipes, buckets, the ejector, the panel's gauges, WAILA and its item follow from the
+role (`insertFluid` / `extractFluid`, `pourBucket` / `fillBucket`, `gauges`, `tankContents`, `save`
+/ `restore`); its tick uses `tankInsert` / `tankExtract`, and `info` gives JEI its numbers. The Oil
+Refinery (`Kinds/Refinery.luau`) and the Combustion Generator (`Kinds/Combustion.luau`) are the
+examples. A kind's `lines(view)` adds lines under its status line (`panel.lines = { x, y }`), and
+a kind keeping a `heat` field warms or cools a room by it (the seasons' heaters and coolers).
 
-**Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
-numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make
-a new stack instead of changing one: `Items.withData(stack, { energy = 5000 })`; read it back with
-`Items.dataNumber(stack.data, "energy")`. A key whose number is a content id (an item, a block or
-a fluid: a gun's `ammo`, a tank's `fluid`) is listed in `Items/ItemData` (`ID_KEYS`, or
+**Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`),
+values numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so
+make a new stack instead of changing one: `Items.withData(stack, { energy = 5000 })`; read it back
+with `Items.dataNumber(stack.data, "energy")`. A key whose number is a content id (an item, a block
+or a fluid: a gun's `ammo`, a tank's `fluid`) is listed in `Items/ItemData` (`ID_KEYS`, or
 `ItemData.addIdKey`) so saves keep it by name, and it holds that kind of id in every item: a
 machine kind's tank, or a kept field without the same `types`, named like one is an error. A data
 key gets a tooltip line with a describer:
@@ -3679,54 +4506,59 @@ serverNet.addBlockData({
 })
 ```
 
-**A light or a shaped block.** `light = 0..15` gives a block one PointLight; `shape = { { size,
-offset, rotation?, color?, material?, glow? } }` (pixels from the cell's centre) draws it from
-boxes, and `bounds` is the box players aim at. `support = "Down"` (or "Up", "North"...) makes it
-need a sturdy block there, and with `behaviour = "Attached"` it pops off and drops when that block
-goes; `brokenByFluid = true` lets flowing water wash it away. `item = "Torch"` with `placeable =
-false` makes it a variant placed by and dropping another item (the name must be a block item:
-checked at load); without `placeable = false` it is an item of its own and drops itself.
-`obstructs = true` keeps a block that is not `solid` (a lantern) from being placed inside a
-player and lets falling sand land on it; `sturdy = false` keeps torches and lanterns off a solid
-cube (leaves, chests, cactus).
+**A block behaviour.** Create a module in `src/server/Behaviours/` (see `Grass.luau`) with
+`onTick(world, ticker, x, y, z, block)` (scheduled after a neighbour changes, `tickDelay` ticks
+later; `onNeighborChanged` to schedule it otherwise) and, for random ticks, `onRandomTick(world,
+ticker, x, y, z, block, random)`; add its name to Content/Schema's `BEHAVIOURS` (the packs are
+checked against that list, and the server checks the list against its modules as it loads); and set
+`behaviour = "YourModule"` on the block. A plant that spreads by itself keeps Plant's `onTick` and
+adds `onRandomTick` (`Behaviours/Herb`).
 
-**A plant.** Add it through Content/Define's `plant()` helper with `plant = { soil = "dirt" }` (or
-`"deadbush"`, `"mushroom"`: the soil set it stands on, `Blocks.mayPlaceOn`); the helper fills in
-the rest (not solid, instant, grass sounds, `support = "Down"`, `brokenByFluid`, `behaviour =
-"Plant"`, `scatter`). A tall plant is two entries: the lower half with `plant = { soil = "dirt",
-top = "MyPlantTop" }`, the upper with `plant = { bottom = "MyPlant" }`, which the helper makes the
-lower half's variant (no item, no drops, not placeable); give both halves full block `bounds`, as
-DoublePlantBlock has. `tinted = true` colours its boxes by the soil's `foliageColor`;
-`shearDrops = true` (or an item name, with `shearCount`) is what Shears harvest. Keep the shape
-to 4 boxes inside the outline whichever way it turns: tests/spec/Plants checks it. Give it a
-`Sprite` in the texture pack (each half of a tall plant its own) and, once filled, it is drawn as
-two crossed images instead of its boxes. From your own
-server scripts place a tall plant with `EditRules.setPlaced(world, x, y, z, block)`:
-`world:setBlock` sets only the half you give it, and a half alone pops on the next tick. A plant
-planted by an item that is not itself (seeds, berries, the herbs' leaves and roots) is
-`placeable = false` on its entry and named by that item's `places` (Minecraft's
-ItemNameBlockItem): the item places it, is its drop and is what pick block takes, and keeps its
-own model (the Survival pack's Mint and MintLeaves). A plant that spreads by itself gets a
-behaviour of its own that keeps Plant's `onTick` and adds `onRandomTick` (`Behaviours/Herb`).
-Generation grows it from a biome's `foliage` lists (`plants`, `flowers`, or `herbs` for rare
-patches of their own; a pack's `biomes`, or an override of one: A biome, below).
-
-**An item.** Items that are not blocks (armor, tools, materials) are a pack's `items` (the
-Minecraft pack's `items/tools.luau`, `items/materials.luau`...). They are drawn from boxes measured
-in pixels (1/16 block), so icons, dropped items and hands show them without any assets.
-
-**A recipe.** A pack's `recipes` list them by item name, like Minecraft's data files (the
-Minecraft pack's `recipes/` folder, a file a feature; a function-form module gets the helpers as
-`define.shaped`, `define.shapeless` and `define.smelting`):
+**A heat source that depends on its state.** A block that warms only while lit or working
+registers a check from a server script (lit furnaces and working generators are registered this
+way in `Players/ToughAsNails`):
 
 ```lua
-define.shaped({ "##", "##" }, { ["#"] = "Marble" }, "MarbleBricks", 4) -- anywhere in the grid
-define.shapeless({ "Marble", "Coal" }, "DarkMarble")
-define.smelting("Marble", "SmoothMarble")                               -- furnace
+local Climate = require(game.ServerScriptService.IceVoxel.Players.Climate)
+Climate.addHeatSource("Brazier", function(x, y, z, block)
+	return isLit(x, y, z)
+end)
+Climate.addColdSource("PowderSnow")
 ```
 
-**A zombie kind (or any mob).** Append a kind to `src/shared/Entities/MobList.luau` (ids are list
-positions, sent as a u8: at the end); everything else follows from its record. Zombie kinds are
+A source counts within `ProximityRadius` blocks of the player's feet (a cube), checked once a
+second, and warms 3 steps (5 when one is within 2 blocks, and then cold sources don't cool) or
+cools 3, however many there are. A name no block has yet is skipped with a warning, so a block can
+be named before it exists.
+
+**Explosions.** `IceVoxel.explode(x, y, z, power, fire?)` (below) blasts anywhere;
+`Tnt.prime(world, x, y, z)` (`Behaviours/Tnt`) lights an explosive, and `Nuke.detonate(world, x, y,
+z)` (`World/Nuke`) sets off a crater. What a blast does to a block it reaches goes through
+`Explosions.setPrimer` (`Behaviours/Tnt` sets it: explosives are lit with a short fuse, lit ones
+stay). From a server script, `Fire.ignite(world, x, y, z)` (`Behaviours/Fire`) lights a fire
+anywhere, as `world:setBlock(x, y, z, Blocks.id.Fire)` does (it goes out the next tick where
+nothing holds it: `Shared/Fire.canSurvive`).
+
+**A tree or another small feature.** Write a builder in `Generation/Structures/` (see
+`Trees.luau`), register it in `Structures.registry` with the blocks it may grow on, and name it in
+a biome's `features` or a sapling's `tree` (a pack's biome, or an override of one). Builders write
+in world coordinates; chunk clipping, cross-chunk consistency and LOD are handled for you.
+
+**A world type.** Register it in `src/shared/Generation/WorldTypes.luau` (or from your own module
+before the world is created) with an id, a name, a description and `create(seed, options)`
+returning a generator built only from the seed and the options (every client and worker builds it
+too). A flat or laid-out world is a few lines with `Generation/LayeredGenerator`: a stack of
+layers (`LayeredGenerator.stack({ { block = Blocks.id.Stone, count = 60 }, ... })`), one
+everywhere or per column, blocks laid over it and an optional structure placer; it answers
+everything the server, the streamer, the far terrain and the map ask, at every level. Declare
+its options in `settings` (toggles, choices, texts) for the Create World screen, and the hints
+`mobs = false`, `ticks = false` or `gameMode` when it needs them. To try one without the menu,
+set `Config.World.Type` and `Config.World.Options` with `Config.MainMenu.Enabled = false`. A new
+superflat preset is a line in `Superflat.PRESETS`.
+
+**A mob, or a zombie kind.** Add a kind to `src/shared/Entities/MobList.luau` (a kind's id is its
+place in the list, sent as a u8; saves keep mob kinds by name, so a new one may go anywhere);
+everything else follows from its record, its drops included. Zombie kinds are
 data: an archetype is one `zombie({ ... })` call, the helper filling in what every zombie shares
 (`hostile`, the apocalypse's rules, `follow` 24, `infect` 0.04, `bleed` 0.15, the zombie's
 voice), the record its numbers, its R15 rig and its looks:
@@ -3785,295 +4617,67 @@ Mobs.playerHit:Connect(function(player: Player, kind: string, damage: number, fr
 end)
 ```
 
-**Food and medicine.** An item's `food`, on its entry, is what using it does (Minecraft 1.20.5's
-food component; `src/shared/Items/Foods.luau` reads every pack's): `food = { heal = 4, nutrition =
-8, saturation = 0.8 }` (Minecraft's FoodProperties: food points and the saturation modifier, what it
-does with hunger on; `heal` in half hearts with it off, and medicine's, which has no nutrition) with
-an optional `effect = { kind = "hunger", chance = 0.3, ticks = 600 }` (Minecraft's Hunger; Tough As
-Nails' Thirst with hunger off, or always with kind "thirst"), and for the apocalypse's tins and
-medicine `useTicks` (the hold, 32 by default), `cures` (effect names: Bleeding, Infection),
-`effects` (`{ effect = "Regeneration", ticks = 200, amplifier = 0 }`, given when it finishes;
-amplifier 0 by default), `aftermath` (an effect after curing an infection that had reached a
-`stage`: Antibiotics' Weakness), `setback` (the Herbal Poultice), `sound` and `burp`:
+**A player setting.** Append an entry to `ENTRIES` in `src/shared/PlayerSettings.luau` with the
+next id (ids are saved and sent: never reuse or renumber one; plain settings stay below 128, where
+the key bindings' ids start), its kind, range, step, default,
+page and the effect key that applies it; put it on its page in `src/client/Settings/Pages.luau`;
+and register what the effect does in the client script (`Settings.register("myEffect", fn)`, `fn`
+taking the values table). Costly effects also go in `PlayerSettings.EXPENSIVE` (they wait until a
+slider stops), and `EFFECT_ORDER` says in which order effects run. Settings marked `preset` take
+their value from each of the `PRESETS`. Worker actors keep their own Config, so anything a worker
+needs travels in its jobs.
+
+**A key binding.** Append an action to `ACTIONS` in `src/shared/KeyBindings.luau` (its place is
+its settings id from 128: never reorder) with Minecraft's name, a category, its default (an
+`Enum.KeyCode` name or `MouseButton1`..`3`) and a context ("game": in the world; "screen": in the
+inventory screens; "universal": both, which decides what conflicts). It shows on the Key Binds
+list by itself. Where the input is handled, ask `Keybinds.matches("myAction", input)` (a press or
+release) or `Keybinds.isDown("myAction")` (held), never a KeyCode; `Keybinds.name("myAction")`
+gives the key's name for hints.
+
+**A chat command.** Make a `TextChatCommand` on the server with its alias (`PrimaryAlias =
+"/mycommand"`, a `SecondaryAlias` too if you like), connect `Triggered` (it gets the sender's
+TextSource and the text) and parent it to TextChatService, as `Players/TimeCommands` does; answer
+with `Notice` messages (`Protocol.encodeNotice`), which show in the chat in white. The chat (client
+`Ui/Chat`) completes its name with `Tab`, suggests it while it is typed and sends it to
+TextChatService, which runs it and shows it to no one; a command no TextChatCommand has is never
+sent. Who may use it is yours to check on the server: the operators' permission is
+`Players/Operators.permitted(player)` (operators, or everyone with Allow Commands; `isOperator`
+for operators only). Mark the command with that rule (`instance:SetAttribute(WorldSettings
+.COMMAND_ATTRIBUTE, WorldSettings.COMMAND_PERMITTED)`, or `COMMAND_OPERATOR`) and the chat offers
+it only to players who may use it. Pure parsing (see `Players/TimeCommand`) keeps it testable.
+With the legacy chat, read `Player.Chatted` instead (the game's chat needs TextChatService and
+leaves Roblox's in place there).
+
+**State saved with the world.** Something of your own that a saved world should keep (a clock, a
+round's scores) registers a section with the server's `World/WorldSave`:
+```lua
+WorldSave.registerSection("arena", function()
+	return { round = Arena.round(), scores = Arena.scores() } -- small, JSON-able
+end, function(value)
+	Arena.restore(value) -- once, when a saved world with it starts
+end)
+```
+`encode` runs at every save (keep it cheap: it runs in the save's frame) and goes in the world's
+record; `decode` runs once when a saved world starts, after every part of the server started and
+before anyone is in, or at once if you register later. A section the world never saved gets no
+call. Names are the world's: "time" (the day clock) and "weather" (`World/WeatherServer`'s
+`encode` / `decode`) are taken. Block state belongs to the blocks instead: it is in the edits, or in `Players/Containers`
+like a chest's (see `Save/WorldSnapshot` for what else regions carry).
+
+**Server-side world access** from your own scripts:
 
 ```lua
--- The Apocalypse pack's items/supplies
-{
-	name = "Bandage",
-	-- ... its model, lore and icon
-	food = { heal = 2, useTicks = 40, cures = { "Bleeding" }, sound = "item.bandage.apply", burp = false },
-},
+local IceVoxel = require(game.ServerScriptService.IceVoxel.Api)
+local Blocks = require(game.ReplicatedStorage.IceVoxel.Blocks)
+
+local world = IceVoxel.waitForWorld()
+world:setBlock(10, 80, 10, Blocks.id.Stone) -- replicated to every client, triggers block updates
+print(world:getBlock(10, 80, 10))
+IceVoxel.explode(10.5, 82, 10.5, 4) -- a TNT-sized blast on the next tick (true as a fifth argument sets fire)
 ```
 
-Any item with a `food` is used with its hold and no other change; `Foods.canUse` decides when (a
-food bar under 20 for food, hurt for medicine and for food with hunger off, or something it cures,
-or any time for a food with effects). The game refuses to load a food naming an unknown effect, one
-with nutrition out of 1..20 and one that does nothing, naming the pack and the entry. The Minecraft
-pack's `items/mobs` (the meat, Minecraft's numbers) and the Apocalypse pack's `items/supplies` (the
-tins and medicine) list theirs in their headers.
-
-**Ages and knowledge.** A new result belongs to the Stone Age (open to everyone) unless its entry
-names a later one, `age = "iron"` (Core's `ages` are the Ages: stone, iron, industrial, electric,
-atomic). An Age is `{ id, name, level, milestones, reward, color }`; milestones are discoveries,
-`{ category = "craft", key = "Furnace", text = ... }` or `{ category = "biome", count = 6, text =
-... }`; ids are what saves keep, so Ages may be renamed or inserted. Knowledge numbers are tables in
-`Progression/Knowledge.luau` (DISCOVERY, MOBS) and the entries' own `knowledge = { mine = n }` /
-`{ smelt = n }`. From server code, `Players/Progression`: `award(player, points, reason)`,
-`discover(player, category, key)` (true when it was new), `killed(player, mobName)`, `state(player)`,
-`allows(player, item)`.
-
-**A skill.** The skill tree's nodes are the packs' `skills` (Core's knowledge and tools branches,
-the Minecraft pack's Demolition and Fission, the Survival pack's survival branch), each entry all
-there is to its node; `lune run tests/content list skills` shows every node's place, Age and
-row. A node that needs Demolition and gates a recipe, in a pack's `skills.luau`:
-
-```lua
-{
-	id = "blasting",                 -- what saves keep and entries name
-	name = "Blasting",
-	description = "Unlocks the Blast Charge",
-	row = 2,                         -- its row on the screen (1..6); its column is its Age
-	icon = "Tnt",                    -- the item drawn in its frame
-	age = "electric",                -- unlocked once the player reaches this Age
-	cost = 4,                        -- skill points (the game's nodes: their Age's number)
-	requires = { "demolition" },     -- nodes unlocked first, of its Age or an earlier one
-	perk = { kind = "none" },        -- no effect of its own: it is there for its recipes
-}
-```
-
-and on the item its recipe makes, `skill = "blasting"` (besides `age = "electric"`): that recipe
-stays locked until the node is unlocked. A `perk` is one of the kinds the game codes, with that
-kind's numbers (`Content/Schema`'s SKILL_PERKS; `Progression/Skills` says what each does):
-`{ kind = "knowledge", sources = { "ore" }, bonus = 0.5 }`, `{ kind = "mining", tiers = {
-"Iron" }, factor = 1.1 }`, `{ kind = "wear", chance = 0.15 }`, `{ kind = "thirst", factor = 0.9 }`,
-`{ kind = "insulation", steps = 1 }`, `{ kind = "boiling", speed = 2 }`. A pack retunes another's
-node with an override, `{ id = "forager", override = true, cost = 2 }`. The game checks it as it
-loads, naming the pack, the file and the node: the Age, the icon, the `requires` (known, of no later
-Age, never in a loop), the row (one node to an Age's row, on the screen's six) and the perk's kind
-and numbers, and every entry's `skill`. A node's place among every pack's nodes is what the protocol
-sends (a u8), so nodes may go anywhere; saves keep ids.
-
-**Block textures (the texture pack).** Every block texture is in one hand-edited module,
-`src/shared/TexturePack.luau`, like a Minecraft resource pack. Its `Textures` table lists the
-images by name, lower case with spaces (`"grass top"`, `"log"`, `"packed mud"`...):
-
-```lua
-["log"] = {
-	Color = "rbxassetid://120423551204729",  -- the colour map ("" = not made yet)
-	Normal = "rbxassetid://109169967309613", -- optional, like Roughness and Metalness
-	Material = "Wood",                       -- the Roblox material the MaterialVariant is based on
-	Tint = true,                             -- take the voxel colour (below)
-	-- Average = { r, g, b },                -- the image's average colour (below)
-},
-```
-
-`Material` is what the textured parts take, so pick the material closest to the picture (a block
-keeps its own sounds); Neon, Glass, ForceField, Air and Water cannot take a MaterialVariant.
-`Align = false` marks a noisy texture (leaves) that never needs odd boxes (see the tiling check
-below). The pack's `Blocks` table says which texture each block shows on each face: `All`,
-`Sides`, `Top` and `Bottom` (a face given nothing falls back to All, then Sides), `Front` for glow
-lichen, ladders, rails and vines (the face looking away from what it hangs on or lies on) and for
-doors (both sides of the panel: `OakDoor` covers a door's lower halves, `OakDoorTop` its upper
-halves; the same picture serves both hinges, and the windows are wherever the picture is
-see-through; give the item a whole-door picture in `Icons` too, as its model draws the boxes) and
-`Sprite` for plants, rope, cobwebs and hanging roots (two crossed images). An entry also covers
-the block's cave twin and the other blocks of its variant group (the six glow lichen sides, the
-four ladders and vines, both rails, a tall plant's top half unless it has its own). A filled
-texture changes some shapes: a ladder or rail with a `Front` image draws only that flat picture
-(its rails and rungs, or iron bars, give way to it, as Minecraft draws a single textured quad),
-and rope with a `Sprite` becomes two crossed images instead of its thin post; shaped blocks given
-cube faces draw their boxes in that texture (the oak fence post takes `planks`, the moss carpet
-`moss block`). Fluids, air, torches and
-lanterns, pipes, cables and tanks, machines and the solar panel, structure blocks and jigsaws and
-the Glow Block (Neon) are never textured. One tile covers one block face (`StudsPerTile = 3`): a
-512 × 512 image per 3-stud face. Blocks checks the pack when it loads and fails naming the mistake
-(an unknown block, face or texture, a material that cannot take a variant, an entry for a cave
-twin), so a typo fails loudly in Studio and in the tests.
-
-To fill in a texture:
-
-1. Upload the image and paste its **Image** id into the entry: `Color = "rbxassetid://<number>"`
-   (and `Normal`, `Roughness`, `Metalness`). A Decal id is a different number, which Studio
-   converts when you paste it into a property but nothing converts here (see the checks below).
-2. Run `lune run tests/build_textures`. It writes `src/textures/Materials.model.json` (a
-   MaterialVariant `IV_<name>` per filled texture, spaces as `_`, e.g. `IV_grass_top`, in
-   `MaterialService.IceVoxel`) and `src/textures/Images.model.json` (a Texture of the same name per
-   filled texture, in `ReplicatedStorage.IceVoxelTextures`: the game clones these for face images,
-   sprites and item cubes, since a clone keeps the normal, roughness and metalness maps that game
-   scripts cannot set). Game scripts cannot make MaterialVariants either, which is why they are
-   made here. Never edit the two files, nor the variants in the Material Manager: the next run and
-   sync overwrite them.
-3. Rojo syncs them into Studio while `rojo serve` runs (`rojo build` puts them in the place file).
-   Save or publish the place so they ship.
-
-`lune run tests/build_textures --list` prints the blank textures with the blocks waiting on each,
-then the filled ones still without an Average; `--check` exits 1 when the files are out of date
-(the TexturePack spec in the test suite fails then too). Every run ends with a note while filled
-textures have no Average. The generator writes nothing for a pack with errors (ids that are not
-`"rbxassetid://<number>"`, unknown fields, bad averages, and whatever Blocks refuses) and warns
-about a normal map that repeats its colour map and about filled textures no block uses.
-
-**Blank entries.** `Color = ""` means "not made yet": 82 textures wait for you (`--list` names
-them; the apocalypse's rusty metal and bunker hatch among them, and its items' `Icons` are blank
-too). While a
-block's sides and top are blank it keeps its plain Roblox material and colour, as
-without textures. A part takes one MaterialVariant on all six faces, so once its sides' texture is
-filled in (or its top's, when the bottom has no other filled texture) its blank faces show that
-one: a log's ends show the bark until `"log top"` is filled, cut sandstone's blank sides show the
-sandstone top. A filled top that differs from the sides is drawn over the top face as an image.
-`ShowMissing = true` draws the missing texture (`"missing texture"`) in place of blank textures, so
-you can see in game what is left to make: on every face of a block whose sides are blank (unless
-its filled top stands in for them), on blank tops, and on blank plant sprites and glow lichen. A
-blank bottom, or blank sides under a filled top, show the block's texture as above unless they are
-drawn as images of their own: bottoms with `Config.Textures.BottomFaces`, sides with `SideImages`.
-
-**Tint** makes a texture take the voxel colour (the block's `color`):
-- `true` (the default): the colour of the block it is drawn on, so one light image serves every
-  wood: `"log"`, `"planks"` and `"leaves"` show oak, birch, spruce, acacia and jungle each in its
-  own colour, and dry grass shows the grass top in its own colour;
-- `false`: the image's own colours (ores, the grass side, glow lichen, flowers and mushrooms);
-- a block name: that block's colour wherever it is drawn (`"dirt"` is `Tint = "Dirt"`, so the dirt
-  under grass is dirt coloured, not grass coloured; `"asphalt"` is `Tint = "Asphalt"`, so a road
-  line's sides stay as dark as the road beside them).
-
-Several entries may share one image (the data sheets do it on purpose): cracked and mossy bricks
-are the bricks' picture and cracked and mossy concrete concrete's, each tinted with its own voxel
-colour (darker, greener), and the road lines' paint is asphalt's picture tinted white or yellow
-until a painted line is made. Keep a road line's top filled: a blank top shows the sides' texture,
-and the line would vanish into the asphalt.
-
-A tint can only **darken**: a part shows its texture times its Color, which Roblox stores in 8 bits
-and stops at white. So a texture shared by tinted blocks should be light, ideally greyscale, and at
-least as light as the lightest block using it (birch logs are far lighter than spruce ones). Images
-(face images, sprites, item cubes) are not clamped and can also brighten. Once a texture's Average
-is known, a block it would leave more than 4 (of 255) too dark draws it as tinted images over the
-variant up close (more instances) and in its plain colour far away, so the block still takes its
-colour; see-through blocks just draw it darker. One warning lists them, worst first:
-`[IceVoxel] textures darker than the blocks they tint (by how much, 0-255): ...`. A lighter image
-keeps the plain variant.
-
-**Average** (`{ r, g, b }`, 0-255) is the image's average colour (the mean in linear light, written
-as sRGB). With it the tint is exact (voxel colour / average per channel, in linear light, so the
-block averages exactly its voxel colour), and distant chunks take the colour each block really
-shows on screen. Without it the colour is simply multiplied in and distant chunks guess (the
-voxel colour). No texture has one yet. With `Config.Textures.MeasureAverages` the game measures
-every texture without one shortly after joining, in the background, and prints a block to the
-output (Studio's Output, or F9 in game):
-
-```
-[IceVoxel] Texture averages (paste into TexturePack.Textures[...].Average):
-	Average = { 121, 85, 58 }, -- ["dirt"]
-```
-
-Paste each line into the entry the comment names, so it is never measured again (until then the
-world is restyled once per session when the averages come in). Textures it could not measure are
-named, with the reason.
-
-**How textures are drawn** (`Rendering/TextureLooks` decides every look; with the Textures
-setting off every block is drawn in its plain material and colour, plants as boxes):
-- **Near** (full detail): a cube's parts take one MaterialVariant on every face, in its texture's
-  Material and tint: the sides' texture, else the top's when it stands alone. A different filled
-  top (grass, sandstone, cactus) is a Texture image over the top face; `BottomFaces` adds the
-  bottom as an image, `SideImages` draws the sides as images over the top's variant. Chests,
-  crafting tables and furnaces keep their decorated faces over their texture.
-- **Far** (LOD levels the far meshes never merge: level 1 and the widest nodes; and the merged
-  ones while Far Materials is on or far meshes are off): one variant per part and no images: the
-  top's texture, which dominates from afar, else the sides'.
-- **Plain** (the merged levels 2-5, about 200 blocks away and further, while far meshes run and
-  Far Materials is off): SmoothPlastic in the colour the block's top averages to on screen,
-  texture and tint included. The far meshes take the same colours, so distant terrain keeps the
-  colours of the textured terrain near you (once the averages are known).
-- **Plants**, rope, cobwebs and hanging roots with a filled `Sprite` (`Config.Textures.Sprites`):
-  two crossed see-through planes along the cell's diagonals carrying the image on both sides,
-  offset and turned like the boxes; grass and ferns take their soil's foliage colour. Blank
-  sprites keep their boxes.
-- **Glow lichen, ladders, rails and vines** with their `Front` texture: the plate goes see-through
-  and shows the image on its face away from the wall (or up, for a rail), and only the plate is
-  drawn: a ladder's rails and rungs and a rail's iron bars give way to the picture (draw them into
-  the image); the lichen's glowing speck stays. A blank Front keeps the boxes.
-- **Shaped blocks with cube faces** (the oak fence post's `planks`, the moss carpet's `moss
-  block`): their boxes take that texture's material and variant near you, without images.
-- **Items**: a textured block's item is a cube with one image per textured face, one tile per
-  face, in its tint (untextured faces keep the block's material and colour); a plant's item is its
-  sprite on an upright plane. Item icons build their models again a few per frame when looks change.
-- **The missing texture** (`IV_missing_texture`) is drawn for blank textures with ShowMissing, for
-  a texture whose id failed to load, and for one whose MaterialVariant is not in MaterialService
-  (the generator was not run, or Rojo is older than 7.7; the output names it and the fix).
-
-Looks drawn before the startup checks finish are provisional: when averages come in, an id
-fails, or the Textures or Far Materials setting changes, only the chunks whose look changed are
-rebuilt, off-screen in the background within the frame budget, and swapped in.
-
-**Rojo 7.7.1.** The generated files use properties Rojo 7.4 does not know (`ColorMapContent`,
-`TextureContent`...), so `rokit.toml` now pins Rojo 7.7.1. Once:
-1. `rokit install`;
-2. `rojo plugin install` (or update the plugin from the Creator Store): a 7.4 Studio plugin cannot
-   talk to a 7.7 server;
-3. delete any `IV_...` MaterialVariants you made by hand in MaterialService (the old way to add
-   textures): one with the same name and base material as a generated one leaves Roblox to use
-   either. Rojo manages only `MaterialService.IceVoxel`, so other variants are left alone.
-
-**Check once in Studio:**
-- **Image ids.** Every id must be an Image id. To check one, paste it into a Decal's Texture
-  property: if Studio turns it into another number, that number is the Image id. With
-  `Config.Textures.ValidateIds` the game loads every id once at startup and names each one that
-  fails (`[IceVoxel] texture "..." (rbxassetid://..., used by ...) failed to load ... Most likely
-  it is a Decal id`): a failed colour map draws the missing texture, a failed normal, roughness or
-  metalness map leaves the texture without it. Check the missing texture's own id, `925810526`,
-  first: it is an old, short id that may be a Decal id, and if it fails, ShowMissing and failed
-  textures show the plain block instead.
-- **Tiling** (`Config.Textures.OddBoxes`). A part most likely tiles a MaterialVariant from a corner
-  of each face, so boxes of any size show whole tiles. Place parts 3, 6 and 9 studs long (3 × 3
-  across) side by side on the block grid, all in the same variant (e.g. Material Slate,
-  MaterialVariant `IV_stone`). If the tile lines on the 6-stud part fall in the middle of its
-  blocks, tiles are centred: set `OddBoxes = true`. Every box of a textured cube is then an odd
-  number of blocks along each axis at full detail (leaves are left out), for 14-18% more parts
-  near the player (up to 49% on flat plains) and no measurable meshing time. Far levels never use
-  it.
-- **Grass sides** (`Config.Textures.SideImages`). Look at a grass block from the side: the green
-  fringe of `"grass side"` must be along the top. If the variant's sides come out turned, set
-  `SideImages = true`: the four sides are then drawn as upright images over the top's variant
-  (four more instances per part).
-- **Averages.** Measuring needs "Enable Mesh / Image APIs" (Game Settings > Security, or the
-  Creator Dashboard) and images the place's owner owns; otherwise the output names the textures
-  it could not measure and why. Paste the printed averages, so players never need it.
-- **Far Materials**, if you use it: a far MeshPart should show one tile per block, sides upright,
-  tinted by the block colours; if not, adjust `Config.Render.FarMeshes.UvStuds`.
-
-**The sheet's oddities**, as transcribed:
-- leaves: the normal map repeated the colour map's id, so leaves have no normal map;
-- packed mud ("darker dirt"): dirt's colour map, and its normal map repeated that id too, so it
-  uses dirt's normal map (`72051511434165`). It is tinted with PackedMud's colour, now
-  `{ 97, 68, 46 }`, darker than Dirt in every channel (it was lighter), so river beds and the
-  outpost's paths are darker than before, textures on or off;
-- calcite uses stone's normal map, as the sheet gives it;
-- the missing texture's size is unknown, and its id may be a Decal id (above);
-- dry grass shares grass's top, in its own colour, but its sides are a blank `"dry grass side"`
-  of their own (the grass side's green fringe would not suit it): until you fill it they keep
-  dry grass's plain material and colour;
-- the crafting table's bottom falls back to its sides (Minecraft's is planks: `Bottom =
-  "planks"`, seen only with BottomFaces), and smooth sandstone is the sandstone top on every face,
-  as in Minecraft.
-- the fourth sheet's rows are named loosely: "Concrete" is `"concrete"`; "crate" fills the supply
-  crate's `"supply crate side"` and `"supply crate top"`, and "cabinet" the medicine cabinet's
-  two, each pair with one picture; "moss" ("All things moss") is `"moss block"`, which the moss
-  block and the moss carpet share;
-- cracked asphalt uses andesite's maps (the sheet: "Yes uses andesite textures"), and asphalt
-  polished andesite's, as the sheet gives them; cracked and mossy bricks keep the bricks' maps,
-  tinted by their own colours ("maybe darker tint", "maybe greener tint");
-- not on the sheet, by decision: cracked and mossy concrete take concrete's maps and the two
-  road-line tops asphalt's, all tinted by their own colours (so the lines' white and yellow paint
-  shows; a blank top would show the asphalt sides' picture and the line would vanish);
-- the vine's normal map (`97312068579996`) is kept in the pack but never drawn: the vine is a
-  plate, whose picture is a Decal, and a Decal takes no normal map.
-
-**Spawn safety.** A block's `spawnUnsafe` says what a player must not do with it: `"on"` (stand on
-it: leaves), `"in"` (stand in it: a fluid, every level of it, or a cobweb) or `"near"` (stand on,
-in or beside it: cactus, lava, fire); `Config.Players.SpawnHeadroom` and `SpawnSearchRadius` are
-the headroom and search radius. Spawns and map teleports search outward for the closest spot that
-passes, and never put players below the natural surface (caves), nor at the bottom of a pit or a
-ravine (the floor at the natural surface must be solid); the generator's spawn also skips columns
-a surface cave opens.
+### Publishing
 
 **The map.** The minimap and world map draw terrain with EditableImage. That API works in Studio
 right away, but **published games** need the experience owner to be 13+ and ID verified and to turn
@@ -4126,469 +4730,6 @@ and shown with `CreateMeshPartAsync`. So any number of regions can be merged.
   is reclaimed over long sessions (a bake that hits the engine's storage limit switches meshes
   off; meshes in the world are capped at `MaxLiveTriangles`), and how far the engine then
   actually draws. Check F3 and the MicroProfiler in a published test place before relying on it.
-
-**A player setting.** Append an entry to `ENTRIES` in `src/shared/PlayerSettings.luau` with the
-next id (ids are saved and sent: never reuse or renumber one; plain settings stay below 128, where
-the key bindings' ids start), its kind, range, step, default,
-page and the effect key that applies it; put it on its page in `src/client/Settings/Pages.luau`;
-and register what the effect does in the client script (`Settings.register("myEffect", fn)`, `fn`
-taking the values table). Costly effects also go in `PlayerSettings.EXPENSIVE` (they wait until a
-slider stops), and `EFFECT_ORDER` says in which order effects run. Settings marked `preset` take
-their value from each of the `PRESETS`. Worker actors keep their own Config, so anything a worker
-needs travels in its jobs.
-
-**A key binding.** Append an action to `ACTIONS` in `src/shared/KeyBindings.luau` (its place is
-its settings id from 128: never reorder) with Minecraft's name, a category, its default (an
-`Enum.KeyCode` name or `MouseButton1`..`3`) and a context ("game": in the world; "screen": in the
-inventory screens; "universal": both, which decides what conflicts). It shows on the Key Binds
-list by itself. Where the input is handled, ask `Keybinds.matches("myAction", input)` (a press or
-release) or `Keybinds.isDown("myAction")` (held), never a KeyCode; `Keybinds.name("myAction")`
-gives the key's name for hints.
-
-**A chat command.** Make a `TextChatCommand` on the server with its alias (`PrimaryAlias =
-"/mycommand"`, a `SecondaryAlias` too if you like), connect `Triggered` (it gets the sender's
-TextSource and the text) and parent it to TextChatService, as `Players/TimeCommands` does; answer
-with `Notice` messages (`Protocol.encodeNotice`), which show in the chat in white. The chat (client
-`Ui/Chat`) completes its name with `Tab`, suggests it while it is typed and sends it to
-TextChatService, which runs it and shows it to no one; a command no TextChatCommand has is never
-sent. Who may use it is yours to check on the server: the operators' permission is
-`Players/Operators.permitted(player)` (operators, or everyone with Allow Commands; `isOperator`
-for operators only). Mark the command with that rule (`instance:SetAttribute(WorldSettings
-.COMMAND_ATTRIBUTE, WorldSettings.COMMAND_PERMITTED)`, or `COMMAND_OPERATOR`) and the chat offers
-it only to players who may use it. Pure parsing (see `Players/TimeCommand`) keeps it testable.
-With the legacy chat, read `Player.Chatted` instead (the game's chat needs TextChatService and
-leaves Roblox's in place there).
-
-**State saved with the world.** Something of your own that a saved world should keep (a clock, a
-round's scores) registers a section with the server's `World/WorldSave`:
-```lua
-WorldSave.registerSection("arena", function()
-	return { round = Arena.round(), scores = Arena.scores() } -- small, JSON-able
-end, function(value)
-	Arena.restore(value) -- once, when a saved world with it starts
-end)
-```
-`encode` runs at every save (keep it cheap: it runs in the save's frame) and goes in the world's
-record; `decode` runs once when a saved world starts, after every part of the server started and
-before anyone is in, or at once if you register later. A section the world never saved gets no
-call. Names are the world's: "time" (the day clock) and "weather" (`World/WeatherServer`'s
-`encode` / `decode`) are taken. Block state belongs to the blocks instead: it is in the edits, or in `Players/Containers`
-like a chest's (see `Save/WorldSnapshot` for what else regions carry).
-
-**A biome.** Add an entry to a pack's `biomes` (the vanilla ones are the Minecraft pack's
-`src/shared/Content/Packs/Minecraft/biomes.luau`; Content/Schema's BIOME_FIELDS says what each
-field does) with the altitude bands it appears in (Lowland, Forest, Highland, Meadow, Alpine,
-Slopes, Peaks: the generator's, in `Shared/Biomes`), a climate position (temperature, humidity),
-surface blocks (optionally patches of another block and a block for steep slopes), its trees
-(`features`, Generation/Structures' builders) and vegetation. The terrain shape comes from
-`Relief`, so a biome only decides what grows and what the ground is made of. Its ground plants
-are `foliage`: an average `density`, the share of the ground in patches (`cover`), weighted
-`plants` and optional `flowers` and `herbs`; keep within the parts budget
-tests/spec/FoliageGeneration checks. `tags` are Minecraft's biome tags `/locate` finds it by:
-
-```lua
--- src/shared/Content/Packs/Wetlands/biomes.luau (with a pack manifest, order 800)
-return {
-	{
-		name = "Marsh",
-		bands = { "Lowland" },
-		temperature = 0.4,
-		humidity = 0.9,
-		vegetation = 0.2,
-		top = "Grass",
-		filler = "Dirt",
-		fillerDepth = 2,
-		underwater = "Dirt",
-		beach = "Dirt",
-		features = { { "OakTree", 1 } },
-		foliage = {
-			density = 0.1,
-			plants = { { "ShortGrass", 3 }, { "Fern", 1 } },
-			flowers = { chance = 0.01, species = { { "BlueOrchid", 1 } } },
-		},
-		tags = { "is_forest" },
-	},
-}
-```
-
-Every block and plant it names, its bands and its trees are checked as the game loads, naming
-the pack and the biome. A biome's index is its place among every pack's biomes, which the
-generator's per-biome arrays and climate picks follow: a pack loading after the Minecraft pack
-(order over 100) adds its biomes after the vanilla ones, which keep their places. A pack may also
-patch another's biome by name with `override = true`: its fields replace the biome's, a table of
-fields (`weather`, `patches`, `foliage` and its `flowers` and `herbs`) is patched field by field,
-its `tags` add to the biome's, and any other list is replaced whole, so to add a flower give the
-species list with it:
-
-```lua
-{
-	name = "Plains",
-	override = true,
-	foliage = {
-		flowers = {
-			species = {
-				{ "Dandelion", 3 }, { "Poppy", 2 }, { "AzureBluet", 2 }, { "OxeyeDaisy", 2 },
-				{ "Cornflower", 2 }, { "RedTulip", 1 }, { "OrangeTulip", 1 }, { "WhiteTulip", 1 },
-				{ "PinkTulip", 1 }, { "Sunflower", 0.4 },
-				{ "BlueOrchid", 1 }, -- the new one
-			},
-		},
-	},
-}
-```
-
-(the plains keep their grass, their flowers' chance and the Survival pack's mint, which is
-itself such an override: `Content/Packs/Survival/biomes.luau`).
-
-**A world type.** Register it in `src/shared/Generation/WorldTypes.luau` (or from your own module
-before the world is created) with an id, a name, a description and `create(seed, options)`
-returning a generator built only from the seed and the options (every client and worker builds it
-too). A flat or laid-out world is a few lines with `Generation/LayeredGenerator`: a stack of
-layers (`LayeredGenerator.stack({ { block = Blocks.id.Stone, count = 60 }, ... })`), one
-everywhere or per column, blocks laid over it and an optional structure placer; it answers
-everything the server, the streamer, the far terrain and the map ask, at every level. Declare
-its options in `settings` (toggles, choices, texts) for the Create World screen, and the hints
-`mobs = false`, `ticks = false` or `gameMode` when it needs them. To try one without the menu,
-set `Config.World.Type` and `Config.World.Options` with `Config.MainMenu.Enabled = false`. A new
-superflat preset is a line in
-`Superflat.PRESETS`.
-
-**A tree or another small feature.** Write a builder in `Generation/Structures/` (see
-`Trees.luau`), register it in `Structures.registry` with the blocks it may grow on, and list it in
-a biome's `features` (a pack's biome, or an override of one). Builders write in world coordinates; chunk clipping, cross-chunk consistency
-and LOD are handled for you.
-
-**A structure**, from building it to seeing it generate. Structure blocks and jigsaws need
-creative and permission: an operator (the game's owner, Studio, `Gameplay.Admins`, `/op`) or a
-user id in `Config.Structures.Permission`.
-
-1. **Build it** in creative. Air you leave inside the region is saved as air and clears whatever
-   is there when the structure is placed; put a Structure Void (creative picker) where the world
-   should stay as it is instead (around a ruin, under a path). For a piece of a bigger structure,
-   put Jigsaw blocks where other pieces attach (step 5).
-2. **Mark the region.** Place a Structure Block (it starts in Save mode) and right click it. Give
-   it a name with slashes, Minecraft style: `mything/houses/hut` (the part before the last slash
-   is its pool, step 5). Set the relative position (from the block to the region's lowest
-   north-west corner, default one block above it) and the size; the outline shows the box. Or put
-   two Corner structure blocks named alike at opposite corners just outside the region and press
-   DETECT.
-3. **Save** (SAVE). The chat says `Saved structure 'mything/houses/hut' (N blocks, M characters)`
-   and the data, `IVS1:...`, appears in the box under the size: click it and press `Ctrl` + `C`
-   (`Cmd` + `C`). Long data comes in parts of 16,000 characters ("part 2 of 9"): copy every part in
-   order and put them together.
-4. **Keep it**, any of these ways:
-   - **Send it to Claude** in a chat message (words around it are fine): it goes into a content
-     pack's `templates`.
-   - **Put it in a pack yourself**: a pack's `templates` maps each template's name to its text
-     (`src/shared/Content/Packs/<Pack>/templates.luau`, or a file of its `templates/` folder, one
-     per structure: the outpost's is `Minecraft/templates/outpost.luau`):
-     ```lua
-     return {
-         ["mything/houses/hut"] = "IVS1:...",
-         ["mything/houses/shed"] = "IVS1:...",
-     }
-     ```
-     The key must be the name inside the text (the load says so when it isn't), and every block
-     its palette names must be one some pack makes, by today's name: a template naming one no pack
-     makes stops the load, naming the pack, the file and the template (saves and pastes are
-     kinder: there an unknown block becomes air). In Studio, the text is also in a StringValue named
-     after the structure in `ServerStorage.IceVoxelSavedStructures` during the playtest: copy its
-     Value. `lune run tests/structure encode <table.luau> --module --out <file>` writes such a
-     module from an edited table (step 8).
-   - **Keep it in the place**: during a Studio playtest every save is a StringValue named after the
-     structure in `ServerStorage.IceVoxelSavedStructures`. Copy it, stop the playtest and paste it
-     into a Folder named `IceVoxelStructures` in ReplicatedStorage (make it; Folders inside are
-     fine). Saves only last for the session: nothing is written anywhere else. A template there
-     replaces a pack's of the same name.
-
-   To place it again by hand, use a Structure Block in Load mode with its name (this session's
-   saves and the library), or paste the data into Paste Data: a LOAD whose size differs from the
-   structure's only sets the size (the outline shows where it goes), the next places it, turned
-   and mirrored as set. The library is read once when the server and each client start (every
-   machine must generate the same structures), so new templates are seen from the next start or
-   playtest on.
-5. **Join pieces with jigsaws** for a structure like a Minecraft village:
-   - Name the pieces by pool: `mything/centres/plaza`, `mything/houses/a`, `mything/houses/b`,
-     `mything/streets/straight`... A pool needs no code: `mything/houses` is every template named
-     `mything/houses/...` (weight 1, rigid), and a pool named like one template is that template.
-   - On a piece, a jigsaw whose front faces out of it marks where a child attaches: its **target
-     pool** is where the child comes from, its **target name** the name of the child's jigsaw that
-     attaches here, and **Turns into** what it becomes once generated (air, or `Planks` to close a
-     wall). On the child, a jigsaw facing out with that **name**. Two jigsaws attach when they face
-     each other, the names match and, for jigsaws facing up or down, their tops match unless the
-     source's joint is rollable. Each child must fit beside what is already there.
-   - Try it at once: a jigsaw's Generate builds from its pool right there, Levels deep, and this
-     session's saves are already in their pools (Keep Jigsaws leaves the jigsaws to look at).
-   - A pack's `pools` adds weights (1..150), empty elements (a plot left empty), a fallback pool
-     (tried after the elements, and alone at the last level: end caps) and terrain matching
-     pieces, which follow the ground column by column (paths); `Content/Schema` lists the fields:
-     ```lua
-     return {
-         ["mything/streets"] = {
-             projection = "terrain_matching",
-             fallback = "mything/street_ends",
-             elements = {
-                 { template = "mything/streets/straight", weight = 4 },
-                 { template = "mything/streets/crossing" },
-                 { empty = true, weight = 2 },
-             },
-         },
-     }
-     ```
-     In the place, the attribute `TerrainMatching = true` on a StringValue makes its templates
-     terrain matching in the pools made from their names.
-6. **Make it generate.** In a pack, add an entry to its `structures` (`Content/Schema` lists the
-   fields: `name`, `startPool`, `size` (jigsaw depth 0..7), `maxDistance`, `biomes`, `spacing` /
-   `separation`, `salt`, `startHeight`, `projectToHeightmap`, `onLand`, `foundation`):
-   ```lua
-   return {
-       {
-           name = "mything",
-           startPool = "mything/centres",
-           size = 4,
-           biomes = { "Plains", "Forest" },
-           spacing = 40,
-           separation = 10,
-       },
-   }
-   ```
-   `biomes` names the packs' biomes exactly (`lune run tests/content list biomes`), at least one;
-   leave it out for every biome. An unknown biome, a number out of its range, a pool with no
-   templates or a block a template names that no pack makes stops the load, naming the pack and
-   the entry. In the place, set the attribute `Generate = true` on the StringValue whose
-   (first) template is the start, and optionally `Biomes` (`"plains, forest"`: biome names;
-   case, spaces, underscores and `minecraft:` are ignored), `Spacing` and `Separation` (one start
-   per Spacing × Spacing chunks, at least Separation apart; default 34 / 8, Minecraft's villages),
-   `Size`, `Foundation`, `OnLand`, `StartHeight` and `MaxDistance`. The place's problems (an
-   unknown pool, biome or block, a bad attribute) are warned in the output as `[Structures] ...`
-   and skipped; nothing there errors.
-7. **See it.** Structures generate in terrain nobody has edited, wherever a start lands: while
-   testing, a small spacing (`Spacing = 4`: one start per 64 × 64 blocks) finds one quickly. From a
-   server script, every generated structure with a piece in a rectangle:
-   ```lua
-   local IceVoxel = require(game.ServerScriptService.IceVoxel.Api)
-   local world = IceVoxel.waitForWorld()
-   for _, s in world.generator.structures(-1000, -1000, 1000, 1000) do
-       print(s.name, s.x, s.z) -- the start position (blocks)
-   end
-   ```
-8. **Look inside the data** without the game:
-   `lune run tests/structure decode <file | IVS1:... | ->` prints every structure in a file (a
-   pasted chat message, a library module) or the text given: name, size, palette, every y layer as
-   ASCII, jigsaws, data markers, containers. `--lua hut.luau` writes an editable table ("." air,
-   " " keep), and `lune run tests/structure encode hut.luau --module` turns it back into a pack's
-   templates module. `lune run tests/content list templates` (or `pools`, `structures`) lists the
-   packs' ones, and `lune run tests/content show mything/houses` a pool's elements (or the
-   templates its name gathers) and what starts from it.
-
-The example outpost is a complete jigsaw structure to copy, the Minecraft pack's (it came with the
-structure blocks): its pieces are built in code by `tests/build_structures.luau` into
-`Minecraft/templates/outpost.luau` (`lune run tests/build_structures`; `--check` tells whether
-that file is up to date, `--print` shows every piece), its pools are `Minecraft/pools.luau` and
-its entry `Minecraft/structures.luau`.
-
-**A structure's pool, changed by another pack.** A later pack overrides a pool by name, as blocks
-are: `override = true` patches the pool's fields, and its `elements` replace the earlier list
-whole (every override's list field does, `tags` aside, which add: a block's `shape`, a
-structure's `biomes`; Minecraft's data packs replace a template_pool the same way), so to add a piece it lists the pool's own
-elements and the new one. A pack giving the outpost a well among its houses:
-
-```lua
--- MyPack/templates.luau
-return { ["mypack/well"] = "IVS1:..." }
-
--- MyPack/pools.luau
-return {
-    ["outpost/houses"] = {
-        override = true,
-        elements = {
-            { template = "outpost/houses/hut", weight = 3 },
-            { template = "outpost/houses/storehouse", weight = 2 },
-            { template = "outpost/houses/forge", weight = 2 },
-            { template = "outpost/houses/woodpile", weight = 1 },
-            { template = "mypack/well", weight = 2 },
-            { empty = true, weight = 2 },
-        },
-    },
-}
-
--- MyPack/structures.luau: the outpost in deserts too, and more often
-return {
-    {
-        name = "outpost",
-        override = true,
-        biomes = { "Plains", "Savanna", "Meadow", "Forest", "Desert" },
-        spacing = 40,
-    },
-}
-```
-
-The well needs a jigsaw named `outpost:house` facing out of its door side, as the houses have
-(`lune run tests/structure decode src/shared/Content/Packs/Minecraft/templates/outpost.luau`
-shows theirs). A pool no pack has an entry for (`outpost/centres`, the templates under that name)
-takes a new piece by its name alone: a template named `outpost/centres/castle` is in it.
-
-**A block behaviour.** Create a module in `src/server/Behaviours/` (see `Grass.luau`) with
-`onTick(world, ticker, x, y, z, block)` (scheduled after a neighbour changes, `tickDelay` ticks
-later) and/or `onRandomTick(world, ticker, x, y, z, block, random)` (random ticks) and set
-`behaviour = "YourModule"` on the block.
-
-**A flammable block.** Give its entry `flammable = { ignite = 5, burn = 20 }` (Minecraft's
-FireBlock odds: wooden blocks 5 / 20, wool 30 / 60, plants 60 / 100); fire then clings to it,
-spreads next to it, burns it away and lava sets it alight. From a server script, `Fire.ignite(world,
-x, y, z)` (`ServerScriptService.IceVoxel.Behaviours.Fire`) lights a fire anywhere, and
-`world:setBlock(x, y, z, Blocks.id.Fire)` does the same (it goes out the next tick where nothing holds
-it: `Shared/Fire.canSurvive`).
-
-**Server-side world access** from your own scripts:
-
-```lua
-local IceVoxel = require(game.ServerScriptService.IceVoxel.Api)
-local Blocks = require(game.ReplicatedStorage.IceVoxel.Blocks)
-
-local world = IceVoxel.waitForWorld()
-world:setBlock(10, 80, 10, Blocks.id.Stone) -- replicated to every client, triggers block updates
-print(world:getBlock(10, 80, 10))
-IceVoxel.explode(10.5, 82, 10.5, 4) -- a TNT-sized blast on the next tick (true as a fifth argument sets fire)
-```
-
-**A heat or cold source (Tough As Nails).** Name a block or fluid in
-`Config.ToughAsNails.HeatingBlocks` / `CoolingBlocks`, or, for one that warms only in some state,
-register it from a server script with a check (lit furnaces and working generators are done this
-way in `Players/ToughAsNails`):
-
-```lua
-local Climate = require(game.ServerScriptService.IceVoxel.Players.Climate)
-Climate.addHeatSource("Brazier", function(x, y, z, block)
-	return isLit(x, y, z)
-end)
-Climate.addColdSource("PowderSnow")
-```
-
-A source counts within `ProximityRadius` blocks of the player's feet (a cube), checked once a
-second, and warms 3 steps (5 when one is within 2 blocks, and then cold sources don't cool) or
-cools 3, however many there are. A name no block has yet is skipped with a warning, so a block
-can go into `HeatingBlocks` before it exists (the Campfire's entry says `heats = true` instead).
-
-**Drinks and containers (Tough As Nails).** An item's `drink`, on its entry, is what drinking it
-gives (`Shared/ToughAsNails/Drinks` reads every pack's): `thirst` points and the `hydration`
-modifier, dirty water's `chance` of TAN's Thirst effect for `effectTicks`, `warmth` / `chill`
-ticks, `effects` (by name, as a food's), `mana`, the `empty` container it leaves (an item name;
-none: it is used up) and `sips` for a canteen (its `durability` is its sips). Numbers left out are
-0. The entries tie the containers together: an empty container's `fills` (the dirty water it
-becomes at a water source) and dirty water's `purified` (its drink's: its purified twin). A new
-container is three entries and its recipes, as the bowls are:
-
-```lua
--- The Survival pack's items/drinks
-{ name = "Bowl", --[[ ... ]] fills = "DirtyWaterBowl" },
-{ name = "DirtyWaterBowl", --[[ ... ]] drink = { thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300, empty = "Bowl", purified = "PurifiedWaterBowl" } },
-{ name = "PurifiedWaterBowl", --[[ ... ]] drink = { thirst = 7, hydration = 0.45, empty = "Bowl" } },
--- The Survival pack's recipes: the furnace and mint
-define.smelting("DirtyWaterBowl", "PurifiedWaterBowl")
-define.shapeless({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl")
-```
-
-A drink of its own (the teas, a juice) is only an entry's `drink` with the container it leaves
-(Mint Tea's is `{ thirst = 7, hydration = 0.6, chill = 2400, empty = "Bowl" }`); `warmth` /
-`chill` ticks give TAN's Internal Warmth / Internal Chill, which move the temperature target 5
-steps towards neutral without pushing it past neutral. Status effects or mana make a drink a
-potion, drunk any time (the Apocalypse pack's Soda, the Terraria pack's mana potions). Drinks
-with the same numbers are one drink, so bottled water is purified water (the tooltip's "Water"
-pill too). Every dirty water with a `purified` twin also boils clean on a Campfire
-(`ToughAsNails/Boiling`) and shows in JEI's Campfire tab, with nothing more to add.
-
-**Insulating armor (Tough As Nails).** An armor piece's `tan = { warmth = n, cooling = n,
-freezeImmune = true }` on its entry: `warmth` steps pull a cold target up towards 0, `cooling`
-steps pull a hot one down, never past it; `freezeImmune` stops hypothermia (leather has it). A
-full set at 2 a piece keeps a tundra (-10) neutral (-2); straw (warmth 1) and leaf (cooling 1)
-sets are made the same way, by Content/Define's `armorSet` in the Survival pack's
-`items/gear.luau` (a material: name, colour, material, points, toughness and `tan`).
-
-**A status effect.** Add an entry to a pack's `effects`: the Minecraft pack's
-`src/shared/Content/Packs/Minecraft/effects.luau` for a vanilla one, or `effects.luau` in a pack
-of your own (ids are given at load in pack order, sent as a u8: 255 effects at most). It has its
-name, `/effect` id (lower_snake), colour, category and HUD glyph (`icon`, one of
-`src/shared/Effects/Looks.luau`' ICONS, each a 9 × 9 glyph in `client/Ui/EffectIcons`; a new look
-is a glyph there and its name in Looks), and what it does as data: `speed` / `mining` / `jump` /
-`melee` / `resistance` per level (the movement, mining, combat and hurt paths read them through
-`Shared/Effects`), `interval` with `heal` or `damage` (ticked on the server), `fireImmune`,
-`burnFactor`, `burnBonus`, `ignites`, `washOff`, `noSprint`, `drainsFood`, or a client `view` (one
-of Looks' VIEWS); `Content/Schema`'s EFFECT_FIELDS say what each does, and a field it has not, an
-icon or view the client has not, fails the load naming the pack. It then works with `/effect`,
-potions, the HUD and F3, and code finds it by name (`Effects.id.Luck`):
-
-```lua
--- src/shared/Content/Packs/MyPack/effects.luau
-return {
-	{ name = "Luck", command = "luck", color = { 51, 153, 0 }, category = "beneficial", icon = "star" },
-	-- Another pack's effect, patched (its id kept): Speed in another colour.
-	{ name = "Speed", override = true, color = { 10, 20, 30 } },
-}
-```
-
-Server code gives and reads effects through `Players/Effects`: `Effects.give(player, "Speed",
-600, 1)` (ticks, amplifier; `Effects.INFINITE` for good), `giveAll`, `remove`, `clear`, `has`,
-`amplifier`, `levels`; combat changes a hit's half hearts with Strength and Weakness
-(`Effects.meleeDamage(player, base)`; the mobs' MobWorld.attack takes the player's `levels`), and
-any hurt goes through `Effects.incomingDamage(player, amount)` (Resistance) before `TakeDamage`
-(Players/Characters does for lava, fire, blasts, falls, walls, mobs' hits and the effects' own
-hurts). A player's mining speed is `Mining.playerFactor(levels, progress, tool)`: the effects'
-times the Progression perks', on the client and the server alike. A mob could keep an `EffectRules` state of its own: `EffectRules.give`
-/ `tick` (the hurt and healing per tick) / `levels`, and `Shared/Effects`' modifiers on those
-levels. An effect kept elsewhere (Tough As Nails' four) is `external = true` and registered with
-`Effects.addExternal(id, { get, give, clear })`, so it is listed with the rest.
-
-**A potion.** Add an entry to a pack's `potions` (the Minecraft pack's
-`src/shared/Content/Packs/Minecraft/potions.luau`, or `potions.luau` in your own pack). Content
-brews it as the packs load: its items (`PotionOfLuck`, `StrongPotionOfLuck` "Potion of Luck II"
-with `strong`, `LongPotionOfLuck` with `long`; stacking to 1, the bottle in its effect's colour,
-after the pack's own items), their recipes (a Purified Water Bottle with the ingredient, an item
-or "#tag"; the potion with Glow Dust for II or a coal for long), each item's lore line, icon and
-Age from the entry, and each item's `drink` (the effect given when the 32 tick drink finishes,
-the Glass Bottle back, and the tooltip's "When drunk:" line), with nothing else to add, and
-nothing in the Minecraft pack:
-
-```lua
--- src/shared/Content/Packs/MyPack/potions.luau
-return {
-	{
-		name = "Luck",
-		ingredient = "Emerald",
-		effect = "Luck",
-		seconds = 300,
-		long = 600,
-		lore = {
-			base = "Brewed from an emerald. Feel lucky.",
-			long = "Brewed longer with coal. Feel lucky for longer.",
-		},
-		age = { base = "iron", long = "industrial" },
-	},
-}
-```
-
-Leave `seconds` out for an instant effect (`strong = true` for its II; it has no long one); its
-effect, ingredient and variants are checked as it loads (`Content/Schema`'s POTION_FIELDS), and
-`{ name = "Swiftness", override = true, seconds = 240 }` patches another pack's potion, items and
-drinks included (`tests/fixtures/content/brewing` is this example, end to end).
-
-**A fluid's effects.** A fluid's `effects` in FluidList lists what touching it gives: `{ effect =
-"Slowness", seconds = 1, amplifier = 1, when = "in" }` (refreshed every tick while in it), `when =
-"head"` (the eyes in it), `when = "left"` (given on leaving it) and `after = 3` (only after 3 s in
-it without a break). Effects with `washOff` come off in a fluid that `extinguishes` (water).
-
-**Blast resistance.** A block's `blastResistance` is Minecraft's explosion resistance; leave it
-out and it is the block's hardness (unbreakable blocks 3,600,000). Minecraft's values that differ
-from the hardness are on those entries (the stone family 6, obsidian 1200...). A fluid other
-than fuel resists 100, so blasts in it break nothing. What else sets fuel off is
-`World/FuelBlast.isHot` (fire and lava).
-
-**Explosive blocks.** What a blast does to a block it reaches goes through
-`Explosions.setPrimer` (`Behaviours/Tnt` sets it: TNT and Nukes are lit with a short fuse, lit ones
-stay). A new explosive's entry names its lit block (`lit`), whose entry gives its fuse in ticks
-(`fuse`, with `behaviour = "Tnt"`), and says what it does when its fuse runs out in `detonate`;
-`Tnt.prime(world, x, y, z)` lights one from a server
-script, and `Nuke.detonate(world, x, y, z)` (`World/Nuke`) sets off a crater anywhere.
 
 ## Development
 
