@@ -5,8 +5,9 @@
 	share. Pure, so all of them use the same rules.
 
 	Every setting is one number (toggles 0 / 1, choices an index), kept by `key` in a Values table
-	and sent and saved by `id`: ids are append-only bytes like BlockList's (saved settings and the
-	wire use them), so a removed setting leaves its id unused. An entry says:
+	and sent and saved by `id`: ids are append-only bytes (saved settings and the wire use them,
+	unlike content's ids, which saves keep by name), so a removed setting leaves its id unused. An
+	entry says:
 
 	  kind      "slider" (min..max by step), "toggle" (0 / 1), "choice" (min..max, labelled) or
 	            "key" (a key binding: Shared/KeyBindings' code of a key or mouse button, 0 "Not

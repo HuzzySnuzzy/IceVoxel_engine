@@ -1128,7 +1128,8 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	                unbreakable and creative only blocks (bedrock, structure blocks), none at all
 	                for air and cave air; fluids 100 (their hardness), so an explosion in water
 	                breaks nothing, but fuel 0 (it is the explosive). Minecraft's values that
-	                differ from the hardness are in BLAST_RESISTANCE at the end of the list.
+	                differ from the hardness are on those entries (the stone family 6, obsidian
+	                1200).
 	  drops         Name of the item a survival player gets for breaking it (default: the block
 	                itself), or false for nothing (e.g. glass, leaves).
 	  dropCount     How many of `drops` (default 1).
@@ -1210,9 +1211,10 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	  flammable     { ignite, burn }: Minecraft's FireBlock odds (FireBlock.setFlammable). `ignite`:
 	                how readily fire spreads into air next to it (0..100; > 0 also means fire
 	                clings to it and lava sets it alight); `burn`: how readily a fire next to it
-	                destroys it (0..100). Set by the fire bootstrap at the end of this list
-	                (Minecraft's FireBlock.bootStrap: planks 5 / 20, logs 5 / 5, leaves 30 / 60,
-	                plants 60 / 100...) or on the block itself. See server Behaviours/Fire.
+	                destroys it (0..100). Each entry gives its own (Minecraft's
+	                FireBlock.bootStrap: planks 5 / 20, logs 5 / 5, leaves 30 / 60, plants
+	                60 / 100...; Content/Define's flower helpers give flowers theirs). See server
+	                Behaviours/Fire.
 
 	Climbing, hanging and lying along (ladders, rope, vines, rails, cobwebs):
 	  climbable     Players and mobs climb it from inside its cell (Minecraft's #climbable tag:
@@ -1234,9 +1236,9 @@ Schema.LOOT_TABLE = LOOT_TABLE
 	The zombie apocalypse (server Mobs/, Apocalypse/; Shared/Blocks/Toggles):
 	  zombieBreak   Ticks one ordinary zombie (MobList `breakPower` 1) hitting it needs to break it
 	                (Minecraft's BreakDoorGoal takes 240 for a door); nil: zombies never break it
-	                (ores, metal, obsidian, containers, machines, the bunker hatch...). Most blocks
-	                get it by name from ZOMBIE_BREAK at the end of the list, before the last cave
-	                twins (which copy it); doors and fences set it themselves. Blocks.zombieBreak.
+	                (ores, metal, obsidian, containers, machines, the bunker hatch...). Each entry
+	                gives its own (Content/Define's `door` gives doors 240 unless told otherwise),
+	                and a cave twin keeps its twin's. Blocks.zombieBreak.
 	  toggle        { to = "<Name>", sound = "<event>"? }: using it (`menu` "Toggle", server
 	                Players/ToggleUse) swaps it for block `to` and plays `sound` (the bunker
 	                hatch opening and shutting); `to` must toggle back. Blocks.toggleOf.

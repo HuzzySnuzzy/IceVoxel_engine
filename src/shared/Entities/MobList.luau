@@ -2,8 +2,9 @@
 --[[
 	Mob kinds: Minecraft 1.20.1's farm animals and the zombie apocalypse's zombies, as simple
 	hitboxes moving about (server Mobs/MobWorld runs them, client Entities/MobRenderer draws them).
-	A kind's id is its position in this list (sent as a u8: append, never reorder; monsters are
-	never saved, so the three monsters this list once had gave their ids 6-8 to zombie kinds).
+	A kind's id is its position in this list, sent as a u8 (so at most 255 kinds), the same on every
+	server and client since all load this list; saves keep mob kinds by name (server
+	Save/SaveCodec's palettes), so a kind may go anywhere in it.
 
 	  Kind               box (w x h)  eye   health  speed  does
 	  Cow                0.9 x 1.4    1.3   10      0.2    wanders, panics when hurt (x2 speed)

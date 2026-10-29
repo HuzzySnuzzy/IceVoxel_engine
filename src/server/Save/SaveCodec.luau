@@ -22,12 +22,12 @@
 	            then for each of PALETTE_KINDS in order varint n + n texts, then the ids in data,
 	            below), before what uses them; the reader (`readPalette`) maps each index to
 	            today's id of its name (`idOf`; blocks and items through Blocks.find and
-	            Items.find, so a RENAMED line keeps a renamed one). A name this version doesn't
-	            know reads as nil: a block becomes air, an item is `lost`, a fluid or a mob is
-	            dropped, an effect skipped (each decoder says, and counts what it left out), never
-	            a refused record. An index the palette doesn't have is a damaged save (but see
-	            Ids in data). So content can be added, removed, renamed (with a RENAMED line) and
-	            reordered between versions.
+	            Items.find, so a renamed entry's `formerly` keeps its old name). A name this
+	            version doesn't know reads as nil: a block becomes air, an item is `lost`, a fluid
+	            or a mob is dropped, an effect skipped (each decoder says, and counts what it left
+	            out), never a refused record. An index the palette doesn't have is a damaged save
+	            (but see Ids in data). So content can be added, removed, renamed (the old name in
+	            its entry's `formerly`) and reordered between versions.
 	  Ids in    which numbers inside data are ids is code too (Items/ItemData's id keys, Shared/
 	  data      Machines `types` and tanks, Crafting/Smelting.ID_FIELDS), and another version may
 	            have more or fewer such keys and fields, so the record says which it wrote as
@@ -366,7 +366,8 @@ local function nameOf(kind: PaletteKind, id: number): string?
 	return if effect then effect.name else nil
 end
 
--- Today's id of the `kind` named `name` (nil: none). Blocks and items follow their RENAMED.
+-- Today's id of the `kind` named `name` (nil: none). Blocks and items follow their entries'
+-- `formerly` (Blocks.RENAMED, Items.RENAMED).
 local function findId(kind: PaletteKind, name: string): number?
 	if kind == "block" then
 		return Blocks.find(name)

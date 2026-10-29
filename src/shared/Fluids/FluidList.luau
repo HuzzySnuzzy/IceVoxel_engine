@@ -11,15 +11,15 @@
 	and items (Blocks, Items: each fluid's blocks, colour, light and bucket).
 
 	Fields (all required unless marked optional):
-	  name           The fluid's name and its BlockList group: `fluid("<name>", ...)` makes the
-	                 blocks <name> (the source, the "<name>" item), <name>Flow1..7 and
-	                 <name>Falling (Blocks.fluidId).
+	  name           The fluid's name and its blocks' group: a content pack's
+	                 `define.fluid("<name>", ...)` makes the blocks <name> (the source, the
+	                 "<name>" item), <name>Flow1..7 and <name>Falling (Blocks.fluidId).
 	  displayName    Shown in tooltips, WAILA and JEI (optional: default the name).
-	  bucket         ItemList name of its full bucket (1000 mB): what an empty Bucket becomes on
-	                 its source, and what pours one.
+	  bucket         Item name of its full bucket (1000 mB, a content pack's item): what an empty
+	                 Bucket becomes on its source, and what pours one.
 	  color          { r, g, b } 0-255: the blocks' colour (checked), and what pipes, tanks, gauges
 	                 and JEI's fluid stacks draw.
-	  light          Light the blocks give off, 0..15 (checked against BlockList).
+	  light          Light the blocks give off, 0..15 (checked against its blocks' entries).
 	  physics        Which branch of Minecraft's LivingEntity.travel moves an entity in it:
 	                 "water" (moveRelative 0.02, then `drag` sideways and 0.8 up and down) or
 	                 "lava" (moveRelative 0.02, then `drag` all ways while it is deeper than the

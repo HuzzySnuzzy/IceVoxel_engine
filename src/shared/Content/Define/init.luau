@@ -54,10 +54,11 @@
 	  layers(base, speeds)   a layered block's eight heights (snow layers)
 	  machine(spec)   a Mekanism style machine block (heaters, coolers) from its own fields
 	  OWN_FIELDS      a block's fields that are its item's: lore, faces, Age, skill, fuel, tags,
-	                  and what makes it an ore (`miner`, `knowledge`). `fluid` puts them on the
-	                  source, `door` on its item half, `fence` on the lone post, `layers` on layer
-	                  1; the generators' other blocks and cave twins carry none of them (each would
-	                  be an ore of its own), and every other field the entry gives.
+	                  former names (`formerly`), its point of interest type (`poi`) and what makes
+	                  it an ore (`miner`, `knowledge`). `fluid` puts them on the source, `door` on
+	                  its item half, `fence` on the lone post, `layers` on layer 1; the generators'
+	                  other blocks and cave twins carry none of them (each would be an ore of its
+	                  own), and every other field the entry gives.
 
 	Plants (Define/Plants: Minecraft's ground foliage)
 	  GROUND, STEM, LEAF, LEAF_LIGHT   the ground's height, flower stems' and leaves' greens
