@@ -22,7 +22,9 @@
 	    gives, in place of the usual drop when a player breaks it, unless Shears harvested its
 	    `shearDrops`, and when it drops by itself: decaying, blown up). So leaves give a sapling
 	    or sticks now and then, gravel Flint and grass Straw. Creative only blocks (structure
-	    blocks, structure voids, jigsaws; `isCreativeOnly`) never drop.
+	    blocks, structure voids, jigsaws; `isCreativeOnly`) never drop, and a block whose drop
+	    needs Silk Touch (its entry's `silkTouch`: packed and blue ice, its `tool` standing in for
+	    the enchantment the game has not) drops only to that tool, never by itself.
 
 	Ids come from the content packs' order (Shared/Content), the same on every machine, so they can
 	be sent over the network. `Items.list` is the creative inventory's order: blocks in id order,
@@ -476,11 +478,29 @@ function Items.canHarvest(block: number, tool: number?): boolean
 end
 
 --[[
-	What `block` drops when it breaks by itself (nil = nothing): a torch losing its wall, a lantern
-	its ceiling, a torch washed away. No tool is involved, so nothing is held back for want of one
-	(Minecraft only asks for the right tool when a player breaks the block).
+	The blocks whose drop needs Silk Touch (their entries' `silkTouch`, Content/Schema), which the
+	game has not: their `tool` stands in for it, so they drop only to a player mining them with it
+	(`drops`, `canHarvest`: they need a `toolLevel` too), never by themselves (`blockDrops`: a
+	blast takes Minecraft's packed ice and blue ice without a drop).
 ]]
-function Items.blockDrops(block: number): Stack?
+local silkTouch: { [number]: boolean } = {}
+do
+	local content = Content.default
+	for id = 0, Blocks.count - 1 do
+		local spec = content.blocks[id + 1]
+		if spec and spec.silkTouch then
+			local where = content.where("block", spec.name)
+			assert(
+				spec.tool and spec.toolLevel,
+				`Items: {where} has silkTouch, which needs its tool and toolLevel (the stand-in for Silk Touch)`
+			)
+			silkTouch[id] = true
+		end
+	end
+end
+
+-- What `block` drops, its `drops` (default its item) times its `dropCount`; nil: nothing.
+local function dropOf(block: number): Stack?
 	local def = if Blocks.isValid(block) then Blocks.get(block) else nil
 	if def == nil or def.drops == false or def.creativeOnly then
 		return nil
@@ -490,6 +510,19 @@ function Items.blockDrops(block: number): Stack?
 		return nil
 	end
 	return { item = item, count = def.dropCount }
+end
+
+--[[
+	What `block` drops when it breaks by itself (nil = nothing): a torch losing its wall, a lantern
+	its ceiling, a torch washed away, a blast. No tool is involved, so nothing is held back for want
+	of one (Minecraft only asks for the right tool when a player breaks the block), but a block
+	whose drop needs Silk Touch (`silkTouch` above) gives nothing.
+]]
+function Items.blockDrops(block: number): Stack?
+	if silkTouch[block] then
+		return nil
+	end
+	return dropOf(block)
 end
 
 --[[
@@ -524,13 +557,14 @@ end
 	What breaking `block` with `tool` (nil = bare hands) gives a survival player (nil = nothing):
 	nothing when the tool can't harvest it (`canHarvest`); with Shears, what the block's
 	`shearDrops` names, `shearCount` of it (Minecraft's loot tables' `match_tool shears`: tall grass
-	gives 2 short grass, leaves themselves); otherwise its `blockDrops`.
+	gives 2 short grass, leaves themselves); otherwise its drop (as `blockDrops`, and a block whose
+	drop needs Silk Touch gives it too: the tool that harvests it is the stand-in).
 ]]
 function Items.drops(block: number, tool: number?): Stack?
 	if not Blocks.isValid(block) or Blocks.isCreativeOnly(block) or not Items.canHarvest(block, tool) then
 		return nil
 	end
-	return shearStack(block, tool) or Items.blockDrops(block)
+	return shearStack(block, tool) or dropOf(block)
 end
 
 --[[

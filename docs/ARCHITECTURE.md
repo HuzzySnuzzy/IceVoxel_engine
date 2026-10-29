@@ -2595,7 +2595,7 @@ clicked rope, `GameModeRules.mayUseItemOn`, the use budget, the held stack) thro
 UseItem for exactly the clicks `Rope.wantsUse` names (Rope or an empty hand on a rope, not
 sneaking, in survival or creative), unpredicted and repeated while the button is held. A rope cut
 anywhere comes down a block a tick through `Behaviours/Attached` (`Blocks.canSurvive`'s chain
-rule), each rope dropping itself. `SpawnUnsafeBlocks` keeps spawns out of cobwebs.
+rule), each rope dropping itself. A cobweb's `spawnUnsafe` keeps spawns out of cobwebs.
 
 **Sounds of climbing** (`Audio/SoundRules.move`, `Audio/MovementSounds`; Entity.move). While the
 hull climbs off the ground (`Motion.climbing`), the vertical movement counts toward the step
@@ -5075,8 +5075,8 @@ item.bucket.fill_lava and empty_lava, water and fuel the plain ones). A Lava Buc
 ticks in a furnace and leaves the Bucket in the fuel slot (`Items.craftingRemainder`); oil and
 fuel are no furnace fuel.
 
-Nobody spawns in lava, oil or fuel or next to lava (`SpawnUnsafeBlocks`: `Body` names the four
-fluids, which covers their levels and twins; `Hazards` lava).
+Nobody spawns in lava, oil or fuel or next to lava (the fluids' `spawnUnsafe`, "in" and lava's
+"near", on every level and the cave twins; `Players/SafeSpot`).
 
 ## Explosions (`World/Explosion`, server `World/FuelBlast`, `World/Explosions`)
 
@@ -5408,14 +5408,15 @@ that both sides read makes three frozen tables: `ITEMS` (full item -> `{ drink, 
 from the entries as it loads: what it gives, the empty container drinking it leaves, `sips` for a
 canteen whose `durability` is its sips; alike drinks are one `Drink`, so the bottle's and the
 canteen's dirty water, and purified and bottled water, are the same, which the tooltip's "Water"
-pill goes by), and two of its own, `FILLS` (empty container -> the dirty water it becomes at a
-water source; a dirty `sips` item of its own container is topped up there while it has sips
-missing) and `PURIFIED_OF` (dirty -> purified; `purifiedOf`, `isDirty`). `HAND` (the empty hand's
-sip) is the one `Drink` no item gives. A new container is two entries' `drink`, a `FILLS` entry, a
-`PURIFIED_OF` entry and its recipes, as the wooden bowls are; a drink that is no water (the teas)
-is an entry's `drink` of its own with the container it leaves; load-time checks name the pack and
-the entry of an unknown effect or container, sips without durability and a drink that does
-nothing, and catch table entries that name no drink.
+pill goes by), `FILLS` (empty container -> the dirty water it becomes at a water source: the
+container entries' `fills`; a dirty `sips` item of its own container is topped up there while it
+has sips missing) and `PURIFIED_OF` (dirty -> purified: the drinks' `purified`; `purifiedOf`,
+`isDirty`). `HAND` (the empty hand's sip) is the one `Drink` no item gives. A new container is
+three entries (the container's `fills`, its dirty water's `drink` with `purified`, its purified
+water's) and its recipes, as the wooden bowls are; a drink that is no water (the teas) is an
+entry's `drink` of its own with the container it leaves; load-time checks name the pack and the
+entry of an unknown effect or container, sips without durability, a drink that does nothing and
+a `fills` or `purified` that names no drink (Content: no item).
 
 Items (the Survival pack's `items/drinks`): Glass Bottle (Minecraft's; three glass in a V make
 three), Dirty and Purified Water Bottle (stack 16), Canteen (TAN's leather canteen in iron: a nugget
@@ -5528,7 +5529,7 @@ ice and a frozen biome's still cool.
   hull has no 7 pixel step) but `obstructs`, strength 2 with an axe, dropping itself (Minecraft
   drops 2 charcoal without Silk Touch, which the game has no way to get, so it could never be
   moved). A heat source (`heats`); standing in it hurts (Players/Burning, above in Fluids);
-  spawns avoid it (SpawnUnsafeBlocks Body and Hazards); its flames and crackle are fire's
+  spawns avoid it (its `spawnUnsafe` "near"); its flames and crackle are fire's
   (Rendering);
 - **boiling** (`ToughAsNails/Boiling`, pure): a right click on a campfire with dirty water
   (`Drinks.isDirty`: anything in PURIFIED_OF, so later containers boil with no code) turns one
@@ -10012,14 +10013,15 @@ sends stay in one ordered stream.
 - `Transmitters/`: Mekanism pipes (see Mekanism pipes); `Players/ItemUse`: the Configurator and
   buckets (UseItem). A full bucket that replaces a plant (`UseRules.pour`) drops it, lava's too, as
   Minecraft's BucketItem.emptyContents destroys the block with drops.
-- `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
-  listed (`Floor`), the body's blocks are free and not listed (`Body`: water, lava, oil and fuel,
-  each name covering its levels and cave twin), nothing listed in `Hazards` (cactus, lava) touches
-  the body, and the feet are not below the natural surface (no cave spawns; in a pit's or a ravine's
-  column the floor at the natural surface is air, so none there either, and the generator's
-  `findSpawn` already skips them). The search checks the target column, then rings around it. In
-  chunks nobody edited the terrain is exactly what the generator makes, so open water is skipped
-  from the generator's height alone and columns are scanned from just above the tallest structure.
+- `Players/SafeSpot`: a spot is safe when the floor is solid and no block spawns stay off
+  (`spawnUnsafe` "on" or "near": leaves, cactus), the body's blocks are free and none spawns stay
+  out of ("in" or "near": water, lava, oil and fuel, every level and cave twin), nothing spawns
+  keep away from ("near": cactus, lava, fire, the campfire) touches the body, and the feet are
+  not below the natural surface (no cave spawns; in a pit's or a ravine's column the floor at the
+  natural surface is air, so none there either, and the generator's `findSpawn` already skips
+  them). The search checks the target column, then rings around it. In chunks nobody edited the
+  terrain is exactly what the generator makes, so open water is skipped from the generator's
+  height alone and columns are scanned from just above the tallest structure.
   Spawning re-checks the spawn spot on every respawn, since players may have built or poured water
   there; when no safe spot exists it waits 30 s before searching again. In a city's footprint
   (the generator's `cityAt` is 1) a column is scanned from no higher than one above the last full

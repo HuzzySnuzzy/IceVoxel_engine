@@ -19,9 +19,12 @@
 	    game has not: ice gives nothing, and packed ice drops itself with a pickaxe, the stand-in
 	    for Silk Touch (`toolLevel` 0: by hand it mines 3.3 times slower, 2.5 s where Minecraft's
 	    takes 0.75, and gives nothing; any pickaxe takes Minecraft's time), so it and what is made
-	    of it (blue ice, the Survival pack's Air Conditioner) can be had.
+	    of it (blue ice, the Survival pack's Air Conditioner) can be had. A blast takes it without
+	    a drop, as Minecraft's (`silkTouch`: only its tool gets it, Items.blockDrops).
 	  * Tough As Nails: ice, packed ice and snow chill a player near them (`cools`), lava warms
 	    (`heats`: every level, and CaveLava).
+	  * Spawns and teleports never land in water, nor in or beside lava (`spawnUnsafe`: every
+	    level, and CaveLava; server Players/SafeSpot).
 	  * knowledge: smelting cobblestone into stone gives Minecraft's furnace experience, 0.1.
 	  * blastResistance: Minecraft 1.20.1's where it differs from the hardness (stone 6, packed mud
 	    3, obsidian 1200; Properties.strength(f) gives both, so the rest keep their hardness).
@@ -178,6 +181,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			transparency = 0.45,
 			reflectance = 0.05,
 			lore = "A water source. Fill bottles and buckets from it.",
+			spawnUnsafe = "in",
 		}, 5)
 	)
 
@@ -192,6 +196,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			tool = "pickaxe",
 			-- (A pickaxe for Silk Touch: see the header.)
 			toolLevel = 0,
+			silkTouch = true,
 			texture = { All = "packed ice" },
 			lore = "Ice packed hard. Mine it with a pickaxe to keep it. Chills you when close.",
 			cools = true,
@@ -297,6 +302,7 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		lightColor = { 255, 140, 60 },
 		lore = "Molten rock. Burns anything that touches it.",
 		heats = true,
+		spawnUnsafe = "near",
 	}, 30)
 	define.append(list, lava)
 	table.insert(list, define.caveFluid(lava[1]))

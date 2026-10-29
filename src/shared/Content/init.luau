@@ -96,7 +96,9 @@
 	    elements give, pools' fallbacks and structures' start pools (each a pool, a template, or
 	    the templates named under it: Structures/Library's lookup), and a structure's biomes (by
 	    their exact names, at least one); the sound events entries name (a block's `sounds`,
-	    `workSound` and toggle's `sound`, an item's `equipSound` and food's `sound`);
+	    `workSound` and toggle's `sound`, an item's `equipSound` and food's `sound`); an
+	    explosive's `lit` block (one with a `fuse`), an empty container's `fills` and dirty
+	    water's `purified` (its drink's);
 	  * the skills: each node's Age and icon, its `requires` (known nodes, of its Age or an earlier
 	    one, never in a loop), one node to an Age's row, and every entry's `skill`.
 	  The registries check what only they know of an entry's value as they load, naming the pack
@@ -866,6 +868,15 @@ function Content.build(input: { PackData }): Content
 		elseif blockLoot then
 			needPools(here, blockLoot)
 		end
+		if spec.lit then
+			needName(here, "lit", spec.lit, true)
+			if blocks[blockAt[spec.lit]].fuse == nil then
+				fail(`{here}: lit names {spec.lit}, which has no fuse (the ticks it burns before its blast)`)
+			end
+		end
+		if spec.fuse and not (spec.fuse >= 1 and spec.fuse == math.floor(spec.fuse)) then
+			fail(`{here}: fuse must be whole ticks, 1 at least, not {spec.fuse}`)
+		end
 	end
 	for _, spec in items do
 		local here = whereOf("items", spec.name)
@@ -877,6 +888,12 @@ function Content.build(input: { PackData }): Content
 		end
 		if spec.food and spec.food.sound then
 			needSound(here, "food sound", spec.food.sound)
+		end
+		if spec.fills then
+			needName(here, "fills", spec.fills)
+		end
+		if spec.drink and spec.drink.purified then
+			needName(here, "drink purified", spec.drink.purified)
 		end
 	end
 	for _, entry in entries do

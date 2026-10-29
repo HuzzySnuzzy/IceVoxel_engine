@@ -4,11 +4,14 @@
 	shapes: lumps, ingots, nuggets, the armor pieces, the tools, bottles and buckets) and the item
 	sets that share them (an armor set, a tool set, a potion). Every entry made is an ItemSpec
 	(Content/Schema); a pack's own items carry the rest of their fields themselves. A set takes
-	what its pieces say of themselves (lore, icon, Age, fuel, equip sound) from its material or
-	tier, so each piece's entry carries them as a hand-written one would; a potion takes them as
-	`extra` fields.
+	what its pieces say of themselves from its material or tier: any item field it gives (lore,
+	icon, Age, skill, fuel, equip sound, `shielding`, `durability`, tags...) is on every piece, as
+	a hand-written entry would carry it, over the set's defaults (one to a stack); a potion takes
+	them as `extra` fields. What a set or a potion is given is checked first (Define/Fields: an
+	unknown field gets a "did you mean").
 ]]
 
+local Fields = require(script.Parent.Fields)
 local Schema = require(script.Parent.Parent.Schema)
 
 type ModelBox = Schema.ModelBox
@@ -112,14 +115,16 @@ local function knownPieces(map: { [string]: any }, pieces: { any }, what: string
 end
 
 --[[
-	An armor material (`armorSet`): Minecraft's armor points of the head / chest / legs / feet
-	pieces and toughness, and each piece's Tough As Nails insulation (`tan`, Schema's: leather
-	warms a step a piece and is freeze immune, Minecraft's freeze_immune_wearables). What every
-	piece says of itself, each optional (Schema's fields of those names): `equipSound`, the event
-	putting it on plays (the Minecraft pack's "item.armor.equip_<material>"; none: what
-	Sounds.armorEquip gives armor naming none), so a set names its sound once; `lore`, its tooltip line; `age`, the
-	Age opening its recipes; `icon`, every piece's icon ("" = not made yet); and `icons`, a piece's
-	own icon by its name (ARMOR_PIECES': Helmet, Chestplate, Leggings, Boots), over `icon`.
+	An armor material (`armorSet`): its name ("Iron": the pieces are "IronHelmet" ..), Minecraft's
+	armor points of the head / chest / legs / feet pieces and toughness, and each piece's Tough As
+	Nails insulation (`tan`, Schema's: leather warms a step a piece and is freeze immune,
+	Minecraft's freeze_immune_wearables). What every piece says of itself is any item field of
+	Schema's, each optional: `equipSound`, the event putting it on plays (the Minecraft pack's
+	"item.armor.equip_<material>"; none: what Sounds.armorEquip gives armor naming none), so a set
+	names its sound once; `lore`, its tooltip line; `age` and `skill`, what opens its recipes;
+	`shielding`, the share of radiation each piece keeps out; `durability`, `tags`, `icon` (every
+	piece's icon, "" = not made yet)...; and `icons`, a piece's own icon by its name (ARMOR_PIECES':
+	Helmet, Chestplate, Leggings, Boots), over `icon`. A piece's `armor` and `model` are made here.
 ]]
 export type ArmorMaterial = {
 	name: string,
@@ -133,27 +138,53 @@ export type ArmorMaterial = {
 	age: string?,
 	icon: string?,
 	icons: { [string]: string }?,
+	-- (Any item field; these are an armor set's likeliest.)
+	displayName: string?,
+	maxStack: number?,
+	durability: number?,
+	skill: string?,
+	knowledge: Schema.KnowledgeSpec?,
+	radiation: number?,
+	shielding: number?,
+	fuel: number?,
+	tags: { string }?,
 }
+-- (An armor set's own fields, and what its pieces make of them.)
+local ARMOR_OWN = table.freeze({
+	name = Schema.STRING,
+	points = Schema.listOf(Schema.NUMBER, 4),
+	toughness = Schema.NUMBER,
+	icons = Schema.mapOf(Schema.STRING),
+}) :: { [string]: Schema.Check }
+local ARMOR_MADE = table.freeze({
+	armor = "each piece's slot, its `points` and `toughness`",
+	model = "ARMOR_PIECES' shapes",
+})
 
--- A material's four pieces, head to feet ("<Name>Helmet" ..), in the armor shapes; they stack to 1.
+-- A material's four pieces, head to feet ("<Name>Helmet" ..), in the armor shapes; they stack to 1
+-- unless it says otherwise.
 function Items.armorSet(armor: ArmorMaterial): { ItemSpec }
+	Fields.check(`armorSet {armor.name}`, armor, {
+		kind = "items",
+		own = ARMOR_OWN,
+		needs = { "name", "color", "material", "points", "toughness" },
+		made = ARMOR_MADE,
+	})
 	local icons = armor.icons or {}
 	knownPieces(icons, Items.ARMOR_PIECES, `armorSet {armor.name}'s icons`)
 	local list: { ItemSpec } = {}
 	for i, piece in Items.ARMOR_PIECES do
-		table.insert(list, {
-			name = armor.name .. piece.name,
-			maxStack = 1,
-			armor = { slot = piece.slot, defense = armor.points[i], toughness = armor.toughness },
-			tan = armor.tan,
-			color = armor.color,
-			material = armor.material,
-			model = piece.model,
-			icon = icons[piece.name] or armor.icon,
-			lore = armor.lore,
-			age = armor.age,
-			equipSound = armor.equipSound,
-		})
+		local spec: any = { maxStack = 1 }
+		for field, value in armor :: any do
+			if not ARMOR_OWN[field] then
+				spec[field] = value
+			end
+		end
+		spec.name = armor.name .. piece.name
+		spec.armor = { slot = piece.slot, defense = armor.points[i], toughness = armor.toughness }
+		spec.model = piece.model
+		spec.icon = icons[piece.name] or armor.icon
+		table.insert(list, spec :: ItemSpec)
 	end
 	return list
 end
@@ -253,12 +284,14 @@ Items.TOOL_SHAPES = {
 } :: { ToolShape }
 
 --[[
-	A tool tier (`toolSet`): Minecraft's mining speed, harvest level and durability, the head's
-	colour and material, and `attack`: per shape (TOOL_SHAPES' names) its { damage, speed }
+	A tool tier (`toolSet`): its name ("Iron": the tools are "IronSword" ..), Minecraft's mining
+	speed and harvest level, and `attack`: per shape (TOOL_SHAPES' names) its { damage, speed }
 	(Minecraft 1.20.1's attack damage, the hand's 1 included, and attack speed). What its tools say
-	of themselves, each optional (Schema's fields): per shape, as `attack`, `lore` (its tooltip
-	line) and `icons` (its icon, "" = not made yet); for every tool of the tier, `age` (the Age
-	opening their recipes) and `fuel` (the ticks each one burns in a furnace: wooden tools).
+	of themselves: per shape, as `attack`, `lore` (its tooltip line) and `icons` (its icon, "" =
+	not made yet); for every tool of the tier, any item field of Schema's: `durability` (needed),
+	`color` and `material` (the head's), `age` and `skill` (what opens their recipes), `fuel` (the
+	ticks each one burns in a furnace: wooden tools), `tags`, `icon`... A tool's `tool` and `model`
+	are made here.
 ]]
 export type ToolTier = {
 	name: string,
@@ -272,31 +305,59 @@ export type ToolTier = {
 	icons: { [string]: string }?,
 	age: string?,
 	fuel: number?,
+	-- (Any item field; these are a tool set's likeliest.)
+	icon: string?,
+	maxStack: number?,
+	tilt: number?,
+	skill: string?,
+	knowledge: Schema.KnowledgeSpec?,
+	radiation: number?,
+	tags: { string }?,
 }
+-- (A tool set's own fields, and what its tools make of them.)
+local TOOL_OWN = table.freeze({
+	name = Schema.STRING,
+	speed = Schema.NUMBER,
+	level = Schema.NUMBER,
+	attack = Schema.mapOf(Schema.listOf(Schema.NUMBER, 2)),
+	lore = Schema.mapOf(Schema.STRING),
+	icons = Schema.mapOf(Schema.STRING),
+}) :: { [string]: Schema.Check }
+local TOOL_MADE = table.freeze({
+	tool = "each shape's kind, its `speed` and `level`",
+	model = "TOOL_SHAPES' models in its colour",
+})
 
--- A tier's five tools in TOOL_SHAPES' order ("<Tier>Sword" ..): one to a stack, tilted -45.
+-- A tier's five tools in TOOL_SHAPES' order ("<Tier>Sword" ..): one to a stack, tilted -45, unless
+-- it says otherwise.
 function Items.toolSet(tier: ToolTier): { ItemSpec }
+	Fields.check(`toolSet {tier.name}`, tier, {
+		kind = "items",
+		own = TOOL_OWN,
+		needs = { "name", "speed", "level", "durability", "color", "material", "attack" },
+		made = TOOL_MADE,
+	})
 	local lore, icons = tier.lore or {}, tier.icons or {}
+	knownPieces(tier.attack, Items.TOOL_SHAPES, `toolSet {tier.name}'s attack`)
 	knownPieces(lore, Items.TOOL_SHAPES, `toolSet {tier.name}'s lore`)
 	knownPieces(icons, Items.TOOL_SHAPES, `toolSet {tier.name}'s icons`)
 	local list: { ItemSpec } = {}
 	for _, shape in Items.TOOL_SHAPES do
 		local attack = tier.attack[shape.name]
-		table.insert(list, {
-			name = tier.name .. shape.name,
-			maxStack = 1,
-			tool = { kind = shape.kind, speed = tier.speed, level = tier.level },
-			attack = { damage = attack[1], speed = attack[2] },
-			durability = tier.durability,
-			color = tier.color,
-			material = tier.material,
-			model = shape.model(tier.color),
-			tilt = -45,
-			icon = icons[shape.name],
-			lore = lore[shape.name],
-			age = tier.age,
-			fuel = tier.fuel,
-		})
+		assert(attack, `toolSet {tier.name}'s attack: none for its {shape.name}`)
+		local spec: any = { maxStack = 1, tilt = -45 }
+		for field, value in tier :: any do
+			if not TOOL_OWN[field] then
+				spec[field] = value
+			end
+		end
+		spec.name = tier.name .. shape.name
+		spec.tool = { kind = shape.kind, speed = tier.speed, level = tier.level }
+		spec.attack = { damage = attack[1], speed = attack[2] }
+		spec.model = shape.model(tier.color)
+		spec.icon = icons[shape.name] or tier.icon
+		spec.lore = lore[shape.name]
+		table.insert(list, spec :: ItemSpec)
 	end
 	return list
 end
@@ -361,6 +422,9 @@ function Items.potion(
 	colour: { number },
 	extra: { [string]: any }?
 ): ItemSpec
+	if extra then
+		Fields.check(`potion {variant.item}`, extra, { kind = "items", made = { name = "its variant's item" } })
+	end
 	local spec: ItemSpec = {
 		name = variant.item,
 		displayName = variant.displayName,

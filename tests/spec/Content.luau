@@ -685,8 +685,9 @@ return function(t, shared, require, _server, _client)
 		local B, I = FreshBlocks.id, FreshItems.id
 		local content = need({ "Content" }).default
 		t.eq(content.packs[#content.packs].name, "Fields", "grafted last")
-		-- (FixtureOre, FixtureFrost and FixturePlanks; its override of Planks moves no id.)
-		t.eq(B.FixtureOre, FreshBlocks.count - 3, "its blocks after every other")
+		-- (FixtureOre, FixtureFrost, FixturePlanks, FixtureCharge and FixtureLitCharge; its override
+		-- of Planks moves no id.)
+		t.eq(B.FixtureOre, FreshBlocks.count - 5, "its blocks after every other")
 		-- Textures and icons.
 		local TexturePack = need({ "TexturePack" })
 		t.eq(TexturePack.Blocks.FixtureOre.All, "fixture ore", "texture -> TexturePack.Blocks")
@@ -859,6 +860,42 @@ return function(t, shared, require, _server, _client)
 		t.eq(Drinks.sips({ item = I.FixtureFlask, count = 1 }), 2, "its durability")
 		t.eq(flask and flask.drink.chance, 0, "numbers left out are 0")
 		t.eq(flask and flask.drink, Drinks.of(I.PurifiedWaterBottle), "an alike drink is the same Drink")
+		-- An empty container's `fills`, dirty water's `purified` (its drink's).
+		t.eq(Drinks.FILLS[I.FixtureGem], I.FixtureFlask, "fills -> Drinks.FILLS")
+		t.ok(Drinks.isContainer(I.FixtureGem) and Drinks.fills({ item = I.FixtureGem, count = 1 }), "it fills")
+		t.ok(Drinks.fills({ item = I.FixtureFlask, count = 1, damage = 1 }), "its flask tops up at water")
+		t.eq(Drinks.purifiedOf(I.FixtureTonic), I.FixtureFlask, "drink.purified -> Drinks.PURIFIED_OF")
+		t.ok(Drinks.isDirty(I.FixtureTonic) and not Drinks.isDirty(I.FixtureFlask), "dirty")
+		local Boiling = need({ "ToughAsNails", "Boiling" })
+		t.ok(Boiling.boils({ item = I.FixtureTonic, count = 1 }), "a campfire boils it")
+		-- Cooked meat: a food a furnace makes into a food (its smelting recipe).
+		t.eq(Foods.COOKED[I.FixtureSnack], I.FixtureSalve, "smelting -> Foods.COOKED")
+		-- Silk Touch: only its tool gets its drop, never a blast.
+		t.eq(FreshItems.blockDrops(B.FixtureCharge), nil, "silkTouch: nothing by itself")
+		local mined = FreshItems.drops(B.FixtureCharge, I.WoodenPickaxe)
+		t.eq(mined and mined.item, B.FixtureCharge, "its pickaxe gets it")
+		t.eq(FreshItems.drops(B.FixtureCharge, nil), nil, "a hand does not")
+		-- An explosive: `lit` and the lit block's `fuse` (server Behaviours/Tnt).
+		local Tnt = need({ "Behaviours", "Tnt" }, serverRoot)
+		t.ok(Tnt.isExplosive(B.FixtureCharge) and not Tnt.isLit(B.FixtureCharge), "lit -> an explosive")
+		t.ok(Tnt.isLit(B.FixtureLitCharge), "fuse -> a lit block")
+		t.eq(Tnt.fuseOf(B.FixtureCharge), 30, "its fuse")
+		t.eq(Tnt.fuseOf(B.Tnt), Config.Tnt.FuseTicks, "TNT's, Config's")
+		-- Spawns (server Players/SafeSpot): "near" keeps them off it, out of it and from beside it.
+		local SafeSpot = need({ "Players", "SafeSpot" }, serverRoot)
+		local function spot(cells: { [string]: number }): boolean
+			local world = {
+				getBlock = function(_self: any, x: number, y: number, z: number): number
+					return cells[`{x},{y},{z}`] or FreshBlocks.AIR
+				end,
+			}
+			return SafeSpot.isSafe(world :: any, 0, 10, 0)
+		end
+		t.ok(spot({ ["0,9,0"] = B.Stone }), "on stone")
+		t.ok(not spot({ ["0,9,0"] = B.Stone, ["1,10,0"] = B.FixtureCharge }), "spawnUnsafe near: not beside")
+		t.ok(not spot({ ["0,9,0"] = B.FixtureCharge }), "nor on it")
+		t.ok(not spot({ ["0,9,0"] = B.OakLeaves }), "the game's leaves: on")
+		t.ok(not spot({ ["0,9,0"] = B.Stone, ["0,10,0"] = B.WaterFlow3 }), "water: in, every level")
 	end)
 
 	t.test("content: a pack's biome reaches Biomes, Locate and the generator; its override of Plains", function()
@@ -2220,6 +2257,60 @@ return function(t, shared, require, _server, _client)
 			{ `Drinks: {SNACK} is drunk in sips but has no durability` }
 		)
 		refused(item({ drink = { hydration = 0.5 } }), { "ToughAsNails", "Drinks" }, { `Drinks: {SNACK} does nothing` })
+		-- An empty container's `fills` and dirty water's `purified`: items (Content), drinks (Drinks).
+		fails(
+			{ pack("P", { items = { { name = "Jar", model = MODEL, fills = "Watr" } } }) },
+			{ "pack P, item Jar: fills names unknown item Watr" },
+			"fills"
+		)
+		fails(
+			{ pack("P", { items = { { name = "Jar", model = MODEL, drink = { thirst = 1, purified = "Clean" } } } }) },
+			{ "pack P, item Jar: drink purified names unknown item Clean" },
+			"purified"
+		)
+		refused(
+			item({ fills = "Stick" }),
+			{ "ToughAsNails", "Drinks" },
+			{ `Drinks: {SNACK} fills with Stick, which is no drink` }
+		)
+		refused(
+			item({ drink = { thirst = 2, purified = "Stick" } }),
+			{ "ToughAsNails", "Drinks" },
+			{ `Drinks: {SNACK}'s purified twin Stick is no drink` }
+		)
+	end)
+
+	t.test("content: an explosive's lit block and fuse, Silk Touch and spawn safety are checked", function()
+		fails(
+			{ pack("P", { blocks = { { name = "Bomb", lit = "LitBom" } } }) },
+			{ "pack P, block Bomb: lit names unknown block LitBom" },
+			"lit"
+		)
+		fails(
+			{ pack("P", { blocks = { { name = "Bomb", lit = "Lit" }, { name = "Lit" } } }) },
+			{ "pack P, block Bomb: lit names Lit, which has no fuse" },
+			"a lit block without a fuse"
+		)
+		fails(
+			{ pack("P", { blocks = { { name = "Lit", fuse = 2.5 } } }) },
+			{ "pack P, block Lit: fuse must be whole ticks, 1 at least, not 2.5" },
+			"fuse"
+		)
+		fails(
+			{ pack("P", { blocks = { { name = "Spikes", spawnUnsafe = "beside" } } }) },
+			{ "pack P, block Spikes: spawnUnsafe must be one of on, in, near" },
+			"spawnUnsafe"
+		)
+		fails(
+			{ pack("P", { blocks = { { name = "Rock", silkTuch = true } } }) },
+			{ "pack P, block Rock: silkTuch is no field it may have (did you mean silkTouch?)" },
+			"silkTouch"
+		)
+		refused(
+			{ blocks = { { name = "ClashRock", silkTouch = true } } },
+			{ "Items" },
+			{ "Items: pack Patch, block ClashRock has silkTouch, which needs its tool and toolLevel" }
+		)
 	end)
 
 	t.test("content: a registry refuses a value only it can check, naming the entry", function()

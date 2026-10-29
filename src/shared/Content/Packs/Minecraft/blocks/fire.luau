@@ -10,109 +10,120 @@
 	    Shared/Fire). No item: lit by flint and steel, lava and burning fuel. Light 15, no
 	    collision, replaceable (a block placed into it puts it out), broken at once with no drop
 	    (punching it out sounds like block.fire.extinguish: its `sounds`), washed away by water, and
-	    warms a player near it (`heats`, Tough As Nails). Its one shape box is only the carrier of
-	    its light: an invisible speck (Neon, see-through), sparse like glow lichen's (GreedyMesher:
-	    one PointLight per 8 x 8 x 8 blocks), so a forest fire is not hundreds of lights. The flames
-	    are drawn by client Rendering/FireRenderer: the user's animated sheet on Minecraft's
-	    fire_floor and fire_side planes, which depend on the neighbours (Fire.sides). Its outline
-	    is Minecraft's: a pixel thick slab on the floor (BaseFireBlock.DOWN_AABB); the client aims
-	    at a fire clinging to walls by the slabs on those walls instead (Fire.outlineAt).
+	    warms a player near it (`heats`, Tough As Nails). Spawns and teleports never land in or
+	    beside it (`spawnUnsafe` "near", server Players/SafeSpot). Its one shape box is only the
+	    carrier of its light: an invisible speck (Neon, see-through), sparse like glow lichen's
+	    (GreedyMesher: one PointLight per 8 x 8 x 8 blocks), so a forest fire is not hundreds of
+	    lights. The flames are drawn by client Rendering/FireRenderer: the user's animated sheet on
+	    Minecraft's fire_floor and fire_side planes, which depend on the neighbours (Fire.sides). Its
+	    outline is Minecraft's: a pixel thick slab on the floor (BaseFireBlock.DOWN_AABB); the
+	    client aims at a fire clinging to walls by the slabs on those walls instead (Fire.outlineAt).
 	  * TNT (Minecraft 1.20.1's TntBlock): breaks at once, no blast resistance, flammable 15 / 100
 	    (FireBlock.bootStrap), red with a white band (BlockDecor "Tnt"; texture pack "tnt side",
 	    "tnt top", "tnt bottom", blank until made). Flint and steel, fire burning it (lava lights the
-	    fire) and a blast reaching it light it: it turns into Lit TNT, Minecraft's PrimedTnt as a
-	    block (server Behaviours/Tnt): it falls while its 80 tick fuse burns, then explodes with
-	    power 4. Lit TNT glows and flashes (client Rendering/FuseView), can't be broken (an entity
-	    in Minecraft) and drops nothing; blasts leave it be. Its `item` is TNT (WAILA's icon, pick
-	    block). Crafting it is the Industrial Age's, with the Demolition skill (`age`, `skill`).
+	    fire) and a blast reaching it light it: it turns into Lit TNT (its `lit`), Minecraft's
+	    PrimedTnt as a block (server Behaviours/Tnt): it falls while its fuse burns (Lit TNT's
+	    `fuse`: Config.Tnt.FuseTicks, 80 ticks), then explodes with power 4. Lit TNT glows and
+	    flashes (client Rendering/FuseView), can't be broken (an entity in Minecraft) and drops
+	    nothing; blasts leave it be. Its `item` is TNT (WAILA's icon, pick block). Crafting it is
+	    the Industrial Age's, with the Demolition skill (`age`, `skill`).
 	  * The Nuke: a dark steel casing with hazard stripes and the radiation sign (BlockDecor "Nuke";
-	    "nuke side", "nuke top", blank), lit the same ways. Lit, it glows red, flashes and wails for
-	    10 s, then digs a crater (server World/Nuke; Config.Nuke). Crafting it is the Atomic Age's,
-	    with the Fission skill.
+	    "nuke side", "nuke top", blank), lit the same ways (into Lit Nuke). Lit, it glows red,
+	    flashes and wails for its fuse (Config.Nuke.FuseTicks: 10 s), then digs a crater (server
+	    World/Nuke; Config.Nuke). Crafting it is the Atomic Age's, with the Fission skill.
 ]]
 
+local Define = require(script.Parent.Parent.Parent.Parent.Define)
 local Schema = require(script.Parent.Parent.Parent.Parent.Schema)
 
-return {
-	{
-		name = "Fire",
-		color = { 232, 132, 36 },
-		material = "Neon",
-		sound = "wool",
-		solid = false,
-		placeable = false,
-		replaceable = true,
-		hardness = 0,
-		drops = false,
-		light = 15,
-		lightColor = { 255, 170, 90 },
-		shape = { { size = { 2, 2, 2 }, offset = { 0, -4, 0 }, glow = true, transparency = 1 } },
-		bounds = { min = { 0, 0, 0 }, max = { 16, 1, 16 } },
-		brokenByFluid = true,
-		behaviour = "Fire",
-		-- (Punching it out is Minecraft's level event 1009, the extinguish hiss: not wool's break.)
-		sounds = { ["break"] = "block.fire.extinguish" },
-		heats = true,
-	},
-	{
-		name = "Tnt",
-		displayName = "TNT",
-		color = { 204, 52, 40 },
-		material = "SmoothPlastic",
-		sound = "grass",
-		hardness = 0,
-		decor = "Tnt",
-		flammable = { ignite = 15, burn = 100 },
-		texture = { Top = "tnt top", Sides = "tnt side", Bottom = "tnt bottom" },
-		lore = "Light it with Flint and Steel, then run.",
-		age = "industrial",
-		skill = "demolition",
-	},
-	{
-		name = "LitTnt",
-		displayName = "Lit TNT",
-		color = { 236, 120, 100 },
-		material = "SmoothPlastic",
-		sound = "grass",
-		hardness = 0,
-		breakable = false,
-		placeable = false,
-		blastResistance = 0,
-		drops = false,
-		item = "Tnt",
-		decor = "Tnt",
-		light = 9,
-		lightColor = { 255, 226, 190 },
-		behaviour = "Tnt",
-	},
-	{
-		name = "Nuke",
-		color = { 46, 50, 48 },
-		material = "Metal",
-		sound = "metal",
-		hardness = 0,
-		decor = "Nuke",
-		flammable = { ignite = 15, burn = 100 },
-		texture = { Top = "nuke top", Sides = "nuke side", Bottom = "nuke top" },
-		lore = "Wails for ten seconds, then leaves a crater. Stand well back.",
-		age = "atomic",
-		skill = "fission",
-	},
-	{
-		name = "LitNuke",
-		displayName = "Lit Nuke",
-		color = { 96, 52, 48 },
-		material = "Metal",
-		sound = "metal",
-		hardness = 0,
-		breakable = false,
-		placeable = false,
-		blastResistance = 0,
-		drops = false,
-		item = "Nuke",
-		decor = "Nuke",
-		light = 12,
-		lightColor = { 255, 70, 50 },
-		behaviour = "Tnt",
-	},
-} :: { Schema.BlockSpec }
+return function(define: Define.Context): { Schema.BlockSpec }
+	local Config = define.Config
+	return {
+		{
+			name = "Fire",
+			color = { 232, 132, 36 },
+			material = "Neon",
+			sound = "wool",
+			solid = false,
+			placeable = false,
+			replaceable = true,
+			hardness = 0,
+			drops = false,
+			light = 15,
+			lightColor = { 255, 170, 90 },
+			shape = { { size = { 2, 2, 2 }, offset = { 0, -4, 0 }, glow = true, transparency = 1 } },
+			bounds = { min = { 0, 0, 0 }, max = { 16, 1, 16 } },
+			brokenByFluid = true,
+			behaviour = "Fire",
+			-- (Punching it out is Minecraft's level event 1009, the extinguish hiss: not wool's break.)
+			sounds = { ["break"] = "block.fire.extinguish" },
+			heats = true,
+			spawnUnsafe = "near",
+		},
+		{
+			name = "Tnt",
+			displayName = "TNT",
+			color = { 204, 52, 40 },
+			material = "SmoothPlastic",
+			sound = "grass",
+			hardness = 0,
+			decor = "Tnt",
+			flammable = { ignite = 15, burn = 100 },
+			texture = { Top = "tnt top", Sides = "tnt side", Bottom = "tnt bottom" },
+			lore = "Light it with Flint and Steel, then run.",
+			age = "industrial",
+			skill = "demolition",
+			lit = "LitTnt",
+		},
+		{
+			name = "LitTnt",
+			displayName = "Lit TNT",
+			color = { 236, 120, 100 },
+			material = "SmoothPlastic",
+			sound = "grass",
+			hardness = 0,
+			breakable = false,
+			placeable = false,
+			blastResistance = 0,
+			drops = false,
+			item = "Tnt",
+			decor = "Tnt",
+			light = 9,
+			lightColor = { 255, 226, 190 },
+			behaviour = "Tnt",
+			fuse = Config.Tnt.FuseTicks,
+		},
+		{
+			name = "Nuke",
+			color = { 46, 50, 48 },
+			material = "Metal",
+			sound = "metal",
+			hardness = 0,
+			decor = "Nuke",
+			flammable = { ignite = 15, burn = 100 },
+			texture = { Top = "nuke top", Sides = "nuke side", Bottom = "nuke top" },
+			lore = "Wails for ten seconds, then leaves a crater. Stand well back.",
+			age = "atomic",
+			skill = "fission",
+			lit = "LitNuke",
+		},
+		{
+			name = "LitNuke",
+			displayName = "Lit Nuke",
+			color = { 96, 52, 48 },
+			material = "Metal",
+			sound = "metal",
+			hardness = 0,
+			breakable = false,
+			placeable = false,
+			blastResistance = 0,
+			drops = false,
+			item = "Nuke",
+			decor = "Nuke",
+			light = 12,
+			lightColor = { 255, 70, 50 },
+			behaviour = "Tnt",
+			fuse = Config.Nuke.FuseTicks,
+		},
+	}
+end

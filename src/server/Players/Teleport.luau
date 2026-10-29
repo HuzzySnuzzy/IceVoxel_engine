@@ -4,7 +4,7 @@
 
 	  Map        Teleport messages from the world map. The server decides: permission
 	             (Config.Map.Teleport), cooldown, and a safe landing spot near the requested column
-	             (SafeSpot / SpawnUnsafeBlocks).
+	             (SafeSpot: the blocks' `spawnUnsafe`).
 	  Spectator  SpectatorTeleport messages (the spectator menu's "Teleport to Player", Minecraft's
 	             handleTeleportToEntityPacket): a spectator goes to another player's feet, exactly
 	             (no safe spot: spectators fly through everything), the target in the game with a

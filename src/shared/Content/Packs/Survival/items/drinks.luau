@@ -22,6 +22,10 @@
 	    ticks as furnace fuel (Minecraft's).
 	Their icons are blank, so each look is one id to paste.
 
+	An empty container's `fills` is the dirty water it becomes at a water source, and dirty water's
+	`purified` (in its `drink`) the clean water a furnace, mint or a campfire makes of it
+	(ToughAsNails/Drinks.FILLS and PURIFIED_OF; the recipes are the pack's).
+
 	What drinking each gives is its `drink` (ToughAsNails/Drinks, and the tooltip's "When drunk:"
 	lines): thirst points and the hydration modifier (Thirst.drink adds thirst x modifier x 2),
 	dirty water's chance of TAN's Thirst effect and its ticks, a tea's Internal Warmth or Chill
@@ -68,6 +72,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bottle(nil),
 			icon = "",
 			lore = "Fill it at water for a drink.",
+			fills = "DirtyWaterBottle",
 		},
 		{
 			name = "DirtyWaterBottle",
@@ -77,7 +82,14 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bottle(DIRTY_WATER),
 			icon = "",
 			lore = "Unsafe to drink. Purify it in a furnace, on a campfire or with mint.",
-			drink = { thirst = 4, hydration = 0.25, chance = 0.5, effectTicks = 300, empty = "GlassBottle" },
+			drink = {
+				thirst = 4,
+				hydration = 0.25,
+				chance = 0.5,
+				effectTicks = 300,
+				empty = "GlassBottle",
+				purified = "PurifiedWaterBottle",
+			},
 		},
 		{
 			name = "PurifiedWaterBottle",
@@ -98,6 +110,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			icon = "",
 			lore = "Fill it at water. Holds several sips.",
 			age = "iron",
+			fills = "DirtyWaterCanteen",
 		},
 		{
 			name = "DirtyWaterCanteen",
@@ -107,7 +120,15 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = canteen(DIRTY_WATER),
 			icon = "",
 			lore = "Unsafe to drink. Purify it, or top it up at water.",
-			drink = { thirst = 4, hydration = 0.25, chance = 0.5, effectTicks = 300, empty = "Canteen", sips = true },
+			drink = {
+				thirst = 4,
+				hydration = 0.25,
+				chance = 0.5,
+				effectTicks = 300,
+				empty = "Canteen",
+				sips = true,
+				purified = "PurifiedWaterCanteen",
+			},
 		},
 		{
 			name = "PurifiedWaterCanteen",
@@ -127,6 +148,7 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			icon = "",
 			lore = "Fill it at water. Holds a little more than a bottle.",
 			fuel = 100,
+			fills = "DirtyWaterBowl",
 		},
 		{
 			name = "DirtyWaterBowl",
@@ -136,7 +158,14 @@ return function(define: Define.Context): { Schema.ItemSpec }
 			model = bowl(DIRTY_WATER),
 			icon = "",
 			lore = "Unsafe to drink. Purify it in a furnace, on a campfire or with mint.",
-			drink = { thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300, empty = "Bowl" },
+			drink = {
+				thirst = 4,
+				hydration = 0.3,
+				chance = 0.5,
+				effectTicks = 300,
+				empty = "Bowl",
+				purified = "PurifiedWaterBowl",
+			},
 		},
 		{
 			name = "PurifiedWaterBowl",

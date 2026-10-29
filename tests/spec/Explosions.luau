@@ -543,6 +543,39 @@ return function(t, shared, require, server, client)
 		t.eq(dirt, 1, "and dropped (power 1: always)")
 	end)
 
+	t.test("world: blasts drop gravel's Flint and grass's Straw now and then, packed and blue ice never", function()
+		-- What power 1 blasts (drops always) leave of a block on dirt, 200 each: gravel its Flint now
+		-- and then (its `loot`, Minecraft's gravel loot table), short grass its Straw; packed and blue
+		-- ice nothing, as Minecraft's, where only Silk Touch gets them (their entries' `silkTouch`:
+		-- here their pickaxe stands in, and no blast holds one).
+		local world = newWorld(11)
+		local dropped: { [string]: number } = {}
+		Drops.set(function(_x, _y, _z, stack)
+			local name = Items.get(stack.item).name
+			dropped[name] = (dropped[name] or 0) + stack.count
+		end)
+		local got: { [string]: { [string]: number } } = {}
+		for _, name in { "Gravel", "ShortGrass", "PackedIce", "BlueIce" } do
+			dropped = {}
+			for _ = 1, 200 do
+				world:setBlock(8, FLOOR, 8, B.Dirt)
+				world:setBlock(8, FLOOR + 1, 8, B[name])
+				Explosions.explode(world, 8.5, FLOOR + 1.5, 8.5, 1)
+				Explosions.step(world)
+				t.eq(world:peekBlock(8, FLOOR + 1, 8), AIR, `{name} blown away`)
+			end
+			got[name] = dropped
+		end
+		Drops.set(nil)
+		local gravel, grass = got.Gravel, got.ShortGrass
+		t.ok((gravel.Flint or 0) > 0 and (gravel.Gravel or 0) > (gravel.Flint or 0), "gravel: Flint one time in 10")
+		t.eq((gravel.Flint or 0) + (gravel.Gravel or 0), 200, "one or the other each time")
+		t.ok((grass.Straw or 0) > 0, "short grass: its Straw now and then")
+		t.eq(got.PackedIce.PackedIce, nil, "packed ice: nothing")
+		t.eq(got.BlueIce.BlueIce, nil, "blue ice: nothing")
+		t.eq(got.PackedIce.Dirt, 200, "(the dirt under it drops as ever)")
+	end)
+
 	t.test("world: blasts within the per-tick ray budget, the first always goes", function()
 		local world = newWorld(9)
 		for i = 1, 12 do

@@ -22,9 +22,9 @@
 	temperature state. Status effects (`effects`) or mana (`mana`) make it a potion (below). An
 	entry leaves out the numbers it hasn't: they are 0.
 
-	The items are data, the entries' (ITEMS) and two tables of this module's, and everything here
-	reads them:
-	  ITEMS        a full item -> { drink, empty?, sips? }, each entry's `drink` as this loads:
+	The items are data, their entries', made into three tables as this loads, which everything
+	here reads:
+	  ITEMS        a full item -> { drink, empty?, sips? }, each entry's `drink`:
 	               what drinking it gives, the empty container drinking it leaves (`empty`, an item
 	               name on the entry; nil: nothing, it is used up), and `sips`: true for a canteen
 	               (the item's `durability` is its sips; each wears it, the last leaves `empty`),
@@ -33,29 +33,29 @@
 	               canteen's dirty water, purified water and the ruins' bottled water (client
 	               Ui/Theme's "Water" pill goes by that);
 	  FILLS        an empty container -> the full item it becomes at a water source (its dirty
-	               water). A `sips` item that is the dirty water of its own container (the Dirty
-	               Water Canteen) is topped up at water while it has sips missing; a purified one
-	               never is (it would be dirtied);
-	  PURIFIED_OF  dirty water -> its purified twin (`purifiedOf`; `isDirty` is being a key here).
-	               Purifying itself is a recipe's (Crafting/Recipes: smelting, or anything else
-	               that turns one into the other).
-	Both sides read this module, so drinks go on the entries and into the tables here (they are
-	frozen), never at run time. A new container is two entries' `drink`, two lines here and its
-	recipes, as the wooden bowls (the Survival pack's Bowl, DirtyWaterBowl, PurifiedWaterBowl)
-	are:
-	    entries      DirtyWaterBowl     drink = { thirst = 4, hydration = 0.3, chance = 0.5,
-	                                              effectTicks = 300, empty = "Bowl" }
-	                 PurifiedWaterBowl  drink = { thirst = 7, hydration = 0.45, empty = "Bowl" }
-	    FILLS        [I.Bowl] = I.DirtyWaterBowl,
-	    PURIFIED_OF  [I.DirtyWaterBowl] = I.PurifiedWaterBowl,
-	    recipes      smelting("DirtyWaterBowl", "PurifiedWaterBowl") and the mint cure
-	                 (shapeless({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl"))
+	               water): each container entry's `fills`. A `sips` item that is the dirty water of
+	               its own container (the Dirty Water Canteen) is topped up at water while it has
+	               sips missing; a purified one never is (it would be dirtied);
+	  PURIFIED_OF  dirty water -> its purified twin: each drink's `purified` (`purifiedOf`;
+	               `isDirty` is being a key here; what a campfire boils it into,
+	               ToughAsNails/Boiling). Purifying itself is a recipe's (Crafting/Recipes:
+	               smelting, or anything else that turns one into the other).
+	Both sides read this module, so drinks go on the entries (the tables are frozen), never at
+	run time. A new container is three entries and its recipes, as the wooden bowls (the Survival
+	pack's Bowl, DirtyWaterBowl, PurifiedWaterBowl) are:
+	    Bowl               fills = "DirtyWaterBowl"
+	    DirtyWaterBowl     drink = { thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300,
+	                                 empty = "Bowl", purified = "PurifiedWaterBowl" }
+	    PurifiedWaterBowl  drink = { thirst = 7, hydration = 0.45, empty = "Bowl" }
+	    recipes            smelting("DirtyWaterBowl", "PurifiedWaterBowl") and the mint cure
+	                       (shapeless({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl"))
 	and a bowl then fills at water, is drunk by holding the use button, gives its Bowl back, and
 	purifies in a furnace or with mint, as a bottle does. A drink that is no water (the teas) is
 	an entry's `drink` of its own with the container it leaves: Mint Tea's is { thirst = 7,
 	hydration = 0.6, chill = 2400, empty = "Bowl" }. The load checks below name the pack and the
-	entry of an unknown effect or container, sips without a durability and a drink that does
-	nothing, and assert that every item the tables name is a drink where it must be one.
+	entry of an unknown effect or container, sips without a durability, a drink that does nothing,
+	and a container filling with, or dirty water purified into, an item that is no drink
+	(Shared/Content checks that the names are items).
 
 	Using an item (`action`, right click; Minecraft's Item.use after a block's own use):
 	  an empty container (FILLS)   at a water source: fill (BottleItem: a ray that stops at
@@ -231,32 +231,27 @@ for _, spec in content.items do
 end
 Drinks.ITEMS = table.freeze(ITEMS)
 
--- Empty containers and the full item each becomes at a water source.
-Drinks.FILLS = table.freeze({
-	[I.GlassBottle] = I.DirtyWaterBottle,
-	[I.Canteen] = I.DirtyWaterCanteen,
-	[I.Bowl] = I.DirtyWaterBowl,
-} :: { [number]: number })
-
--- Dirty water and its purified twin.
-Drinks.PURIFIED_OF = table.freeze({
-	[I.DirtyWaterBottle] = I.PurifiedWaterBottle,
-	[I.DirtyWaterCanteen] = I.PurifiedWaterCanteen,
-	[I.DirtyWaterBowl] = I.PurifiedWaterBowl,
-} :: { [number]: number })
-
--- (Mistakes in the tables would only show as items that do nothing: catch them at load.)
-local function itemName(item: number): string
-	local def = Items.get(item)
-	return if def then def.name else tostring(item)
+-- Empty containers and the full item each becomes at a water source (their entries' `fills`), and
+-- dirty water and its purified twin (the drinks' `purified`). (Mistakes would only show as items
+-- that do nothing: catch them at load.)
+local FILLS: { [number]: number } = {}
+local PURIFIED_OF: { [number]: number } = {}
+for _, spec in content.items do
+	local where = content.where("item", spec.name)
+	if spec.fills then
+		local full = Items.find(spec.fills)
+		assert(full and Drinks.ITEMS[full], `Drinks: {where} fills with {spec.fills}, which is no drink`)
+		FILLS[Items.id[spec.name]] = full
+	end
+	local purified = spec.drink and spec.drink.purified
+	if purified then
+		local twin = Items.find(purified)
+		assert(twin and Drinks.ITEMS[twin], `Drinks: {where}'s purified twin {purified} is no drink`)
+		PURIFIED_OF[Items.id[spec.name]] = twin
+	end
 end
-for empty, full in Drinks.FILLS do
-	assert(Items.get(empty), `Drinks.FILLS has an unknown item {empty}`)
-	assert(Drinks.ITEMS[full], `{itemName(empty)} fills with {itemName(full)}, which is no drink`)
-end
-for dirty, purified in Drinks.PURIFIED_OF do
-	assert(Drinks.ITEMS[dirty] and Drinks.ITEMS[purified], `{itemName(dirty)} or its purified twin is no drink`)
-end
+Drinks.FILLS = table.freeze(FILLS)
+Drinks.PURIFIED_OF = table.freeze(PURIFIED_OF)
 
 -- The full item entry of `item` (nil: it is no drink).
 function Drinks.entry(item: number?): DrinkItem?

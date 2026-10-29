@@ -6,8 +6,15 @@
 	and tanks, doors (all 32 halves), fences (all 16 variants), layered blocks (snow layers) and
 	machine blocks. Boxes are in pixels from the cell's centre (Schema's `shape`); directions are
 	Minecraft's (North = -Z, East = +X).
+
+	Every generator copies each block field the author gives it (Content/Schema's) onto what it
+	makes, its own defaults only where one is left out: an iron door is a door with its material,
+	tool, hardness and sounds. What it gives is checked first (Define/Fields: an unknown field gets
+	a "did you mean", and a field it makes itself, a door's `shape`, is refused). Its other blocks
+	and cave twins keep all of it but the item's own fields (OWN_FIELDS).
 ]]
 
+local Fields = require(script.Parent.Fields)
 local Schema = require(script.Parent.Parent.Schema)
 
 type BlockSpec = Schema.BlockSpec
@@ -20,11 +27,19 @@ local Blocks = {}
 --[[
 	A block's own fields of Content/Schema's per-entry ones, which only the block that is the item
 	carries: its lore, its texture pack faces, the Age and skill that open its recipes, its fuel
-	and its tags. A generator's other blocks (a fluid's flows, a door's other halves, a fence's
-	arms) and cave twins never copy them: they are no items, and they take their item's or twin's
-	faces (Blocks: a variant group's entry, a twin's twin's).
+	and its tags, and what makes it an ore of the Metal Miner (`miner`) and of Knowledge
+	(`knowledge`, mining it again). A generator's other blocks (a fluid's flows, a door's other
+	halves, a fence's arms, a layered block's heights 2..8) and cave twins never copy them: they
+	are no items, they take their item's or twin's faces (Blocks: a variant group's entry, a
+	twin's twin's), and each would be an ore of its own. Every other field (how it looks, sounds,
+	breaks, burns, radiates, drops...) they keep.
 ]]
-local OWN_FIELDS = { "lore", "texture", "age", "skill", "fuel", "tags" }
+Blocks.OWN_FIELDS = table.freeze({ "lore", "texture", "age", "skill", "fuel", "tags", "knowledge", "miner" })
+local OWN_FIELDS = Blocks.OWN_FIELDS
+local OWN: { [string]: boolean } = {}
+for _, field in OWN_FIELDS do
+	OWN[field] = true
+end
 
 --[[ Directions and walls ]]
 
@@ -81,51 +96,61 @@ local wallBounds = Blocks.wallBounds
 --[[
 	A fluid's nine blocks (BlockList's `fluid`): level 0 is the source (`group`, the item), 1-7
 	are flowing blocks getting weaker ("<Group>Flow<n>") and 8 is falling fluid fed from above
-	("<Group>Falling"), sharing one look so the mesher merges them: `spec`'s colour, material,
-	transparency, reflectance, light and blast resistance; not solid, replaceable, hardness 100, no
-	drop, server Behaviours/Fluid, ticking every `tickDelay`. `flowing`: fields of the flowing and
-	falling levels only (flowing fuel burns like a fuse, its source explodes). `spec`'s own fields
-	(OWN_FIELDS: its lore...) and `heats` / `cools` are the source's alone: the source is the
-	fluid's item, and a fluid's name warms or cools at every level (ToughAsNails/Temperature).
-	Every group is a fluid of Shared/Fluids (FluidList: its id, bucket, colour and light; checked
-	at load), and its flow rules are Behaviours/Fluid's RULES.
+	("<Group>Falling"), sharing one look so the mesher merges them: every field `spec` gives (its
+	colour, material, transparency, light, blast resistance, sounds, radiation...) on every level,
+	over FLUID_DEFAULTS (not solid, replaceable, hardness 100, no drop, server Behaviours/Fluid),
+	ticking every `tickDelay`. `flowing`: fields of the flowing and falling levels only (flowing
+	fuel burns like a fuse, its source explodes). `spec`'s own fields (OWN_FIELDS: its lore...) and
+	`heats` / `cools` are the source's alone: the source is the fluid's item, and a fluid's name
+	warms or cools at every level (ToughAsNails/Temperature). The levels' names (the source's is
+	the group's), `fluid` and `placeable` (the source alone) are made here. Every group is a fluid
+	of Shared/Fluids (FluidList: its id, bucket, colour and light; checked at load), and its flow
+	rules are Behaviours/Fluid's RULES.
 ]]
+local FLUID_DEFAULTS = table.freeze({
+	render = "Fluid",
+	solid = false,
+	replaceable = true,
+	hardness = 100,
+	drops = false,
+	behaviour = "Fluid",
+})
+local FLUID_MADE = table.freeze({ fluid = "its group, level and tick delay", placeable = "the source alone" })
+local FLOWING_MADE = table.freeze({
+	name = "Flow1..7 and Falling",
+	fluid = "its group, level and tick delay",
+	placeable = "the source alone",
+})
+-- (The source's alone, see above.)
+local SOURCE_ONLY: { [string]: boolean } = table.clone(OWN)
+SOURCE_ONLY.heats = true
+SOURCE_ONLY.cools = true
 function Blocks.fluid(group: string, spec: BlockSpec, tickDelay: number, flowing: { [string]: any }?): { BlockSpec }
+	Fields.check(`fluid {group}`, spec, { kind = "blocks", made = FLUID_MADE })
+	if spec.name ~= nil and spec.name ~= group then
+		error(`Content/Define: fluid {group}: its source is named {group}, not {spec.name}`, 0)
+	end
+	if flowing then
+		Fields.check(`fluid {group}'s flowing`, flowing, { kind = "blocks", made = FLOWING_MADE })
+	end
 	local list: { BlockSpec } = {}
-	local source = table.clone(OWN_FIELDS)
-	table.insert(source, "heats")
-	table.insert(source, "cools")
 	for level = 0, 8 do
 		local name = if level == 0 then group elseif level == 8 then group .. "Falling" else group .. "Flow" .. level
-		local entry: BlockSpec = {
-			name = name,
-			render = "Fluid",
-			color = spec.color,
-			material = spec.material,
-			transparency = spec.transparency,
-			reflectance = spec.reflectance,
-			light = spec.light,
-			lightColor = spec.lightColor,
-			solid = false,
-			replaceable = true,
-			placeable = level == 0,
-			hardness = 100,
-			blastResistance = spec.blastResistance,
-			drops = false,
-			behaviour = "Fluid",
-			fluid = { group = group, level = level, tickDelay = tickDelay },
-		}
+		local entry: any = table.clone(FLUID_DEFAULTS)
+		for field, value in spec :: any do
+			if level == 0 or not SOURCE_ONLY[field] then
+				entry[field] = value
+			end
+		end
 		if level > 0 and flowing then
 			for field, value in flowing do
-				(entry :: any)[field] = value
+				entry[field] = value
 			end
 		end
-		if level == 0 then
-			for _, field in source do
-				(entry :: any)[field] = (spec :: any)[field]
-			end
-		end
-		table.insert(list, entry)
+		entry.name = name
+		entry.placeable = level == 0
+		entry.fluid = { group = group, level = level, tickDelay = tickDelay }
+		table.insert(list, entry :: BlockSpec)
 	end
 	return list
 end
@@ -134,10 +159,20 @@ end
 	The cave twin of `spec` (Schema's `caveTwin`): a copy named "Cave<Name>" that generation places
 	in caves, which looks, drops and behaves exactly like it but counts as cave air while caves are
 	hidden; nothing places it, and its item is its twin's (so it has none of `spec`'s own fields,
-	OWN_FIELDS: lore, faces, Age...). `extra`: fields put over the copy (the mineshafts' vines are
-	`seasonless`).
+	OWN_FIELDS: lore, faces, Age, the miner's and Knowledge's numbers...). `extra`: block fields
+	put over the copy (the mineshafts' vines are `seasonless`).
 ]]
+local TWIN_MADE = table.freeze({
+	name = "Cave<Name>",
+	caveTwin = "its twin's name",
+	item = "its twin's item",
+	placeable = "never",
+})
 function Blocks.caveTwin(spec: BlockSpec, extra: { [string]: any }?): BlockSpec
+	Fields.check(`caveTwin {spec.name}`, spec, { kind = "blocks", needs = { "name" } })
+	if extra then
+		Fields.check(`caveTwin {spec.name}'s extra`, extra, { kind = "blocks", made = TWIN_MADE })
+	end
 	local twin = table.clone(spec)
 	twin.name = "Cave" .. spec.name
 	twin.placeable = false
@@ -316,23 +351,25 @@ end
 	tier's colour), the item a core with two arms. The client draws the arms towards what it
 	connects to (Rendering/TransmitterRenderer). Aimed at over its whole cell; not solid (the
 	movement hull only knows full cubes) but obstructing; hardness 1 with a pickaxe, metal sounds,
-	drops itself. Returns `spec`, filled in.
+	drops itself. Returns `spec`, filled in where it leaves a field out.
 ]]
 function Blocks.transmitter(spec: BlockSpec, frame: { number }, glassColour: { number }): BlockSpec
-	local core = transmitterCore(frame, glassColour)
-	spec.color = frame
-	spec.material = "Metal"
-	spec.transparency = GLASS_TRANSPARENCY
-	spec.sound = "metal"
-	spec.solid = false
-	spec.placeable = true
-	spec.obstructs = true
-	spec.hardness = 1
-	spec.tool = "pickaxe"
-	spec.shape = core
-	spec.icon = transmitterIcon(core, frame, glassColour)
-	spec.bounds = FULL_BOUNDS
-	return spec
+	Fields.check(`transmitter {spec.name}`, spec, { kind = "blocks", needs = { "name", "transmitter" } })
+	local core = spec.shape or transmitterCore(frame, glassColour)
+	return Fields.defaults(spec, {
+		color = frame,
+		material = "Metal",
+		transparency = GLASS_TRANSPARENCY,
+		sound = "metal",
+		solid = false,
+		placeable = true,
+		obstructs = true,
+		hardness = 1,
+		tool = "pickaxe",
+		shape = core,
+		icon = transmitterIcon(core, frame, glassColour),
+		bounds = FULL_BOUNDS,
+	})
 end
 
 -- A Universal Cable's core, 6 pixels wide: the conductor, then the twelve frame edges.
@@ -366,31 +403,35 @@ end
 	A Universal Cable (`spec`: its name and `transmitter`): Mekanism's small transmitter, a 6 pixel
 	core (Mekanism's 5..11 box), a red-ish conductor in a frame of twelve edges in `frame` (its
 	tier's colour). Like every transmitter it is aimed at over its whole cell, not solid but
-	obstructing, breaks fast and drops itself. Returns `spec`, filled in.
+	obstructing, breaks fast and drops itself. Returns `spec`, filled in where it leaves a field
+	out.
 ]]
 function Blocks.cable(spec: BlockSpec, frame: { number }): BlockSpec
-	local core = cableCore(frame)
-	spec.color = frame
-	spec.material = "Metal"
-	spec.sound = "metal"
-	spec.solid = false
-	spec.placeable = true
-	spec.obstructs = true
-	spec.hardness = 1
-	spec.tool = "pickaxe"
-	spec.shape = core
-	spec.icon = cableIcon(core, frame)
-	spec.bounds = FULL_BOUNDS
-	return spec
+	Fields.check(`cable {spec.name}`, spec, { kind = "blocks", needs = { "name", "transmitter" } })
+	local core = spec.shape or cableCore(frame)
+	return Fields.defaults(spec, {
+		color = frame,
+		material = "Metal",
+		sound = "metal",
+		solid = false,
+		placeable = true,
+		obstructs = true,
+		hardness = 1,
+		tool = "pickaxe",
+		shape = core,
+		icon = cableIcon(core, frame),
+		bounds = FULL_BOUNDS,
+	})
 end
 
 --[[
 	A Fluid Tank (`spec`: its name and `tank`): a solid cube (torches may hang on it) of glass sides
 	inside steel plates at the top and bottom, posts in `posts` (its tier's colour) at the corners;
 	the client's water shows through the glass. Hardness 2 with a pickaxe, metal sounds. Returns
-	`spec`, filled in.
+	`spec`, filled in where it leaves a field out.
 ]]
 function Blocks.tank(spec: BlockSpec, posts: { number }): BlockSpec
+	Fields.check(`tank {spec.name}`, spec, { kind = "blocks", needs = { "name", "tank" } })
 	local boxes: { ShapeBox } = {
 		glassBox({ 14, 14, 14 }, { 0, 0, 0 }, TANK_GLASS),
 		metalBox({ 16, 2, 16 }, { 0, -7, 0 }, STEEL),
@@ -401,17 +442,18 @@ function Blocks.tank(spec: BlockSpec, posts: { number }): BlockSpec
 			table.insert(boxes, metalBox({ 2, 12, 2 }, { x, 0, z }, posts))
 		end
 	end
-	spec.color = STEEL
-	spec.material = "Metal"
-	spec.transparency = GLASS_TRANSPARENCY
-	spec.sound = "metal"
-	spec.hardness = 2
-	spec.tool = "pickaxe"
-	-- (A solid cube, so torches may hang on it.)
-	spec.sturdy = true
-	spec.shape = boxes
-	spec.bounds = FULL_BOUNDS
-	return spec
+	return Fields.defaults(spec, {
+		color = STEEL,
+		material = "Metal",
+		transparency = GLASS_TRANSPARENCY,
+		sound = "metal",
+		hardness = 2,
+		tool = "pickaxe",
+		-- (A solid cube, so torches may hang on it.)
+		sturdy = true,
+		shape = boxes,
+		bounds = FULL_BOUNDS,
+	})
 end
 
 --[[ Doors (Minecraft's DoorBlock; Shared/Blocks/Doors) ]]
@@ -420,8 +462,12 @@ end
 	A door's wood (`door`): its name ("Oak": the door is "OakDoor"), its planks' colour, its upper
 	half's frame around the windows (`upper`, from the colour: the boxes the windows leave open,
 	made with `doorPiece`) and, closed, its insulation (Blocks `insulation`; default a wooden door's
-	0.1); and the door's own fields (OWN_FIELDS: its lore, Age, fuel...), which its item carries:
-	`texture` is its lower halves' faces, `topTexture` its upper halves' ("<Wood>DoorTop"'s).
+	0.1); and any other block field (Content/Schema's) for every half, over a wooden door's
+	(DOOR_DEFAULTS): an iron door's material, sound, hardness, tool and toolLevel, its `sounds`,
+	blast resistance, fire odds... The door's own fields (OWN_FIELDS: its lore, Age, fuel...) are
+	its item's: `texture` is its lower halves' faces, `topTexture` its upper halves'
+	("<Wood>DoorTop"'s). The rest of a half (its name, shape, outline, `door`, `item`...) is made
+	here: a door's.
 ]]
 export type DoorWood = {
 	wood: string,
@@ -435,7 +481,50 @@ export type DoorWood = {
 	skill: string?,
 	fuel: number?,
 	tags: { string }?,
+	-- (Any block field; these are a door's likeliest.)
+	displayName: string?,
+	material: string?,
+	sound: string?,
+	sounds: { [string]: string }?,
+	hardness: number?,
+	tool: string?,
+	toolLevel: number?,
+	blastResistance: number?,
+	flammable: Schema.FlammableSpec?,
+	radiationShield: number?,
+	zombieBreak: number?,
 }
+-- What every half is unless the door says otherwise: Minecraft's wooden door (strength 3, an
+-- axe, wood sounds; BreakDoorGoal's 240 ticks).
+local DOOR_DEFAULTS = table.freeze({
+	material = "WoodPlanks",
+	sound = "wood",
+	hardness = 3,
+	tool = "axe",
+	zombieBreak = 240,
+})
+-- (A door's own fields, and what its halves make of them.)
+local DOOR_OWN = table.freeze({
+	wood = Schema.STRING,
+	upper = Fields.FUNCTION,
+	topTexture = Schema.FACES,
+}) :: { [string]: Schema.Check }
+local DOOR_MADE = table.freeze({
+	name = "<Wood>Door and its halves' names",
+	shape = "the halves' design, from `upper`",
+	icon = "the whole door at half size",
+	bounds = "its 3 pixel panel",
+	collision = "its panel",
+	support = "the lower halves stand",
+	item = "the lower half facing North, hinged left, closed",
+	placeable = "its item alone",
+	drops = "the door, from a lower half",
+	door = "each half's facing, hinge, open state and half",
+	menu = "Door",
+	behaviour = "Door",
+	solid = "not solid, its panel collides",
+	collides = "its panel",
+})
 
 --[[
 	A box of a door half's design: pixels across the door (u: -8 at the hinge .. 8), up the half
@@ -478,8 +567,9 @@ end
 	as its `item`, and the upper halves drop nothing. Its panel is 3 pixels thick (`bounds`), across
 	the cell's side nearest the player who placed it while closed, against its hinge side while
 	open; players, mobs and items bump into it (`collides`) though it is not solid. Strength 3, an
-	axe, wood sounds; right clicking opens it (`menu` "Door", server World/DoorUse); a zombie needs
-	BreakDoorGoal's 240 ticks for any half; closed, it is a room's wall face (`insulation`).
+	axe, wood sounds unless `wood` says otherwise; right clicking opens it (`menu` "Door", server
+	World/DoorUse); a zombie needs BreakDoorGoal's 240 ticks for any half; closed, it is a room's
+	wall face (`insulation`).
 
 	Drawn from boxes: the lower half a panel with a raised middle and an iron handle on the side
 	away from the hinge, the upper half the wood's frame (`upper`). Its first box is a see-through
@@ -489,8 +579,23 @@ end
 	size, upright, as Minecraft's door item.
 ]]
 function Blocks.door(wood: DoorWood): { BlockSpec }
+	Fields.check(`door {wood.wood}`, wood, {
+		kind = "blocks",
+		own = DOOR_OWN,
+		needs = { "wood", "color", "upper" },
+		made = DOOR_MADE,
+	})
 	local list: { BlockSpec } = {}
 	local base = wood.wood .. "Door"
+	-- What every half says: the door's fields over a wooden door's (its item's own, its own and
+	-- `insulation`, the closed halves', aside).
+	local shared: { [string]: any } = table.clone(DOOR_DEFAULTS)
+	shared.displayName = wood.wood .. " Door"
+	for field, value in wood :: any do
+		if not DOOR_OWN[field] and not OWN[field] and field ~= "insulation" then
+			shared[field] = value
+		end
+	end
 	local plate: ShapeBox = { size = { 16, 16, 3 }, offset = { 0, 0, 6.5 }, transparency = 1 }
 	local lower: { ShapeBox } = {
 		plate,
@@ -526,30 +631,21 @@ function Blocks.door(wood: DoorWood): { BlockSpec }
 						.. (if open then "Open" else "")
 						.. (if isUpper then "Top" else "")
 					local item = name == base
-					local spec: BlockSpec = {
-						name = name,
-						displayName = wood.wood .. " Door",
-						color = wood.color,
-						material = "WoodPlanks",
-						sound = "wood",
-						solid = false,
-						collides = true,
-						placeable = item,
-						item = if item then nil else base,
-						hardness = 3,
-						tool = "axe",
-						shape = boxes,
-						bounds = wallBounds(side, 3),
-						support = if isUpper then nil else "Down",
-						drops = if isUpper then false else nil,
-						menu = "Door",
-						behaviour = "Door",
-						door = { facing = facing, hinge = hinge, open = open, upper = isUpper },
-						-- (BreakDoorGoal's 240 ticks, every half.)
-						zombieBreak = 240,
-						-- (Closed, a room's wall face; open, its air flows through.)
-						insulation = if open then nil else wood.insulation or 0.1,
-					}
+					local spec: BlockSpec = table.clone(shared) :: any
+					spec.name = name
+					spec.solid = false
+					spec.collides = true
+					spec.placeable = item
+					spec.item = if item then nil else base
+					spec.shape = boxes
+					spec.bounds = wallBounds(side, 3)
+					spec.support = if isUpper then nil else "Down"
+					spec.drops = if isUpper then false else nil
+					spec.menu = "Door"
+					spec.behaviour = "Door"
+					spec.door = { facing = facing, hinge = hinge, open = open, upper = isUpper }
+					-- (Closed, a room's wall face; open, its air flows through.)
+					spec.insulation = if open then nil else wood.insulation or 0.1
 					if name == base .. "Top" then
 						spec.texture = wood.topTexture
 					end
@@ -621,11 +717,22 @@ end
 	4 x 4 pixel post, and two rails (2 pixels wide, 3 tall, at 6..9 and 12..15) out to every side
 	of its mask. The lone post (mask 0) is `base.name` and the item, and the only one with `base`'s
 	own fields (OWN_FIELDS: its lore, faces, fuel...); the others are named after their sides
-	("OakFenceNorthEast") and name it as their `item`. Solid, but colliding only with its post and
-	arms (`collision`), 1.5 blocks high, as Minecraft's; its outline the post and arms 4 pixels
-	wide; server Behaviours/Fence picks the variant (Blocks.fenceConnections).
+	("OakFenceNorthEast") and name it as their `item`. Solid unless `base` says otherwise, but
+	colliding only with its post and arms (`collision`), 1.5 blocks high, as Minecraft's; its
+	outline the post and arms 4 pixels wide; server Behaviours/Fence picks the variant
+	(Blocks.fenceConnections). Those (FENCE_MADE) are made here.
 ]]
+local FENCE_MADE = table.freeze({
+	fence = "each variant's arms",
+	item = "the lone post",
+	placeable = "the lone post alone",
+	shape = "the post and its arms",
+	bounds = "the post and its arms",
+	collision = "the post and its arms, 1.5 blocks high",
+	behaviour = "Fence: it picks the variant",
+})
 function Blocks.fence(base: BlockSpec): { BlockSpec }
+	Fields.check(`fence {base.name}`, base, { kind = "blocks", needs = { "name" }, made = FENCE_MADE })
 	local list: { BlockSpec } = {}
 	for mask = 0, 15 do
 		local shape, bounds, collision = fencePost(mask)
@@ -640,7 +747,9 @@ function Blocks.fence(base: BlockSpec): { BlockSpec }
 				(spec :: any)[field] = nil
 			end
 		end
-		spec.solid = true
+		if spec.solid == nil then
+			spec.solid = true
+		end
 		spec.placeable = mask == 0
 		spec.item = if mask == 0 then nil else base.name
 		spec.shape = shape
@@ -663,17 +772,33 @@ end
 	look and only the eighth is sturdy and keeps `base.insulation` (a room's wall face; fewer let a
 	room's air through). "<Name>1" is the item; the others drop and are placed as it, each dropping
 	n of `base.drops`. Walking in it multiplies the speed by `speeds[n]`. The item is a single layer.
-	What `base` says of the item (its lore, Age, fuel...: ITEM_FIELDS) and its `texture` (the
-	texture pack's entry, which covers every layer) are layer 1's alone.
+	What `base` says of the item (its lore, Age, fuel, knowledge...: OWN_FIELDS) and its `texture`
+	(the texture pack's entry, which covers every layer) are layer 1's alone; everything else it
+	says, every layer's. What makes the heights (LAYERS_MADE) is made here.
 ]]
-local ITEM_FIELDS = { "lore", "age", "skill", "fuel", "tags", "texture" }
+local LAYERS_MADE = table.freeze({
+	layer = "1..8",
+	render = "Transparent: boxes that merge like glass",
+	transparency = "0",
+	solid = "layers 2..8",
+	sturdy = "the eighth",
+	replaceable = "the first",
+	placeable = "the first",
+	item = "the first",
+	dropCount = "n of its drops",
+	bounds = "2 pixels a layer",
+	collision = "a layer lower than it looks",
+	speedFactor = "its `speeds`",
+	icon = "a single layer",
+})
 function Blocks.layers(base: BlockSpec, speeds: { number }): { BlockSpec }
+	Fields.check(`layers {base.name}`, base, { kind = "blocks", needs = { "name" }, made = LAYERS_MADE })
 	local list: { BlockSpec } = {}
 	for n = 1, 8 do
 		local layered = n >= 2
 		local spec = table.clone(base)
 		if layered then
-			for _, field in ITEM_FIELDS do
+			for _, field in OWN_FIELDS do
 				(spec :: any)[field] = nil
 			end
 		end
@@ -700,18 +825,21 @@ end
 
 --[[
 	`spec` (its name, colour, `machine` kind of Shared/Machines and `energy`, Schema's: capacity 0
-	for a fuel-only kind; its lore, Age...) made a Mekanism style machine block: hardness 3.5, a
-	pickaxe to drop anything, metal sounds, drawn with its BlockDecor faces (decor: its name).
-	BlockList's heatMachine: the seasons' stoves, heaters and coolers. Returns `spec`.
+	for a fuel-only kind; its lore, Age...) made a Mekanism style machine block where it leaves a
+	field out: Metal, hardness 3.5, a pickaxe to drop anything, metal sounds, drawn with its
+	BlockDecor faces (decor: its name). BlockList's heatMachine: the seasons' stoves, heaters and
+	coolers. Returns `spec`.
 ]]
 function Blocks.machine(spec: BlockSpec): BlockSpec
-	spec.material = "Metal"
-	spec.sound = "metal"
-	spec.hardness = 3.5
-	spec.tool = "pickaxe"
-	spec.toolLevel = 0
-	spec.decor = spec.name
-	return spec
+	Fields.check(`machine {spec.name}`, spec, { kind = "blocks", needs = { "name", "machine" } })
+	return Fields.defaults(spec, {
+		material = "Metal",
+		sound = "metal",
+		hardness = 3.5,
+		tool = "pickaxe",
+		toolLevel = 0,
+		decor = spec.name,
+	})
 end
 
 return Blocks

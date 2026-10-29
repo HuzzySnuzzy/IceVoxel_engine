@@ -6,6 +6,12 @@
 	submodules (Items, Blocks, Plants, Recipes, Metal, Potions, Sounds) and are all here as
 	`define.<name>`; a pack's own helpers are its "_" modules.
 
+	A generator (a fluid, a door, a fence, an armor or tool set, a plant...) copies every field
+	the author gives it (Content/Schema's fields of its kind) onto what it makes, with its own
+	defaults only where one is left out, and checks what it is given first (Define/Fields: an
+	unknown field gets a "did you mean", a field it makes itself is refused), so nothing an entry
+	says is lost: an iron door is a door with an iron door's material, tool and sounds.
+
 	  Config          the game's tunables, for packs that read switches and numbers (the turrets',
 	                  the miner's and the press's `Enabled`, the cave lava's level)
 	  append(list, more)  adds `more`'s entries to the end of `list` (returns `list`)
@@ -17,12 +23,13 @@
 	  HELMET, CHESTPLATE, LEGGINGS, BOOTS   the armor pieces' shapes
 	  ARMOR_PIECES    each piece's name suffix, slot and model, head to feet
 	  armorSet(material)   a material's four pieces (ArmorMaterial: points, toughness, `tan`; what
-	                  every piece says of itself: equip sound, lore, Age, each one's icon)
+	                  every piece says of itself, any item field: equip sound, lore, Age,
+	                  shielding...; each one's icon)
 	  HANDLE, HANDLE_DARK   the tools' wooden handle and its darker grip
 	  handle(length, y)   a tool's handle box
 	  TOOL_SHAPES     the sword, shovel, pickaxe, axe and hoe, each a model of its head's colour
 	  toolSet(tier)   a tier's five tools (ToolTier: speed, level, durability, each shape's attack,
-	                  lore and icon; every tool's Age and fuel)
+	                  lore and icon; every tool's Age, fuel and any other item field)
 	  GLASS, bottle(water?)   the Glass Bottle, with a band of its liquid
 	  BUCKET_IRON, bucket(top), filledBucket(colour, material)   Minecraft's bucket, empty or full
 	  potion(variant, colour, extra?)   a potion item (a variant: its item name and shown name)
@@ -46,8 +53,11 @@
 	  fence(base)     a fence's 16 variants (lone post and arms) from its own fields
 	  layers(base, speeds)   a layered block's eight heights (snow layers)
 	  machine(spec)   a Mekanism style machine block (heaters, coolers) from its own fields
-	  (A block's lore, faces, Age, skill, fuel and tags are its item's: `fluid` puts them on the
-	  source, `door` on its item half, `fence` on the lone post; cave twins carry none.)
+	  OWN_FIELDS      a block's fields that are its item's: lore, faces, Age, skill, fuel, tags,
+	                  and what makes it an ore (`miner`, `knowledge`). `fluid` puts them on the
+	                  source, `door` on its item half, `fence` on the lone post, `layers` on layer
+	                  1; the generators' other blocks and cave twins carry none of them (each would
+	                  be an ore of its own), and every other field the entry gives.
 
 	Plants (Define/Plants: Minecraft's ground foliage)
 	  GROUND, STEM, LEAF, LEAF_LIGHT   the ground's height, flower stems' and leaves' greens
@@ -173,6 +183,7 @@ Define.darker = BlocksDefine.darker
 Define.fence = BlocksDefine.fence
 Define.layers = BlocksDefine.layers
 Define.machine = BlocksDefine.machine
+Define.OWN_FIELDS = BlocksDefine.OWN_FIELDS
 
 -- Plants.
 Define.GROUND = PlantsDefine.GROUND

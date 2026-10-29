@@ -4,7 +4,8 @@
 	recipes and the doors, fences and tools are made of; tags "logs", "planks" and "leaves" are
 	Core's).
 
-	  * Leaves hold up no torches or lanterns (Minecraft's LeavesBlock has no support shape).
+	  * Leaves hold up no torches or lanterns (Minecraft's LeavesBlock has no support shape), and
+	    no spawn or teleport lands on them (a tree top: `spawnUnsafe` "on", server Players/SafeSpot).
 	    Shears harvest them, as in Minecraft; otherwise they drop a sapling or sticks now and then
 	    (their `loot`, `leafLoot`: Items.lootDrop, also when they decay or a blast takes them), and
 	    they decay once their tree has no log left (server Behaviours/Leaves).
@@ -56,6 +57,7 @@ return {
 		texture = { All = "leaves" },
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("OakSapling", 20),
+		spawnUnsafe = "on",
 	},
 	{
 		name = "BirchLog",
@@ -83,6 +85,7 @@ return {
 		texture = { All = "leaves" },
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("BirchSapling", 20),
+		spawnUnsafe = "on",
 	},
 	{
 		name = "SpruceLog",
@@ -110,6 +113,7 @@ return {
 		texture = { All = "leaves" },
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("SpruceSapling", 20),
+		spawnUnsafe = "on",
 	},
 	{
 		name = "AcaciaLog",
@@ -137,6 +141,7 @@ return {
 		texture = { All = "leaves" },
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("AcaciaSapling", 20),
+		spawnUnsafe = "on",
 	},
 	{
 		name = "JungleLog",
@@ -164,6 +169,7 @@ return {
 		texture = { All = "leaves" },
 		lore = "Drops saplings and sticks now and then. Shears keep the leaves.",
 		loot = leafLoot("JungleSapling", 40),
+		spawnUnsafe = "on",
 	},
 	{
 		name = "Planks",

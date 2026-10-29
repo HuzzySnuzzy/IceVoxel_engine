@@ -212,6 +212,8 @@ return function(define: Define.Context): { BlockSpec }
 		stuck = { 0.25, 0.05, 0.25 },
 		texture = { Sprite = "cobweb" },
 		lore = "Slows anything caught in it. Gives String.",
+		-- (It holds whoever is in it: spawns never land in one, nor in its cave twin, Players/SafeSpot.)
+		spawnUnsafe = "in",
 	}
 	table.insert(list, cobweb)
 	table.insert(twinned, cobweb)

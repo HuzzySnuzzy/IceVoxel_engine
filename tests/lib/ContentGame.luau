@@ -297,6 +297,15 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 
 	-- What breaking a block gives (Shared/Items: tools, Shears, everything its loot may give).
 	local shears = Items.find("Shears")
+	-- (The best tool of each kind: a block whose drop needs Silk Touch, its `silkTouch`, gives it
+	-- only to its tool, never by itself.)
+	local best: { [string]: any } = {}
+	for _, def in Items.list do
+		local tool = def.tool
+		if tool and (best[tool.kind] == nil or tool.level > best[tool.kind].tool.level) then
+			best[tool.kind] = def
+		end
+	end
 	local function drops(block: string): { string }
 		local id = Blocks.find(block)
 		local out: { string } = {}
@@ -310,6 +319,10 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 			return out
 		end
 		add(Items.blockDrops(id))
+		local kind = Blocks.get(id).tool
+		if kind and best[kind] then
+			add(Items.drops(id, best[kind].id))
+		end
 		if shears then
 			add(Items.drops(id, shears))
 		end

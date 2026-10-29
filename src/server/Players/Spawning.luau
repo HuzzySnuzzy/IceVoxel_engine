@@ -5,7 +5,7 @@
 
 	The spawn column comes from the generator (dry land near the origin). Every spawn re-checks the
 	spot against the real world (players may have built or poured water there) and searches nearby
-	for a new one when it is no longer safe (rules in SpawnUnsafeBlocks).
+	for a new one when it is no longer safe (SafeSpot's rules: the blocks' `spawnUnsafe`).
 
 	A saved world puts a returning player back where they were (World/WorldSave's `placement`,
 	`setPlacement`): asked on every new character, it gives their saved feet and facing once (the

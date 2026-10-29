@@ -2,8 +2,21 @@
 --[[
 	Finds a safe place to put a character near a target column (spawning, teleporting).
 
-	Rules come from SpawnUnsafeBlocks. The search checks the target column first, then rings of
-	columns further and further away, and within each column the highest safe spot that is not
+	A spot is safe when:
+	  * the block the player stands on is solid and spawns may stand on it,
+	  * the Config.Players.SpawnHeadroom blocks the body takes are not solid and spawns may stand
+	    in them,
+	  * no block next to the body (the four sides, at body height) or right under the floor's sides
+	    is one spawns keep away from,
+	  * the feet are not below the natural terrain surface (no spawning inside caves).
+	What spawns keep clear of is the content packs' to say, each block's `spawnUnsafe`
+	(Content/Schema): "on" a floor never stood on (leaves: a tree top), "in" a block never stood in
+	(water, oil, fuel, cobwebs), "near" one never stood on, in or beside (cactus, lava, fire, the
+	campfire: they hurt). A fluid's covers every level of it and its cave twin, and a cave twin
+	keeps its twin's (Content/Define's caveTwin).
+
+	The search checks the target column first, then rings of columns further and further away
+	(Config.Players.SpawnSearchRadius), and within each column the highest safe spot that is not
 	below the natural terrain surface. Uses the real world data (player builds included), and may
 	generate chunks on the server while searching.
 
@@ -26,9 +39,9 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Biomes = require(Shared.Biomes)
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
+local Content = require(Shared.Content)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
-local SpawnUnsafeBlocks = require(script.Parent.SpawnUnsafeBlocks)
 
 type World = WorldServer.World
 
@@ -41,7 +54,7 @@ local STRUCTURE_CLEARANCE = 20
 local CITY_CLEARANCE = (Config.Cities.FullFloors - 1) * Config.Cities.FloorHeight + 1
 local SIDES = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
 
--- Turns block / fluid group names into a set of block ids.
+-- Turns block / fluid group names into a set of block ids (a fluid's name: every level of it).
 local function resolve(names: { string }): { [number]: boolean }
 	local set: { [number]: boolean } = {}
 	for _, name in names do
@@ -52,15 +65,26 @@ local function resolve(names: { string }): { [number]: boolean }
 				found = true
 			end
 		end
-		assert(found, `SpawnUnsafeBlocks: unknown block '{name}'`)
+		assert(found, `SafeSpot: unknown block '{name}'`)
 	end
 	return set
 end
 
-local unsafeFloor = resolve(SpawnUnsafeBlocks.Floor)
-local unsafeBody = resolve(SpawnUnsafeBlocks.Body)
-local hazards = resolve(SpawnUnsafeBlocks.Hazards)
-local headroom = SpawnUnsafeBlocks.Headroom
+-- The names of the blocks whose `spawnUnsafe` is one of `kinds` (see the header).
+local function unsafe(kinds: { string }): { string }
+	local names: { string } = {}
+	for _, spec in Content.default.blocks do
+		if spec.spawnUnsafe and table.find(kinds, spec.spawnUnsafe) then
+			table.insert(names, spec.name)
+		end
+	end
+	return names
+end
+
+local unsafeFloor = resolve(unsafe({ "on", "near" }))
+local unsafeBody = resolve(unsafe({ "in", "near" }))
+local hazards = resolve(unsafe({ "near" }))
+local headroom = Config.Players.SpawnHeadroom
 local water = resolve({ "Water" })
 
 local SafeSpot = {}
@@ -138,10 +162,10 @@ end
 
 --[[
 	Safe feet position (block coordinates) closest to column (x, z), searching up to `radius`
-	blocks away (default SpawnUnsafeBlocks.SearchRadius). Returns nil if there is none.
+	blocks away (default Config.Players.SpawnSearchRadius). Returns nil if there is none.
 ]]
 function SafeSpot.find(world: World, x: number, z: number, radius: number?): (number?, number, number)
-	local maxRadius = radius or SpawnUnsafeBlocks.SearchRadius
+	local maxRadius = radius or Config.Players.SpawnSearchRadius
 	for ring = 0, maxRadius do
 		-- Far rings are sampled every other block; spots are plentiful once we get there.
 		local stride = if ring > 8 then 2 else 1

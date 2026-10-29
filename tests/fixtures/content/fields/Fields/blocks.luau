@@ -41,4 +41,28 @@ return {
 	},
 	-- (An entry's own fuel beats its tag's.)
 	{ name = "Planks", override = true, fuel = 100 },
+	-- An explosive and its lit block (server Behaviours/Tnt), whose drop needs Silk Touch (its
+	-- pickaxe: Items.blockDrops) and which spawns keep clear of (server Players/SafeSpot).
+	{
+		name = "FixtureCharge",
+		color = { 200, 40, 40 },
+		material = "SmoothPlastic",
+		hardness = 0,
+		tool = "pickaxe",
+		toolLevel = 0,
+		silkTouch = true,
+		lit = "FixtureLitCharge",
+		spawnUnsafe = "near",
+	},
+	{
+		name = "FixtureLitCharge",
+		color = { 240, 120, 100 },
+		material = "SmoothPlastic",
+		breakable = false,
+		placeable = false,
+		drops = false,
+		item = "FixtureCharge",
+		behaviour = "Tnt",
+		fuse = 30,
+	},
 }

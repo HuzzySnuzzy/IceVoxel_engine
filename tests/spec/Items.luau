@@ -102,8 +102,10 @@ return function(t, shared, require)
 	t.test("items: packed and blue ice drop themselves with a pickaxe (Silk Touch's stand-in)", function()
 		-- Minecraft gives them only to Silk Touch, which the game has not: a pickaxe stands in, so
 		-- the Air Conditioner's packed ice and nine of it, blue ice, can be had. Ice gives nothing.
+		-- Breaking by itself (a blast) they give nothing either, as Minecraft's (their `silkTouch`).
 		for _, name in { "PackedIce", "BlueIce" } do
 			local block = Blocks.id[name]
+			t.eq(Items.blockDrops(block), nil, `{name} by itself: nothing`)
 			t.eq(Items.drops(block), nil, `{name} by hand: nothing`)
 			t.eq(Items.drops(block, Items.id.WoodenShovel), nil, `{name}: not with a shovel`)
 			t.eq(Items.drops(block, Items.id.Shears), nil, `{name}: nor Shears`)

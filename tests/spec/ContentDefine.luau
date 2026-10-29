@@ -1,7 +1,10 @@
 --[[
 	Content/Define, the helpers content packs build entries with: each generator's entries (names,
-	the fields it sets and the ones it leaves to the pack), and every helper its header lists being
-	there as `define.<name>`.
+	the fields it sets and the ones it leaves to the pack), every field an author gives reaching
+	what it makes (its defaults only where one is left out; the item's own fields, OWN_FIELDS, on
+	the item alone, never on a variant or a cave twin), what it is given checked (Define/Fields:
+	unknown fields with a "did you mean", the fields it makes refused), and every helper its
+	header lists being there as `define.<name>`.
 ]]
 
 return function(t, shared, require)
@@ -230,10 +233,9 @@ return function(t, shared, require)
 		t.eq(sapling.flammable, nil, "saplings don't burn")
 		t.eq(sapling.behaviour, "Sapling")
 		valid("blocks", { tulip, sapling })
-		t.ok(
-			not pcall(Define.plant, { name = "Bush", plant = { soil = "dirt" }, shape = table.create(5, {}) }),
-			"at most 4 boxes"
-		)
+		local box = Define.stem(4)
+		local ok, err = pcall(Define.plant, { name = "Bush", plant = { soil = "dirt" }, shape = table.create(5, box) })
+		t.ok(not ok and string.find(tostring(err), "more than 4 boxes", 1, true) ~= nil, `at most 4 boxes: {err}`)
 		valid("blocks", tall)
 		local pipe = Define.transmitter(
 			{ name = "TestPipe", transmitter = { kind = "fluid", tier = 1 } },
@@ -435,6 +437,326 @@ return function(t, shared, require)
 		end
 	end)
 
+	-- What `fn(...)` fails with ("(it worked)" when it does not).
+	local function failure(fn: (...any) -> ...any, ...: any): string
+		local ok, err = pcall(fn, ...)
+		return if ok then "(it worked)" else tostring(err)
+	end
+
+	t.test("define: a fluid and a door keep every field the author gives; an iron door", function()
+		-- Every field of the fluid's on every level (its look, sounds, radiation, fire odds...), its
+		-- item's own (lore, knowledge, the miner's) and heats on the source alone.
+		local acid = Define.fluid("Acid", {
+			name = "Acid",
+			color = { 1, 2, 3 },
+			material = "Water",
+			displayName = "Acid",
+			radiation = 2,
+			sounds = { step = "block.wool.step" },
+			flammable = { ignite = 5, burn = 5 },
+			insulation = 0.2,
+			tinted = true,
+			loot = "x",
+			hardness = 50,
+			spawnUnsafe = "in",
+			lore = "Acid.",
+			knowledge = { mine = 1 },
+			miner = { ticks = 1, joules = 1 },
+			heats = true,
+		}, 5)
+		for level, entry in acid do
+			for _, field in { "displayName", "radiation", "sounds", "flammable", "insulation", "tinted", "loot" } do
+				t.ok((entry :: any)[field] ~= nil, `{entry.name} keeps {field}`)
+			end
+			t.eq(entry.hardness, 50, "the author's over the default")
+			t.eq(entry.spawnUnsafe, "in")
+			t.eq(entry.render, "Fluid", "a default where it says none")
+			local source = level == 1
+			t.eq(entry.lore ~= nil, source, `{entry.name}: lore on the source`)
+			t.eq(entry.knowledge ~= nil, source, `{entry.name}: knowledge`)
+			t.eq(entry.miner ~= nil, source, `{entry.name}: miner`)
+			t.eq(entry.heats ~= nil, source, `{entry.name}: heats`)
+		end
+		valid("blocks", acid)
+		-- An iron door: every half its material, tool, strength and sounds; the item its own.
+		local iron = Define.door({
+			wood = "Iron",
+			color = { 200, 200, 200 },
+			upper = function(_c)
+				return { Define.doorPiece(-8, 8, -8, 8) }
+			end,
+			lore = "An iron door.",
+			hardness = 5,
+			tool = "pickaxe",
+			toolLevel = 0,
+			material = "Metal",
+			sound = "metal",
+			sounds = { open = "block.iron_door.open" },
+			flammable = { ignite = 5, burn = 20 },
+			blastResistance = 5,
+			displayName = "Iron Door",
+			radiationShield = 0.5,
+			zombieBreak = 900,
+			knowledge = { mine = 1 },
+		} :: any)
+		t.eq(#iron, 32)
+		for _, half in iron do
+			t.ok(half.hardness == 5 and half.tool == "pickaxe" and half.toolLevel == 0, `{half.name}: its strength`)
+			t.ok(half.material == "Metal" and half.sound == "metal", `{half.name}: iron`)
+			t.eq(half.sounds and half.sounds.open, "block.iron_door.open")
+			t.ok(half.flammable and half.blastResistance == 5 and half.radiationShield == 0.5, half.name)
+			t.eq(half.displayName, "Iron Door")
+			t.eq(half.zombieBreak, 900)
+			t.eq(half.menu, "Door", "still a door")
+			local item = half.name == "IronDoor"
+			t.eq(half.lore ~= nil, item, `{half.name}: lore on its item`)
+			t.eq(half.knowledge ~= nil, item, `{half.name}: knowledge on its item`)
+		end
+		valid("blocks", iron)
+		-- A door saying nothing more is Minecraft's wooden door.
+		local plain = Define.door({
+			wood = "Plain",
+			color = { 1, 1, 1 },
+			upper = function(_c)
+				return {}
+			end,
+		})
+		t.ok(plain[1].material == "WoodPlanks" and plain[1].tool == "axe" and plain[1].hardness == 3, "wood")
+		t.ok(plain[1].sound == "wood" and plain[1].zombieBreak == 240 and plain[1].displayName == "Plain Door")
+	end)
+
+	t.test("define: armor and tool sets put every item field on each piece", function()
+		local lead = Define.armorSet({
+			name = "Lead",
+			color = { 1, 1, 1 },
+			material = "Metal",
+			points = { 1, 2, 3, 4 },
+			toughness = 0,
+			shielding = 0.2,
+			skill = "metallurgy",
+			durability = 100,
+			tags = { "armor" },
+			maxStack = 2,
+		})
+		for _, piece in lead do
+			t.eq(piece.shielding, 0.2, `{piece.name}'s shielding`)
+			t.eq(piece.skill, "metallurgy")
+			t.eq(piece.durability, 100)
+			t.eq(piece.tags and piece.tags[1], "armor")
+			t.eq(piece.maxStack, 2, "the author's over one to a stack")
+			t.eq((piece :: any).points, nil, "the set's own fields are no piece's")
+		end
+		valid("items", lead)
+		local tools = Define.toolSet({
+			name = "Lead",
+			speed = 4,
+			level = 1,
+			durability = 100,
+			color = { 1, 1, 1 },
+			material = "Metal",
+			attack = { Sword = { 4, 1.6 }, Shovel = { 2, 1 }, Pickaxe = { 2, 1.2 }, Axe = { 7, 0.8 }, Hoe = { 1, 2 } },
+			skill = "metallurgy",
+			tags = { "tools" },
+			knowledge = { smelt = 1 },
+			icon = "",
+		})
+		for _, tool in tools do
+			t.ok(tool.skill == "metallurgy" and tool.tags and tool.knowledge, `{tool.name} keeps them`)
+			t.eq(tool.icon, "", "every tool's icon")
+			t.eq(tool.tilt, -45, "a default")
+		end
+		valid("items", tools)
+	end)
+
+	t.test("define: plants keep their soil, fire odds, sound, strength, outline and shape", function()
+		local bounds = { min = { 0, 0, 0 }, max = { 16, 16, 16 } }
+		local rose = Define.flower({
+			name = "DesertRose",
+			color = { 200, 50, 50 },
+			shape = { Define.stem(6) },
+			plant = { soil = "deadbush" },
+			flammable = { ignite = 0, burn = 0 },
+			sound = "wood",
+			hardness = 1,
+			bounds = bounds,
+		})
+		t.eq(rose.plant.soil, "deadbush", "its soil")
+		t.ok(rose.flammable.ignite == 0 and rose.flammable.burn == 0, "its fire odds")
+		t.eq(rose.sound, "wood")
+		t.eq(rose.hardness, 1)
+		t.eq(rose.bounds, bounds)
+		t.eq(rose.behaviour, "Plant", "the rest a plant's")
+		local palm = Define.sapling({
+			name = "PalmSapling",
+			color = { 1, 2, 3 },
+			shape = { Define.stem(9), Define.stem(3) },
+			plant = { soil = "deadbush" },
+		})
+		t.eq(#palm.shape, 2, "its own shape")
+		t.eq(palm.plant.soil, "deadbush")
+		t.eq(palm.behaviour, "Sapling")
+		local cap = Define.mushroom({
+			name = "Cap",
+			color = { 1, 2, 3 },
+			shape = { Define.stem(2) },
+			flammable = { ignite = 1, burn = 1 },
+		})
+		t.ok(cap.flammable ~= nil and cap.plant.soil == "mushroom", "a mushroom that burns")
+		local herb = Define.herb({
+			name = "Thyme",
+			shape = { Define.stem(2) },
+			plant = { soil = "deadbush" },
+			behaviour = "Plant",
+		})
+		t.ok(herb.plant.soil == "deadbush" and herb.behaviour == "Plant", "a herb's own soil and behaviour")
+		local tall = Define.tallFlower(
+			{ name = "Lily", color = { 1, 2, 3 }, shape = { Define.stem(6) }, flammable = { ignite = 1, burn = 2 } },
+			{ shape = { Define.stem(4) }, color = { 9, 9, 9 } },
+			{}
+		)
+		t.eq(tall[1].flammable.burn, 2, "the lower half's fire odds")
+		t.eq(tall[2].color[1], 9, "the upper half's own colour")
+		t.eq(tall[2].flammable.burn, 100, "a flower's where it says none")
+		valid("blocks", { rose, palm, cap, herb })
+		valid("blocks", tall)
+		-- Machines, transmitters and tanks the same: the author's fields, defaults for the rest.
+		local brass =
+			Define.machine({ name = "BrassHeater", machine = { kind = "heater" }, material = "Brick", hardness = 2 })
+		t.ok(brass.material == "Brick" and brass.hardness == 2 and brass.tool == "pickaxe", "a machine")
+		local pipe = Define.transmitter(
+			{ name = "TestPipe", transmitter = { kind = "fluid", tier = 1 }, hardness = 4 },
+			{ 1, 1, 1 },
+			{ 2, 2, 2 }
+		)
+		t.ok(pipe.hardness == 4 and pipe.sound == "metal", "a transmitter")
+	end)
+
+	t.test("define: a cave twin, a fence's arms and a layered block's heights are no ores of their own", function()
+		local ORE = {
+			lore = "x",
+			texture = { All = "x" },
+			age = "iron",
+			skill = "x",
+			fuel = 1,
+			tags = { "x" },
+			knowledge = { mine = 3 },
+			miner = { ticks = 10, joules = 10 },
+		}
+		local function ore(fields: { [string]: any }): any
+			local spec = table.clone(ORE)
+			for key, value in fields do
+				spec[key] = value
+			end
+			return spec
+		end
+		local twin =
+			Define.caveTwin(ore({ name = "UraniumRock", color = { 1, 1, 1 }, radiation = 1, heats = true, loot = "x" }))
+		local fence = Define.fence(ore({ name = "IronBars", color = { 1, 1, 1 }, radiation = 1 }))
+		local layers = Define.layers(ore({ name = "Ash", color = { 1, 1, 1 }, drops = "Ash1" }), table.create(8, 1))
+		for _, field in Define.OWN_FIELDS do
+			t.eq((twin :: any)[field], nil, `caveTwin keeps no {field}`)
+			t.ok((fence[1] :: any)[field] ~= nil, `the lone post keeps its {field}`)
+			t.ok((layers[1] :: any)[field] ~= nil, `layer 1 keeps its {field}`)
+			for n = 2, 16 do
+				t.eq((fence[n] :: any)[field], nil, `{fence[n].name}: no {field}`)
+			end
+			for n = 2, 8 do
+				t.eq((layers[n] :: any)[field], nil, `{layers[n].name}: no {field}`)
+			end
+		end
+		t.ok(twin.radiation == 1 and twin.heats and twin.loot == "x", "a twin keeps the rest of its twin's")
+		t.eq(fence[5].radiation, 1, "and an arm the rest of its fence's")
+		t.eq(layers[5].drops, "Ash1", "and a height the rest of its block's")
+	end)
+
+	t.test("define: a generator refuses what it would drop, naming it, with a did you mean", function()
+		-- (`fn(...)` fails with a message holding `text`.)
+		local function refuses(text: string, fn: (...any) -> ...any, ...: any)
+			local message = failure(fn, ...)
+			t.ok(string.find(message, text, 1, true) ~= nil, `{text}: {message}`)
+		end
+		local function armor(fields: { [string]: any }): any
+			local spec: { [string]: any } = {
+				name = "Lead",
+				color = { 1, 1, 1 },
+				material = "Metal",
+				points = { 1, 2, 3, 4 },
+				toughness = 0,
+			}
+			for key, value in fields do
+				spec[key] = value
+			end
+			return spec
+		end
+		local ATTACK = { Sword = { 4, 1.6 }, Shovel = { 2, 1 }, Pickaxe = { 2, 1.2 }, Axe = { 7, 0.8 }, Hoe = { 1, 2 } }
+		local TIN = { block = { 1, 1, 1 }, ingot = { 1, 1, 1 } }
+		local upper = function(_c)
+			return {}
+		end
+		refuses(
+			"Content/Define: armorSet Lead: shieldng is no field it may have (did you mean shielding?)",
+			Define.armorSet,
+			armor({ shieldng = 0.2 })
+		)
+		refuses(
+			"armorSet Lead: toughnes is no field it may have (did you mean toughness?)",
+			Define.armorSet,
+			armor({ toughnes = 1 })
+		)
+		refuses("armorSet Lead: shielding must be a number", Define.armorSet, armor({ shielding = "lots" }))
+		refuses("armorSet Lead: model is the generator's to make", Define.armorSet, armor({ model = Define.HELMET }))
+		refuses(
+			"armorSet Lead: toughness is missing",
+			Define.armorSet,
+			{ name = "Lead", color = { 1, 1, 1 }, material = "Metal", points = { 1, 2, 3, 4 } }
+		)
+		refuses("toolSet Lead: skil is no field it may have (did you mean skill?)", Define.toolSet, {
+			name = "Lead",
+			speed = 4,
+			level = 1,
+			durability = 9,
+			color = { 1, 1, 1 },
+			material = "Metal",
+			attack = ATTACK,
+			skil = "x",
+		})
+		refuses(
+			"door Iron: harndess is no field it may have (did you mean hardness?)",
+			Define.door,
+			{ wood = "Iron", color = { 1, 1, 1 }, upper = upper, harndess = 5 }
+		)
+		refuses(
+			"door Iron: shape is the generator's to make",
+			Define.door,
+			{ wood = "Iron", color = { 1, 1, 1 }, upper = upper, shape = {} }
+		)
+		refuses("door Iron: upper is missing", Define.door, { wood = "Iron", color = { 1, 1, 1 } })
+		refuses(
+			"fluid Acid: radiaton is no field it may have (did you mean radiation?)",
+			Define.fluid,
+			"Acid",
+			{ radiaton = 1 },
+			5
+		)
+		refuses("fluid Acid: its source is named Acid", Define.fluid, "Acid", { name = "Slime" }, 5)
+		refuses("fence Bars: fence is the generator's to make", Define.fence, { name = "Bars", fence = 3 })
+		refuses(
+			"plant Rose: flamable is no field it may have (did you mean flammable?)",
+			Define.flower,
+			{ name = "Rose", shape = { Define.stem(2) }, flamable = {} }
+		)
+		refuses(
+			"metal Tin: storgeBlock is no field it may have (did you mean storageBlock?)",
+			Define.metal,
+			{ name = "Tin", level = 1, colors = TIN, storgeBlock = {} }
+		)
+		refuses(
+			"metal Tin: oreBlock.harndess is no field it may have (did you mean hardness?)",
+			Define.metal,
+			{ name = "Tin", level = 1, colors = TIN, oreBlock = { harndess = 1 } }
+		)
+	end)
+
 	t.test("define: every helper its header lists is there", function()
 		for _, name in
 			{
@@ -470,6 +792,7 @@ return function(t, shared, require)
 				"fence",
 				"layers",
 				"machine",
+				"OWN_FIELDS",
 				"plant",
 				"tallIcon",
 				"tallPlant",

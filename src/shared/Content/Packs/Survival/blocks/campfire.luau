@@ -15,7 +15,7 @@
 	game has no enchantment for: here it drops itself, so a campfire can be moved. A heat source
 	(`heats`, Shared/ToughAsNails/Temperature: 3 steps within 5 blocks, 5 within 2) where dirty water
 	boils clean (Shared/ToughAsNails/Boiling); it crackles like fire (Audio/Ambience through
-	FireRenderer.firesNear). Spawns never land in or next to one (Players/SpawnUnsafeBlocks). Its
+	FireRenderer.firesNear). Spawns never land in or next to one (`spawnUnsafe`, Players/SafeSpot). Its
 	item shows a few flames over the logs (`icon`).
 ]]
 
@@ -63,5 +63,6 @@ return {
 		obstructs = true,
 		heats = true,
 		lore = "Warms you when close and boils dirty water clean. Hot to touch.",
+		spawnUnsafe = "near",
 	},
 } :: { Schema.BlockSpec }

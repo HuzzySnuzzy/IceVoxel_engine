@@ -1839,7 +1839,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   origin (`origin` line: where it is, its moves and the last one's cost) and the players tracked.
   Off, other players are their characters, as before.
 - **Safe spawns.** Spawns and teleports never land in water, lava, oil, fuel or fire, on leaves or
-  next to cacti, lava or fire; the rules live in `SpawnUnsafeBlocks`.
+  next to cacti, lava or fire; each block's `spawnUnsafe` says so (`Players/SafeSpot`).
 - **A texture pack.** Every block texture is in one module, `src/shared/TexturePack.luau`, like a
   Minecraft resource pack: 512 × 512 images, one per 3-stud block face, drawn as MaterialVariants
   and face images that take each block's own colour (one bark image for every log, each in its
@@ -2534,7 +2534,7 @@ src/server   -> ServerScriptService.IceVoxel
                             /effect) + EffectRules (giving, ticking, the fluids' effects, the
                             sync rule; pure) + EffectCommand (/effect; pure),
                             Spawning,
-                            SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
+                            SafeSpot (safety rules: blocks' `spawnUnsafe`), Teleport (map,
                             spectators), TeleportCommands + TeleportCommand (/tp; pure),
                             LocateCommands + LocateCommand (/locate: parsing, answers and their
                             links, the searches' budgeted queue; pure),
@@ -4065,12 +4065,13 @@ rebuilt, off-screen in the background within the frame budget, and swapped in.
 - the vine's normal map (`97312068579996`) is kept in the pack but never drawn: the vine is a
   plate, whose picture is a Decal, and a Decal takes no normal map.
 
-**Spawn safety.** `src/server/Players/SpawnUnsafeBlocks.luau` lists what a player must not stand on
-(`Floor`), stand in (`Body`, fluids by name) or touch (`Hazards`), plus the headroom and search
-radius. Spawns and map teleports search outward for the closest spot that passes, and never put
-players below the natural surface (caves), nor at the bottom of a pit or a ravine (the floor at
-the natural surface must be solid); the generator's spawn also skips columns a surface cave
-opens.
+**Spawn safety.** A block's `spawnUnsafe` says what a player must not do with it: `"on"` (stand on
+it: leaves), `"in"` (stand in it: a fluid, every level of it, or a cobweb) or `"near"` (stand on,
+in or beside it: cactus, lava, fire); `Config.Players.SpawnHeadroom` and `SpawnSearchRadius` are
+the headroom and search radius. Spawns and map teleports search outward for the closest spot that
+passes, and never put players below the natural surface (caves), nor at the bottom of a pit or a
+ravine (the floor at the natural surface must be solid); the generator's spawn also skips columns
+a surface cave opens.
 
 **The map.** The minimap and world map draw terrain with EditableImage. That API works in Studio
 right away, but **published games** need the experience owner to be 13+ and ID verified and to turn
@@ -4471,18 +4472,15 @@ gives (`Shared/ToughAsNails/Drinks` reads every pack's): `thirst` points and the
 modifier, dirty water's `chance` of TAN's Thirst effect for `effectTicks`, `warmth` / `chill`
 ticks, `effects` (by name, as a food's), `mana`, the `empty` container it leaves (an item name;
 none: it is used up) and `sips` for a canteen (its `durability` is its sips). Numbers left out are
-0. Two tables in Drinks tie the containers together: `FILLS` (an empty container and the dirty
-water it fills with at a water source) and `PURIFIED_OF` (dirty water and its purified twin). A
-new container is two entries' `drink`, a line in each table and its recipes, as the bowls are:
+0. The entries tie the containers together: an empty container's `fills` (the dirty water it
+becomes at a water source) and dirty water's `purified` (its drink's: its purified twin). A new
+container is three entries and its recipes, as the bowls are:
 
 ```lua
 -- The Survival pack's items/drinks
-{ name = "DirtyWaterBowl", --[[ ... ]] drink = { thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300, empty = "Bowl" } },
+{ name = "Bowl", --[[ ... ]] fills = "DirtyWaterBowl" },
+{ name = "DirtyWaterBowl", --[[ ... ]] drink = { thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300, empty = "Bowl", purified = "PurifiedWaterBowl" } },
 { name = "PurifiedWaterBowl", --[[ ... ]] drink = { thirst = 7, hydration = 0.45, empty = "Bowl" } },
--- Drinks.FILLS
-[I.Bowl] = I.DirtyWaterBowl,
--- Drinks.PURIFIED_OF
-[I.DirtyWaterBowl] = I.PurifiedWaterBowl,
 -- The Survival pack's recipes: the furnace and mint
 define.smelting("DirtyWaterBowl", "PurifiedWaterBowl")
 define.shapeless({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl")
@@ -4494,8 +4492,8 @@ A drink of its own (the teas, a juice) is only an entry's `drink` with the conta
 steps towards neutral without pushing it past neutral. Status effects or mana make a drink a
 potion, drunk any time (the Apocalypse pack's Soda, the Terraria pack's mana potions). Drinks
 with the same numbers are one drink, so bottled water is purified water (the tooltip's "Water"
-pill too). Every `PURIFIED_OF` pair also boils clean on a Campfire (`ToughAsNails/Boiling`) and
-shows in JEI's Campfire tab, with nothing more to add.
+pill too). Every dirty water with a `purified` twin also boils clean on a Campfire
+(`ToughAsNails/Boiling`) and shows in JEI's Campfire tab, with nothing more to add.
 
 **Insulating armor (Tough As Nails).** An armor piece's `tan = { warmth = n, cooling = n,
 freezeImmune = true }` on its entry: `warmth` steps pull a cold target up towards 0, `cooling`
@@ -4584,8 +4582,9 @@ than fuel resists 100, so blasts in it break nothing. What else sets fuel off is
 
 **Explosive blocks.** What a blast does to a block it reaches goes through
 `Explosions.setPrimer` (`Behaviours/Tnt` sets it: TNT and Nukes are lit with a short fuse, lit ones
-stay). A new explosive adds its unlit and lit ids to `LIT_OF` and `FUSE_OF` there and says what it
-does when its fuse runs out in `detonate`; `Tnt.prime(world, x, y, z)` lights one from a server
+stay). A new explosive's entry names its lit block (`lit`), whose entry gives its fuse in ticks
+(`fuse`, with `behaviour = "Tnt"`), and says what it does when its fuse runs out in `detonate`;
+`Tnt.prime(world, x, y, z)` lights one from a server
 script, and `Nuke.detonate(world, x, y, z)` (`World/Nuke`) sets off a crater anywhere.
 
 ## Development

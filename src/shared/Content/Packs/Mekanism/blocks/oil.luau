@@ -42,6 +42,8 @@ return function(define: Define.Context): { BlockSpec }
 		transparency = 0.1,
 		reflectance = 0.2,
 		lore = "Crude oil from underground wells. Refine it into Fuel.",
+		-- (Spawns never land in it, nor in fuel: Players/SafeSpot.)
+		spawnUnsafe = "in",
 	}, 20)
 	define.append(list, oil)
 	local fuel = define.fluid("Fuel", {
@@ -52,6 +54,7 @@ return function(define: Define.Context): { BlockSpec }
 		reflectance = 0.05,
 		blastResistance = 0,
 		lore = "Refined oil. Burns in a Combustion Generator.",
+		spawnUnsafe = "in",
 	}, 5, { flammable = { ignite = 100, burn = 100 } })
 	define.append(list, fuel)
 	table.insert(list, define.caveFluid(oil[1]))

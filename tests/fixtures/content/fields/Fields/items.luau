@@ -13,6 +13,8 @@ return function(define)
 			radiation = 0.2,
 			fuel = 120,
 			tags = { "fixture_tag", "coals" },
+			-- (An empty container: at water it becomes the flask, ToughAsNails/Drinks.)
+			fills = "FixtureFlask",
 		},
 		{
 			name = "FixtureHelmet",
@@ -63,6 +65,7 @@ return function(define)
 				effects = { { effect = "Speed", ticks = 80 } },
 				mana = 5,
 				empty = "GlassBottle",
+				purified = "FixtureFlask",
 			},
 		},
 		-- (Purified water's drink, in sips: alike drinks are one.)

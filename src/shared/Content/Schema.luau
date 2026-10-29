@@ -72,10 +72,24 @@
 	                                header says what each does); effects and cures by their
 	                                Shared/Effects names
 	  drink            item         what drinking it does: { thirst?, hydration?, chance?,
-	                                effectTicks?, warmth?, chill?, effects?, mana?, empty?, sips? }
-	                                (ToughAsNails/Drinks.ITEMS, whose header says what each does;
-	                                numbers left out are 0); `empty` the container it leaves, by
-	                                name
+	                                effectTicks?, warmth?, chill?, effects?, mana?, empty?, sips?,
+	                                purified? } (ToughAsNails/Drinks.ITEMS, whose header says what
+	                                each does; numbers left out are 0); `empty` the container it
+	                                leaves, by name; dirty water's `purified`, its purified twin by
+	                                name (Drinks.PURIFIED_OF: what a campfire boils it into)
+	  fills            item         an empty container: the item it becomes, filled at a water
+	                                source (its dirty water, a drink: Drinks.FILLS)
+	  silkTouch        block        true: its drop needs Minecraft's Silk Touch, for which its
+	                                `tool` stands in here (packed and blue ice): a player mining it
+	                                with that tool gets it, and it drops nothing when it breaks by
+	                                itself (a blast; Items.blockDrops)
+	  lit, fuse        block        an explosive: `lit` the block lighting it makes (TNT's Lit TNT),
+	                                and that lit block's `fuse`, ticks to its blast (server
+	                                Behaviours/Tnt)
+	  spawnUnsafe      block        what a spawn or teleport keeps clear of (server Players/SafeSpot):
+	                                "on" never stood on (leaves: a tree top), "in" never stood in
+	                                (water, cobwebs), "near" never stood on, in or beside (cactus,
+	                                lava, fire: they hurt); a fluid's covers every level of it
 	  override         block, item, texture, biome, effect, potion, pool, structure, sound, track
 	                   patches the entry of that name an earlier pack made
 	The fields blocks always had (blastResistance, zombieBreak, flammable) are on the entries
@@ -193,6 +207,8 @@ export type DrinkSpec = {
 	mana: number?,
 	empty: string?,
 	sips: boolean?,
+	-- (Dirty water: its purified twin, by name.)
+	purified: string?,
 }
 
 export type BlockSpec = {
@@ -278,6 +294,13 @@ export type BlockSpec = {
 	workSound: string?,
 	loot: (string | { Pool })?,
 	override: boolean?,
+	-- Its drop needs Silk Touch, its `tool` standing in (the header).
+	silkTouch: boolean?,
+	-- An explosive's lit block, by name, and a lit block's fuse in ticks (the header).
+	lit: string?,
+	fuse: number?,
+	-- What a spawn keeps clear of it: "on", "in" or "near" (the header).
+	spawnUnsafe: string?,
 }
 
 -- One box of an item's model (`model`).
@@ -348,6 +371,8 @@ export type ItemSpec = {
 	food: FoodSpec?,
 	drink: DrinkSpec?,
 	override: boolean?,
+	-- An empty container: the item it becomes filled at water, by name (the header).
+	fills: string?,
 }
 
 -- A block's or an item's entry, where either will do (Content `entry`).
@@ -1199,6 +1224,11 @@ Schema.BLOCK_FIELDS = {
 	workSound = STRING,
 	loot = oneOf("a loot table's name or its pools", { STRING, LOOT_TABLE }),
 	override = BOOLEAN,
+	-- (The header's: Silk Touch, an explosive, spawns.)
+	silkTouch = BOOLEAN,
+	lit = STRING,
+	fuse = NUMBER,
+	spawnUnsafe = enum({ "on", "in", "near" }),
 } :: { [string]: Check }
 
 --[[
@@ -1319,6 +1349,7 @@ local DRINK = record({
 	mana = NUMBER,
 	empty = STRING,
 	sips = BOOLEAN,
+	purified = STRING,
 })
 Schema.ITEM_FIELDS = {
 	name = STRING,
@@ -1372,6 +1403,8 @@ Schema.ITEM_FIELDS = {
 	food = FOOD,
 	drink = DRINK,
 	override = BOOLEAN,
+	-- (The header's: an empty container.)
+	fills = STRING,
 } :: { [string]: Check }
 
 -- Recipes (Recipe above), and the fields each type needs and may have.

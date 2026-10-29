@@ -80,6 +80,8 @@ return function(define: Define.Context): { BlockSpec }
 			sturdy = false,
 			texture = { Sides = "cactus side", Top = "cactus top", Bottom = "cactus top" },
 			lore = "A desert plant, all spines and water.",
+			-- (Its spines hurt: spawns land neither on nor beside it, Players/SafeSpot.)
+			spawnUnsafe = "near",
 		},
 	}
 

@@ -2,7 +2,9 @@
 --[[
 	TNT and the Nuke: Minecraft 1.20.1's TntBlock and its PrimedTnt entity, the Nuke lit the same
 	way (BlockList Tnt, LitTnt, Nuke, LitNuke; Config.Tnt, Config.Nuke). The behaviour of the lit
-	blocks; `prime` lights an unlit one.
+	blocks; `prime` lights an unlit one. What is explosive is the content packs' to say: an unlit
+	explosive's entry names the block lighting it makes (`lit`, Content/Schema), and that lit
+	block's entry its full fuse in ticks (`fuse`; Shared/Content checks that a `lit` block has one).
 
 	  Lighting  (TntBlock.explode / onCaughtFire / use / wasExploded) TNT or a Nuke becomes its lit
 	            block (`prime`) with the hiss (entity.tnt.primed, Audio/Sounds):
@@ -43,6 +45,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
+local Content = require(Shared.Content)
 local Coords = require(Shared.World.Coords)
 local SharedSounds = require(Shared.Sounds)
 
@@ -52,8 +55,8 @@ local Nuke = require(script.Parent.Parent.World.Nuke)
 
 local B = Blocks.id
 local AIR = Blocks.AIR
-local TNT, LIT_TNT = B.Tnt, B.LitTnt
-local NUKE, LIT_NUKE = B.Nuke, B.LitNuke
+-- (The Nuke's blast is its crater and its fuse beeps: World/Nuke.)
+local LIT_NUKE = B.LitNuke
 -- (nil until Shared/Sounds has them.)
 local PRIMED = SharedSounds.find("entity.tnt.primed")
 local ALARM = SharedSounds.find("entity.nuke.alarm")
@@ -62,9 +65,18 @@ local SWEEP_AT = 1024
 -- Ticks after which a record that did not run belongs to a lit block that is gone.
 local STALE_TICKS = 20
 
--- An unlit explosive's lit block, and a lit block's full fuse (ticks).
-local LIT_OF: { [number]: number } = { [TNT] = LIT_TNT, [NUKE] = LIT_NUKE }
-local FUSE_OF: { [number]: number } = { [LIT_TNT] = Config.Tnt.FuseTicks, [LIT_NUKE] = Config.Nuke.FuseTicks }
+-- An unlit explosive's lit block, and a lit block's full fuse (ticks): the content packs' block
+-- entries' `lit` and `fuse` (see the header).
+local LIT_OF: { [number]: number } = {}
+local FUSE_OF: { [number]: number } = {}
+for index, spec in Content.default.blocks do
+	if spec.lit then
+		LIT_OF[index - 1] = B[spec.lit]
+	end
+	if spec.fuse then
+		FUSE_OF[index - 1] = spec.fuse
+	end
+end
 
 -- A lit block's state: the tick its fuse runs out, the last tick it ran, the Nuke's next beep,
 -- its fall (speed in blocks a tick, and how far into the next cell) and what it fell into.

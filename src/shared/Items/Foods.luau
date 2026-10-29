@@ -22,7 +22,8 @@
 	and a Thirst badge shows; nothing at all with thirst off too), as before the food bar. Crackers
 	are dry: their risk is the Thirst effect either way. Rolled once a food (`effect`,
 	LivingEntity.addEatEffect). Cooking is the furnace's (Crafting/Recipes); a mob that dies
-	burning drops its meat cooked (`COOKED`, Minecraft's furnace_smelt loot function).
+	burning drops its meat cooked (`COOKED`, Minecraft's furnace_smelt loot function: what the
+	furnace makes of it).
 
 	The medical supplies (the zombie apocalypse, server Apocalypse/Infection and /Survival) are
 	used the same way, with their own sound (`sound`: the user's client plays it as the use
@@ -58,11 +59,13 @@
 	food is a `food` on its item's entry: `food = { heal = 4, nutrition = 8, saturation = 0.8 }`,
 	with optional `effect = { kind, chance, ticks }` (kind "hunger" or "thirst"), `useTicks`,
 	`cures` (effect names), `effects` ({ effect = name, ticks, amplifier? }), `aftermath` ({
-	effect = name, ticks, amplifier?, stage }), `setback`, `sound` and `burp` (sound events are the
-	Sounds spec's to check).
+	effect = name, ticks, amplifier?, stage }), `setback`, `sound` and `burp` (`sound` is any of the
+	packs' sound events: Shared/Content checks its name as the packs load, naming the pack, and the
+	client plays it as it is).
 ]]
 
 local Content = require(script.Parent.Parent.Content)
+local Smelting = require(script.Parent.Parent.Crafting.Smelting)
 local Effects = require(script.Parent.Parent.Effects)
 local GameMode = require(script.Parent.Parent.GameMode)
 local Hunger = require(script.Parent.Parent.Hunger)
@@ -232,15 +235,19 @@ for _, spec in content.items do
 end
 Foods.ITEMS = table.freeze(ITEMS)
 
-local I = Items.id
-
--- Raw meat -> its cooked twin (a burning mob's drop; the furnace has the same pairs).
-Foods.COOKED = table.freeze({
-	[I.RawBeef] = I.CookedBeef,
-	[I.RawPorkchop] = I.CookedPorkchop,
-	[I.RawMutton] = I.CookedMutton,
-	[I.RawChicken] = I.CookedChicken,
-} :: { [number]: number })
+--[[
+	Raw meat -> its cooked twin (a burning mob's drop): every food a furnace makes into another
+	food (Crafting/Smelting: the packs' smelting recipes, Minecraft's furnace_smelt), so a new raw
+	food and its smelting recipe are all a pack writes.
+]]
+local COOKED: { [number]: number } = {}
+for raw in ITEMS do
+	local smelted = Smelting.result(raw)
+	if smelted and ITEMS[smelted.item] then
+		COOKED[raw] = smelted.item
+	end
+end
+Foods.COOKED = table.freeze(COOKED)
 
 -- What eating `item` does (nil: not food).
 function Foods.of(item: number?): Food?

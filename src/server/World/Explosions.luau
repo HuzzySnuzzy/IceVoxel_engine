@@ -22,9 +22,11 @@
 	                  hurts entities in explode() before finalizeExplosion drops anything;
 	               3. Minecraft's explosion sound (entity.generic.explode, Audio/Sounds);
 	               4. every affected non-air block becomes air, dropping its items (its `loot`
-	                  now and then, Items.lootDrop: leaves their sapling or sticks, else its
-	                  usual drop) with chance 1 / power (Behaviours/Drops; containers drop
-	                  their contents through Inventories as for any change);
+	                  now and then, Items.lootDrop: leaves their sapling or sticks, gravel Flint,
+	                  grass Straw; else its usual drop, Items.blockDrops: none for a block whose
+	                  drop needs Silk Touch, packed and blue ice) with chance 1 / power
+	                  (Behaviours/Drops; containers drop their contents through Inventories as
+	                  for any change);
 	                  unclaimed fuel among them is ignited instead (it is the explosive), and
 	                  explosive blocks are handed to the primer (`setPrimer`, Behaviours/Tnt:
 	                  TNT and the Nuke are lit with a short fuse, lit ones stay, as Minecraft's

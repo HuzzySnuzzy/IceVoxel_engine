@@ -22,8 +22,14 @@
 	What burns (Minecraft's FireBlock.bootStrap): every flower and tall flower, both halves, at 60
 	/ 100 (`flower`, `tulip` and `tallFlower` give it); no sapling and no mushroom. A pack's grass,
 	ferns and herbs give theirs on their entries.
+
+	Each generator fills in only what the entry leaves out: a flower in the desert (`plant = { soil
+	= "deadbush" }`: sand too), a mushroom that burns, a sapling of its own shape or a plant that
+	sounds like wood keeps what it says. What it is given is checked first (Define/Fields: an
+	unknown field gets a "did you mean").
 ]]
 
+local Fields = require(script.Parent.Fields)
 local Schema = require(script.Parent.Parent.Schema)
 
 type BlockSpec = Schema.BlockSpec
@@ -125,32 +131,45 @@ local stem = Plants.stem
 --[[ Entries ]]
 
 --[[
-	`spec` made a plant (see the header): its material (default SmoothPlastic), not solid, broken
-	at once, grass sounds, washed away, the Plant behaviour unless it has its own, scattered; an
-	upper half (`plant.bottom`) names its lower half as its `item` and drops nothing, anything else
-	stands on its soil (`support` "Down"). A plant with `placeable = false` is no item of its own
-	either: an item places it (its `places`: the herbs, planted by their leaves and roots).
-	At most 4 boxes. Returns `spec`.
+	`spec` made a plant (see the header), where it leaves a field out (PLANT_DEFAULTS): SmoothPlastic,
+	not solid, broken at once, grass sounds, washed away, the Plant behaviour, scattered; an upper
+	half (`plant.bottom`) names its lower half as its `item`, is no item of its own and drops
+	nothing, anything else stands on its soil (`support` "Down"). A plant with `placeable = false`
+	is no item of its own either: an item places it (its `places`: the herbs, planted by their
+	leaves and roots). At most 4 boxes. Returns `spec`.
 ]]
+local PLANT_DEFAULTS = table.freeze({
+	material = SMOOTH,
+	solid = false,
+	hardness = 0,
+	sound = "grass",
+	brokenByFluid = true,
+	behaviour = "Plant",
+	scatter = true,
+})
 function Plants.plant(spec: BlockSpec): BlockSpec
+	Fields.check(`plant {spec.name}`, spec, { kind = "blocks", needs = { "name", "plant", "shape" } })
 	local info = spec.plant :: PlantSpec
 	local upper = info.bottom ~= nil
-	spec.material = spec.material or SMOOTH
-	spec.solid = false
+	Fields.defaults(spec, PLANT_DEFAULTS)
 	spec.placeable = not upper and spec.placeable ~= false
-	spec.hardness = 0
-	spec.sound = "grass"
-	spec.brokenByFluid = true
-	spec.behaviour = spec.behaviour or "Plant"
-	spec.scatter = true
 	if upper then
-		spec.item = info.bottom
-		spec.drops = false
+		spec.item = spec.item or info.bottom
+		if spec.drops == nil then
+			spec.drops = false
+		end
 	else
-		spec.support = "Down"
+		spec.support = spec.support or "Down"
 	end
 	assert(spec.shape and #spec.shape <= 4, `Plant {spec.name} has more than 4 boxes`)
 	return spec
+end
+
+-- `spec`'s `plant`, its soil `soil` unless it names its own (a new table: its other fields kept).
+local function onSoil(spec: BlockSpec, soil: string): PlantSpec
+	local info: PlantSpec = table.clone(spec.plant or {})
+	info.soil = info.soil or soil
+	return info
 end
 local plant = Plants.plant
 
@@ -170,6 +189,8 @@ end
 	otherwise. Returns { lower, upper }.
 ]]
 function Plants.tallPlant(lower: BlockSpec, upper: BlockSpec): { BlockSpec }
+	Fields.check(`tallPlant {lower.name}`, lower, { kind = "blocks", needs = { "name", "shape" } })
+	Fields.check(`tallPlant {lower.name}'s upper half`, upper, { kind = "blocks", needs = { "name", "shape" } })
 	local soil = if lower.plant then lower.plant.soil else nil
 	lower.plant = { soil = soil or "dirt", top = upper.name }
 	upper.plant = { bottom = lower.name }
@@ -186,80 +207,95 @@ end
 
 --[[
 	A tall flower: `lower` (its name, colour, display name, boxes and own fields) and `upper` (the
-	upper half's boxes and texture), the upper half named "<name>Top", shown and coloured as the
-	lower; its item the lower half's boxes and then `extra`. Burns as flowers do. Returns { lower,
-	upper }.
+	upper half's fields: its boxes and texture, and any other block field), the upper half named
+	"<name>Top", shown and coloured as the lower unless `upper` says otherwise; its item the lower
+	half's boxes and then `extra`. Both burn as flowers do unless they say otherwise. Returns {
+	lower, upper }.
 ]]
-function Plants.tallFlower(
-	lower: BlockSpec,
-	upper: { shape: { ShapeBox }, texture: Faces? },
-	extra: { ShapeBox }
-): { BlockSpec }
-	lower.icon = Plants.tallIcon(lower.shape :: { ShapeBox }, extra)
-	lower.flammable = FLOWER_FIRE
-	return Plants.tallPlant(lower, {
-		name = lower.name .. "Top",
+export type TallTop = {
+	shape: { ShapeBox },
+	texture: Faces?,
+	displayName: string?,
+	color: { number }?,
+	flammable: FlammableSpec?,
+}
+function Plants.tallFlower(lower: BlockSpec, upper: TallTop, extra: { ShapeBox }): { BlockSpec }
+	Fields.check(`tallFlower {lower.name}`, lower, { kind = "blocks", needs = { "name", "shape" } })
+	Fields.check(`tallFlower {lower.name}'s upper half`, upper, {
+		kind = "blocks",
+		needs = { "shape" },
+		made = { name = "<name>Top", plant = "its lower half" },
+	})
+	lower.icon = lower.icon or Plants.tallIcon(lower.shape :: { ShapeBox }, extra)
+	lower.flammable = lower.flammable or FLOWER_FIRE
+	local top: BlockSpec = table.clone(upper) :: any
+	top.name = lower.name .. "Top"
+	Fields.defaults(top, {
 		displayName = lower.displayName or lower.name,
 		color = lower.color,
-		shape = upper.shape,
-		texture = upper.texture,
 		flammable = FLOWER_FIRE,
 	})
+	return Plants.tallPlant(lower, top)
 end
 
--- A flower on dirt (Minecraft's 5..11 outline): `spec` (its name, colour, boxes...); burns.
+-- A flower (Minecraft's 5..11 outline) on dirt unless its `plant.soil` says otherwise: `spec`
+-- (its name, colour, boxes...); burns.
 function Plants.flower(spec: BlockSpec): BlockSpec
-	spec.plant = { soil = "dirt" }
-	spec.bounds = Plants.FLOWER_BOUNDS
-	spec.flammable = FLOWER_FIRE
+	spec.plant = onSoil(spec, "dirt")
+	Fields.defaults(spec, { bounds = Plants.FLOWER_BOUNDS, flammable = FLOWER_FIRE })
 	return plant(spec)
 end
 
--- A tulip: a cup of `spec`'s colour on a stem between two long leaves.
+-- A tulip: a cup of `spec`'s colour on a stem between two long leaves (unless it has a `shape`).
 function Plants.tulip(spec: BlockSpec): BlockSpec
-	spec.shape = {
-		stem(6),
-		leaf({ 0, GROUND, 0 }, { 1.6, 5, 0.4 }, 22, 45, LEAF),
-		leaf({ 0, GROUND, 0 }, { 1.6, 4.4, 0.4 }, 26, 225, LEAF_LIGHT),
-		plantBox({ 2.6, 3.4, 2.6 }, { 0, -0.6, 0 }, spec.color :: { number }, { 0, 45, 0 }),
-	}
+	spec.shape = spec.shape
+		or {
+			stem(6),
+			leaf({ 0, GROUND, 0 }, { 1.6, 5, 0.4 }, 22, 45, LEAF),
+			leaf({ 0, GROUND, 0 }, { 1.6, 4.4, 0.4 }, 26, 225, LEAF_LIGHT),
+			plantBox({ 2.6, 3.4, 2.6 }, { 0, -0.6, 0 }, spec.color :: { number }, { 0, 45, 0 }),
+		}
 	return Plants.flower(spec)
 end
 
--- A mushroom (Minecraft's MushroomBlock soil set, `plant.soil` "mushroom"): `spec` (its boxes...).
+-- A mushroom (Minecraft's MushroomBlock soil set, `plant.soil` "mushroom", and its outline, unless
+-- it says otherwise): `spec` (its boxes...).
 function Plants.mushroom(spec: BlockSpec): BlockSpec
-	spec.plant = { soil = "mushroom" }
-	spec.bounds = Plants.MUSHROOM_BOUNDS
+	spec.plant = onSoil(spec, "mushroom")
+	Fields.defaults(spec, { bounds = Plants.MUSHROOM_BOUNDS })
 	return plant(spec)
 end
 
 --[[
 	A sapling (Minecraft's SaplingBlock) on dirt-type soil, grown into its tree by a random tick
 	under the open sky (server Behaviours/Sapling): drawn as its texture pack sprite, else as a stem
-	with two leaf lumps of `spec`'s colour. Minecraft's outline: 2..14 across, 12 high.
+	with two leaf lumps of `spec`'s colour (or its own `shape`). Minecraft's outline: 2..14 across,
+	12 high. Its soil, behaviour, shape and outline are `spec`'s where it gives them.
 ]]
 function Plants.sapling(spec: BlockSpec): BlockSpec
 	local colour = spec.color :: { number }
-	spec.behaviour = "Sapling"
-	spec.plant = { soil = "dirt" }
-	spec.shape = {
-		stem(6),
-		plantBox({ 4.5, 3, 4.5 }, { 0, -2.5, 0 }, colour),
-		plantBox({ 3, 2.5, 3 }, { 0, -0.5, 0 }, colour, { 0, 45, 0 }),
-	}
-	spec.bounds = Plants.SAPLING_BOUNDS
+	spec.plant = onSoil(spec, "dirt")
+	Fields.defaults(spec, {
+		behaviour = "Sapling",
+		shape = {
+			stem(6),
+			plantBox({ 4.5, 3, 4.5 }, { 0, -2.5, 0 }, colour),
+			plantBox({ 3, 2.5, 3 }, { 0, -0.5, 0 }, colour, { 0, 45, 0 }),
+		},
+		bounds = Plants.SAPLING_BOUNDS,
+	})
 	return plant(spec)
 end
 
 --[[
 	A herb (Tough As Nails' water and teas): `spec` (its name, colour, `shape` inside `bounds`, its
 	texture, how it burns...) made a plant on dirt that is no item of its own (its item plants it,
-	its `places`), spreading slowly (server Behaviours/Herb). Returns `spec`.
+	its `places`), spreading slowly (server Behaviours/Herb), unless it says otherwise. Returns
+	`spec`.
 ]]
 function Plants.herb(spec: BlockSpec): BlockSpec
-	spec.placeable = false
-	spec.behaviour = "Herb"
-	spec.plant = { soil = "dirt" }
+	spec.plant = onSoil(spec, "dirt")
+	Fields.defaults(spec, { placeable = false, behaviour = "Herb" })
 	return plant(spec)
 end
 

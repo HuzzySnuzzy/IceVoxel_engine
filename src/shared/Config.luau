@@ -1428,6 +1428,12 @@ local Config = {
 		},
 		-- Studs: where every character stands on the server (what replicates: the fake coordinates).
 		ParkPosition = { 0, 20000, 0 },
+		-- Spawning and teleporting (server Players/SafeSpot; what a spot keeps clear of is the
+		-- blocks' `spawnUnsafe`): free blocks a character needs above its floor (the default
+		-- character is about 1.7 tall), and how far (blocks) around the wanted column it searches
+		-- for a safe spot.
+		SpawnHeadroom = 2,
+		SpawnSearchRadius = 48,
 	},
 
 	-- Interaction ------------------------------------------------------------------------------------
@@ -2124,8 +2130,9 @@ local Config = {
 	-- TNT (Minecraft 1.20.1's TntBlock and PrimedTnt; server Behaviours/Tnt): lit by flint and
 	-- steel, fire (lava lights the fire) or a blast, it falls while its fuse burns, then explodes.
 	Tnt = {
-		-- Ticks from lighting to the blast (PrimedTnt's 80: 4 s). A blast lights TNT with a short
-		-- fuse instead: rand(FuseTicks / 4) + FuseTicks / 8 (10..29 ticks), so chains ripple.
+		-- Ticks from lighting to the blast (PrimedTnt's 80: 4 s; the Minecraft pack's Lit TNT's
+		-- `fuse`). A blast lights TNT with a short fuse instead: rand(FuseTicks / 4) + FuseTicks / 8
+		-- (10..29 ticks), so chains ripple.
 		FuseTicks = 80,
 		-- Minecraft's TNT: power 4, no fire.
 		Power = 4,
@@ -2134,7 +2141,8 @@ local Config = {
 	-- wails for FuseTicks, then digs a crater no ray explosion could (Minecraft's rays thin out and
 	-- cost too much at such powers).
 	Nuke = {
-		-- Ticks from lighting to the blast (10 s); a blast lights it with the short fuse rule.
+		-- Ticks from lighting to the blast (10 s; the Minecraft pack's Lit Nuke's `fuse`); a blast
+		-- lights it with the short fuse rule.
 		FuseTicks = 200,
 		-- Ticks between the alarm's beeps while it is lit.
 		AlarmTicks = 20,

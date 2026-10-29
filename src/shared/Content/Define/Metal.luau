@@ -18,8 +18,13 @@
 	degrees) and nugget: Define's models in the metal's colours, blank icons. Their textures are
 	"<name> ore", "<name> block" and "raw <name> block" (lower case), blank and untinted, each on
 	its block's material.
+
+	What a metal is given is checked first (Define/Fields): its own fields and colours, and each
+	piece's fields against Content/Schema's block or item fields (an unknown one gets a "did you
+	mean").
 ]]
 
+local Fields = require(script.Parent.Fields)
 local Items = require(script.Parent.Items)
 local Recipes = require(script.Parent.Recipes)
 local Schema = require(script.Parent.Parent.Schema)
@@ -72,7 +77,34 @@ local function append<T>(list: { T }, more: { T })
 	end
 end
 
+-- A metal's own fields (MetalSpec), each piece's checked against its kind's fields.
+local RGB = Schema.BLOCK_FIELDS.color
+local function FALSE(value: any): string?
+	return if value == false then nil else ` must be false (an alloy: no ore), not {tostring(value)}`
+end
+local METAL_OWN = table.freeze({
+	name = Schema.STRING,
+	level = Schema.NUMBER,
+	ore = FALSE,
+	colors = Schema.record({
+		ore = RGB,
+		block = RGB,
+		rawBlock = RGB,
+		raw = RGB,
+		ingot = RGB,
+		light = RGB,
+		dark = RGB,
+	}, { "block", "ingot" }),
+	oreBlock = Schema.record(Schema.BLOCK_FIELDS),
+	storageBlock = Schema.record(Schema.BLOCK_FIELDS),
+	rawBlock = Schema.record(Schema.BLOCK_FIELDS),
+	rawItem = Schema.record(Schema.ITEM_FIELDS),
+	ingotItem = Schema.record(Schema.ITEM_FIELDS),
+	nuggetItem = Schema.record(Schema.ITEM_FIELDS),
+}) :: { [string]: Schema.Check }
+
 local function metal(spec: MetalSpec): Metal
+	Fields.check(`metal {spec.name}`, spec, { own = METAL_OWN, needs = { "name", "level", "colors" } })
 	local name, level, colors = spec.name, spec.level, spec.colors
 	local lower = string.lower(name)
 	local hasOre = spec.ore ~= false

@@ -4,8 +4,8 @@
 	run it). TAN purifies water in a furnace (Crafting/Recipes' smelting) and, in its 1.12 days,
 	by its own campfire; here a right click with dirty water on the Campfire (BlockList, always
 	lit) does it at once, one container a click: whatever Drinks names as dirty (`Drinks.isDirty`:
-	a Dirty Water Bottle, a Dirty Water Canteen, and any container added to Drinks.PURIFIED_OF
-	later) becomes its purified twin (`Drinks.purifiedOf`). The campfire burns no fuel and moves
+	a Dirty Water Bottle, Canteen or Bowl, and any drink whose entry names a `purified` twin)
+	becomes its purified twin (`Drinks.purifiedOf`). The campfire burns no fuel and moves
 	with its owner (it drops itself), so the time the water takes is the price: one container
 	every INTERVAL ticks (60: 3 s) per player, as Minecraft's campfire cooks free but slowly
 	(600 ticks for food, where a furnace burns fuel). Mint stays the quick cure, a stack at a
