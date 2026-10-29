@@ -1,6 +1,6 @@
 return {
 	{
-		name = "Marsh",
+		name = "FixtureMarsh",
 		bands = { "Lowland" },
 		temperature = 0.4,
 		humidity = 0.9,
@@ -18,7 +18,7 @@ return {
 			plants = { { "ShortGrass", 3 }, { "Fern", 1 } },
 			flowers = { chance = 0.01, species = { { "BlueOrchid", 1 } } },
 		},
-		tags = { "is_forest", "is_wet" },
+		tags = { "is_forest", "is_fixture_wet" },
 	},
 	-- (A list is replaced whole: the plains' flowers are these two now, the rest of their foliage
 	-- kept, the Survival pack's mint too.)

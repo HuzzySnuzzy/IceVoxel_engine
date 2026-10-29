@@ -1,9 +1,9 @@
 return {
 	-- (The Electric Age's row 2 is free: Demolition's line runs straight along it.)
 	{
-		id = "blasting",
-		name = "Blasting",
-		description = "Unlocks the Blast Charge",
+		id = "fixture_blasting",
+		name = "Fixture Blasting",
+		description = "Unlocks the Fixture Blast Charge",
 		row = 2,
 		icon = "Tnt",
 		age = "electric",

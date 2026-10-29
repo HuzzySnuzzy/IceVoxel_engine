@@ -1527,7 +1527,13 @@ Schema.ORE_FIELDS = {
 	size = NUMBER,
 	minY = NUMBER,
 	maxY = NUMBER,
-	shape = enum({ "trapezoid" }),
+	-- (Left out, an ore is uniform: "trapezoid" is the one value to write.)
+	shape = function(value: any): string?
+		if value ~= "trapezoid" then
+			return ` must be "trapezoid" (or left out: uniform veins), not {describe(value)}`
+		end
+		return nil
+	end,
 	plateau = NUMBER,
 	depth = BOOLEAN,
 	dry = BOOLEAN,
@@ -2258,6 +2264,31 @@ local VALUE_CHECKS: { [string]: Check } = {
 	templates = TEMPLATE_TEXT,
 }
 
+-- A loot table's problem in words: "[1].entries[2][2] must be a weight above 0" is "pool 1,
+-- entry 2: its weight must be above 0".
+local LOOT_VALUES = { "item", "weight", "fewest", "most", "wear" }
+local function lootWords(problem: string): string
+	local pool, entry, value, rest = string.match(problem, "^%[(%d+)%]%.entries%[(%d+)%]%[(%d+)%](.*)$")
+	if pool then
+		local said = string.gsub(rest :: string, "^ must be a weight above 0", " must be above 0")
+		return `pool {pool}, entry {entry}: its {LOOT_VALUES[tonumber(value) :: number] or `value {value}`}{said}`
+	end
+	pool, entry, rest = string.match(problem, "^%[(%d+)%]%.entries%[(%d+)%](.*)$")
+	if pool then
+		return `pool {pool}, entry {entry}{rest}`
+	end
+	local field
+	pool, field, rest = string.match(problem, "^%[(%d+)%]%.([%a_]+)(.*)$")
+	if pool then
+		return `pool {pool}: {field}{rest}`
+	end
+	pool, rest = string.match(problem, "^%[(%d+)%](.*)$")
+	if pool then
+		return `pool {pool}{rest}`
+	end
+	return `it{problem}`
+end
+
 --[[
 	What is wrong with one entry of `kind` (nil: nothing): an unknown field ("harndess is no field
 	it may have (did you mean hardness?)"), a wrong type ("color[2] must be a number 0..255, not
@@ -2268,6 +2299,9 @@ function Schema.check(kind: string, entry: any): string?
 	if fields == nil then
 		local check = VALUE_CHECKS[kind]
 		local problem = check(entry)
+		if problem and kind == "loot" then
+			return lootWords(problem)
+		end
 		return if problem then `it{problem}` else nil
 	end
 	if type(entry) ~= "table" then

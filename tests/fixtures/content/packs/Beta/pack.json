@@ -1,4 +1,4 @@
 {
 	"order": 10,
-	"description": "The JSON fixture pack (tests/spec/Content): every kind as a .json file but potions (brewed from the game's bottles: the Brewing pack)."
+	"description": "The JSON fixture pack (tests/spec/Content): every kind as a .json file but potions (brewed from the game's bottles: the FixtureBrewing pack)."
 }

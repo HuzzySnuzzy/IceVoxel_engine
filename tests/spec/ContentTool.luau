@@ -1,17 +1,24 @@
 --[[
 	The content tool (tests/content; its workings tests/lib/ContentTool, its view of the game
-	tests/lib/ContentGame): every check on the fixture packs in tests/fixtures/content/tool (Lint,
-	one of each finding, and LintPatch, a JSON pack patching it), grafted into a fresh game after
-	its own packs; the game's packs, which load and whose faces rule agrees with the TexturePack
-	spec's; a load error, named; what each entry came from (the loader's record, content.origin:
-	the fixture packs of tests/spec/Content, Gamma's overrides; a kind folder's recipes by their
-	file); the lists and the pages (biomes and biome tags too); and a new pack's modules, which load
-	and pass the check as they are made.
+	tests/lib/ContentGame): every check on the fixture packs in tests/fixtures/content/tool
+	(FixtureLint, one of each finding, and FixtureLintPatch, a JSON pack patching it), grafted into
+	a fresh game after every pack there (lib/GamePacks); what each finding says (an item out of
+	reach named by its cause, a brewed potion item's fix on its potion, a pack naming another's
+	entries without requiring it, or one loading after it); the game's packs, which load, the
+	shipped ones with no warning, and whose faces rule agrees with the TexturePack spec's; a load
+	error, named; what each entry came from (the loader's record, content.origin: the fixture packs
+	of tests/spec/Content, Gamma's overrides; a kind folder's recipes by their file); the lists
+	(with the nearest kind or pack for a word that is neither, lore and fuel as the game has them)
+	and the pages (biomes and biome tags too, every field whole, every way survival gets an item);
+	and a new pack's modules, which load and pass the check as they are made, a second one too,
+	their header saying where their order puts them.
 
-	Nothing here pins an id or a total: the game's content may grow.
+	Nothing here pins an id or a total: the game's content may grow, and an author's packs move
+	nothing here (the fixtures load after them and name what they make "Fixture...").
 ]]
 
 local Loader = require("../lib/Loader")
+local GamePacks = require("../lib/GamePacks")
 local ContentGame = require("../lib/ContentGame")
 local ContentTool = require("../lib/ContentTool")
 
@@ -36,8 +43,8 @@ return function(t, shared, require, _server, _client)
 
 	local function withLint(): any
 		local view, problem = fresh(function(env, packs)
-			env.graft(`{TOOL}/Lint`, packs, "Lint")
-			env.graft(`{TOOL}/LintPatch`, packs, "LintPatch")
+			GamePacks.graftLast(env, `{TOOL}/FixtureLint`, packs, "FixtureLint")
+			GamePacks.graftLast(env, `{TOOL}/FixtureLintPatch`, packs, "FixtureLintPatch")
 		end)
 		assert(view, problem)
 		return view
@@ -83,36 +90,95 @@ return function(t, shared, require, _server, _client)
 	t.test("content tool: one of each finding, each on its entry and pack, nothing else", function()
 		local view = withLint()
 		local findings = ContentTool.check(view)
-		-- (LintSecond's recipe is the Lint pack's fifth: recipes are named by their place in it.)
+		-- (FixtureLintSecond's recipe is the FixtureLint pack's fifth: recipes are named by their
+		-- place in it.)
 		local place = 5
 		t.eq(
-			table.concat(of(findings, "Lint"), ", "),
+			table.concat(of(findings, "FixtureLint"), ", "),
 			table.concat({
-				"age item LintLate",
-				"faces block LintBare",
-				"icon item LintNoIcon",
-				"lore block LintBare",
-				`recipe recipe #{place} (LintSecond)`,
-				"survival block LintBare",
-				"survival item LintLost",
-				'texture texture "lint unused"',
+				"age item FixtureLintLate",
+				"faces block FixtureLintBare",
+				"icon item FixtureLintNoIcon",
+				"loot loot table fixture_lint_unused",
+				"lore block FixtureLintBare",
+				`recipe recipe #{place} (FixtureLintSecond)`,
+				"requires requires",
+				"survival block FixtureLintBare",
+				"survival block FixtureLintOre",
+				"survival item FixtureLintLost",
+				"survival item FixtureLintNugget",
+				"survival item FixtureLintRaw",
+				'texture texture "fixture lint unused"',
 			}, ", "),
-			"Lint's findings"
+			"FixtureLint's findings"
 		)
-		t.eq(#of(findings, "LintPatch"), 0, "nothing against the patch")
+		t.eq(#of(findings, "FixtureLintPatch"), 0, "nothing against the patch")
 		-- Levels: the reach is an info, the rest warnings.
-		t.eq((finding(findings, "survival", "item LintLost") :: any).level, "info")
-		t.eq((finding(findings, "lore", "block LintBare") :: any).level, "warning")
+		t.eq((finding(findings, "survival", "item FixtureLintLost") :: any).level, "info")
+		t.eq((finding(findings, "lore", "block FixtureLintBare") :: any).level, "warning")
 		-- What each says.
-		local age = (finding(findings, "age", "item LintLate") :: any).text
-		t.ok(string.find(age, "LintPart", 1, true) and string.find(age, 'age = "iron"', 1, true), age)
+		local age = (finding(findings, "age", "item FixtureLintLate") :: any).text
+		t.ok(string.find(age, "FixtureLintPart", 1, true) and string.find(age, 'age = "iron"', 1, true), age)
 		t.ok(string.find(age, "Stone Age", 1, true) and string.find(age, "Iron Age", 1, true), age)
-		local shadow = (finding(findings, "recipe", `recipe #{place} (LintSecond)`) :: any).text
+		local shadow = (finding(findings, "recipe", `recipe #{place} (FixtureLintSecond)`) :: any).text
 		t.ok(
-			string.find(shadow, "LintFirst", 1, true) and string.find(shadow, "pack Lint's recipe #4", 1, true),
+			string.find(shadow, "FixtureLintFirst", 1, true)
+				and string.find(shadow, "pack FixtureLint's recipe #4", 1, true),
 			shadow
 		)
-		t.ok(string.find((finding(findings, "faces", "block LintBare") :: any).text, "texture", 1, true))
+		t.ok(string.find((finding(findings, "faces", "block FixtureLintBare") :: any).text, "texture", 1, true))
+		t.ok(
+			string.find(
+				(finding(findings, "loot", "loot table fixture_lint_unused") :: any).text,
+				"nothing rolls it",
+				1,
+				true
+			)
+		)
+		local lintOnly: { ContentTool.Finding } = {}
+		for _, each in findings do
+			if each.pack == "FixtureLint" then
+				table.insert(lintOnly, each)
+			end
+		end
+		local requires = finding(lintOnly, "requires", "requires") :: any
+		t.eq(requires.level, "warning", "a pack it could require: a warning")
+		t.ok(
+			string.find(requires.text, "pack Minecraft's Speed (item FixtureLintLate)", 1, true)
+				and string.find(requires.text, 'requires = { "Core", "Minecraft" }?', 1, true),
+			requires.text
+		)
+		-- Out of reach: named by the cause, not round the loop of the raw drop and its nuggets.
+		local function says(subject: string): string
+			return (finding(findings, "survival", subject) :: any).text
+		end
+		t.eq(
+			says("item FixtureLintLost"),
+			"survival never gives it: no recipe, loot table, drop, mob drop or structure gives it"
+		)
+		t.eq(
+			says("block FixtureLintOre"),
+			"survival never gives it: the world never makes it and no recipe, loot table, drop, mob drop or structure gives it"
+		)
+		t.ok(
+			string.find(
+				says("item FixtureLintRaw"),
+				"only breaking FixtureLintOre gives it, and the world never makes it",
+				1,
+				true
+			),
+			says("item FixtureLintRaw")
+		)
+		local nugget = says("item FixtureLintNugget")
+		t.ok(
+			string.find(
+				nugget,
+				"its recipe needs FixtureLintRaw, which survival never gives: only breaking FixtureLintOre",
+				1,
+				true
+			) and string.find(nugget, "no ore feature", 1, true),
+			nugget
+		)
 		-- Findings come pack by pack in load order, warnings before infos.
 		local packs = {}
 		for _, each in view.packs do
@@ -133,13 +199,13 @@ return function(t, shared, require, _server, _client)
 	t.test("content tool: survival's reach follows drops, recipes and Ages", function()
 		local view = withLint()
 		local reach = ContentTool.reach(view)
-		t.eq(reach.age.LintClean, 1, "found in the world: its drop")
-		t.ok(string.find(reach.how.LintClean, "breaking LintClean", 1, true), reach.how.LintClean)
-		t.eq(reach.age.LintNoIcon, 1, "smelted from it")
-		t.eq(reach.age.LintPart, 2, "its own Age")
-		t.eq(reach.age.LintLate, 2, "its part's Age")
-		t.eq(reach.age.LintLost, nil, "never")
-		t.eq(reach.age.LintBare, nil)
+		t.eq(reach.age.FixtureLintClean, 1, "found in the world: its drop")
+		t.ok(string.find(reach.how.FixtureLintClean, "breaking FixtureLintClean", 1, true), reach.how.FixtureLintClean)
+		t.eq(reach.age.FixtureLintNoIcon, 1, "smelted from it")
+		t.eq(reach.age.FixtureLintPart, 2, "its own Age")
+		t.eq(reach.age.FixtureLintLate, 2, "its part's Age")
+		t.eq(reach.age.FixtureLintLost, nil, "never")
+		t.eq(reach.age.FixtureLintBare, nil)
 		-- The game's: mined, smelted, crafted from them, looted, a mob's.
 		t.eq(reach.age.Cobblestone, 1, "Stone breaks into it")
 		t.eq(reach.age.IronIngot, 1, "smelted from Raw Iron, which Iron Ore drops")
@@ -152,19 +218,40 @@ return function(t, shared, require, _server, _client)
 		local view = withLint()
 		local findings = ContentTool.check(view)
 		local lines = ContentTool.report(view, findings)
+		-- (Their orders: after every pack's, an author's too.)
+		local orders: { [string]: number } = {}
+		for _, info in view.packs do
+			orders[info.name] = info.order
+		end
 		t.ok(
-			has(lines, { "Lint", "order 900", "blocks 2", "items 6", "recipes 5", "textures 2", "ores 1" }),
-			"Lint's summary"
+			has(lines, {
+				"FixtureLint",
+				`order {orders.FixtureLint}`,
+				"blocks 3",
+				"items 8",
+				"recipes 7",
+				"textures 2",
+				"loot 1",
+				"ores 1",
+			}),
+			"FixtureLint's summary"
 		)
-		t.ok(has(lines, { "LintPatch", "order 910", "blocks 0 (1 override)" }), "the patch's")
-		t.ok(has(lines, { "warning", "pack Lint, block LintBare: no lore line" }), "a warning names its pack and entry")
-		t.ok(has(lines, { "info", "pack Lint, item LintLost:" }), "an info")
+		t.ok(
+			has(lines, { "FixtureLintPatch", `order {orders.FixtureLintPatch}`, "blocks 0 (1 override)" }),
+			"the patch's"
+		)
+		t.ok(
+			has(lines, { "warning", "pack FixtureLint, block FixtureLintBare: no lore line" }),
+			"a warning names its pack and entry"
+		)
+		t.ok(has(lines, { "info", "pack FixtureLint, item FixtureLintLost:" }), "an info")
 		local counts = lines[#lines]
 		t.ok(string.find(counts, "warnings (", 1, true) and string.find(counts, "1 never crafted", 1, true), counts)
+		t.ok(string.find(counts, "1 unused loot", 1, true) and string.find(counts, "requires", 1, true), counts)
 		-- (The fixture's own: the game's packs carry no warnings.)
 		local lint: { any } = {}
 		for _, finding in findings do
-			if finding.pack == "Lint" or finding.pack == "LintPatch" then
+			if finding.pack == "FixtureLint" or finding.pack == "FixtureLintPatch" then
 				table.insert(lint, finding)
 			end
 		end
@@ -188,6 +275,11 @@ return function(t, shared, require, _server, _client)
 		for _, each in ContentTool.check(view) do
 			t.ok(checks[each.check], `known check {each.check}`)
 			t.ok(packs[each.pack], `{each.subject}'s pack {each.pack}`)
+			-- (The game's own packs carry no warning: their `requires` say what they need, the
+			-- dependencies no `requires` can say are infos.)
+			if table.find(GamePacks.SHIPPED, each.pack) then
+				t.ok(each.level == "info", `pack {each.pack}, {each.subject}: {each.text}`)
+			end
 		end
 		local summary = ContentTool.summary(view)
 		t.eq(#summary, #view.packs, "a summary line per pack")
@@ -319,59 +411,91 @@ return function(t, shared, require, _server, _client)
 
 	t.test("content tool: list by kind and pack; show an entry, its patches and what it became", function()
 		local view = withLint()
-		local blocks = assert(ContentTool.list(view, "blocks", "Lint"))
-		t.eq(blocks[1], "blocks: 2")
-		t.ok(has(blocks, { tostring(view.content.blockId.LintBare), "LintBare", "Lint" }), "id, name, pack")
-		t.ok(has(blocks, { "LintClean", "Lint (patched by LintPatch)" }))
-		t.ok(has(assert(ContentTool.list(view, "blocks", "LintPatch")), { "LintClean" }), "what a pack patched")
-		local all = assert(ContentTool.list(view, nil, "Lint"))
-		for _, head in { "blocks: 2", "items: 6", "recipes: 5", "textures: 2", "ores: 1", "loot: 0" } do
+		local blocks = assert(ContentTool.list(view, "blocks", "FixtureLint"))
+		t.eq(blocks[1], "blocks: 3")
+		t.ok(
+			has(blocks, { tostring(view.content.blockId.FixtureLintBare), "FixtureLintBare", "FixtureLint" }),
+			"id, name, pack"
+		)
+		t.ok(has(blocks, { "FixtureLintClean", "FixtureLint (patched by FixtureLintPatch)" }))
+		t.ok(
+			has(assert(ContentTool.list(view, "blocks", "FixtureLintPatch")), { "FixtureLintClean" }),
+			"what a pack patched"
+		)
+		local all = assert(ContentTool.list(view, nil, "FixtureLint"))
+		for _, head in { "blocks: 3", "items: 8", "recipes: 7", "textures: 2", "ores: 1", "loot: 1" } do
 			t.ok(table.find(all, head) ~= nil, head)
 		end
-		t.ok(has(all, { "lint unused", "Lint", "blank" }), "a blank texture")
+		t.ok(has(all, { "fixture lint unused", "FixtureLint", "blank" }), "a blank texture")
 		local none, why = ContentTool.list(view, "blcoks")
 		t.eq(none, nil)
-		t.ok(why and string.find(why, "no kind blcoks", 1, true), why)
+		t.ok(why and string.find(why, "no kind blcoks (did you mean blocks?)", 1, true), why)
 		t.eq((ContentTool.list(view, nil, "Nowhere")), nil, "an unknown pack")
+		-- (`list block`: one word, neither a kind nor a pack: the nearest of either.)
+		local _, word = ContentTool.list(view, nil, "block")
+		t.ok(word and string.find(word, "no kind or pack block (did you mean blocks?)", 1, true), word)
+		local _, packWord = ContentTool.list(view, nil, "FixtureLnit")
+		t.ok(packWord and string.find(packWord, "(did you mean FixtureLint?)", 1, true), packWord)
+		-- Lore: every line the game has, an entry's own too; fuel: a tag's and an entry's own.
+		local lore = assert(ContentTool.list(view, "lore", "FixtureLint"))
+		t.ok(has(lore, { "FixtureLintClean", "FixtureLint" }) and lore[1] ~= "lore: 0", lore[1])
+		t.ok(not has(lore, { "FixtureLintBare" }), "a line it has not")
+		local fuel = assert(ContentTool.list(view, "fuel"))
+		t.ok(has(fuel, { "#planks", "300 ticks", "Core" }), "a tag's")
+		t.ok(has(fuel, { "Coal", "1600 ticks", "Minecraft" }), "an entry's own")
 
-		local page = assert(ContentTool.show(view, "LintClean"))
-		t.ok(has(page, { "block LintClean", `id {view.content.blockId.LintClean}`, "pack Lint" }), page[1])
-		t.ok(has(page, { "patched by: LintPatch" }))
+		local page = assert(ContentTool.show(view, "FixtureLintClean"))
+		t.ok(
+			has(page, { "block FixtureLintClean", `id {view.content.blockId.FixtureLintClean}`, "pack FixtureLint" }),
+			page[1]
+		)
+		t.ok(has(page, { "patched by: FixtureLintPatch" }))
 		t.ok(has(page, { "hardness = 2" }), "the merged fields")
 		t.ok(has(page, { "lore:", "A fixture block with nothing against it." }))
-		t.ok(has(page, { "texture:", 'All = "lint clean"', "its own entry" }))
+		t.ok(has(page, { "texture:", 'All = "fixture lint clean"', "its own entry" }))
 		t.ok(has(page, { "Age: Stone Age" }), "the default")
 		t.ok(has(page, { "survival: from the Stone Age" }))
-		t.ok(has(page, { "pack Lint, recipe #1: smelting LintClean -> LintNoIcon" }), "a recipe using it")
-		local item = assert(ContentTool.show(view, "LintPart"))
+		t.ok(
+			has(page, { "pack FixtureLint, recipe #1: smelting FixtureLintClean -> FixtureLintNoIcon" }),
+			"a recipe using it"
+		)
+		local item = assert(ContentTool.show(view, "FixtureLintPart"))
 		t.ok(has(item, { "icon:", "blank" }))
 		t.ok(
 			has(item, { "food:", "heals 2 (hunger off)", "nutrition 4", "saturation 0.25 (+2)", "held 32 ticks" }),
 			"what eating it does (Items/Foods)"
 		)
 		t.ok(has(item, { "50% Hunger (Thirst with hunger off) for 100 ticks" }), "its risk")
-		local drink = assert(ContentTool.show(view, "LintLate"))
+		local drink = assert(ContentTool.show(view, "FixtureLintLate"))
+		-- (Its pieces wrapped over two lines: the page's lines joined.)
 		t.ok(
-			has(
-				drink,
-				{ "drink:", "a potion", "thirst 3", "hydration 0.5 (+3)", "Speed II for 40 ticks", "leaves LintPart" }
-			),
+			has({ table.concat(drink, " ") }, {
+				"drink:",
+				"a potion",
+				"thirst 3",
+				"hydration 0.5 (+3)",
+				"Speed II for 40 ticks",
+				"leaves FixtureLintPart",
+			}),
 			"what drinking it does (ToughAsNails/Drinks)"
 		)
 		t.ok(has(item, { "Age: Iron Age" }))
-		t.ok(has(item, { "made by:" }) and has(item, { "shapeless LintPart" }))
-		local texture = assert(ContentTool.show(view, "lint clean"))
-		t.ok(has(texture, { 'texture "lint clean"', "pack Lint" }) and has(texture, { "faces of: LintClean" }))
-		local ore = assert(ContentTool.show(view, "lint_clean"))
-		t.ok(has(ore, { "ore feature lint_clean", "pack Lint" }))
+		t.ok(has(item, { "made by:" }) and has(item, { "shapeless FixtureLintPart" }))
+		local texture = assert(ContentTool.show(view, "fixture lint clean"))
+		t.ok(
+			has(texture, { 'texture "fixture lint clean"', "pack FixtureLint" })
+				and has(texture, { "faces of: FixtureLintClean" })
+		)
+		local ore = assert(ContentTool.show(view, "fixture_lint_clean"))
+		t.ok(has(ore, { "ore feature fixture_lint_clean", "pack FixtureLint" }))
 		local age = assert(ContentTool.show(view, "iron"))
-		t.ok(has(age, { "Age iron", "Iron Age" }) and has(age, { "opens:" }) and has(age, { "LintPart" }))
-		local missing, near = ContentTool.show(view, "LintClaen")
+		t.ok(has(age, { "Age iron", "Iron Age" }) and has(age, { "opens:" }) and has(age, { "FixtureLintPart" }))
+		local missing, near = ContentTool.show(view, "FixtureLintClaen")
 		t.eq(missing, nil)
-		t.eq((near :: any)[1], "LintClean", "the nearest name")
+		t.eq((near :: any)[1], "FixtureLintClean", "the nearest name")
 		-- Biomes: the game's, patched by the Survival pack's herbs.
 		local biomes = assert(ContentTool.list(view, "biomes", "Survival"))
-		t.ok(has(biomes, { "Taiga", "Minecraft (patched by Survival)" }), "the biomes a pack patched")
+		t.ok(has(biomes, { "Taiga", "Minecraft (patched by Survival" }), "the biomes a pack patched")
 		local taiga = assert(ContentTool.show(view, "Taiga"))
 		t.ok(has(taiga, { "biome Taiga: index ", "pack Minecraft" }), taiga[1])
 		t.ok(has(taiga, { "patched by: Survival" }))
@@ -475,47 +599,207 @@ return function(t, shared, require, _server, _client)
 		t.eq((near :: any)[1], "demolition", "a skill's id is a name it knows")
 		-- (A pack patching a node shows on its page and in its list.)
 		local patched = assert(fresh(function(env, packs)
-			env.graft("tests/fixtures/content/skills/Skilled", packs, "Skilled")
+			GamePacks.graftLast(env, "tests/fixtures/content/skills/FixtureSkilled", packs, "FixtureSkilled")
 		end))
-		t.ok(has(assert(ContentTool.show(patched, "forager")), { "patched by: Skilled" }), "an override")
-		t.ok(has(assert(ContentTool.list(patched, "skills", "Skilled")), { "forager", "Core (patched by Skilled)" }))
-		t.ok(has(assert(ContentTool.show(patched, "blasting")), { "gates: BlastCharge" }), "a pack's node")
+		t.ok(has(assert(ContentTool.show(patched, "forager")), { "patched by: ", "FixtureSkilled" }), "an override")
+		t.ok(
+			has(
+				assert(ContentTool.list(patched, "skills", "FixtureSkilled")),
+				{ "forager", "Core (patched by ", "FixtureSkilled)" }
+			)
+		)
+		t.ok(
+			has(assert(ContentTool.show(patched, "fixture_blasting")), { "gates: FixtureBlastCharge" }),
+			"a pack's node"
+		)
 	end)
 
 	t.test("content tool: sound events and tracks: lists by pack, pages with what names them", function()
 		-- (The Content spec's sounds and music fixture pack, grafted in.)
 		local view, problem = fresh(function(env, packs)
-			env.graft("tests/fixtures/content/sounds/Chorus", packs, "Chorus")
+			GamePacks.graftLast(env, "tests/fixtures/content/sounds/FixtureChorus", packs, "FixtureChorus")
 		end)
 		assert(view, problem)
 		local number = 0
 		for index, spec in view.content.sounds do
-			if spec.name == "entity.chorus.sing" then
+			if spec.name == "entity.fixture_chorus.sing" then
 				number = index
 			end
 		end
-		local sounds = assert(ContentTool.list(view, "sounds", "Chorus"))
-		t.ok(has(sounds, { `#{number}`, "entity.chorus.sing", "Chorus" }), "number, name, pack")
-		t.ok(has(sounds, { "block.chime.step", "Chorus", "block.step" }), "and category")
-		t.ok(has(sounds, { "ui.button.click", "Minecraft (patched by Chorus)" }), "what a pack patched")
-		local music = assert(ContentTool.list(view, "music", "Chorus"))
-		t.ok(has(music, { "chorus_mood", "mood", "Chorus" }), "name, set, pack")
-		t.ok(has(music, { "surface1", "surface", "Minecraft (patched by Chorus)", "First Light" }), "and title")
+		local sounds = assert(ContentTool.list(view, "sounds", "FixtureChorus"))
+		t.ok(has(sounds, { `#{number}`, "entity.fixture_chorus.sing", "FixtureChorus" }), "number, name, pack")
+		t.ok(has(sounds, { "block.fixture_chime.step", "FixtureChorus", "block.step" }), "and category")
+		t.ok(has(sounds, { "ui.button.click", "Minecraft (patched by ", "FixtureChorus)" }), "what a pack patched")
+		local music = assert(ContentTool.list(view, "music", "FixtureChorus"))
+		t.ok(has(music, { "fixture_chorus_mood", "mood", "FixtureChorus" }), "name, set, pack")
+		t.ok(
+			has(music, { "surface1", "surface", "Minecraft (patched by ", "FixtureChorus)", "First Light" }),
+			"and title"
+		)
 
-		local page = assert(ContentTool.show(view, "item.armor.equip_chorus"))
-		t.ok(has(page, { "sound item.armor.equip_chorus", "pack Chorus" }), page[1])
+		local page = assert(ContentTool.show(view, "item.armor.equip_fixture_chorus"))
+		t.ok(has(page, { "sound item.armor.equip_fixture_chorus", "pack FixtureChorus" }), page[1])
 		t.ok(has(page, { "pitch = 1.7" }), "the merged fields")
 		t.ok(has(page, { "named by:", "IronHelmet (put on)" }), "the entries naming it")
-		t.ok(has(assert(ContentTool.show(view, "block.chorus.hum")), { "ElectricFurnace (working)" }))
+		t.ok(has(assert(ContentTool.show(view, "block.fixture_chorus.hum")), { "ElectricFurnace (working)" }))
 		t.ok(has(assert(ContentTool.show(view, "block.fire.extinguish")), { "Fire (break)" }))
 		local click = assert(ContentTool.show(view, "ui.button.click"))
-		t.ok(has(click, { "patched by: Chorus" }) and has(click, { "volume = 0.8" }), "an override")
-		local mood = assert(ContentTool.show(view, "ambient.cave.chorus_mood"))
-		t.ok(has(mood, { "track chorus_mood: mood, pack Chorus" }), "a cave mood's event shows its track")
-		t.ok(has(mood, { "event: ambient.cave.chorus_mood" }))
-		local missing, near = ContentTool.show(view, "entity.chorus.sign")
+		t.ok(has(click, { "patched by: ", "FixtureChorus" }) and has(click, { "volume = 0.8" }), "an override")
+		local mood = assert(ContentTool.show(view, "ambient.cave.fixture_chorus_mood"))
+		t.ok(
+			has(mood, { "track fixture_chorus_mood: mood, pack FixtureChorus" }),
+			"a cave mood's event shows its track"
+		)
+		t.ok(has(mood, { "event: ambient.cave.fixture_chorus_mood" }))
+		local missing, near = ContentTool.show(view, "entity.fixture_chorus.sign")
 		t.eq(missing, nil)
-		t.eq((near :: any)[1], "entity.chorus.sing", "the nearest name")
+		t.eq((near :: any)[1], "entity.fixture_chorus.sing", "the nearest name")
+	end)
+
+	t.test("content tool: show gives every field whole and every way survival gets an item", function()
+		local view = assert(fresh())
+		-- (The plains' flowers are a long list: wrapped, an element a line, never cut.)
+		local plains = assert(ContentTool.show(view, "Plains"))
+		local joined = table.concat(plains, "\n")
+		t.ok(not string.find(joined, " ...", 1, true), "nothing cut")
+		t.ok(has(plains, { "foliage.flowers = {" }) and has(plains, { '"Sunflower"' }), "the last flower too")
+		for _, line in plains do
+			t.ok(#line <= ContentTool.WIDTH, line)
+		end
+		-- A string longer than a line stays whole on its own.
+		local long = ContentTool.valueLines("    lore = ", string.rep("x", 200), "    ", "")
+		t.eq(#long, 1)
+		t.eq(#long[1], 11 + 202)
+		-- Stick: breaking leaves, its recipe and a chest, every way of the Stone Age.
+		local stick = table.concat(assert(ContentTool.show(view, "Stick")), " ")
+		t.ok(
+			string.find(stick, "survival: from the Stone Age: breaking ", 1, true)
+				and string.find(stick, "OakLeaves", 1, true)
+				and string.find(stick, "(shaped Stick x4)", 1, true),
+			"its recipe among its ways"
+		)
+		local reach = ContentTool.reach(view)
+		t.ok(#reach.ways.Stick >= 3 and string.match(reach.how.Stick, "^breaking %a+ %(") ~= nil, reach.how.Stick)
+	end)
+
+	t.test("content tool: a brewed potion item's lore and Age are its potion's to give", function()
+		-- (A potion of the Speed effect brewed from Shears, the Iron Age's, its strong variant
+		-- without a line.)
+		local view = assert(fresh(function(env, packs)
+			local folder = env.folder(packs, "FixturePotion")
+			env.module(
+				folder,
+				"pack",
+				{ order = GamePacks.orderAfter(env, packs, 900), requires = { "Core", "Minecraft", "Survival" } }
+			)
+			env.module(folder, "potions", {
+				{
+					name = "FixtureHaste",
+					ingredient = "Shears",
+					effect = "Speed",
+					seconds = 30,
+					strong = 10,
+					lore = { base = "Brewed from shears." },
+				},
+			})
+		end))
+		local findings = ContentTool.check(view)
+		local lore = finding(findings, "lore", "item StrongPotionOfFixtureHaste") :: any
+		t.ok(
+			lore and string.find(lore.text, 'lore = { strong = "..." } on potion FixtureHaste', 1, true),
+			lore and lore.text
+		)
+		local age = finding(findings, "age", "item PotionOfFixtureHaste") :: any
+		t.ok(
+			age and string.find(age.text, 'age = { base = "iron" } on potion FixtureHaste, which brews it?', 1, true),
+			age and age.text
+		)
+		t.eq(#of(findings, "FixturePotion"), 3, "and the strong one's Age")
+	end)
+
+	t.test("content tool: requires: a pack named but not required, or loading after", function()
+		-- (FixtureEarly names FixtureLate's item, which loads after it, and Minecraft's Stick,
+		-- requiring Core alone.)
+		local view = assert(fresh(function(env, packs)
+			local early = env.folder(packs, "FixtureEarly")
+			local order = GamePacks.orderAfter(env, packs, 900)
+			env.module(early, "pack", { order = order, requires = { "Core" } })
+			env.module(early, "recipes", {
+				{ type = "shapeless", ingredients = { "FixtureLateGem", "Stick" }, result = "FixtureLateGem" },
+			})
+			local late = env.folder(packs, "FixtureLate")
+			env.module(late, "pack", { order = order + 1, requires = { "Core" } })
+			env.module(late, "items", {
+				{ name = "FixtureLateGem", model = { { size = { 1, 1, 1 }, offset = { 0, 0, 0 } } } },
+			})
+		end))
+		local found: { string } = {}
+		for _, each in ContentTool.check(view) do
+			if each.check == "requires" and each.pack == "FixtureEarly" then
+				table.insert(found, `{each.level}: {each.text}`)
+			end
+		end
+		t.eq(#found, 2, table.concat(found, "; "))
+		t.ok(
+			has(found, {
+				"warning: it names pack Minecraft's Stick (recipe #1 (FixtureLateGem))",
+				'requires = { "Core", "Minecraft" }?',
+			}),
+			"an earlier pack's: a warning"
+		)
+		t.ok(
+			has(found, {
+				"info: it names pack FixtureLate's FixtureLateGem (recipe #1 (FixtureLateGem))",
+				"FixtureLate loads after it",
+			}),
+			"a later pack's: an info"
+		)
+		-- What a module names, as its pack wrote it: an override names what it patches.
+		local named: { string } = {}
+		ContentTool.references(
+			"blocks",
+			{
+				{ name = "Stone", override = true, drops = "Cobblestone", texture = { All = "stone" }, age = "iron" },
+			},
+			nil,
+			function(space, name, where)
+				table.insert(named, `{space} {name} ({where})`)
+			end
+		)
+		table.sort(named)
+		t.eq(
+			table.concat(named, ", "),
+			"age iron (block Stone), block Stone (block Stone), entry Cobblestone (block Stone), texture stone (block Stone)"
+		)
+		-- (A recipe's tag, a container's fill, a drink's purified twin and an explosive's lit block.)
+		named = {}
+		local function into(space: string, name: string, where: string)
+			table.insert(named, `{space} {name} ({where})`)
+		end
+		ContentTool.references("recipes", {
+			{ type = "shapeless", ingredients = { "#coals", "Stick" }, result = "Torch" },
+		}, "recipes/lights", into)
+		ContentTool.references("items", {
+			{ name = "Jug", fills = "DirtyJug", drink = { purified = "CleanJug", effects = { { effect = "Speed" } } } },
+		}, nil, into)
+		ContentTool.references("blocks", { { name = "Charge", lit = "LitCharge" } }, nil, into)
+		-- (Joining a tag names no pack: the Ores pack's ores join the Minecraft pack's "ores".)
+		ContentTool.references("blocks", { { name = "TinOre", tags = { "ores" } } }, nil, into)
+		ContentTool.references("tags", { ores = { "TinOre" } }, nil, into)
+		table.sort(named)
+		t.eq(
+			table.concat(named, ", "),
+			table.concat({
+				"block LitCharge (block Charge)",
+				"effect Speed (item Jug)",
+				"entry CleanJug (item Jug)",
+				"entry DirtyJug (item Jug)",
+				"entry Stick (recipes/lights, recipe #1 (Torch))",
+				"entry TinOre (tag ores)",
+				"entry Torch (recipes/lights, recipe #1 (Torch))",
+				"tag coals (recipes/lights, recipe #1 (Torch))",
+			}, ", ")
+		)
 	end)
 
 	--[[ A new pack ]]
@@ -527,7 +811,7 @@ return function(t, shared, require, _server, _client)
 			t.ok(order > pack.order, "after every pack")
 		end
 		t.eq(ContentTool.scaffoldProblem(view, "Scaffolded"), nil)
-		local files = ContentTool.scaffold("Scaffolded", order)
+		local files = ContentTool.scaffold(view, "Scaffolded", order)
 		local paths = {}
 		for _, file in files do
 			table.insert(paths, file.path)
@@ -561,6 +845,52 @@ return function(t, shared, require, _server, _client)
 		end
 		t.eq(shaped, 1, "a shaped recipe")
 		t.eq(smelting, 1, "a smelting recipe")
+		-- A second new pack, made in the game with the first: its recipe takes another grid, and
+		-- neither has anything against it.
+		local second = ContentTool.scaffold(after, "Rescaffolded", ContentTool.nextOrder(after))
+		local both, bothProblem = fresh(function(env, packs)
+			for name, made in { Scaffolded = files, Rescaffolded = second } do
+				local folder = env.folder(packs, name)
+				for _, file in made do
+					env.source(folder, string.sub(file.path, 1, -6), file.text)
+				end
+			end
+		end)
+		t.ok(both, bothProblem)
+		local again = ContentTool.check(both)
+		t.eq(table.concat(of(again, "Scaffolded"), ", "), "", "the first: nothing against it")
+		t.eq(table.concat(of(again, "Rescaffolded"), ", "), "", "the second: nothing against it")
+		-- Its header says where its order puts it, and every header line fits 100 columns.
+		local function header(made: { { path: string, text: string } }): string
+			return made[1].text
+		end
+		t.ok(string.find(header(files), `at {order}, after every other pack`, 1, true), "the order it took")
+		local early = ContentTool.scaffold(view, "Early", 50)
+		local earlyHeader = string.gsub(header(early), "\n\t", " ")
+		t.ok(
+			string.find(earlyHeader, "at 50, before Minecraft, Mekanism", 1, true)
+				and not string.find(earlyHeader, "after every other pack", 1, true),
+			earlyHeader
+		)
+		-- (Comments 100 columns, as the game's modules wrap them; code 120, StyLua's.)
+		for _, made in { files, second, early } do
+			for _, file in made do
+				local inComment = false
+				for line in string.gmatch(file.text, "[^\n]+") do
+					inComment = inComment or string.sub(line, 1, 4) == "--[["
+					local tabs = #(string.match(line, "^\t*") :: string)
+					local comment = inComment or string.match(line, "^\t*%-%-") ~= nil
+					t.ok(#line + tabs * 3 <= if comment then 100 else 120, `{file.path}: {line}`)
+					inComment = inComment and line ~= "]]"
+				end
+			end
+		end
+		-- What `new` prints of them.
+		t.eq(ContentTool.verdict({}), "it loads and passes the check")
+		local one =
+			{ pack = "P", level = "warning", check = "lore", subject = "item I", text = "x" } :: ContentTool.Finding
+		t.eq(ContentTool.verdict({ one }), "1 finding", "one, not 1 findings")
+		t.eq(ContentTool.verdict({ one, one }), "2 findings")
 		-- (Camel case names spaced: the texture's words.)
 		t.eq(ContentTool.scaffoldNames("DeepOres").texture, "deep ores block")
 		t.eq(ContentTool.scaffoldNames("DeepOres").loot, "deep_ores_block")

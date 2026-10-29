@@ -1,8 +1,8 @@
 return {
 	{
-		name = "Luck",
+		name = "FixtureLuck",
 		ingredient = "Emerald",
-		effect = "Luck",
+		effect = "FixtureLuck",
 		seconds = 300,
 		long = 600,
 		lore = {
@@ -19,7 +19,7 @@ return {
 		override = true,
 		seconds = 240,
 		lore = {
-			base = "Patched by Brewing. Run faster for longer.",
+			base = "Patched by FixtureBrewing. Run faster for longer.",
 			strong = "Brewed stronger with Glow Dust. Run much faster.",
 			long = "Brewed longer with coal. Run faster.",
 		},

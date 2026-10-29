@@ -1,3 +1,5 @@
+local GamePacks = require("../lib/GamePacks")
+
 return function(t, shared, require)
 	local Config = require(shared.Config)
 	local Blocks = require(shared.Blocks)
@@ -389,7 +391,12 @@ return function(t, shared, require)
 		-- 922:10116833, 921:460687070 and 914:1847593037 with one stream through all the features;
 		-- OreGeneration checks no feature moves another now). (The ores from osmium on only replace
 		-- stone left over, so they are left out; OreGeneration pins osmium and the rest. Each block
-		-- counts by its name's hash, not its id: ids follow the packs.)
+		-- counts by its name's hash, not its id: ids follow the packs.) The shipped packs' ores, the
+		-- game mounted with lib/GamePacks.SHIPPED alone: an author's ore feature, wherever its pack
+		-- loads, moves nothing here.
+		local env, root = GamePacks.mountShipped()
+		local Blocks = env.require(root.Blocks)
+		local Ores = env.require(root.Generation.Ores)
 		local later: { [number]: boolean } = {}
 		local after = false
 		for _, ore in Ores.FEATURES do
@@ -414,7 +421,11 @@ return function(t, shared, require)
 					n += 1
 				end
 			end
-			t.eq(`{n}:{sum}`, expected[i], `chunk {chunk[1]}, {chunk[2]}`)
+			t.eq(
+				`{n}:{sum}`,
+				expected[i],
+				`chunk {chunk[1]}, {chunk[2]} (the shipped packs' ores: pin the new value if a change to them meant it)`
+			)
 		end
 	end)
 

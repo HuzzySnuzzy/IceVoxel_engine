@@ -8,7 +8,8 @@
 	  check(view)       the findings (Finding: pack, level, check, subject, text), pack by pack in
 	                    load order:
 	    lore      warning  a block that is an item, or an item, without a lore line where the game
-	                       finds one (Items/LoreList: its entry's `lore`, a pack's `lore`)
+	                       finds one (Items/LoreList: its entry's `lore`, a pack's `lore`; a brewed
+	                       potion item's: its potion's `lore`, by the item's form)
 	    faces     warning  a block that can carry a texture without texture-pack faces (its own
 	                       entry, its cave twin's or its variant group's, as Blocks resolves them).
 	                       Never textured, as the TexturePack spec has it: undrawn blocks, fluids,
@@ -21,36 +22,59 @@
 	    age       warning  a crafted or smelted result no Age names, which the first Age opens
 	                       (Ages.ofName's default), that survival play cannot give before a later
 	                       Age: every way to it needs something of that Age, so it most likely
-	                       wants that `age`. (A result no Age names is no mistake by itself: the
-	                       first Age is every result's unless an Age names it.)
+	                       wants that `age` (a brewed potion item: its potion's `age`, by form).
+	                       (A result no Age names is no mistake by itself: the first Age is every
+	                       result's unless an Age names it.)
 	    recipe    warning  a crafting recipe that never crafts: its own grid (one of each key or
 	                       ingredient, a tag's first name, from the top left of the 3 x 3 grid)
 	                       makes something else, since Crafting.match takes the first recipe that
 	                       fits (every shaped one before any shapeless one)
-	    survival  info     an item survival play never gives (`reach`): no recipe, loot table,
-	                       drop, mob drop, structure or other way the game has, or only recipes
-	                       needing such items. Creative only items, the creative tier's machines
-	                       (a machine kind with `creative`: Mekanism's creative energy cube, which
-	                       no recipe makes by design), fluids' blocks (buckets carry those) and
-	                       blocks the world makes (found there, even when they break into
-	                       something else: ores, grass, ice) are left out
+	    loot      warning  a loot table nothing rolls: no block's `loot` names it and it is no
+	                       chest's (the View's `chests`: the ruins', bunkers' and mineshafts')
+	    requires  warning  a pack naming entries of a pack that loads before it (its own modules'
+	                       names, `references`, and its potions' brewed recipes'), which it does
+	                       not require, directly or through the packs it requires: a finding per
+	                       pack named, with the first names and the `requires` to write
+	              info     the same of a pack loading after it, which no `requires` can say (a
+	                       pack's requires load first): the two stand only together
+	    survival  info     an item survival play never gives (`reach`), and why: the first thing
+	                       on its way that nothing gives (a block that alone drops it, which the
+	                       world never makes; an item no recipe, loot table, drop, mob drop,
+	                       structure or other way gives), followed through its recipes rather than
+	                       round a loop of items made from each other. Creative only items, the
+	                       creative tier's machines (a machine kind with `creative`: Mekanism's
+	                       creative energy cube, which no recipe makes by design), fluids' blocks
+	                       (buckets carry those) and blocks the world makes (found there, even when
+	                       they break into something else: ores, grass, ice) are left out
 	  report(view, findings)    the check's lines: a summary per pack, the findings, the counts
 	  summary(view)             a line per pack: its order and how much of each kind it holds
+	  count(findings, level), verdict(findings)   how many of a level; what `new` says ("1 finding")
 	  list(view, kind?, pack?)  lines of entries (id, name, pack), of one kind, of one pack (a sound
-	                            event with its number, a track with its set)
+	                            event with its number, a track with its set, every lore line the
+	                            game has, fuel by tag and by entry); nil and why for a kind or pack
+	                            it has not, with the nearest ("no kind or pack block (did you mean
+	                            blocks?)")
 	  show(view, name)          lines about everything named `name` (a block, item, texture, loot
 	                            table, tag, ore feature, Age, skill, biome, effect, potion,
 	                            structure template, pool, structure, sound event or track): its
-	                            merged fields, id, pack and the packs that patched it, and what the
-	                            registries made of it (a skill's cell, the nodes needing it, the
-	                            entries it gates and their recipes; a potion's brewed items; a
-	                            template's size and palette; an event's number and the entries
-	                            naming it; a cave mood's event); nil and the nearest names when
-	                            nothing has the name
-	  reach(view)               when survival play first gives each item (an Age index) and how
-	  scaffold(name, order)     a new pack's modules, { { path, text } }: one block, one item, a
-	                            shaped and a smelting recipe, a texture and a loot table, each field
-	                            explained, ready to load and to pass `check`
+	                            merged fields (whole: a long one over several lines, `valueLines`),
+	                            id, pack and the packs that patched it, and what the registries
+	                            made of it (every way survival gets an item in its first Age; a
+	                            skill's cell, the nodes needing it, the entries it gates and their
+	                            recipes; a potion's brewed items; a template's size and palette;
+	                            an event's number and the entries naming it; a cave mood's event);
+	                            nil and the nearest names when nothing has the name
+	  reach(view)               when survival play first gives each item (an Age index), how, and
+	                            every way it does then
+	  references(kind, data, file, add, head?)   every name one pack module gives of another
+	                            thing, as the pack wrote it (the `requires` check's)
+	  scaffold(view, name, order)   a new pack's modules, { { path, text } }: one block, one item,
+	                            a shaped and a smelting recipe, a texture and a loot table, each
+	                            field explained, its header naming a module of the game's packs to
+	                            copy for each other kind and saying where `order` puts it, ready to
+	                            load and to pass `check`, however many new packs there are
+	  scaffoldGrid(view)        the grid of cobblestone around a coal its recipe takes: one no
+	                            recipe takes yet
 	  scaffoldProblem(view, name)   why `name` can't be a new pack (nil: it can)
 	  nextOrder(view)           the order after every pack's (the next hundred)
 
@@ -74,6 +98,10 @@
 	  variants(potion) a potion's items (Effects/PotionList.variants)
 	  templateHead(text)   a structure template's name, size and palette (Structures/TemplateText
 	                   .head; optional)
+	  chests           the loot tables the game's code rolls into chests, by name (optional: no
+	                   `loot` check without it)
+	  packData         each pack's own modules' data, before merging (ContentGame's; optional: no
+	                   `requires` check without it)
 
 	Where an entry comes from is the loader's own record (content.origin): the pack and file that
 	made it, the packs whose overrides patched it, a recipe's place in its file, the packs that
@@ -101,12 +129,16 @@ ContentTool.CHECKS = table.freeze({
 	{ id = "texture", label = "unused" },
 	{ id = "age", label = "Age" },
 	{ id = "recipe", label = "never crafted" },
+	{ id = "loot", label = "unused loot" },
+	{ id = "requires", label = "requires" },
 	{ id = "survival", label = "out of reach" },
 })
 
 -- The grid recipes are tried in (a crafting table's).
 ContentTool.GRID = 3
--- The widest line `show` writes (longer fields are cut, lists of names wrapped).
+-- The widest line `show` writes: a longer field's table goes over several lines, an element or
+-- a field a line, lists of names and sentences wrap (nothing is cut; a string longer than the
+-- line stays whole on its own).
 ContentTool.WIDTH = 118
 
 local INF = math.huge
@@ -185,13 +217,52 @@ local function inline(value: any): string
 end
 ContentTool.inline = inline
 
--- `text` cut to `width` characters ("..." at the end when cut).
-local function cut(text: string, width: number): string
-	if #text <= width then
-		return text
+--[[
+	`head .. value .. tail` as lines no wider than WIDTH where it can be: on one line when it fits,
+	else a table opened on the first line, an element or a field a line (the same way, one indent
+	deeper), closed under `indent`. Nothing is cut: a string longer than a line stays whole.
+]]
+local function valueLines(head: string, value: any, indent: string, tail: string): { string }
+	local one = head .. inline(value) .. tail
+	if #one <= ContentTool.WIDTH or type(value) ~= "table" or next(value) == nil then
+		return { one }
 	end
-	return string.sub(text, 1, width - 4) .. " ..."
+	local lines = { head .. "{" }
+	local inner = indent .. "    "
+	local function add(each: { string })
+		table.move(each, 1, #each, #lines + 1, lines)
+	end
+	if isList(value) then
+		for _, element in value do
+			add(valueLines(inner, element, inner, ","))
+		end
+	else
+		for _, key in sortedKeys(value) do
+			local name = if type(key) == "string" and identifier(key) then key else `[{inline(key)}]`
+			add(valueLines(`{inner}{name} = `, value[key], inner, ","))
+		end
+	end
+	table.insert(lines, indent .. "}" .. tail)
+	return lines
 end
+ContentTool.valueLines = valueLines
+
+-- `head .. text` wrapped at WIDTH between words, the lines after the first under the text's start.
+local function prose(head: string, text: string): { string }
+	local lines = {}
+	local line = head
+	local indent = string.rep(" ", #head)
+	for word in string.gmatch(text, "%S+") do
+		if #line + 1 + #word > ContentTool.WIDTH and line ~= head and line ~= indent then
+			table.insert(lines, line)
+			line = indent
+		end
+		line ..= (if line == head or line == indent then "" else " ") .. word
+	end
+	table.insert(lines, line)
+	return lines
+end
+ContentTool.prose = prose
 
 -- `head` and `names`, comma separated, wrapped at WIDTH (continued under the first name).
 local function wrap(head: string, names: { string }): { string }
@@ -368,9 +439,17 @@ end
 export type Reach = {
 	-- Item name -> the index of the earliest Age survival play gives it in (none: never).
 	age: { [string]: number },
-	-- Item name -> how ("loot table house", "breaking Stone (found in the world)", "recipe ...").
+	-- Item name -> how ("breaking Stone (found in the world)", "pack Minecraft, recipe ...", "loot
+	-- table house"): the first of `ways`.
 	how: { [string]: string },
+	-- Item name -> every way that gives it in that Age: breaking blocks first (those found the same
+	-- way in one: "breaking OakLeaves and BirchLeaves (found in the world)"), then recipes, then
+	-- what turns one item into another, then chests and mobs.
+	ways: { [string]: { string } },
 }
+
+-- The order `ways` lists them in.
+local BREAKING, RECIPE, CONVERT, FOUND = 1, 2, 3, 4
 
 --[[
 	When survival play first gives each item, and how: what needs nothing (`view.found`: loot
@@ -378,7 +457,7 @@ export type Reach = {
 	Age, or one an item placed, once that item is had; a recipe once every ingredient is had (a
 	tag: any of its names) and its result's Age is reached (results no Age names: the first);
 	`view.converts` once their item (and the block they need in the world) is had. The least
-	fixed point: each item's earliest Age over all its ways.
+	fixed point: each item's earliest Age over all its ways, and every way giving it then.
 ]]
 function ContentTool.reach(view: any): Reach
 	if view.__reach then
@@ -386,17 +465,30 @@ function ContentTool.reach(view: any): Reach
 	end
 	local content = view.content
 	local age: { [string]: number } = {}
-	local how: { [string]: string } = {}
-	local function give(name: string, at: number, why: string): boolean
-		if at < (age[name] or INF) then
+	-- Item name -> its ways in its earliest Age, and how each ranks (BREAKING...); a block broken,
+	-- its name and why it is there.
+	type Way = { rank: number, why: string, block: string?, note: string? }
+	local found: { [string]: { Way } } = {}
+	local function give(name: string, at: number, why: string, rank: number, block: string?, note: string?): boolean
+		local now = age[name] or INF
+		local way = { rank = rank, why = why, block = block, note = note }
+		if at < now then
 			age[name] = at
-			how[name] = why
+			found[name] = { way }
 			return true
+		elseif at == now then
+			-- (Another way in the same Age: kept, once, for `show`.)
+			for _, other in found[name] do
+				if other.why == why then
+					return false
+				end
+			end
+			table.insert(found[name], way)
 		end
 		return false
 	end
 	for _, name in sortedKeys(view.found) do
-		give(name, 1, view.found[name])
+		give(name, 1, view.found[name], FOUND)
 	end
 	-- Block name -> the earliest Age one can be broken in, and why it is there.
 	local blockAt: { [string]: number } = {}
@@ -429,7 +521,8 @@ function ContentTool.reach(view: any): Reach
 					dropsOf[spec.name] = drops
 				end
 				for _, item in drops do
-					if give(item, at, `breaking {spec.name} ({blockWhy[spec.name]})`) then
+					local note = blockWhy[spec.name]
+					if give(item, at, `breaking {spec.name} ({note})`, BREAKING, spec.name, note) then
 						changed = true
 					end
 				end
@@ -442,7 +535,7 @@ function ContentTool.reach(view: any): Reach
 			end
 			if at < INF then
 				local pack, place = recipeFrom(view, index)
-				if give(recipe.result, at, `pack {pack}, {place} ({recipeText(recipe)})`) then
+				if give(recipe.result, at, `pack {pack}, {place} ({recipeText(recipe)})`, RECIPE) then
 					changed = true
 				end
 			end
@@ -452,7 +545,7 @@ function ContentTool.reach(view: any): Reach
 			if convert.needs then
 				at = math.max(at, blockAt[convert.needs] or INF)
 			end
-			if at < INF and give(convert.to, at, convert.why) then
+			if at < INF and give(convert.to, at, convert.why, CONVERT) then
 				changed = true
 			end
 		end
@@ -465,7 +558,48 @@ function ContentTool.reach(view: any): Reach
 			end
 		end
 	end
-	local result = { age = age, how = how }
+	local how: { [string]: string } = {}
+	local ways: { [string]: { string } } = {}
+	for name, list in found do
+		-- (By rank, in the order they were found within one.)
+		local order: { [any]: number } = {}
+		for index, way in list do
+			order[way] = index
+		end
+		table.sort(list, function(a, b): boolean
+			if a.rank ~= b.rank then
+				return a.rank < b.rank
+			end
+			return order[a] < order[b]
+		end)
+		-- (The blocks broken for it the same way, in one: "breaking A and B (found in the world)".)
+		local texts: { string } = {}
+		local broken: { [string]: { string } } = {}
+		local notes: { string } = {}
+		for _, way in list do
+			if way.block and way.note then
+				if broken[way.note] == nil then
+					broken[way.note] = {}
+					table.insert(notes, way.note)
+					table.insert(texts, way.note)
+				end
+				table.insert(broken[way.note], way.block)
+			else
+				table.insert(texts, way.why)
+			end
+		end
+		for index, text in texts do
+			local blocks = broken[text]
+			if blocks and table.find(notes, text) then
+				local last = table.remove(blocks) :: string
+				local named = if #blocks > 0 then `{table.concat(blocks, ", ")} and {last}` else last
+				texts[index] = `breaking {named} ({text})`
+			end
+		end
+		ways[name] = texts
+		how[name] = list[1].why
+	end
+	local result = { age = age, how = how, ways = ways }
 	view.__reach = result
 	return result
 end
@@ -549,6 +683,557 @@ local function craftingOrder(view: any): { number }
 	return order
 end
 
+--[[ What a pack names (the `requires` check) ]]
+
+--[[
+	Every name one module of a pack gives of another thing, as the pack wrote it (before merging:
+	an override's own fields, not the entry it patches): `add(space, name, where)` for each, where
+	`space` is what the name is looked up among ("entry": a block's or an item's name, "block",
+	"tag", "texture", "loot", "sound", "effect", "biome", "skill", "age", "template", "pool",
+	"potion", "structure", "track") and `where` the entry giving it ("block OilHeater", "recipes/
+	fire, recipe #2 (Tnt)"). An override names the entry it patches. Joining a tag names no pack
+	(an entry's `tags`, a `tags` module's tag: the Ores pack's ores join the Minecraft pack's
+	"ores", which would be theirs alone without it); the names a tags module lists do, and so does
+	a "#tag" an ingredient takes (its first pack's). `kind` is the module's kind, `data` its data,
+	`file` its kind folder's file (nil: the kind's module); `head(text)` reads a template's palette
+	(Structures/TemplateText.head; nil: templates name nothing here).
+]]
+function ContentTool.references(
+	kind: string,
+	data: any,
+	file: string?,
+	add: (space: string, name: string, where: string) -> (),
+	head: ((string) -> any)?
+)
+	if type(data) ~= "table" then
+		return
+	end
+	-- A name or "#tag" (recipes and potions take both).
+	local function ingredient(name: any, where: string)
+		if type(name) ~= "string" then
+			return
+		end
+		if string.sub(name, 1, 1) == "#" then
+			add("tag", string.sub(name, 2), where)
+		else
+			add("entry", name, where)
+		end
+	end
+	local function pools(list: any, where: string)
+		for _, pool in if type(list) == "table" then list else {} do
+			for _, entry in pool.entries or {} do
+				if type(entry[1]) == "string" then
+					add("entry", entry[1], where)
+				end
+			end
+		end
+	end
+	-- The effects a food or a drink gives or cures, its sound and its empty container.
+	local function consumed(entry: any, where: string)
+		for _, field in { "food", "drink" } do
+			local use = entry[field]
+			if type(use) == "table" then
+				for _, given in use.effects or {} do
+					add("effect", given.effect, where)
+				end
+				for _, cured in use.cures or {} do
+					add("effect", cured, where)
+				end
+				if type(use.aftermath) == "table" then
+					add("effect", use.aftermath.effect, where)
+				end
+				if use.sound then
+					add("sound", use.sound, where)
+				end
+				for _, other in { use.empty, use.purified } do
+					add("entry", other, where)
+				end
+			end
+		end
+	end
+	-- A pool or the templates under a name (a fallback, a start pool: Structures/Library's lookup).
+	local function pool(name: any, where: string)
+		if type(name) == "string" then
+			add("pool", name, where)
+		end
+	end
+	local function entries(singular: string, nameField: string, each: (entry: any, where: string) -> ())
+		for _, entry in data do
+			if type(entry) == "table" then
+				local name = entry[nameField]
+				local where = `{singular} {name}`
+				if entry.override == true then
+					add(if singular == "ore feature" then "ore" else singular, name, where)
+				end
+				each(entry, where)
+			end
+		end
+	end
+	local function blockOrItem(entry: any, where: string)
+		for _, field in { "drops", "shearDrops", "item", "fills" } do
+			if type(entry[field]) == "string" then
+				add("entry", entry[field], where)
+			end
+		end
+		for _, field in { "caveTwin", "places", "lit" } do
+			if type(entry[field]) == "string" then
+				add("block", entry[field], where)
+			end
+		end
+		if type(entry.plant) == "table" then
+			for _, field in { "top", "bottom" } do
+				if entry.plant[field] then
+					add("block", entry.plant[field], where)
+				end
+			end
+		end
+		if type(entry.toggle) == "table" then
+			add("block", entry.toggle.to, where)
+			if entry.toggle.sound then
+				add("sound", entry.toggle.sound, where)
+			end
+		end
+		for _, sound in if type(entry.sounds) == "table" then entry.sounds else {} do
+			add("sound", sound, where)
+		end
+		for _, field in { "workSound", "equipSound" } do
+			if type(entry[field]) == "string" then
+				add("sound", entry[field], where)
+			end
+		end
+		for _, texture in if type(entry.texture) == "table" then entry.texture else {} do
+			add("texture", texture, where)
+		end
+		if type(entry.loot) == "string" then
+			add("loot", entry.loot, where)
+		else
+			pools(entry.loot, where)
+		end
+		if type(entry.age) == "string" then
+			add("age", entry.age, where)
+		end
+		if type(entry.skill) == "string" then
+			add("skill", entry.skill, where)
+		end
+		consumed(entry, where)
+	end
+	if kind == "blocks" then
+		entries("block", "name", blockOrItem)
+	elseif kind == "items" then
+		entries("item", "name", blockOrItem)
+	elseif kind == "recipes" then
+		for index, recipe in data do
+			local where = `{if file then `{file}, ` else ""}recipe #{index} ({recipe.result})`
+			add("entry", recipe.result, where)
+			for _, name in recipe.ingredients or {} do
+				ingredient(name, where)
+			end
+			for _, name in recipe.key or {} do
+				ingredient(name, where)
+			end
+			ingredient(recipe.input, where)
+		end
+	elseif kind == "tags" then
+		for tag, names in data do
+			for _, name in names do
+				add("entry", name, `tag {tag}`)
+			end
+		end
+	elseif kind == "textures" then
+		for name, texture in data do
+			if texture.override == true then
+				add("texture", name, `texture {name}`)
+			end
+			if type(texture.Tint) == "string" then
+				add("block", texture.Tint, `texture {name}`)
+			end
+		end
+	elseif kind == "loot" then
+		for name, list in data do
+			pools(list, `loot table {name}`)
+		end
+	elseif kind == "ores" then
+		entries("ore feature", "name", function(ore, where)
+			add("block", ore.block, where)
+		end)
+	elseif kind == "ages" then
+		entries("Age", "id", function(age, where)
+			for _, milestone in age.milestones or {} do
+				if milestone.key and (milestone.category == "craft" or milestone.category == "smelt") then
+					add("entry", milestone.key, where)
+				elseif milestone.key and milestone.category == "mine" then
+					add("block", milestone.key, where)
+				end
+			end
+		end)
+	elseif kind == "skills" then
+		entries("skill", "id", function(skill, where)
+			if skill.age then
+				add("age", skill.age, where)
+			end
+			if skill.icon then
+				add("entry", skill.icon, where)
+			end
+			for _, required in skill.requires or {} do
+				add("skill", required, where)
+			end
+		end)
+	elseif kind == "lore" then
+		for name in data do
+			add("entry", name, `lore {name}`)
+		end
+	elseif kind == "fuel" then
+		for tag in data do
+			add("tag", tag, `fuel {tag}`)
+		end
+	elseif kind == "biomes" then
+		entries("biome", "name", function(biome, where)
+			for _, field in { "top", "filler", "steep", "underwater", "beach" } do
+				if type(biome[field]) == "string" then
+					add("block", biome[field], where)
+				end
+			end
+			if type(biome.patches) == "table" and biome.patches.block then
+				add("block", biome.patches.block, where)
+			end
+			local foliage = if type(biome.foliage) == "table" then biome.foliage else {}
+			for _, list in
+				{ foliage.plants or {}, (foliage.flowers or {}).species or {}, (foliage.herbs or {}).species or {} }
+			do
+				for _, weighted in list do
+					add("block", weighted[1], where)
+				end
+			end
+		end)
+	elseif kind == "effects" then
+		entries("effect", "name", function() end)
+	elseif kind == "potions" then
+		entries("potion", "name", function(potion, where)
+			ingredient(potion.ingredient, where)
+			if potion.effect then
+				add("effect", potion.effect, where)
+			end
+		end)
+	elseif kind == "templates" then
+		for name, text in data do
+			local read = if head and type(text) == "string" then head(text) else nil
+			for _, block in if read then read.blocks else {} do
+				add("block", block, `template {name}`)
+			end
+		end
+	elseif kind == "pools" then
+		for name, entry in data do
+			local where = `pool {name}`
+			if entry.override == true then
+				add("pool", name, where)
+			end
+			for _, element in entry.elements or {} do
+				if element.template then
+					add("template", element.template, where)
+				end
+			end
+			pool(entry.fallback, where)
+		end
+	elseif kind == "structures" then
+		entries("structure", "name", function(structure, where)
+			pool(structure.startPool, where)
+			for _, biome in structure.biomes or {} do
+				add("biome", biome, where)
+			end
+		end)
+	elseif kind == "sounds" then
+		entries("sound", "name", function() end)
+	elseif kind == "music" then
+		entries("track", "name", function() end)
+	end
+end
+
+-- ContentTool.references' spaces and the kinds they are (an "entry" is a block's or an item's).
+local SPACES = table.freeze({
+	block = "blocks",
+	item = "items",
+	tag = "tags",
+	texture = "textures",
+	loot = "loot",
+	sound = "sounds",
+	effect = "effects",
+	biome = "biomes",
+	skill = "skills",
+	age = "ages",
+	Age = "ages",
+	template = "templates",
+	potion = "potions",
+	structure = "structures",
+	track = "music",
+	ore = "ores",
+})
+
+-- The pack that made what `name` names among `space` (ContentTool.references'), nil when none
+-- did (the names of things no pack makes: a fallback "minecraft:empty", a tree builder).
+local function ownerOf(view: any, space: string, name: string): string?
+	local content = view.content
+	local origin
+	if space == "entry" then
+		origin = content.origin("blocks", name) or content.origin("items", name)
+	elseif space == "pool" then
+		-- (A pool, or a template by that name, or the templates under it: their first's pack.)
+		origin = content.origin("pool", name) or content.origin("template", name)
+		if origin == nil then
+			for _, template in sortedKeys(content.templates) do
+				if string.sub(template, 1, #name + 1) == name .. "/" then
+					origin = content.origin("template", template)
+					break
+				end
+			end
+		end
+	else
+		origin = content.origin(SPACES[space] or space, name)
+	end
+	return if origin then origin.pack else nil
+end
+
+--[[
+	The `requires` check (the header's): for each pack, the packs whose entries it names (its own
+	modules' data, the View's `packData`, and its potions' brewed recipes) that it does not require,
+	directly or through the packs it requires. A pack loading before it: a warning (`requires`
+	says so: add it); one loading after: an info (no `requires` can, as a pack's requires load
+	first: the two packs stand only together). One finding per pack and pack named, with the first
+	few names.
+]]
+local function requiresFindings(view: any): { Finding }
+	local findings: { Finding } = {}
+	if view.packData == nil then
+		return findings
+	end
+	local content = view.content
+	local packIndex = packIndexOf(view)
+	local requiresOf: { [string]: { string } } = {}
+	for _, pack in view.packs do
+		requiresOf[pack.name] = pack.requires or {}
+	end
+	-- Every pack `pack` requires, directly or through them.
+	local function closure(pack: string): { [string]: boolean }
+		local all: { [string]: boolean } = {}
+		local function visit(name: string)
+			for _, required in requiresOf[name] or {} do
+				if not all[required] then
+					all[required] = true
+					visit(required)
+				end
+			end
+		end
+		visit(pack)
+		return all
+	end
+	local SHOWN = 3
+	for _, info in view.packs do
+		local pack = info.name
+		local data = view.packData[pack]
+		if data == nil then
+			continue
+		end
+		local required = closure(pack)
+		-- Owner -> the names given of its, each once, and where each was first given.
+		local named: { [string]: { string } } = {}
+		local firstWhere: { [string]: { [string]: string } } = {}
+		local owners: { string } = {}
+		local function add(space: string, name: string, where: string)
+			if type(name) ~= "string" then
+				return
+			end
+			local owner = ownerOf(view, space, name)
+			if owner == nil or owner == pack or required[owner] then
+				return
+			end
+			local list = named[owner]
+			if list == nil then
+				list = {}
+				named[owner] = list
+				firstWhere[owner] = {}
+				table.insert(owners, owner)
+			end
+			if firstWhere[owner][name] == nil then
+				firstWhere[owner][name] = where
+				table.insert(list, name)
+			end
+		end
+		for _, kind in view.kinds do
+			ContentTool.references(kind, data.kinds[kind], nil, add, view.templateHead)
+			for _, each in (data.folders[kind] or {}) :: { any } do
+				ContentTool.references(kind, each.data, each.file, add, view.templateHead)
+			end
+		end
+		-- (Its potions' brewed recipes: the loader makes them, from its potions.)
+		for index, recipe in content.recipes do
+			local origin = content.origin("recipe", index)
+			if origin and origin.pack == pack and origin.file and string.sub(origin.file, 1, 7) == "potion " then
+				ContentTool.references("recipes", { recipe }, origin.file, function(space, name, _where)
+					add(space, name, `{origin.file}, recipe #{origin.index} ({recipe.result})`)
+				end)
+			end
+		end
+		table.sort(owners, function(a: string, b: string): boolean
+			return (packIndex[a] or INF) < (packIndex[b] or INF)
+		end)
+		for _, owner in owners do
+			local list = named[owner]
+			local texts = {}
+			for index = 1, math.min(#list, SHOWN) do
+				table.insert(texts, `{list[index]} ({firstWhere[owner][list[index]]})`)
+			end
+			local shown = table.concat(texts, ", ")
+			local more = if #list > SHOWN then ` and {#list - SHOWN} more` else ""
+			local before = (packIndex[owner] or INF) < (packIndex[pack] or INF)
+			local text
+			if before then
+				local wanted = table.clone(info.requires or {})
+				table.insert(wanted, owner)
+				for index, name in wanted do
+					wanted[index] = quote(name)
+				end
+				text =
+					`it names pack {owner}'s {shown}{more}, but requires neither {owner} nor a pack requiring it: requires = \{ {table.concat(
+						wanted,
+						", "
+					)} }?`
+			else
+				text =
+					`it names pack {owner}'s {shown}{more}, and {owner} loads after it, so no requires can say so: {pack} stands only with {owner}`
+			end
+			table.insert(findings, {
+				pack = pack,
+				level = if before then "warning" else "info",
+				check = "requires",
+				subject = "requires",
+				text = text,
+			})
+		end
+	end
+	return findings
+end
+
+--[[
+	A brewed potion item's potion and its form ("base", "strong", "long": its key in the potion's
+	`lore`, `icon` and `age`), from where it came from (the loader's "potion <Name>"); nil for any
+	other item.
+]]
+local function brewedFrom(view: any, name: string): (string?, string?)
+	local origin = view.content.origin("item", name)
+	local potion = if origin and origin.file then string.match(origin.file, "^potion (.+)$") else nil
+	if potion == nil then
+		return nil, nil
+	end
+	for _, spec in view.content.potions or {} do
+		if spec.name == potion and view.variants then
+			for _, variant in view.variants(spec) do
+				if variant.item == name then
+					return potion, variant.form
+				end
+			end
+		end
+	end
+	return potion, "base"
+end
+
+-- "A", "A and B", "A, B and C".
+local function joined(names: { string }, word: string?): string
+	if #names <= 1 then
+		return names[1] or ""
+	end
+	return `{table.concat(names, ", ", 1, #names - 1)} {word or "and"} {names[#names]}`
+end
+
+--[[
+	Why survival never gives an item: a function of its name to a phrase. It follows the item's
+	recipes to the first thing on the way that nothing gives for a reason of its own, rather than
+	round a loop of items each made from the other (Raw Tin from a Raw Tin Block, the block from
+	Raw Tin): a block that would drop it which the world never makes (no ore feature, biome or
+	structure places it, nor an item survival has), or an item nothing makes at all.
+]]
+local function outOfReach(view: any, reach: Reach, recipesOf: { [string]: { number } }): (string) -> string
+	local content = view.content
+	-- Item name -> the blocks whose breaking gives it (none of them breaks in survival, or it
+	-- would be had).
+	local droppedBy: { [string]: { string } }? = nil
+	local function droppers(item: string): { string }
+		if droppedBy == nil then
+			local map: { [string]: { string } } = {}
+			for _, spec in content.blocks do
+				for _, dropped in if view.drops then view.drops(spec.name) else {} do
+					if dropped ~= spec.name then
+						map[dropped] = map[dropped] or {}
+						table.insert(map[dropped], spec.name)
+					end
+				end
+			end
+			droppedBy = map
+		end
+		return (droppedBy :: any)[item] or {}
+	end
+	-- What `item` (`word`: "it" or its name) lacks itself.
+	local function reason(item: string, word: string): string
+		local blocks = droppers(item)
+		if #blocks > 0 then
+			local them = if #blocks > 1 then "them" else "it"
+			return `only breaking {joined(blocks, "or")} gives {word}, and the world never makes {them} (no ore feature, biome or structure places {them}, nor an item survival has)`
+		end
+		local text = `no recipe, loot table, drop, mob drop or structure gives {word}`
+		if content.block(item) and not view.world[item] then
+			return `the world never makes {word} and {text}`
+		end
+		return text
+	end
+	-- The first item on `item`'s way out of reach for a reason of its own (nil: only loops).
+	local function root(item: string, seen: { [string]: boolean }): string?
+		if seen[item] then
+			return nil
+		end
+		seen[item] = true
+		local list = recipesOf[item]
+		if #droppers(item) > 0 or list == nil then
+			return item
+		end
+		for _, index in list do
+			for _, ingredient in ingredientsOf(content.recipes[index]) do
+				if ingredientAge(view, reach.age, ingredient) == INF then
+					local names = if string.sub(ingredient, 1, 1) == "#"
+						then content.tags[string.sub(ingredient, 2)] or {}
+						else { ingredient }
+					for _, name in names do
+						local found = root(name, seen)
+						if found then
+							return found
+						end
+					end
+				end
+			end
+		end
+		return nil
+	end
+	return function(name: string): string
+		local cause = root(name, {})
+		if cause == name then
+			return reason(name, "it")
+		end
+		local list = recipesOf[name] or {}
+		local recipes = if #list == 1 then "its recipe needs" else "its recipes need"
+		if cause == nil then
+			return `{recipes} items made only from each other (a loop nothing leads into)`
+		end
+		-- (Straight in a recipe of its, or further on the way.)
+		local direct = false
+		for _, index in list do
+			for _, ingredient in ingredientsOf(content.recipes[index]) do
+				direct = direct or takes(view, ingredient, cause)
+			end
+		end
+		return `{recipes} {cause}{if direct then "" else " (on the way)"}, which survival never gives: {reason(
+			cause,
+			cause
+		)}`
+	end
+end
+
 function ContentTool.check(view: any): { Finding }
 	local content = view.content
 	local findings: { Finding } = {}
@@ -581,7 +1266,17 @@ function ContentTool.check(view: any): { Finding }
 		local subject = `item {spec.name}`
 		local line = view.lore[spec.name]
 		if type(line) ~= "string" or line == "" then
-			add(pack, "warning", "lore", subject, `no lore line (lore = "..." on its entry)`)
+			-- (A brewed potion item's line is its potion's, by its form.)
+			local potion, form = brewedFrom(view, spec.name)
+			add(
+				pack,
+				"warning",
+				"lore",
+				subject,
+				if potion
+					then `no lore line (lore = \{ {form} = "..." } on potion {potion}, which brews it)`
+					else `no lore line (lore = "..." on its entry)`
+			)
 		end
 		if view.icons[spec.name] == nil then
 			add(pack, "warning", "icon", subject, `no icon entry (icon = "" marks its picture as still to make)`)
@@ -640,12 +1335,17 @@ function ContentTool.check(view: any): { Finding }
 				local because = if culprit and best == at
 					then `every way to make it needs {culprit}, which comes in the {record.name}`
 					else `nothing gives it before the {record.name} ({reach.how[name]})`
+				-- (A brewed potion item's Age is its potion's, by its form.)
+				local potion, form = brewedFrom(view, name)
+				local fix = if potion
+					then `age = \{ {form} = "{record.id}" } on potion {potion}, which brews it?`
+					else `age = "{record.id}"?`
 				add(
 					packOf(view, kind, name),
 					"warning",
 					"age",
 					`{if kind == "blocks" then "block" else "item"} {name}`,
-					`no Age names it, so the {ages[1].name} opens it, but {because}: age = "{record.id}"?`
+					`no Age names it, so the {ages[1].name} opens it, but {because}: {fix}`
 				)
 			end
 		end
@@ -694,7 +1394,35 @@ function ContentTool.check(view: any): { Finding }
 		end
 	end
 
-	-- Survival's reach.
+	-- Unused loot tables: none a block's `loot` names that is no chest's (the View's `chests`).
+	if view.chests then
+		local named: { [string]: boolean } = {}
+		for _, spec in content.blocks do
+			if type(spec.loot) == "string" then
+				named[spec.loot] = true
+			end
+		end
+		for _, name in sortedKeys(content.loot) do
+			if not named[name] and not view.chests[name] then
+				add(
+					packOf(view, "loot", name),
+					"warning",
+					"loot",
+					`loot table {name}`,
+					"nothing rolls it: no block's loot names it, and it is no chest's (the game's chests roll Generation/ScavengeLoot.NAMES' tables and the mineshafts')"
+				)
+			end
+		end
+	end
+
+	-- Requires: the packs a pack names entries of.
+	for _, finding in requiresFindings(view) do
+		table.insert(findings, finding)
+	end
+
+	-- Survival's reach: what it never gives, and why (the first thing on the way that nothing
+	-- gives, `outOfReach`, not a loop of items each made from the other).
+	local why = outOfReach(view, reach, recipesOf)
 	for _, entry in content.entries do
 		local name = entry.name
 		if not view.isItem[name] or view.creativeOnly[name] or view.creativeMachines[name] or reach.age[name] then
@@ -704,21 +1432,14 @@ function ContentTool.check(view: any): { Finding }
 		if block and (view.world[name] or block.render == "Fluid" or block.fluid) then
 			continue
 		end
-		local text = "survival never gives it: no recipe, loot table, drop, mob drop or structure does"
-		local list = recipesOf[name]
-		if list then
-			local missing = nil
-			for _, ingredient in ingredientsOf(content.recipes[list[1]]) do
-				if ingredientAge(view, reach.age, ingredient) == INF then
-					missing = ingredient
-					break
-				end
-			end
-			text =
-				`survival never gives it: {if #list == 1 then "its recipe needs" else "its recipes need"} {missing or "items"}, which survival never gives either`
-		end
 		local kind = if block then "blocks" else "items"
-		add(packOf(view, kind, name), "info", "survival", `{if block then "block" else "item"} {name}`, text)
+		add(
+			packOf(view, kind, name),
+			"info",
+			"survival",
+			`{if block then "block" else "item"} {name}`,
+			`survival never gives it: {why(name)}`
+		)
 	end
 
 	-- Pack by pack in load order (each check's own order within a pack).
@@ -867,6 +1588,14 @@ function ContentTool.report(view: any, findings: { Finding }): { string }
 	return lines
 end
 
+-- What `new` says of a new pack's findings: that it passes, or how many ("1 finding").
+function ContentTool.verdict(findings: { Finding }): string
+	if #findings == 0 then
+		return "it loads and passes the check"
+	end
+	return `{#findings} finding{if #findings == 1 then "" else "s"}`
+end
+
 -- How many findings of `level` there are.
 function ContentTool.count(findings: { Finding }, level: string): number
 	local n = 0
@@ -903,20 +1632,41 @@ end
 --[[
 	Lines listing the entries of `kind` (every kind when nil), of `pack` only when given (what it
 	made or patched): blocks and items with their ids, recipes by their merged place, biomes by
-	their index (Shared/Biomes) with their bands, the rest by name; nil and why when the kind or
-	the pack is unknown.
+	their index (Shared/Biomes) with their bands, lore lines (every one the game has: an entry's
+	own or a pack's `lore`) and fuel (a tag's, an entry's own) by name with their pack, the rest by
+	name; nil and why when the kind or the pack is unknown (with the nearest kind or pack: `list
+	block` is no kind, but "blocks?").
 ]]
 function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?, string?)
 	local content = view.content
+	local packNames = {}
+	for _, info in view.packs do
+		table.insert(packNames, info.name)
+	end
+	-- " (did you mean x?)" for a word near one of `names`.
+	local function near(word: string, names: { string }): string
+		local set = {}
+		for _, name in names do
+			set[name] = true
+		end
+		local hint = if view.suggest then view.suggest(word, set) else nil
+		return if hint then ` (did you mean {hint}?)` else ""
+	end
 	if kind and not table.find(view.kinds, kind) then
-		return nil, `no kind {kind} (kinds: {table.concat(view.kinds, ", ")})`
+		return nil, `no kind {kind}{near(kind, view.kinds)} (kinds: {table.concat(view.kinds, ", ")})`
 	end
 	if pack and packIndexOf(view)[pack] == nil then
-		local names = {}
-		for _, info in view.packs do
-			table.insert(names, info.name)
+		-- (One word, no kind: it may be either.)
+		if kind == nil then
+			local both = table.clone(view.kinds)
+			table.move(packNames, 1, #packNames, #both + 1, both)
+			return nil,
+				`no kind or pack {pack}{near(pack, both)} (kinds: {table.concat(view.kinds, ", ")}; packs: {table.concat(
+					packNames,
+					", "
+				)})`
 		end
-		return nil, `no pack {pack} (packs: {table.concat(names, ", ")})`
+		return nil, `no pack {pack}{near(pack, packNames)} (packs: {table.concat(packNames, ", ")})`
 	end
 	local lines = {}
 	for _, each in view.kinds do
@@ -1019,6 +1769,34 @@ function ContentTool.list(view: any, kind: string?, pack: string?): ({ string }?
 					table.insert(rows, { spec.name, spec.set, madeText(view, each, spec.name), spec.title or "" })
 				end
 			end
+		elseif each == "lore" then
+			-- (Every line the game has, Items/LoreList: an entry's own, by the pack that made the
+			-- entry, or a pack's `lore`.)
+			for _, name in sortedKeys(view.lore or content.lore) do
+				local from = if content.lore[name]
+					then packOf(view, "lore", name)
+					else packOf(view, if content.block(name) then "blocks" else "items", name)
+				if pack == nil or from == pack then
+					table.insert(rows, { name, from })
+				end
+			end
+		elseif each == "fuel" then
+			-- (A tag's, then every entry's own `fuel`, which beats its tag's.)
+			right[2] = true
+			for _, tag in sortedKeys(content.fuel) do
+				if listed(view, each, tag, pack) then
+					table.insert(rows, { `#{tag}`, `{number(content.fuel[tag])} ticks`, packOf(view, each, tag) })
+				end
+			end
+			for _, entry in content.entries do
+				local ticks = (entry :: any).fuel
+				if type(ticks) == "number" then
+					local kind = if content.block(entry.name) then "blocks" else "items"
+					if listed(view, kind, entry.name, pack) then
+						table.insert(rows, { entry.name, `{number(ticks)} ticks`, madeText(view, kind, entry.name) })
+					end
+				end
+			end
 		elseif each == "tags" then
 			for _, tag in sortedKeys(content.tags) do
 				local packs = tagPacks(view, tag)
@@ -1049,12 +1827,15 @@ end
 
 --[[ Pages ]]
 
--- An entry's merged fields, a line each ("  hardness = 1.5"), name first, the rest sorted.
+-- An entry's merged fields, sorted, a line each ("    hardness = 1.5") or more (a long table:
+-- `valueLines`).
 local function fieldLines(entry: { [string]: any }, skip: { [string]: boolean }?): { string }
 	local lines = {}
 	for _, key in sortedKeys(entry) do
 		if not (skip and skip[key]) then
-			table.insert(lines, cut(`    {key} = {inline(entry[key])}`, ContentTool.WIDTH))
+			for _, line in valueLines(`    {key} = `, entry[key], "    ", "") do
+				table.insert(lines, line)
+			end
 		end
 	end
 	return lines
@@ -1214,6 +1995,9 @@ local function drinkTexts(drink: any): { string }
 	return texts
 end
 
+-- The most ways `show` lists of how survival gets an item (the rest are counted).
+local SHOWN_WAYS = 6
+
 -- The derived lines of a block or an item.
 local function derivedLines(view: any, entry: any, isBlock: boolean): { string }
 	local content = view.content
@@ -1267,13 +2051,25 @@ local function derivedLines(view: any, entry: any, isBlock: boolean): { string }
 		)
 	end
 	if view.isItem[name] then
+		-- (Every way that gives it in its first Age, a recipe too where a chest gives it as well,
+		-- the first few: the rest counted.)
 		local reach = ContentTool.reach(view)
 		local at = reach.age[name]
-		local text = if at
-			then `from the {if ages[at] then ages[at].name else `Age {at}`}: {reach.how[name]}`
-			elseif isBlock and view.world[name] then `never as an item (the world makes it: {view.world[name]})`
-			else "never"
-		table.insert(lines, cut(`    survival: {text}`, ContentTool.WIDTH))
+		local text = "never"
+		if at then
+			local ways = table.clone(reach.ways[name] or { reach.how[name] })
+			local more = #ways - SHOWN_WAYS
+			if more > 0 then
+				ways = table.move(ways, 1, SHOWN_WAYS, 1, {})
+				table.insert(ways, `and {more} more way{if more == 1 then "" else "s"}`)
+			end
+			text = `from the {if ages[at] then ages[at].name else `Age {at}`}: {table.concat(ways, "; ")}`
+		elseif isBlock and view.world[name] then
+			text = `never as an item (the world makes it: {view.world[name]})`
+		end
+		for _, line in prose("    survival: ", text) do
+			table.insert(lines, line)
+		end
 	end
 	for _, line in recipeLines(view, name) do
 		table.insert(lines, line)
@@ -1472,7 +2268,9 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 	if loot then
 		section(`loot table {name}: pack {packOf(view, "loot", name)}`)
 		for index, pool in loot do
-			table.insert(lines, cut(`  pool {index}: {inline(pool)}`, ContentTool.WIDTH))
+			for _, line in valueLines(`  pool {index}: `, pool, "  ", "") do
+				table.insert(lines, line)
+			end
 		end
 		local users = {}
 		for _, spec in content.blocks do
@@ -1611,7 +2409,9 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 			-- (Its ground plants a line each: the herbs a pack patched in are seen.)
 			local foliage = biome.foliage
 			for _, key in if foliage then sortedKeys(foliage) else {} do
-				table.insert(lines, cut(`    foliage.{key} = {inline(foliage[key])}`, ContentTool.WIDTH))
+				for _, line in valueLines(`    foliage.{key} = `, foliage[key], "    ", "") do
+					table.insert(lines, line)
+				end
 			end
 		end
 	end
@@ -1648,13 +2448,11 @@ function ContentTool.show(view: any, name: string): ({ string }?, { string }?)
 				table.insert(lines, "  items (brewed):")
 				for _, variant in view.variants(potion) do
 					local id = content.itemId[variant.item]
-					table.insert(
-						lines,
-						cut(
-							`    {variant.item} (id {id}): {variant.displayName}, {variant.effect} {variant.amplifier + 1} for {variant.ticks} ticks, {variant.from} + {variant.with}`,
-							ContentTool.WIDTH
-						)
-					)
+					local text =
+						`{variant.displayName}, {variant.effect} {variant.amplifier + 1} for {variant.ticks} ticks, {variant.from} + {variant.with}`
+					for _, line in prose(`    {variant.item} (id {id}): `, text) do
+						table.insert(lines, line)
+					end
 				end
 			end
 		end
@@ -1799,6 +2597,86 @@ function ContentTool.scaffoldProblem(view: any, pack: string): string?
 	if content.loot[names.loot] then
 		return `{content.where("loot", names.loot)} has the name the example loot table needs: pick another pack name`
 	end
+	if ContentTool.scaffoldGrid(view) == nil then
+		return "every grid of cobblestone around a coal is some recipe's already: the example recipe has none left"
+	end
+	return nil
+end
+
+--[[
+	The shaped recipe's grid for a new pack's block (rows of "S", cobblestone, and "C", a coal):
+	the first of these that no recipe of the game takes yet (the View's `craft` makes nothing of
+	it), so each new pack's example crafts, however many there are. The nicer shapes first, then
+	every other set of cobblestone around the coal. nil: every one is taken.
+]]
+local NICE_GRIDS = {
+	{ "S S", " C ", "S S" },
+	{ " S ", "SCS", " S " },
+	{ "S S", "SCS", "S S" },
+	{ "SSS", " C ", "SSS" },
+	{ "S S", "SCS", " S " },
+	{ "SSS", "SC ", "S  " },
+}
+function ContentTool.scaffoldGrid(view: any): { string }?
+	local candidates = table.clone(NICE_GRIDS)
+	-- (Every set of two or more of the eight cells around the coal, the fullest first: rows and
+	-- columns left empty are trimmed, as a pattern fits anywhere in the grid.)
+	local masks = {}
+	for mask = 0, 255 do
+		local cells = 0
+		for bit = 0, 7 do
+			cells += bit32.extract(mask, bit)
+		end
+		if cells >= 2 then
+			table.insert(masks, { mask = mask, cells = cells })
+		end
+	end
+	table.sort(masks, function(a, b)
+		return if a.cells ~= b.cells then a.cells > b.cells else a.mask < b.mask
+	end)
+	-- (The eight cells around the centre, as grid places 1..9.)
+	local AROUND = { 1, 2, 3, 4, 6, 7, 8, 9 }
+	for _, each in masks do
+		local cells = { " ", " ", " ", " ", "C", " ", " ", " ", " " }
+		for bit = 0, 7 do
+			if bit32.extract(each.mask, bit) == 1 then
+				cells[AROUND[bit + 1]] = "S"
+			end
+		end
+		local rows = {}
+		for y = 0, 2 do
+			table.insert(rows, table.concat(cells, "", y * 3 + 1, y * 3 + 3))
+		end
+		-- (Trimmed: empty rows, then empty columns.)
+		while rows[1] and string.match(rows[1], "^%s*$") do
+			table.remove(rows, 1)
+		end
+		while rows[#rows] and string.match(rows[#rows], "^%s*$") do
+			table.remove(rows)
+		end
+		for _, side in { "left", "right" } do
+			local empty = true
+			while empty do
+				for _, row in rows do
+					local char = if side == "left" then string.sub(row, 1, 1) else string.sub(row, -1)
+					empty = empty and char == " "
+				end
+				if empty then
+					for index, row in rows do
+						rows[index] = if side == "left" then string.sub(row, 2) else string.sub(row, 1, -2)
+					end
+				end
+			end
+		end
+		table.insert(candidates, rows)
+	end
+	local key = { S = "#stone_crafting_materials", C = "#coals" }
+	for _, pattern in candidates do
+		local grid = gridOf(view, { type = "shaped", pattern = pattern, key = key })
+		if grid and view.craft(grid, ContentTool.GRID) == nil then
+			return pattern
+		end
+	end
 	return nil
 end
 
@@ -1821,16 +2699,21 @@ local TEMPLATES = {
 		text = [==[
 --!strict
 --[[
-	$Pack: one feature's content in one pack. `lune run tests/content new $Pack` made it, with an
-	example of each kind to rename, edit or delete: a block, an item, a shaped and a smelting
-	recipe, a texture and a loot table. Each entry carries its own lore, texture, icon and Age
-	(Content/Schema's per-entry fields), so nothing outside the pack needs an edit. `lune run
-	tests/content` checks it; `lune run tests/content show $Block` shows what the game makes of an
-	entry.
+	$Pack: one feature's content in one pack. `lune run tests/content new $Pack` made it with an
+	example of five kinds to rename, edit or delete: a block (blocks), an item (items), a shaped
+	and a smelting recipe (recipes), a texture (textures) and a loot table (loot). Every other
+	kind's example is a module of the game's packs, to copy from: tags, ages and fuel Core's;
+	ore features Ores/ores.luau; biomes Minecraft/biomes.luau (and an override of them,
+	Survival/biomes.luau); effects and potions Minecraft/effects.luau and potions.luau; skills
+	Survival/skills.luau; sounds Ores/sounds.luau; structures Minecraft/templates, pools.luau and
+	structures.luau. Each entry carries its own lore, texture, icon and Age (Content/Schema's
+	per-entry fields), so nothing outside the pack needs an edit. `lune run tests/content` checks
+	it; `lune run tests/content show $Block` shows what the game makes of an entry.
 
-	Packs load by `order`, then by name (Shared/Content), and every id is a place in that order: at
-	$order, after every other pack, this one moves no id. `requires` names the packs that must load
-	before it: Core, whose Ages and base tags its entries name.
+	Packs load by `order`, then by name (Shared/Content), and every id is a place in that order:
+	$placement `requires` names the packs that must load before it: Core, whose Ages and base tags
+	its entries name (a pack whose entries it names goes there too: `lune run tests/content` says
+	when one is missing).
 ]]
 return {
 	order = $order,
@@ -1928,10 +2811,11 @@ return {
 local Schema = require(script.Parent.Parent.Parent.Schema)
 
 return {
-	-- Four cobblestone around a coal: two $BlockSpaced blocks.
+	-- Cobblestone around a coal, two $BlockSpaced blocks: a shape no other recipe took when the
+	-- pack was made (a grid makes the first recipe it fits).
 	{
 		type = "shaped",
-		pattern = { "S S", " C ", "S S" },
+		pattern = $pattern,
 		key = { S = "#stone_crafting_materials", C = "#coals" },
 		result = "$Block",
 		count = 2,
@@ -1983,18 +2867,79 @@ return {
 	},
 }
 
+-- `text` (a module) with its comment lines that run past the 100th column (a tab is 4) wrapped,
+-- the header's and the `--` ones: the words past it begin the next line when that line goes on
+-- with the sentence (the same start, then a word), else a line of their own.
+local function fit(text: string): string
+	local lines = string.split(text, "\n")
+	local header = true
+	local index = 1
+	while index <= #lines do
+		local line = lines[index]
+		-- (What each line of the comment starts with: the header's tabs, or tabs and "-- ".)
+		local start = if header then string.match(line, "^\t+") else string.match(line, "^\t*%-%- ")
+		local tabs = #(string.match(line, "^\t*") :: string)
+		if start and #line + tabs * 3 > 100 then
+			local cut: number? = nil
+			for at = 101 - tabs * 3, #start + 1, -1 do
+				if string.sub(line, at, at) == " " then
+					cut = at
+					break
+				end
+			end
+			if cut then
+				local rest = string.sub(line, cut + 1)
+				lines[index] = string.sub(line, 1, cut - 1)
+				local following = lines[index + 1]
+				if
+					following
+					and string.sub(following, 1, #start) == start
+					and string.match(following, "^%S", #start + 1)
+				then
+					lines[index + 1] = start .. rest .. " " .. string.sub(following, #start + 1)
+				else
+					table.insert(lines, index + 1, start .. rest)
+				end
+			end
+		end
+		header = header and line ~= "]]"
+		index += 1
+	end
+	return table.concat(lines, "\n")
+end
+
 --[[
-	A new pack's modules: { { path = "pack.luau", text = ... }, ... } (paths inside the pack's
-	folder), each a commented example to edit, in the Ores pack's style.
+	A new pack's modules in `view`'s game: { { path = "pack.luau", text = ... }, ... } (paths inside
+	the pack's folder), each a commented example to edit, in the Ores pack's style. Its header
+	says where `order` puts it (after every pack, or before some, whose ids then move up), its
+	shaped recipe takes the first grid no recipe takes (scaffoldGrid; scaffoldProblem says when
+	there is none).
 ]]
-function ContentTool.scaffold(pack: string, order: number): { { path: string, text: string } }
+function ContentTool.scaffold(view: any, pack: string, order: number): { { path: string, text: string } }
 	local values = ContentTool.scaffoldNames(pack)
 	values.order = number(order)
+	-- (The packs it loads before: the same order and a later name, or a higher order.)
+	local later: { string } = {}
+	for _, info in view.packs do
+		if info.order > order or (info.order == order and info.name > pack) then
+			table.insert(later, info.name)
+		end
+	end
+	values.placement = if #later == 0
+		then `at {values.order}, after every other pack, so making it moved no other pack's id.`
+		else `at {values.order}, before {joined(later)}, so its blocks and items take the ids theirs had and theirs move up (saves keep names, so a world still loads; a pack with no reason to load early goes after every other, as \`new\` puts it without --order).`
+	local grid = ContentTool.scaffoldGrid(view) or { "S S", " C ", "S S" }
+	local rows = {}
+	for _, row in grid do
+		table.insert(rows, quote(row))
+	end
+	values.pattern = `\{ {table.concat(rows, ", ")} }`
 	local files = {}
 	for _, template in TEMPLATES do
 		local text = string.gsub(template.text, "%$(%a+)", function(key: string): string
 			return assert(values[key], `scaffold: no value for ${key}`)
 		end)
+		text = fit(text)
 		table.insert(files, { path = template.path, text = text })
 	end
 	return files

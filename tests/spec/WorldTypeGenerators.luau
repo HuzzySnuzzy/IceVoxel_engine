@@ -10,6 +10,8 @@
 	spawning and structure block records.
 ]]
 
+local GamePacks = require("../lib/GamePacks")
+
 return function(t, shared, require, server)
 	local Config = require(shared.Config)
 	local Blocks = require(shared.Blocks)
@@ -48,18 +50,21 @@ return function(t, shared, require, server)
 		return if b then Hash.string(buffer.tostring(b)) else 0
 	end
 
-	-- A block by its name's hash (16 bits), not its id: ids follow the content packs.
-	local codes: { [number]: number } = {}
-	local function code(block: number): number
-		local c = codes[block]
-		if not c then
-			c = Hash.string(Blocks.get(block).name) % 65536
-			codes[block] = c
+	-- A block by its name's hash (16 bits), not its id: ids follow the content packs. (`blocks`: the
+	-- Blocks registry whose ids they are.)
+	local function coder(blocks: any): (number) -> number
+		local codes: { [number]: number } = {}
+		return function(block: number): number
+			local c = codes[block]
+			if not c then
+				c = Hash.string(blocks.get(block).name) % 65536
+				codes[block] = c
+			end
+			return c
 		end
-		return c
 	end
 	-- The digest of chunk data with every cell's block by name (`code`).
-	local function named(data: buffer): number
+	local function named(data: buffer, code: (number) -> number): number
 		local out = buffer.create(buffer.len(data))
 		for i = 0, buffer.len(data) // 2 - 1 do
 			buffer.writeu16(out, i * 2, code(readu16(data, i * 2)))
@@ -289,6 +294,9 @@ return function(t, shared, require, server)
 	-- the data digest of every full detail row moved (from 2020112233, 448628366, 1411476657,
 	-- 1947456610, 2104854834, 1634297742, 3834757082 and 3741921682); no other value of any row
 	-- moved.
+	-- They are the shipped packs' world: the test mounts the game with lib/GamePacks.SHIPPED alone,
+	-- since a pack an author adds (an ore feature, a biome) changes the Default world. A change to
+	-- a shipped pack's ore features or biomes moves them: pin the new values once it is meant.
 	local PINNED = {
 		{ 0, 0, 0, 738712826, 2385823076, 637642054, 112, 73, 75 },
 		{ 0, 3, -2, 2925077528, 2787425146, 1146561170, 112, 71, 74 },
@@ -307,13 +315,28 @@ return function(t, shared, require, server)
 	}
 
 	t.test("default world: byte for byte what it was before world types (chunks, columns, spawn, map)", function()
-		for _, gen in { TerrainGenerator.new(SEED), WorldTypes.create(WorldTypes.DEFAULT, SEED, {}) } do
+		-- (The game with its shipped packs alone, in an environment of its own.)
+		local env, root = GamePacks.mountShipped()
+		local function need(path: { string }): any
+			local node = root
+			for _, name in path do
+				node = node[name]
+			end
+			return env.require(node)
+		end
+		local code = coder(need({ "Blocks" }))
+		local ShippedTerrain = need({ "Generation", "TerrainGenerator" })
+		local ShippedTypes = need({ "Generation", "WorldTypes" })
+		local ShippedMap = need({ "Map", "MapPainter" })
+		local ShippedConfig = need({ "Config" })
+		local REPIN = " (the shipped packs' world: pin the new value if a change to their generation meant it)"
+		for _, gen in { ShippedTerrain.new(SEED), ShippedTypes.create(ShippedTypes.DEFAULT, SEED, {}) } do
 			for _, p in PINNED do
 				local r = gen.generate(p[1], p[2], p[3], nil, true)
 				local what = `L{p[1]} {p[2]},{p[3]}`
-				t.eq(named(r.data), p[4], `{what} data`)
-				t.eq(digest(r.summary), p[5], `{what} summary`)
-				t.eq(digest(r.surface), p[6], `{what} surface`)
+				t.eq(named(r.data, code), p[4], `{what} data{REPIN}`)
+				t.eq(digest(r.summary), p[5], `{what} summary{REPIN}`)
+				t.eq(digest(r.surface), p[6], `{what} surface{REPIN}`)
 				t.eq(r.height, p[7], `{what} height`)
 				t.eq(r.solidBelow, p[8], `{what} solidBelow`)
 				t.eq(r.emptyAbove, p[9], `{what} emptyAbove`)
@@ -324,12 +347,12 @@ return function(t, shared, require, server)
 				local h, b, v, s = gen.column(x, z)
 				acc = Hash.hash3(acc, h, b * 65536 + code(s), math.floor(v * 1e6))
 			end
-			t.eq(acc, 2538438384, "columns")
+			t.eq(acc, 2538438384, `columns{REPIN}`)
 			local x, y, z = gen.findSpawn()
-			t.eq(`{x} {y} {z}`, "512 87 -128", "spawn")
-			t.eq(digest(MapPainter.new(gen)(-512, 300, 8, 32)), 1346689466, "map tile")
+			t.eq(`{x} {y} {z}`, "512 87 -128", `spawn{REPIN}`)
+			t.eq(digest(ShippedMap.new(gen)(-512, 300, 8, 32)), 1346689466, `map tile{REPIN}`)
 			t.eq(#gen.structures(-2500, -2500, 2500, 2500), 9, "outposts")
-			t.eq(gen.seaLevel, Config.SeaLevel)
+			t.eq(gen.seaLevel, ShippedConfig.SeaLevel)
 		end
 	end)
 

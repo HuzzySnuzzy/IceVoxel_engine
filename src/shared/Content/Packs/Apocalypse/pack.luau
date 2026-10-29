@@ -22,12 +22,13 @@
 	                     moon (the mobs are Shared/Entities/MobList's): sounds/zombies; the bunkers'
 	                     hatch and the medical supplies' sounds: sounds/bunkers, sounds/medical
 
-	Calls made here: the ruins' and bunkers' loot hold the Terraria pack's Feral Claws (a loot table
-	is one pack's); the medical supplies' effects are Shared/Items/Foods' (keyed by name), and the
+	Calls made here: the ruins' and bunkers' loot hold the Terraria pack's Feral Claws and Cobalt
+	Shield and the Mekanism pack's fuel and oil buckets (a loot table is one pack's), so it requires
+	those packs too; the medical supplies' effects are Shared/Items/Foods' (keyed by name), and the
 	zombies are the mobs' (Shared/Entities/MobList).
 ]]
 return {
 	order = 500,
 	description = "The zombie apocalypse: cities, roads, bunkers, medical supplies, scavenging loot and DayZ weapons.",
-	requires = { "Core", "Minecraft", "Survival" },
+	requires = { "Core", "Minecraft", "Mekanism", "Survival", "Terraria" },
 }

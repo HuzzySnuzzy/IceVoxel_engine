@@ -10,7 +10,8 @@
 	                                                 items, recipes, tags, textures, loot, ores,
 	                                                 ages, skills, lore, fuel, biomes, effects,
 	                                                 potions, templates, pools, structures, sounds,
-	                                                 music), of one pack
+	                                                 music), of one pack (one word: a kind, else a
+	                                                 pack)
 	    lune run tests/content show <name>           an entry's merged fields, its id and pack, the
 	                                                 packs that patched it, and what the registries
 	                                                 made of it (lore, faces or icon, Age, recipes;
@@ -18,9 +19,14 @@
 	                                                 a template's size and palette, a pool's
 	                                                 elements, what starts from it)
 	    lune run tests/content new <Pack> [--order n]
-	                                                 a new pack, src/shared/Content/Packs/<Pack>/,
-	                                                 an example of each kind in it (never over a
-	                                                 folder that is there), checked once written
+	                                                 a new pack, src/shared/Content/Packs/<Pack>/
+	                                                 (never over a folder that is there), with an
+	                                                 example of five kinds: a block, an item, a
+	                                                 shaped and a smelting recipe, a texture and a
+	                                                 loot table (its pack.luau names a module of
+	                                                 the game's packs to copy for each other
+	                                                 kind); checked once written. Its order: n, or
+	                                                 after every pack's
 
 	The checks, lists, pages and the new pack's text are tests/lib/ContentTool's (its header lists
 	every check); what the game makes of the packs is tests/lib/ContentGame's.
@@ -39,7 +45,7 @@ local USAGE = table.concat({
 	"usage: lune run tests/content [check] [--strict]",
 	"       lune run tests/content list [kind] [pack]",
 	"       lune run tests/content show <name>",
-	"       lune run tests/content new <Pack> [--order n]",
+	"       lune run tests/content new <Pack> [--order n]   (a block, an item, two recipes, a texture, a loot table)",
 }, "\n")
 
 local function fail(text: string): never
@@ -140,7 +146,7 @@ elseif command == "new" then
 	end
 	local at = order or ContentTool.nextOrder(view)
 	fs.writeDir(dir)
-	for _, file in ContentTool.scaffold(pack, at) do
+	for _, file in ContentTool.scaffold(view, pack, at) do
 		fs.writeFile(`{dir}/{file.path}`, file.text)
 		print(`wrote {dir}/{file.path}`)
 	end
@@ -160,7 +166,7 @@ elseif command == "new" then
 	for _, finding in findings do
 		print(`{finding.level}  {finding.subject}: {finding.text}`)
 	end
-	print(if #findings == 0 then "it loads and passes the check" else `{#findings} findings`)
+	print(ContentTool.verdict(findings))
 else
 	fail(`unknown command {command}\n{USAGE}`)
 end

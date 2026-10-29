@@ -6,6 +6,6 @@
 ]]
 return {
 	order = 900,
-	description = "Luck and its potion, Speed in another colour and Swiftness lasting longer, for tests/spec/Content.",
+	description = "Fixture Luck and its potion, Speed in another colour and Swiftness lasting longer, for tests/spec/Content.",
 	requires = { "Core", "Minecraft", "Survival" },
 }

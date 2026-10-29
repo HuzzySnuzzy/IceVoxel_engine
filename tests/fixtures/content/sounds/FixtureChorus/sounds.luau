@@ -1,9 +1,9 @@
--- The Chorus fixture pack's sounds (tests/spec/Content): a block sound type, three events and an
+-- The FixtureChorus fixture pack's sounds (tests/spec/Content): a block sound type, three events and an
 -- override.
 return function(define)
 	local SHIPPED = define.SHIPPED
 	local list = define.blockSounds({
-		name = "chime",
+		name = "fixture_chime",
 		volume = 1,
 		pitch = 1.8,
 		dig = { id = SHIPPED.LAND, volume = 0.8, pitchVariance = 0.05 },
@@ -11,7 +11,7 @@ return function(define)
 	})
 	define.append(list, {
 		{
-			name = "entity.chorus.sing",
+			name = "entity.fixture_chorus.sing",
 			id = SHIPPED.TICK,
 			pitch = 1.5,
 			fallback = { id = SHIPPED.LAND, pitch = 2 },
@@ -20,7 +20,7 @@ return function(define)
 			limit = 2,
 		},
 		{
-			name = "block.chorus.hum",
+			name = "block.fixture_chorus.hum",
 			category = "machine.hum",
 			id = define.RECORDINGS.ELECTRIC_HUM,
 			volume = 0.2,
@@ -29,7 +29,7 @@ return function(define)
 			side = "client",
 		},
 		{
-			name = "item.armor.equip_chorus",
+			name = "item.armor.equip_fixture_chorus",
 			category = "item.armor.equip",
 			id = SHIPPED.GET_UP,
 			pitch = 1.7,

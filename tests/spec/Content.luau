@@ -7,34 +7,40 @@
 	and structures: a pool's and a structure's overrides); kind folders
 	(tests/fixtures/content/folders: Delta, Luau, a folder inside a kind folder; Epsilon, JSON),
 	their modules' order and the files every message names; every per-entry field reaching its
-	registry (the Fields fixture pack grafted into a fresh game); where each thing came from
+	registry (the FixtureFields pack grafted into a fresh game); where each thing came from
 	(`origin`); biomes: the game's (the Minecraft pack's, the Survival pack's herbs patched in), the
 	fixture packs' (Beta's in JSON, Gamma's override patching it field by field) and a pack's biome
-	and override reaching Biomes, Locate and the generator (tests/fixtures/content/biomes/Wilds
-	grafted into a fresh game); effects and potions: the game's, by pack, and a pack's own status
-	effect and potion (the Brewing fixture pack, grafted the same way: the potion's items, recipes,
-	lore, drink and tooltip from its entry alone, and a patched effect and potion of the Minecraft
-	pack's); the skill tree's nodes (the `skills` kind: the game's in their features' packs, Beta's
-	in JSON, and the Skilled fixture pack's node, which needs Demolition and gates a recipe, and
-	override, grafted the same way); and every check: the schema's (unknown fields with their "did
-	you mean", wrong types, missing fields, an effect's icon and view the client has, a skill's perk
-	and its numbers), names and overrides, manifests and `requires`, every cross-reference (a
-	potion's effect, ingredient and variants, a skill's Age, icon, prerequisites and cell),
-	discovery's, the registries' own checks on the entries' values (Effects' names among them, the
-	skill tree's rows, icons and perks), and the biome registries' (bands, tree builders, a band
-	without biomes, a biome code needs).
+	and override reaching Biomes, Locate and the generator (tests/fixtures/content/biomes/
+	FixtureWilds grafted into a fresh game); effects and potions: the game's, by pack, and a pack's
+	own status effect and potion (the FixtureBrewing pack, grafted the same way: the potion's items,
+	recipes, lore, drink and tooltip from its entry alone, and a patched effect and potion of the
+	Minecraft pack's); the skill tree's nodes (the `skills` kind: the game's in their features'
+	packs, Beta's in JSON, and the FixtureSkilled pack's node, which needs Demolition and gates a
+	recipe, and override, grafted the same way); and every check: the schema's (unknown fields with
+	their "did you mean", wrong types, missing fields, an effect's icon and view the client has, a
+	skill's perk and its numbers), names and overrides, manifests and `requires`, every
+	cross-reference (a potion's effect, ingredient and variants, a skill's Age, icon, prerequisites
+	and cell), discovery's, the registries' own checks on the entries' values (Effects' names among
+	them, the skill tree's rows, icons and perks), and the biome registries' (bands, tree builders,
+	a band without biomes, a biome code needs).
 
-	Nothing here pins an id or a total: the game's content may grow.
+	Nothing here pins an id or a total: the game's content may grow. Nor does anything break when
+	an author adds a pack, an entry or an override: the game's entries are checked by the pack that
+	made them (`origin`), not by `where`'s whole text, which names every pack patching them; a
+	fixture pack grafted into the game loads after every pack there (lib/GamePacks' graftLast,
+	whatever order an author's take) and names what it makes "Fixture...", which no pack takes; and
+	a pack built here in memory takes an order after every pack's too.
 ]]
 
 local Loader = require("../lib/Loader")
+local GamePacks = require("../lib/GamePacks")
 
 local PACKS = "tests/fixtures/content/packs"
 local FOLDERS = "tests/fixtures/content/folders"
-local FIELDS = "tests/fixtures/content/fields/Fields"
-local BIOMES = "tests/fixtures/content/biomes/Wilds"
-local BREWING = "tests/fixtures/content/brewing/Brewing"
-local SKILLS = "tests/fixtures/content/skills/Skilled"
+local FIELDS = "tests/fixtures/content/fields/FixtureFields"
+local BIOMES = "tests/fixtures/content/biomes/FixtureWilds"
+local BREWING = "tests/fixtures/content/brewing/FixtureBrewing"
+local SKILLS = "tests/fixtures/content/skills/FixtureSkilled"
 
 return function(t, shared, require, _server, _client)
 	local Content = require(shared.Content)
@@ -60,6 +66,19 @@ return function(t, shared, require, _server, _client)
 			table.insert(out, entry[field or "name"])
 		end
 		return table.concat(out, " ")
+	end
+
+	-- The pack that made `name` of `kind` in `content` (the game's when left out), by `origin`: a
+	-- spec of the game's content asks this, not for `where`'s whole text, since an author's pack
+	-- may patch any of the game's entries and `where` names every pack that did.
+	local function maker(kind: string, name: string, content: any?): string
+		local origin = (content or Content.default).origin(kind, name)
+		return if origin then origin.pack else "nil"
+	end
+	-- The packs that patched it, in load order.
+	local function patchers(kind: string, name: string, content: any?): { string }
+		local origin = (content or Content.default).origin(kind, name)
+		return if origin then origin.patched else {}
 	end
 
 	-- A fresh game (shared and server modules), after `edit` has had its chance to add packs to
@@ -116,9 +135,10 @@ return function(t, shared, require, _server, _client)
 		t.eq(Items.ITEM_BASE, Content.ITEM_BASE)
 		-- The Ores pack's after the Turrets pack's, the lists the registries keep the merged ones.
 		t.ok(Blocks.id.CopperOre > Blocks.id.AmmoPress and Items.id.RawCopper > Items.id.LaserSight, "the ores last")
-		t.eq(content.where("block", "UraniumOre"), "pack Ores, block UraniumOre")
-		t.eq(content.where("item", "Stick"), "pack Minecraft, items/materials, item Stick", "a kind folder's file")
-		t.eq(content.where("item", "HermesBoots"), "pack Terraria, item HermesBoots")
+		t.eq(maker("block", "UraniumOre"), "Ores")
+		t.eq(maker("item", "Stick"), "Minecraft")
+		t.eq((content.origin("item", "Stick") :: any).file, "items/materials", "a kind folder's file")
+		t.eq(maker("item", "HermesBoots"), "Terraria")
 		t.eq(require(shared.Blocks.BlockList), content.blocks, "Blocks.BlockList")
 		t.eq(require(shared.Items.ItemList), content.items, "Items.ItemList")
 		t.eq(content.entry("UraniumOre"), content.block("UraniumOre"))
@@ -137,10 +157,26 @@ return function(t, shared, require, _server, _client)
 		t.eq((content.item("HazmatHelmet") :: any).shielding, 0.25)
 		t.eq((content.block("LeadBlock") :: any).radiationShield, 0.02)
 		t.eq(content.textures["uranium ore"].Color, "", "its textures are the pack's")
-		t.eq(content.ores[#content.ores].name, "uranium_buried", "its ore features last")
+		-- Its ore features together, after every earlier pack's (an author's pack may add some after
+		-- them: they are appended in load order).
+		local packAt: { [string]: number } = {}
+		for index, info in content.packs do
+			packAt[info.name] = index
+		end
+		local first, last = math.huge, 0
+		for index, feature in content.ores do
+			if maker("ores", feature.name) == "Ores" then
+				first, last = math.min(first, index), index
+			end
+		end
+		t.eq((content.ores[last] :: any).name, "uranium_buried", "its ore features end with uranium's buried cells")
+		for index, feature in content.ores do
+			local at = packAt[maker("ores", feature.name)]
+			t.ok((index < first) == (at < packAt.Ores) and (index > last) == (at > packAt.Ores), feature.name)
+		end
 		t.eq(content.where("ores", "copper"), "pack Ores, ore feature copper", "where: by kind")
 		t.eq(content.where("ore feature", "copper"), "pack Ores, ore feature copper", "or by its word")
-		t.eq(content.where("texture", "copper ore"), "pack Ores, texture copper ore")
+		t.eq(maker("texture", "copper ore"), "Ores")
 		-- Define.metal made its set: storage both ways and smelting.
 		local Recipes = require(shared.Crafting.Recipes)
 		local packs, unpacks, smelts = 0, 0, 0
@@ -180,7 +216,7 @@ return function(t, shared, require, _server, _client)
 		-- Every item of the pack: its lore line and its icon (blank until made) on its entry.
 		local seen = 0
 		for _, spec in content.items do
-			if string.find(content.where("item", spec.name), "pack Minecraft", 1, true) then
+			if maker("item", spec.name) == "Minecraft" then
 				seen += 1
 				t.ok(type(spec.lore) == "string" and LoreList[spec.name] == spec.lore, `{spec.name}'s lore`)
 				t.eq(spec.icon, "", `{spec.name}'s icon on its entry`)
@@ -217,8 +253,12 @@ return function(t, shared, require, _server, _client)
 		t.eq((Skills.ofName("Gunpowder") :: any).id, "demolition", "-> the skill's recipes")
 		t.eq(Ages.ofName("Gunpowder"), industrial.index)
 		t.eq(Ages.ofName("Shears"), iron.index)
-		-- Potions: a base potion the Iron Age's, its strong and long variants the Industrial Age's.
+		-- Potions: a base potion the Iron Age's, its strong and long variants the Industrial Age's
+		-- (the pack's potions: another pack's give their own Ages).
 		for _, variant in PotionList.all() do
+			if maker("potion", variant.potion.name) ~= "Minecraft" then
+				continue
+			end
 			local age = if variant.from == PotionList.BASE then iron else industrial
 			t.eq(Ages.ofName(variant.item), age.index, `{variant.item}'s Age`)
 			t.ok(type(item(variant.item).lore) == "string", `{variant.item}'s lore`)
@@ -248,7 +288,7 @@ return function(t, shared, require, _server, _client)
 				RadiationSickness = "Ores",
 			}
 		do
-			t.eq(content.where("effect", name), `pack {pack}, effect {name}`, `{name} is the {pack} pack's`)
+			t.eq(maker("effect", name), pack, `{name} is the {pack} pack's`)
 		end
 		-- Ids by place, the registry's the same.
 		t.eq(Effects.COUNT, #content.effects)
@@ -258,7 +298,7 @@ return function(t, shared, require, _server, _client)
 		end
 		t.ok(#content.effects <= Content.MAX_EFFECTS, "ids fit a u8")
 		t.eq(PotionList.list, content.potions, "PotionList.list")
-		t.eq(content.where("potion", "Swiftness"), "pack Minecraft, potion Swiftness")
+		t.eq(maker("potion", "Swiftness"), "Minecraft")
 		-- Each potion's items are brewed after the pack's own items, their recipes after its recipes.
 		t.ok(Items.id.PotionOfSwiftness > Items.id.Stick, "after the pack's own items")
 		t.eq(
@@ -279,7 +319,7 @@ return function(t, shared, require, _server, _client)
 
 	t.test("content: a pack's own effect and potion: items, recipes, lore and tooltip from its entry alone", function()
 		local env, root = fresh(function(env, packs)
-			env.graft(BREWING, packs, "Brewing")
+			GamePacks.graftLast(env, BREWING, packs, "FixtureBrewing")
 		end)
 		local function need(path: { string }): any
 			local node = root
@@ -300,55 +340,70 @@ return function(t, shared, require, _server, _client)
 		local content = need({ "Content" }).default
 		local E, I = FreshEffects.id, FreshItems.id
 		-- The effect: the last id, its own fields, /effect finds it.
-		t.eq(E.Luck, FreshEffects.COUNT, "after every other pack's effects")
-		local luck = FreshEffects.get(E.Luck)
+		t.eq(E.FixtureLuck, FreshEffects.COUNT, "after every other pack's effects")
+		local luck = FreshEffects.get(E.FixtureLuck)
 		t.eq(luck.colorValue, 51 * 65536 + 153 * 256, "Minecraft's LUCK colour")
 		t.ok(luck.beneficial and luck.icon == "star")
-		t.eq(FreshEffects.find("minecraft:luck"), E.Luck, "/effect give @s luck")
-		t.eq(content.where("effect", "Luck"), "pack Brewing, effect Luck")
-		-- Speed patched: its place kept, the colour its potions' liquid takes.
+		t.eq(FreshEffects.find("fixture_luck"), E.FixtureLuck, "/effect give @s fixture_luck")
+		t.eq(content.where("effect", "FixtureLuck"), "pack FixtureBrewing, effect FixtureLuck")
+		-- Speed patched: its place kept, the colour its potions' liquid takes (the fixture's patch,
+		-- the last: it loads after every pack).
 		t.eq(E.Speed, require(shared.Effects).id.Speed, "its id kept")
 		t.eq(FreshEffects.get(E.Speed).color[1], 10, "patched")
 		t.eq(FreshEffects.get(E.Speed).command, "speed", "the rest kept")
 		t.eq(FreshItems.get(I.PotionOfSwiftness).color[1], 10, "a potion takes its effect's colour, patched")
-		t.eq(content.where("effect", "Speed"), "pack Minecraft (patched by Brewing), effect Speed")
+		local speedBy = patchers("effect", "Speed", content)
+		t.ok(maker("effect", "Speed", content) == "Minecraft" and speedBy[#speedBy] == "FixtureBrewing", "patched last")
 		-- The potion's items, after the pack's own: the base potion and the long one (no strong).
-		t.ok(I.PotionOfLuck == I.FourLeafClover + 1 and I.LongPotionOfLuck == I.PotionOfLuck + 1, "after its own")
-		t.eq(FreshItems.find("StrongPotionOfLuck"), nil, "no strong variant")
-		t.eq(FreshItems.get(I.LongPotionOfLuck).displayName, "Long Potion of Luck")
-		t.eq(FreshItems.get(I.PotionOfLuck).maxStack, 1)
-		t.eq(FreshItems.get(I.PotionOfLuck).color[2], 153, "its effect's colour")
-		t.eq(content.where("item", "PotionOfLuck"), "pack Brewing, potion Luck, item PotionOfLuck")
+		t.ok(
+			I.PotionOfFixtureLuck == I.FixtureClover + 1 and I.LongPotionOfFixtureLuck == I.PotionOfFixtureLuck + 1,
+			"after its own"
+		)
+		t.eq(FreshItems.find("StrongPotionOfFixtureLuck"), nil, "no strong variant")
+		t.eq(FreshItems.get(I.LongPotionOfFixtureLuck).displayName, "Long Potion of FixtureLuck")
+		t.eq(FreshItems.get(I.PotionOfFixtureLuck).maxStack, 1)
+		t.eq(FreshItems.get(I.PotionOfFixtureLuck).color[2], 153, "its effect's colour")
+		t.eq(
+			content.where("item", "PotionOfFixtureLuck"),
+			"pack FixtureBrewing, potion FixtureLuck, item PotionOfFixtureLuck"
+		)
 		-- Each item's lore line, icon and Age, from the potion's.
-		t.eq(LoreList.PotionOfLuck, "Brewed from an emerald. Feel lucky.")
-		t.eq(LoreList.LongPotionOfLuck, "Brewed longer with coal. Feel lucky for longer.")
-		t.eq(TexturePack.Icons.PotionOfLuck, "rbxassetid://777", "its icon")
-		t.eq(TexturePack.Icons.LongPotionOfLuck, "", "blank where it gives none")
-		t.eq(Ages.ofName("PotionOfLuck"), Ages.byId("iron").index)
-		t.eq(Ages.ofName("LongPotionOfLuck"), Ages.byId("industrial").index)
+		t.eq(LoreList.PotionOfFixtureLuck, "Brewed from an emerald. Feel lucky.")
+		t.eq(LoreList.LongPotionOfFixtureLuck, "Brewed longer with coal. Feel lucky for longer.")
+		t.eq(TexturePack.Icons.PotionOfFixtureLuck, "rbxassetid://777", "its icon")
+		t.eq(TexturePack.Icons.LongPotionOfFixtureLuck, "", "blank where it gives none")
+		t.eq(Ages.ofName("PotionOfFixtureLuck"), Ages.byId("iron").index)
+		t.eq(Ages.ofName("LongPotionOfFixtureLuck"), Ages.byId("industrial").index)
 		-- Its recipes: a Purified Water Bottle with the ingredient, the potion with a coal.
 		local made = Crafting.match({
 			[1] = { item = I.PurifiedWaterBottle, count = 1 },
 			[2] = { item = I.Emerald, count = 1 },
 		}, 2)
-		t.eq(made and made.item, I.PotionOfLuck, "brewed")
-		local long =
-			Crafting.match({ [1] = { item = I.PotionOfLuck, count = 1 }, [2] = { item = I.Charcoal, count = 1 } }, 2)
-		t.eq(long and long.item, I.LongPotionOfLuck, "lengthened")
+		t.eq(made and made.item, I.PotionOfFixtureLuck, "brewed")
+		local long = Crafting.match({
+			[1] = { item = I.PotionOfFixtureLuck, count = 1 },
+			[2] = { item = I.Charcoal, count = 1 },
+		}, 2)
+		t.eq(long and long.item, I.LongPotionOfFixtureLuck, "lengthened")
 		-- Drinking it, and its tooltip.
-		local given = Drinks.of(I.PotionOfLuck).effects[1]
-		t.ok(given.effect == E.Luck and given.ticks == 6000 and given.amplifier == 0, "5:00 of Luck I")
-		t.eq(Drinks.entry(I.PotionOfLuck).empty, I.GlassBottle, "the bottle back")
-		local tip = Tooltip.texts(I.PotionOfLuck)
-		t.ok(table.find(tip, "Luck (5:00)") ~= nil, "the tooltip's effect line")
+		local given = Drinks.of(I.PotionOfFixtureLuck).effects[1]
+		t.ok(given.effect == E.FixtureLuck and given.ticks == 6000 and given.amplifier == 0, "5:00 of Luck I")
+		t.eq(Drinks.entry(I.PotionOfFixtureLuck).empty, I.GlassBottle, "the bottle back")
+		local tip = Tooltip.texts(I.PotionOfFixtureLuck)
+		t.ok(table.find(tip, "Fixture Luck (5:00)") ~= nil, "the tooltip's effect line")
 		t.ok(table.find(tip, "Brewed from an emerald. Feel lucky.") ~= nil, "and its lore")
 		-- Swiftness patched: 4:00, its new line; the Minecraft pack's own data untouched.
 		t.eq(Drinks.of(I.PotionOfSwiftness).effects[1].ticks, 4800, "patched: 4:00")
 		t.eq(Drinks.of(I.StrongPotionOfSwiftness).effects[1].ticks, 1800, "its II kept")
-		t.eq(LoreList.PotionOfSwiftness, "Patched by Brewing. Run faster for longer.")
-		t.eq(content.where("potion", "Swiftness"), "pack Minecraft (patched by Brewing), potion Swiftness")
-		t.eq(PotionList.list[#PotionList.list].name, "Luck", "the potions in load order")
-		t.eq(require(shared.Content).default.potions[1].seconds, 180, "the game's own Swiftness unpatched")
+		t.eq(LoreList.PotionOfSwiftness, "Patched by FixtureBrewing. Run faster for longer.")
+		local swiftnessBy = patchers("potion", "Swiftness", content)
+		t.eq(swiftnessBy[#swiftnessBy], "FixtureBrewing", "the potion patched last by the fixture")
+		t.eq(PotionList.list[#PotionList.list].name, "FixtureLuck", "the potions in load order")
+		for _, potion in require(shared.Content).default.potions do
+			if potion.name == "Swiftness" then
+				t.ok(potion.seconds ~= 240, "the game's own Swiftness unpatched")
+			end
+		end
 		-- Where each came from, as data (`origin`): the effects and potions, their overrides, and a
 		-- brewed item's and recipe's potion.
 		local function origin(kind: string, name: any): string
@@ -359,19 +414,33 @@ return function(t, shared, require, _server, _client)
 			local index = if from.index then ` #{from.index}` else ""
 			return `{from.pack} {from.file or "-"}{index} [{table.concat(from.patched, ",")}]`
 		end
-		t.eq(origin("effect", "Luck"), "Brewing - []", "an effect's")
-		t.eq(origin("effects", "Speed"), "Minecraft - [Brewing]", "an effect patched")
-		t.eq(origin("potion", "Luck"), "Brewing - []", "a potion's")
-		t.eq(origin("potion", "Swiftness"), "Minecraft - [Brewing]", "a potion patched")
-		t.eq(origin("item", "LongPotionOfLuck"), "Brewing potion Luck []", "a brewed item: its potion's")
+		t.eq(origin("effect", "FixtureLuck"), "FixtureBrewing - []", "an effect's")
+		t.ok(
+			string.match(origin("effects", "Speed"), "^Minecraft %- %[.*FixtureBrewing%]$") ~= nil,
+			"an effect patched"
+		)
+		t.eq(origin("potion", "FixtureLuck"), "FixtureBrewing - []", "a potion's")
+		t.ok(
+			string.match(origin("potion", "Swiftness"), "^Minecraft %- %[.*FixtureBrewing%]$") ~= nil,
+			"a potion patched"
+		)
+		t.eq(
+			origin("item", "LongPotionOfFixtureLuck"),
+			"FixtureBrewing potion FixtureLuck []",
+			"a brewed item: its potion's"
+		)
 		t.eq(origin("item", "PotionOfSwiftness"), "Minecraft potion Swiftness []")
 		local brewedAt: number? = nil
 		for index, recipe in content.recipes do
-			if recipe.result == "LongPotionOfLuck" then
+			if recipe.result == "LongPotionOfFixtureLuck" then
 				brewedAt = index
 			end
 		end
-		t.eq(origin("recipe", brewedAt), "Brewing potion Luck #2 []", "a brewed recipe: its potion's, its place")
+		t.eq(
+			origin("recipe", brewedAt),
+			"FixtureBrewing potion FixtureLuck #2 []",
+			"a brewed recipe: its potion's, its place"
+		)
 		t.eq(origin("effect", "Nothing"), "nil")
 	end)
 
@@ -380,12 +449,23 @@ return function(t, shared, require, _server, _client)
 		local Biomes = require(shared.Biomes)
 		t.ok(#content.biomes > 0, "biomes")
 		t.eq(Biomes.count, #content.biomes, "the registry has every one")
+		-- (Every biome a pack's, in load order: the Minecraft pack's, then any later pack's, an
+		-- author's among them.)
+		local packAt: { [string]: number } = {}
+		for index, info in content.packs do
+			packAt[info.name] = index
+		end
+		local minecraft, lastPack = 0, 0
 		for index, spec in content.biomes do
 			t.eq(Biomes.get(index).name, spec.name, `{spec.name}: its index is its place`)
 			t.eq(Biomes.byName(spec.name), Biomes.get(index))
 			t.eq(content.biome(spec.name), spec)
-			t.ok(string.find(content.where("biome", spec.name), "pack Minecraft", 1, true) ~= nil, spec.name)
+			local at = packAt[maker("biome", spec.name)]
+			t.ok(at ~= nil and at >= lastPack, `{spec.name}: a pack's, in load order`)
+			lastPack = at or lastPack
+			minecraft += if maker("biome", spec.name) == "Minecraft" then 1 else 0
 		end
+		t.ok(minecraft > 0, "the Minecraft pack's")
 		t.eq(content.biome("Atlantis"), nil)
 		-- (The order the generator's arrays and climate picks follow: the Minecraft pack's list.
 		-- tests/spec/Generation and WorldTypeGenerators pin what it generates.)
@@ -397,7 +477,7 @@ return function(t, shared, require, _server, _client)
 		before("Plains", "Forest")
 		before("FrozenPeaks", "MushroomFields")
 		-- Herbs: the Survival pack's overrides, the rest of the foliage the Minecraft pack's.
-		t.eq(content.where("biome", "Taiga"), "pack Minecraft (patched by Survival), biome Taiga")
+		t.ok(maker("biome", "Taiga") == "Minecraft" and table.find(patchers("biome", "Taiga"), "Survival") ~= nil)
 		local taiga = content.biome("Taiga") :: any
 		t.eq(taiga.foliage.herbs.species[1][1], "WildGinger")
 		t.eq(taiga.foliage.plants[1][1], "Fern", "the taiga's own plants kept")
@@ -428,7 +508,7 @@ return function(t, shared, require, _server, _client)
 		t.eq(names(content.packs), "Beta Alpha Gamma", "order 10, then order 20 by name")
 		t.eq(
 			content.packs[1].description,
-			"The JSON fixture pack (tests/spec/Content): every kind as a .json file but potions (brewed from the game's bottles: the Brewing pack)."
+			"The JSON fixture pack (tests/spec/Content): every kind as a .json file but potions (brewed from the game's bottles: the FixtureBrewing pack)."
 		)
 		t.eq(table.concat(content.packs[2].requires, ","), "Beta")
 		t.eq(
@@ -667,11 +747,11 @@ return function(t, shared, require, _server, _client)
 		t.eq(Content.default.fuel.planks, 300)
 	end)
 
-	--[[ Every per-entry field reaching its registry (the Fields pack in a fresh game) ]]
+	--[[ Every per-entry field reaching its registry (the FixtureFields pack in a fresh game) ]]
 
 	t.test("content: every per-entry field reaches its registry", function()
 		local env, root, serverRoot = fresh(function(env, packs)
-			env.graft(FIELDS, packs, "Fields")
+			GamePacks.graftLast(env, FIELDS, packs, "FixtureFields")
 		end)
 		local function need(path: { string }, from: any?): any
 			local node = from or root
@@ -684,7 +764,7 @@ return function(t, shared, require, _server, _client)
 		local FreshItems = need({ "Items" })
 		local B, I = FreshBlocks.id, FreshItems.id
 		local content = need({ "Content" }).default
-		t.eq(content.packs[#content.packs].name, "Fields", "grafted last")
+		t.eq(content.packs[#content.packs].name, "FixtureFields", "grafted last")
 		-- (FixtureOre, FixtureFrost, FixturePlanks, FixtureCharge and FixtureLitCharge; its override
 		-- of Planks moves no id.)
 		t.eq(B.FixtureOre, FreshBlocks.count - 5, "its blocks after every other")
@@ -900,15 +980,15 @@ return function(t, shared, require, _server, _client)
 
 	t.test("content: a pack's biome reaches Biomes, Locate and the generator; its override of Plains", function()
 		local env, root = fresh(function(env, packs)
-			env.graft(BIOMES, packs, "Wilds")
+			GamePacks.graftLast(env, BIOMES, packs, "FixtureWilds")
 		end)
 		local FreshBlocks = env.require(root.Blocks)
 		local FreshBiomes = env.require(root.Biomes)
 		local B = FreshBlocks.id
 		local GameBiomes = require(shared.Biomes)
 		-- After every other biome, which keep their places.
-		local marsh = FreshBiomes.byName("Marsh") :: any
-		t.ok(marsh ~= nil, "the Marsh")
+		local marsh = FreshBiomes.byName("FixtureMarsh") :: any
+		t.ok(marsh ~= nil, "the Fixture Marsh")
 		t.eq(marsh.index, FreshBiomes.count, "last")
 		t.eq(FreshBiomes.count, GameBiomes.count + 1)
 		for index, biome in GameBiomes.list do
@@ -938,14 +1018,20 @@ return function(t, shared, require, _server, _client)
 		t.eq(plains.foliage.flowerChance, before.foliage.flowerChance, "its chance kept")
 		t.eq(plains.foliage.density, before.foliage.density)
 		t.eq(plains.foliage.herbs.blocks[1], B.Mint, "the Survival pack's herbs kept")
-		t.eq(FreshBiomes.where("Plains"), "pack Minecraft (patched by Survival, Wilds), biome Plains")
+		-- (Patched by the Survival pack, then by any other pack, the fixture's last.)
+		local where = FreshBiomes.where("Plains")
+		t.ok(
+			string.sub(where, 1, 35) == "pack Minecraft (patched by Survival"
+				and string.sub(where, -27) == "FixtureWilds), biome Plains",
+			where
+		)
 		-- Its tags: /locate's, joining the Minecraft pack's.
 		local Locate = env.require(root.Generation.Locate)
-		t.ok(table.find(Locate.BIOME_TAGS.is_forest, "marsh") ~= nil, "#is_forest")
+		t.ok(table.find(Locate.BIOME_TAGS.is_forest, "fixture_marsh") ~= nil, "#is_forest")
 		t.ok(table.find(Locate.BIOME_TAGS.is_forest, "birch_forest") ~= nil, "with the others")
-		local wet = Locate.resolve(Locate.biomeRegistry(), "#wet") :: any
-		t.eq(table.concat(wet.members, ","), "marsh", "a tag of its own")
-		t.eq(Locate.biomeIndex.marsh, marsh.index)
+		local wet = Locate.resolve(Locate.biomeRegistry(), "#fixture_wet") :: any
+		t.eq(table.concat(wet.members, ","), "fixture_marsh", "a tag of its own")
+		t.eq(Locate.biomeIndex.fixture_marsh, marsh.index)
 		-- The generator takes it: its features are known builders, its arrays cover it.
 		local Generation = env.require(root.Generation.TerrainGenerator)
 		local single = Generation.new(7, { biome = marsh.index })
@@ -985,38 +1071,40 @@ return function(t, shared, require, _server, _client)
 			return (Skills.byId(id) :: any).index
 		end
 		t.ok(at("enlightenment") < at("demolition") and at("fission") < at("hardy"), "in pack order")
-		t.eq(table.concat((Skills.byId("demolition") :: any).recipes, " "), "Tnt Gunpowder", "the entries naming it")
+		-- (The Minecraft pack's entries naming it: another pack's may too.)
+		local gated = (Skills.byId("demolition") :: any).recipes
+		t.ok(table.find(gated, "Tnt") and table.find(gated, "Gunpowder"), "the entries naming it")
 	end)
 
 	t.test("content: a pack's skill: a node needing another, gating a recipe; an override", function()
 		local env, root = fresh(function(env, packs)
-			env.graft(SKILLS, packs, "Skilled")
+			GamePacks.graftLast(env, SKILLS, packs, "FixtureSkilled")
 		end)
 		local Progression = env.require(root.Progression)
 		local Skills, Ages, Knowledge = Progression.Skills, Progression.Ages, Progression.Knowledge
 		local FreshItems = env.require(root.Items)
 		local content = env.require(root.Content).default
-		local blasting = assert(Skills.byId("blasting"), "the pack's node")
+		local blasting = assert(Skills.byId("fixture_blasting"), "the pack's node")
 		t.eq(blasting.index, Skills.count, "the last pack's: the last place")
 		t.eq(Ages.get(blasting.age).id, "electric")
 		t.eq(blasting.row, 2)
 		t.eq(table.concat(blasting.requires, " "), "demolition", "it needs the Minecraft pack's")
-		t.eq(table.concat(blasting.recipes, " "), "BlastCharge", "the entry naming it")
-		t.eq(Skills.ofName("BlastCharge"), blasting)
+		t.eq(table.concat(blasting.recipes, " "), "FixtureBlastCharge", "the entry naming it")
+		t.eq(Skills.ofName("FixtureBlastCharge"), blasting)
 		-- Its cell on the skill tree screen: its Age's column, a row of its own.
 		for _, other in Skills.ofAge(blasting.age) do
 			t.ok(other == blasting or other.row ~= blasting.row, `{other.id}'s row is another`)
 		end
 		-- The gate: the Age, then the node, which needs Demolition first.
-		local charge = FreshItems.id.BlastCharge
+		local charge = FreshItems.id.FixtureBlastCharge
 		local state = Progression.new()
 		Progression.setAge(state, Ages.byId("electric").index)
 		Progression.setPoints(state, Knowledge.total(40))
 		t.ok(not Progression.allows(state, charge), "locked")
-		t.eq(Progression.lockText(state, charge), "Requires Blasting")
-		t.eq(select(2, Progression.canUnlock(state, "blasting")), "requires", "Demolition first")
+		t.eq(Progression.lockText(state, charge), "Requires Fixture Blasting")
+		t.eq(select(2, Progression.canUnlock(state, "fixture_blasting")), "requires", "Demolition first")
 		state.skills.demolition = true
-		t.ok((Progression.unlock(state, "blasting")), "then it unlocks")
+		t.ok((Progression.unlock(state, "fixture_blasting")), "then it unlocks")
 		t.ok(Progression.allows(state, charge), "and its recipe with it")
 		local Crafting = env.require(root.Crafting)
 		local I = FreshItems.id
@@ -1038,8 +1126,8 @@ return function(t, shared, require, _server, _client)
 		t.eq(forager.name, "Forager", "the rest kept")
 		t.eq(forager.perk.bonus, 0.1)
 		t.eq(forager.index, (require(shared.Progression.Skills).byId("forager") :: any).index, "its place kept")
-		t.eq(content.where("skill", "forager"), "pack Core (patched by Skilled), skill forager")
-		t.eq(table.concat((content.origin("skill", "forager") :: any).patched, " "), "Skilled")
+		local foragerBy = patchers("skill", "forager", content)
+		t.ok(maker("skill", "forager", content) == "Core" and foragerBy[#foragerBy] == "FixtureSkilled", "patched last")
 	end)
 
 	--[[ Checks: Content.build ]]
@@ -1146,9 +1234,27 @@ return function(t, shared, require, _server, _client)
 		)
 		fails(
 			{ pack("P", { loot = { chest = { { rolls = { 1, 1 }, entries = { { "A", 0, 1, 1 } } } } } }) },
-			{ "pack P, loot table chest: it[1].entries[1][2] must be a weight above 0" },
-			"a loot entry"
+			{ "pack P, loot table chest: pool 1, entry 1: its weight must be above 0, not 0" },
+			"a loot entry, in words (not it[1].entries[1][2])"
 		)
+		fails(
+			{ pack("P", { loot = { chest = { { rolls = 1, entries = {} } } } }) },
+			{ "pack P, loot table chest: pool 1: rolls must be a list, not 1" },
+			"a pool's field"
+		)
+		fails(
+			{ pack("P", { loot = { chest = { { rolls = { 1, 1 }, entries = { { "A", 1, 3, 2 } } } } } }) },
+			{ "pack P, loot table chest: pool 1, entry 1 has its most (2) under its fewest (3)" },
+			"a whole entry"
+		)
+		fails({
+			pack("P", {
+				blocks = { { name = "A" } },
+				ores = { { name = "o", block = "A", veins = 1, size = 1, minY = 1, maxY = 2, shape = "uniform" } },
+			}),
+		}, {
+			'pack P, ore feature o: shape must be "trapezoid" (or left out: uniform veins), not the string "uniform"',
+		}, "an ore's shape: uniform is left out")
 		fails(
 			{ pack("P", { recipes = { { type = "baked", result = "A" } } }) },
 			{ "pack P, recipe #1 (A): type must be one of shaped, shapeless, smelting" },
@@ -2240,11 +2346,13 @@ return function(t, shared, require, _server, _client)
 
 	--[[ Checks: the registries' own, on the entries' values ]]
 
-	-- Requiring `path` in a fresh game with a pack Patch (`kinds`) fails with `parts`.
+	-- Requiring `path` in a fresh game with a pack Patch (`kinds`), after every pack there, fails
+	-- with `parts`.
 	local function refused(kinds: { [string]: any }, path: { string }, parts: { string })
 		local env, root = fresh(function(env, packs)
+			local order = GamePacks.orderAfter(env, packs, 900)
 			local folder = env.folder(packs, "Patch")
-			env.module(folder, "pack", { order = 900, requires = { "Minecraft", "Terraria" } })
+			env.module(folder, "pack", { order = order, requires = { "Minecraft", "Terraria" } })
 			for kind, value in kinds do
 				env.module(folder, kind, value)
 			end
@@ -2257,8 +2365,15 @@ return function(t, shared, require, _server, _client)
 		local message = if ok then "(it loaded)" else tostring(err)
 		t.ok(has(message, parts), `{table.concat(path, ".")}: {message}`)
 	end
-	local STONE = "pack Minecraft (patched by Patch), blocks/terrain, block Stone"
-	local HELMET = "pack Minecraft (patched by Patch), items/armor, item IronHelmet"
+	-- `refused`'s parts for a message naming the Minecraft pack's `name` (in `file`, of `kind`)
+	-- patched by Patch, last: "<before>pack Minecraft (patched by [any other pack, ]Patch), <file>,
+	-- <kind> <name><after>" (an author's pack may patch it too).
+	local function patched(before: string, file: string, name: string, after: string): { string }
+		return { `{before}pack Minecraft (patched by `, `Patch), {file}, {name}{after}` }
+	end
+	local function stone(before: string, after: string): { string }
+		return patched(before, "blocks/terrain", "block Stone", after)
+	end
 
 	t.test("content: food and drink: their schema, unknown effects and containers, ones that do nothing", function()
 		fails(
@@ -2384,27 +2499,43 @@ return function(t, shared, require, _server, _client)
 		refused(
 			{ blocks = { { name = "Stone", override = true, sounds = { smash = "block.stone.break" } } } },
 			{ "Sounds" },
-			{ `Sounds: {STONE} has unknown action smash` }
+			stone("Sounds: ", " has unknown action smash")
 		)
 		refused(
 			{ blocks = { { name = "Stone", override = true, radiation = 0 } } },
 			{ "Radiation" },
-			{ `Radiation: {STONE}'s radiation must be a positive number` }
+			stone("Radiation: ", "'s radiation must be a positive number")
 		)
 		refused(
 			{ items = { { name = "IronHelmet", override = true, shielding = 2 } } },
 			{ "Radiation" },
-			{ `Radiation: {HELMET}'s shielding must be 0..1` }
+			patched("Radiation: ", "items/armor", "item IronHelmet", "'s shielding must be 0..1")
 		)
 		refused(
 			{ blocks = { { name = "Stone", override = true, miner = { ticks = 1.5, joules = 10 } } } },
 			{ "Machines", "MinerRules" },
-			{ `MinerRules: {STONE} needs whole ticks and J a tick` }
+			stone("MinerRules: ", " needs whole ticks and J a tick")
 		)
 		refused(
 			{ blocks = { { name = "Stone", override = true, fuel = 0 } } },
 			{ "Crafting", "Recipes" },
-			{ `Recipes: {STONE} burns for 0 ticks` }
+			stone("Recipes: ", " burns for 0 ticks")
+		)
+		-- A texture's Material: one that takes a MaterialVariant, the message naming them (a typo
+		-- is no Roblox material at all).
+		refused({ textures = { ["patch marbel"] = { Color = "", Material = "Marbel" } } }, { "Blocks" }, {
+			'TexturePack: texture "patch marbel" has Material Marbel: a texture\'s Material must be one that takes a MaterialVariant (',
+			"Slate",
+		})
+		-- A loot entry's count: at least one (Content checks the names).
+		refused(
+			{
+				blocks = {
+					{ name = "PatchLoot", loot = { { rolls = { 1, 1 }, entries = { { "Stick", 1, -1, 1 } } } } },
+				},
+			},
+			{ "Items" },
+			{ "Items: pack Patch, block PatchLoot's loot gives -1 to 1 Stick: the fewest must be 1 or more" }
 		)
 	end)
 
@@ -2749,7 +2880,7 @@ return function(t, shared, require, _server, _client)
 	--[[ Sounds and music (the `sounds` and `music` kinds) ]]
 
 	-- The fixture pack of sounds and music, grafted into a fresh game.
-	local CHORUS = "tests/fixtures/content/sounds/Chorus"
+	local CHORUS = "tests/fixtures/content/sounds/FixtureChorus"
 
 	-- A sound event's entry and a track's, with `fields` over them.
 	local function soundEntry(name: string, fields: { [string]: any }?): { [string]: any }
@@ -2786,16 +2917,20 @@ return function(t, shared, require, _server, _client)
 		t.eq((content.music[1] :: any).set, "night")
 		t.eq(content.where("track", "beta_theme"), "pack Beta, track beta_theme")
 		t.eq((content.origin("music", "beta_theme") :: Content.Origin).pack, "Beta", "by kind or by its word")
-		-- The game's, each from its file.
+		-- The game's, each from its file (by `origin`: an author's pack may patch them).
 		local game = Content.default
-		t.eq(game.where("sound", "block.stone.break"), "pack Minecraft, sounds/blocks, sound block.stone.break")
+		local function from(kind: string, name: string): string
+			local origin = game.origin(kind, name) :: Content.Origin
+			return `{origin.pack} {origin.file or "-"}`
+		end
+		t.eq(from("sound", "block.stone.break"), "Minecraft sounds/blocks")
 		t.eq(
-			game.where("sound", "item.firearm.9mm.fire"),
-			"pack Apocalypse, sounds/weapons, sound item.firearm.9mm.fire",
+			from("sound", "item.firearm.9mm.fire"),
+			"Apocalypse sounds/weapons",
 			"a gun's shot is the Apocalypse pack's"
 		)
-		t.eq(game.where("sound", "ambient.radiation.click"), "pack Ores, sound ambient.radiation.click")
-		t.eq(game.where("track", "mood1"), "pack Minecraft, track mood1")
+		t.eq(from("sound", "ambient.radiation.click"), "Ores -")
+		t.eq(from("track", "mood1"), "Minecraft -")
 		t.eq((game.origin("sound", "entity.zombie.hurt") :: Content.Origin).file, "sounds/zombies")
 		-- A block, a sound and a track may share a name: each kind's names are its own.
 		t.ok(
@@ -2811,7 +2946,7 @@ return function(t, shared, require, _server, _client)
 
 	t.test("content: a pack's sounds and music reach the catalogue, the blocks and the music", function()
 		local env, root = fresh(function(env, packs)
-			env.graft(CHORUS, packs, "Chorus")
+			GamePacks.graftLast(env, CHORUS, packs, "FixtureChorus")
 		end)
 		local FreshSounds = env.require(root.Sounds)
 		local FreshBlocks = env.require(root.Blocks)
@@ -2822,19 +2957,19 @@ return function(t, shared, require, _server, _client)
 		local GameSounds = require(shared.Sounds)
 		local B = FreshBlocks.id
 		-- A block sound type of its own: its five events make it one, after the Minecraft pack's.
-		t.eq(FreshBlocks.SOUND_TYPES[#FreshBlocks.SOUND_TYPES], "chime", "a type, after every other pack's")
-		local step = FreshSounds.get(FreshSounds.block(B.ChorusBlock, "step") :: number) :: any
-		t.eq(step.name, "block.chime.step", "its block steps with it")
+		t.eq(FreshBlocks.SOUND_TYPES[#FreshBlocks.SOUND_TYPES], "fixture_chime", "a type, after every other pack's")
+		local step = FreshSounds.get(FreshSounds.block(B.FixtureChorusBlock, "step") :: number) :: any
+		t.eq(step.name, "block.fixture_chime.step", "its block steps with it")
 		t.near(step.pitch, 1.8, 1e-9, "the type's pitch, Minecraft's scaling for a step")
 		t.eq(step.limit, 6, "and a step's limit")
-		t.eq((FreshSounds.get("block.chime.break") :: any).id, FreshDefine.RECORDINGS.BREAK, "the recordings")
+		t.eq((FreshSounds.get("block.fixture_chime.break") :: any).id, FreshDefine.RECORDINGS.BREAK, "the recordings")
 		-- Its events after every other pack's, the cave moods last.
-		local sing = FreshSounds.get("entity.chorus.sing") :: any
+		local sing = FreshSounds.get("entity.fixture_chorus.sing") :: any
 		t.ok(sing.index > FreshSounds.id["ambient.radiation.click"], "after the Ores pack's")
 		t.ok(sing.index < FreshSounds.id[FreshSounds.MOODS[1]], "before the cave moods")
 		t.eq(FreshSounds.count, #content.sounds + #FreshSounds.MOODS)
 		t.eq(sing.limit, 2, "its limit")
-		t.eq(FreshSounds.LIMITS["entity.chorus.sing"], 2, "its kind's")
+		t.eq(FreshSounds.LIMITS["entity.fixture_chorus.sing"], 2, "its kind's")
 		t.eq(sing.fallback.pitch, 2, "its fallback")
 		t.eq(sing.fallback.volume, 0.5, "what the fallback leaves out is the event's")
 		-- An override retunes an event in its place.
@@ -2842,22 +2977,24 @@ return function(t, shared, require, _server, _client)
 		t.eq(click.volume, 0.8, "retuned")
 		t.eq(click.id, "rbxasset://sounds/volume_slider.ogg", "its file kept")
 		t.eq(click.index, GameSounds.id["ui.button.click"], "its number kept")
-		t.eq(
-			content.where("sound", "ui.button.click"),
-			"pack Minecraft (patched by Chorus), sounds/interface, sound ui.button.click"
-		)
+		local clickBy = patchers("sound", "ui.button.click", content)
+		t.ok(maker("sound", "ui.button.click", content) == "Minecraft" and clickBy[#clickBy] == "FixtureChorus")
 		-- A machine's work sound and an armor piece's equip sound, by name.
-		t.eq(FreshSounds.workSound(B.ElectricFurnace), "block.chorus.hum", "workSound")
+		t.eq(FreshSounds.workSound(B.ElectricFurnace), "block.fixture_chorus.hum", "workSound")
 		t.eq(FreshSounds.workSound(B.Stone), nil)
-		t.eq(FreshSounds.armorEquip(FreshItems.id.IronHelmet), FreshSounds.id["item.armor.equip_chorus"], "equipSound")
+		t.eq(
+			FreshSounds.armorEquip(FreshItems.id.IronHelmet),
+			FreshSounds.id["item.armor.equip_fixture_chorus"],
+			"equipSound"
+		)
 		-- Music: a track added to a set, an override's title, a cave mood.
 		local surface = FreshMusic.Surface
 		t.eq(surface[#surface].Id, "rbxassetid://1234", "a surface track, after the Minecraft pack's")
-		t.eq(surface[#surface].Title, "Chorus")
+		t.eq(surface[#surface].Title, "Fixture Chorus")
 		t.eq(surface[1].Title, "First Light", "an override's title")
 		t.eq(surface[1].Id, "rbxassetid://113907623876478", "its id kept")
 		local mood = FreshSounds.MOODS[#FreshSounds.MOODS]
-		t.eq(mood, "ambient.cave.chorus_mood", "a cave mood, its track's name")
+		t.eq(mood, "ambient.cave.fixture_chorus_mood", "a cave mood, its track's name")
 		local event = FreshSounds.get(mood) :: any
 		t.eq(event.id, "rbxassetid://5678")
 		t.eq(event.category, "ambient.cave")
@@ -3008,7 +3145,7 @@ return function(t, shared, require, _server, _client)
 		refused(
 			{ blocks = { { name = "Stone", override = true, workSound = "block.fan.loop" } } },
 			{ "Sounds" },
-			{ `Sounds: {STONE} has a workSound but is no machine` }
+			stone("Sounds: ", " has a workSound but is no machine")
 		)
 		refused(
 			{ blocks = { { name = "Stone", override = true, sound = "chime" } } },

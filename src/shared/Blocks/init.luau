@@ -477,10 +477,12 @@ do
 	for _, spec in BlockList do
 		specs[spec.name] = spec
 	end
+	-- (Named in the message: a texture's Material may be a typo, or no material at all.)
+	local takes = table.concat(Blocks.VARIANT_MATERIALS, ", ")
 	for name, texture in packTextures do
 		assert(
 			variantMaterials[texture.Material],
-			`TexturePack: texture "{name}" has Material {texture.Material}, which cannot take a MaterialVariant`
+			`TexturePack: texture "{name}" has Material {texture.Material}: a texture's Material must be one that takes a MaterialVariant ({takes})`
 		)
 		local tint = texture.Tint
 		assert(

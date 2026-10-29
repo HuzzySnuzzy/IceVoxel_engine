@@ -5,9 +5,18 @@
 	buried cells; saltpetre under dry land only; the sulfur vents on lava lakes' barriers and around
 	oil deposits; real chunks of a seed; that each feature keeps its veins whatever the others (a
 	stream of its own) and the older ores' cells, pinned; and what they cost.
+
+	All of it the game's shipped packs' ore features (lib/GamePacks.SHIPPED), the game mounted
+	with those alone: a pack an author adds (an ore feature, a biome) changes what generates, and
+	the pinned checksums here are the shipped ores'. A change to a shipped pack's ore features moves
+	them: pin the new values once it is meant.
 ]]
 
-return function(t, shared, require)
+local GamePacks = require("../lib/GamePacks")
+
+return function(t, _shared, _require)
+	local env, shared = GamePacks.mountShipped()
+	local require = env.require
 	local Config = require(shared.Config)
 	local Blocks = require(shared.Blocks)
 	local Biomes = require(shared.Biomes)
@@ -197,7 +206,11 @@ return function(t, shared, require)
 					n += 1
 				end
 			end
-			t.eq(`{n}:{sum}`, expected[i], `chunk {chunk[1]}, {chunk[2]}`)
+			t.eq(
+				`{n}:{sum}`,
+				expected[i],
+				`chunk {chunk[1]}, {chunk[2]} (the shipped packs' ores: pin the new value if a change to them meant it)`
+			)
 		end
 	end)
 

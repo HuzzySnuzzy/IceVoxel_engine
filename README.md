@@ -3384,7 +3384,9 @@ base tags), Minecraft, Mekanism, Survival (Tough As Nails and the seasons), Terr
 Turrets and Ores; each `pack` manifest says what is in which file and where its code lives, and the
 examples below go in any of them. `Content/Packs/Ores` is a whole feature (the new ores, the Hazmat
 suit) in a pack of its own, the worked example.
-`lune run tests/content new <Pack>` starts a pack with an example of each kind, and
+`lune run tests/content new <Pack>` starts a pack with an example block, item, shaped and smelting
+recipe, texture and loot table (its `pack.luau` names a module of the game's packs to copy for
+each other kind), and
 `lune run tests/content` says what a pack is missing (the content tool, under Development).
 
 **A block.** Add an entry to a pack's blocks: a file of the Minecraft pack's `src/shared/Content/
@@ -4604,7 +4606,7 @@ lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo f
 lune run tests/content [check] [--strict]     # the content packs: each pack, then what it lacks
 lune run tests/content list [kind] [pack]     # entries with their ids and packs
 lune run tests/content show <name>            # an entry, its pack and patches, what it became
-lune run tests/content new <Pack> [--order n] # a new pack, an example of each kind in it
+lune run tests/content new <Pack> [--order n] # a new pack, an example of five kinds
 ```
 
 
@@ -4630,17 +4632,22 @@ order and what it holds, then a line per finding, pack by pack, and the counts. 
 or item without a lore line, a block that can carry a texture without texture-pack faces, an item
 without an icon entry (a blank `""` counts), a texture no block uses, a result no Age names that
 survival can only make in a later Age (a result no Age names is the Stone Age's, which is fine
-alone), a crafting recipe whose own grid an earlier recipe takes. Info: items survival never gives
-(no recipe, chest, drop, mob, structure or fill reaches them; the creative tier's machines, such as
-the Creative Energy Cube, which no recipe makes by design, are left out). `--strict` fails on a
-warning.
+alone), a crafting recipe whose own grid an earlier recipe takes, a loot table nothing rolls (no
+block's `loot`, no chest's), a pack naming an earlier pack's entries without requiring it. Info:
+items survival never gives (no recipe, chest, drop, mob, structure or fill reaches them; the info
+names the cause, such as the ore no feature places; the creative tier's machines, such as the
+Creative Energy Cube, which no recipe makes by design, are left out), and a pack naming a later
+pack's entries, which no `requires` can say (the game's own: Core's tags and Ages name Minecraft's
+and Mekanism's items, Minecraft's grass and mineshafts give Survival's and Terraria's). `--strict`
+fails on a warning.
 `show <name>` gives an entry's merged fields, id, pack, the packs that patched it, its lore,
 faces or icon, Age, how survival gets it and the recipes making and using it (a biome's fields,
 index and patches; `show #is_forest` a biome tag's biomes; `list biomes` every biome with its
 bands and pack; an effect's id and the potions giving it, a potion's brewed items; `list effects`
 and `list potions` list those kinds as `list blocks` does blocks); `new <Pack>` writes
 `src/shared/Content/Packs/<Pack>/` (never over a folder) with a commented block, item, shaped and
-smelting recipe, texture and loot table that load and pass the check as written. The workings are
+smelting recipe, texture and loot table that load and pass the check as written (its recipe takes
+a grid no recipe has, so a second new pack's passes too). The workings are
 `tests/lib/ContentTool` (`tests/spec/ContentTool` runs them on `tests/fixtures/content/tool`) and
 `tests/lib/ContentGame` (what the game makes of the packs).
 

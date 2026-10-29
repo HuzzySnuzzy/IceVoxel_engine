@@ -349,15 +349,20 @@ the single pack before the split did.
 `Content.load` (Beta, JSON, order 10; Alpha, Luau, order 20, with a `_` helper and `define.metal`;
 Gamma, order 20 after Alpha by name, overriding both) and the kind folder ones in
 `tests/fixtures/content/folders` (Delta, Luau, with a folder inside a kind folder, a function-form
-file and a `_` helper at its top; Epsilon, JSON), grafts `tests/fixtures/content/fields/Fields`
-(every per-entry field) into a fresh game to follow each field to its registry, and
-`tests/fixtures/content/biomes/Wilds` (a biome, and an override of Plains) to follow a biome to
-Biomes, Locate and the generator, `tests/fixtures/content/brewing/Brewing` (an effect and a
-potion of it, and Speed and Swiftness patched: the potion's items, recipes, lore, tooltip and
-drink from its entry alone) and `tests/fixtures/content/sounds/Chorus` (a block sound type and
-its block, events, a work and an equip sound, a track, a cave mood and overrides of each: to the
-catalogue, the blocks and the music), builds packs in memory for every check (`Content.build`,
-and the Lune loader's `folder` / `module` / `graft`), and pins no id or total.
+file and a `_` helper at its top; Epsilon, JSON), grafts `tests/fixtures/content/fields/
+FixtureFields` (every per-entry field) into a fresh game to follow each field to its registry, and
+`tests/fixtures/content/biomes/FixtureWilds` (a biome, and an override of Plains) to follow a
+biome to Biomes, Locate and the generator, `tests/fixtures/content/brewing/FixtureBrewing` (an
+effect and a potion of it, and Speed and Swiftness patched: the potion's items, recipes, lore,
+tooltip and drink from its entry alone) and `tests/fixtures/content/sounds/FixtureChorus` (a block
+sound type and its block, events, a work and an equip sound, a track, a cave mood and overrides of
+each: to the catalogue, the blocks and the music), builds packs in memory for every check
+(`Content.build`, and the Lune loader's `folder` / `module` / `graft`), and pins no id or total.
+An author's pack breaks none of it: a grafted fixture loads after every pack there
+(`tests/lib/GamePacks`' `graftLast`) and names what it makes "Fixture...", the game's entries are
+checked by the pack that made them (`origin`), not `where`'s whole text, and the generation
+digests (Generation, OreGeneration, WorldTypeGenerators' Default world) are the shipped packs'
+alone (`GamePacks.mountShipped`: an ore feature or a biome an author adds changes the world).
 
 **The content tool** (`tests/content`: `check`, `list`, `show`, `new`; README, Development) sees
 what the game sees: `tests/lib/ContentGame` mounts `src/shared` with the Lune loader, requires
@@ -368,15 +373,17 @@ faces, the Ages' names, Crafting.match, Items' drops, a potion's items) and of t
 blocks the generators' sources name, the ore features', biomes' and structure templates' blocks,
 the chests' loot tables, mobs' drops, buckets and fills). `tests/lib/ContentTool` is pure over a
 View: the checks (lore, faces, icons, unused textures, Ages, recipes Crafting.match never
-reaches, and survival's reach: the least fixed point of the earliest Age each item can be had in,
-through drops, recipes, placing and fills; the creative tier's machines, a machine kind with
-`creative` such as the Creative Energy Cube, are by design never made, so left out), the
+reaches, loot tables nothing rolls, a pack naming another's entries without requiring it, and
+survival's reach: the least fixed point of the earliest Age each item can be had in, through
+drops, recipes, placing and fills, an item out of reach named by its cause; the creative tier's
+machines, a machine kind with `creative` such as the Creative Energy Cube, are by design never
+made, so left out), the
 summary, lists, pages (a structure template's size and palette, read with
 `Structures/TemplateText.head`, and the pools holding it; a pool's elements, or the templates its
 name gathers, and the structures starting from it) and a new pack's text.
-`tests/spec/ContentTool` runs it on `tests/fixtures/content/tool` (Lint, one of each finding;
-LintPatch, a JSON override) grafted into a fresh game, and on a new pack built in memory (the
-loader's `source`) before any file is written.
+`tests/spec/ContentTool` runs it on `tests/fixtures/content/tool` (FixtureLint, one of each
+finding; FixtureLintPatch, a JSON override) grafted into a fresh game, and on new packs built in
+memory (the loader's `source`) before any file is written.
 
 ## Chunks
 

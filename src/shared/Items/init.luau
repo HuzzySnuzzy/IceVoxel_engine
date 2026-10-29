@@ -609,7 +609,9 @@ do
 				for _, entry in pool.entries do
 					assert(
 						entry[1] == false or (rawget(ids :: any, entry[1]) ~= nil and entry[3] >= 1),
-						`Items: {where}'s loot gives {entry[1]}, which is no item (or fewer than one)`
+						if rawget(ids :: any, entry[1]) == nil
+							then `Items: {where}'s loot gives {entry[1]}, which is no item`
+							else `Items: {where}'s loot gives {entry[3]} to {entry[4]} {entry[1]}: the fewest must be 1 or more (an entry of nothing is false)`
 					)
 				end
 			end

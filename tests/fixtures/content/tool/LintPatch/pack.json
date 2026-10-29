@@ -1,5 +1,0 @@
-{
-	"order": 910,
-	"description": "Patches the Lint fixture pack, for tests/spec/ContentTool (a JSON pack).",
-	"requires": ["Lint"]
-}

@@ -1,9 +1,9 @@
 return {
-	-- Minecraft's Luck (MobEffects.LUCK, its colour), which nothing in the game gives but this
-	-- pack's potion.
+	-- Minecraft's Luck (MobEffects.LUCK, its colour) under a fixture's name, which nothing in the
+	-- game gives but this pack's potion.
 	{
-		name = "Luck",
-		command = "luck",
+		name = "FixtureLuck",
+		command = "fixture_luck",
 		color = { 51, 153, 0 },
 		category = "beneficial",
 		icon = "star",

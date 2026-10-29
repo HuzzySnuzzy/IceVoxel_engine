@@ -2,7 +2,7 @@
 return function(define)
 	return {
 		{
-			name = "FourLeafClover",
+			name = "FixtureClover",
 			color = { 60, 160, 60 },
 			material = "Grass",
 			model = define.nugget({ 60, 160, 60 }),

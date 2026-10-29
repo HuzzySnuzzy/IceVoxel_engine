@@ -32,10 +32,11 @@
 
 	Calls made here: the Glass Bottle is here (Tough As Nails' water brought it), though the
 	Minecraft pack's potions are brewed from its Purified Water Bottle; the Bowl, Minecraft's, came
-	with the teas. The Straw that grass drops is the grass's (the Minecraft pack's blocks).
+	with the teas. The Straw that grass drops is the grass's (the Minecraft pack's blocks). The
+	heaters are built of the Mekanism pack's osmium and cables, so it requires that pack too.
 ]]
 return {
 	order = 300,
 	description = "Tough As Nails (herbs, water, teas, campfire, straw, thermometer) and the seasons (snow layers, heaters, insulation).",
-	requires = { "Core", "Minecraft" },
+	requires = { "Core", "Minecraft", "Mekanism" },
 }

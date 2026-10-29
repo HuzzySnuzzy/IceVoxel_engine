@@ -236,13 +236,14 @@ return function(t, shared, require, server, client)
 			t.eq(usedAgain, used)
 			t.eq(container.slots[OUTPUT].count, 2)
 		end
-		-- Every ore block BlockList has is the miner's, the design's among them (by name, not a
-		-- count, so new ores leave it alone).
+		-- The miner copies a block when its entry has `miner`, and no other: any pack's ore may opt
+		-- in (an ore without it is no mistake: the miner leaves it be). (This was once "every block
+		-- named ...Ore", a rule no pack was told of.) The design's ores are among them, by name.
+		local Content = require(shared.Content)
 		for id = 0, Blocks.count - 1 do
 			local def = Blocks.get(id)
-			if string.find(def.name, "Ore$") and not Blocks.isCaveTwin(id) then
-				t.ok(MinerRules.ore(id) ~= nil, `{def.name} is an ore the miner copies`)
-			end
+			local spec = Content.default.block(def.name) :: any
+			t.eq(MinerRules.ore(id) ~= nil, spec.miner ~= nil, `{def.name}: the miner's when its entry has miner`)
 		end
 		for name in TABLE do
 			t.ok(MinerRules.ore(B[name]) ~= nil, `{name} is the miner's`)

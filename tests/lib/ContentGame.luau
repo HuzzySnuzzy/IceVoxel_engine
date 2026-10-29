@@ -28,6 +28,11 @@
 	  * `converts`: one item into another: raw meat a burning mob drops cooked (Foods.COOKED), an
 	    empty Bucket at a carriable fluid's source (Fluids/FluidList), an empty bottle, bowl or
 	    canteen at water (ToughAsNails/Drinks.FILLS).
+
+	The View also has `chests` (the loot tables the game's code rolls into chests: a table no
+	block names and no chest rolls gives nothing) and `packData` (each pack's own modules' data,
+	read again as Content.load reads them, before merging: what each pack itself names, for the
+	`requires` check).
 ]]
 
 local fs = require("@lune/fs")
@@ -82,6 +87,60 @@ function ContentGame.scanWorld(dirs: { string }?): { [string]: string }
 		end
 	end
 	return words
+end
+
+--[[
+	Each pack's own data, before merging, read from its folder as Content.load reads it (a module's
+	data, or what its function makes with Content/Define): pack name -> { kinds = kind -> its
+	module's data, folders = kind -> { { file, data } } (a kind folder's modules, in order) }.
+	Its manifest and its "_" helpers are left out.
+]]
+local function packData(env: any, shared: any): { [string]: any }
+	local Define = env.require(shared.Content.Define)
+	local function load(module: any): any
+		local data = env.require(module)
+		if type(data) == "function" then
+			data = data(Define)
+		end
+		return data
+	end
+	local function sorted(folder: any): { any }
+		local children = folder:GetChildren()
+		table.sort(children, function(a, b)
+			return a.Name < b.Name
+		end)
+		return children
+	end
+	local function walk(folder: any, path: string, into: { any })
+		for _, child in sorted(folder) do
+			local file = `{path}/{child.Name}`
+			if child:IsA("ModuleScript") then
+				table.insert(into, { file = file, data = load(child) })
+			elseif child:IsA("Folder") then
+				walk(child, file, into)
+			end
+		end
+	end
+	local packs: { [string]: any } = {}
+	for _, folder in sorted(shared.Content.Packs) do
+		local kinds: { [string]: any } = {}
+		local folders: { [string]: { any } } = {}
+		for _, module in sorted(folder) do
+			local name = module.Name
+			if string.sub(name, 1, 1) == "_" or name == "pack" then
+				continue
+			end
+			if module:IsA("Folder") then
+				local files = {}
+				walk(module, name, files)
+				folders[name] = files
+			elseif module:IsA("ModuleScript") then
+				kinds[name] = load(module)
+			end
+		end
+		packs[folder.Name] = { kinds = kinds, folders = folders }
+	end
+	return packs
 end
 
 -- The View's parts, from the registries (see the header).
@@ -379,6 +438,8 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		converts = converts,
 		creativeOnly = creativeOnly,
 		creativeMachines = creativeMachines,
+		chests = chests,
+		packData = packData(env, shared),
 		variants = PotionList.variants,
 		itemId = function(name: string): number?
 			return Items.find(name)
