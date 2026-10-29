@@ -4023,8 +4023,8 @@ a fuel-only machine's HU, and with the state code it gives WAILA's line without 
 "+", no energy bar on a fuel-only machine. A click is Inventory Action "button", routed by
 Players/Inventories to `Machines.button`. The window of a working stove and oil heater glows
 orange, the heater's element red, the AC's strip cyan (BlockDecor windows,
-TransmitterModel.machineBoxes); a burning stove or oil heater casts a warm light
-(TransmitterModel.machineLight); each plays its loop while it works (TransmitterModel
+TransmitterModel.machineBoxes; the entries' `workGlow`); a burning stove or oil heater casts a
+warm light (TransmitterModel.machineLight; their entries' `workLight`); each plays its loop while it works (TransmitterModel
 .machineLoop, Audio/Ambience: the 6 nearest within 16 blocks); the click is
 `ui.thermostat.click`. JEI lists the stove as a fuel catalyst for the fuels it takes.
 

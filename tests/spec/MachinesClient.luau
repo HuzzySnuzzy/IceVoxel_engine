@@ -345,10 +345,10 @@ return function(t, shared, require, _server, client)
 		t.eq(TransmitterModel.glowColour(B.WoodStove), TransmitterModel.GLOW_COLOUR, "the stove's fire")
 		t.ok(TransmitterModel.glowColour(B.ElectricHeater)[1] > 200, "the element red")
 		t.ok(TransmitterModel.glowColour(B.AirConditioner)[3] > 200, "the cold strip cyan")
-		-- A warm light while the stove and the oil heater burn.
+		-- A warm light while the stove and the oil heater burn (their entries' `workLight`, 10).
 		local burning = { active = true, energy = 0, capacity = 0 }
 		local light = assert(TransmitterModel.machineLight(B.WoodStove, burning))
-		t.near(light.range, TransmitterModel.MACHINE_LIGHT * 0.9, 1e-9)
+		t.near(light.range, 10 * 0.9, 1e-9)
 		t.ok(light.brightness > 0)
 		t.ok(TransmitterModel.machineLight(B.OilHeater, burning) ~= nil)
 		t.eq(TransmitterModel.machineLight(B.WoodStove, nil), nil, "out")

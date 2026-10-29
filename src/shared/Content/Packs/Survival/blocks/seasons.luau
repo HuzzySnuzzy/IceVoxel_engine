@@ -16,7 +16,10 @@
 	  * Heaters, coolers and stoves (Shared/Machines kinds "stove", "oilheater", "heater" and
 	    "cooler"; their room heat: server Seasons/RoomWorld through Players/Climate's room sources):
 	    Mekanism style machine blocks (Content/Define's `machine`), drawn with their BlockDecor
-	    faces and window panes (never textured), which zombies never break.
+	    faces and window panes (never textured), which zombies never break. While they work their
+	    windows glow (`workGlow`: the stove's and oil heater's fire orange, the default; the
+	    heater's element red, the air conditioner's cold strip cyan), and the stove and the oil
+	    heater cast a fire's light (`workLight` 10, dimmer than a furnace's 13 would be).
 	      Wood Stove        fuel only (no energy: `capacity = 0`): furnace fuel burns 4 times its
 	                        furnace time for 30 HU; radiant.
 	      Oil Heater        fuel only: a tank of Oil or Fuel, a thermostat, up to 35 HU; radiant.
@@ -62,6 +65,7 @@ return function(define: Define.Context): { BlockSpec }
 			machine = { kind = "stove" },
 			energy = { capacity = 0 },
 			workSound = "block.wood_stove.crackle",
+			workLight = 10,
 			lore = "Burns furnace fuel four times as long to heat the room it stands in.",
 			age = "iron",
 		}),
@@ -71,6 +75,7 @@ return function(define: Define.Context): { BlockSpec }
 			machine = { kind = "oilheater" },
 			energy = { capacity = 0 },
 			workSound = "block.oil_heater.burn",
+			workLight = 10,
 			lore = "Burns oil or fuel to hold a room at its set point.",
 			age = "industrial",
 		}),
@@ -80,6 +85,7 @@ return function(define: Define.Context): { BlockSpec }
 			machine = { kind = "heater" },
 			energy = { capacity = 16000, input = 400 },
 			workSound = "block.electric_heater.hum",
+			workGlow = { 255, 72, 40 },
 			lore = "Holds a room at its set point on power. Outdoors it warms whoever stands close.",
 			age = "electric",
 		}),
@@ -89,6 +95,7 @@ return function(define: Define.Context): { BlockSpec }
 			machine = { kind = "cooler" },
 			energy = { capacity = 20000, input = 500 },
 			workSound = "block.air_conditioner.hum",
+			workGlow = { 96, 224, 255 },
 			lore = "Cools a room to its set point on power. Useless outdoors.",
 			age = "electric",
 		}),

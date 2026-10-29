@@ -35,8 +35,9 @@
 	           their four sides, and a Battery's gauges fill with its charge. The seasons'
 	           machines while they work: a Wood Stove's fire door and an Oil Heater's burner glow
 	           orange, an Electric Heater's element red, an Air Conditioner's cold strip cyan
-	           (`glowColour`); a burning stove or oil heater also casts a warm light
-	           (`machineLight`: Rendering/TransmitterRenderer gives the cell a PointLight), and
+	           (`glowColour`: the block entry's `workGlow`); a burning stove or oil heater also
+	           casts a warm light (`machineLight`: its entry's `workLight`; Rendering/
+	           TransmitterRenderer gives the cell a PointLight), and
 	           every one of them hums, roars or crackles (`machineLoop`: its block's `workSound`,
 	           which Audio/Ambience plays looped while the record says it works). A working Metal Miner lights its drill
 	           housing's grille yellow-orange, a working Ammo Press its stamping window: both from
@@ -69,6 +70,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local BlockList = require(Shared.Blocks.BlockList)
 local Fluids = require(Shared.Fluids)
 local Machines = require(Shared.Machines)
 local Sounds = require(Shared.Sounds)
@@ -324,27 +326,17 @@ end
 -- What a machine's boxes are drawn from: its Machines record (Protocol.MachineRecord) or less.
 export type MachineLook = { active: boolean, energy: number, capacity: number }
 
--- A lit window's colour (a furnace's fire) and how far it stands out of the face (pixels).
+-- A lit window's colour (a furnace's fire: a machine's `workGlow` unless it gives its own) and how
+-- far it stands out of the face (pixels).
 TransmitterModel.GLOW_COLOUR = table.freeze({ 255, 138, 44 })
 TransmitterModel.GLOW_DEPTH = 0.2
--- The seasons' windows that glow another colour, by BlockList `decor`: the heater's element red,
--- the air conditioner's cold air cyan (the stove's and the oil heater's fire is GLOW_COLOUR).
-local GLOW_COLOURS: { [string]: { number } } = {
-	ElectricHeater = table.freeze({ 255, 72, 40 }),
-	AirConditioner = table.freeze({ 96, 224, 255 }),
-	-- The Metal Miner's drill housing, lit yellow-orange through its grille (the Ammo Press's
-	-- hot die is GLOW_COLOUR).
-	MetalMiner = table.freeze({ 255, 186, 52 }),
-}
 --[[
-	The light a burning Wood Stove or Oil Heater casts (`machineLight`): Minecraft's light level
-	MACHINE_LIGHT (a furnace's 13 would be a lamp; a stove's fire is dimmer), a warm colour, its
+	The light a machine with a `workLight` casts while it works (`machineLight`: a burning Wood
+	Stove's or Oil Heater's 10, where a furnace's 13 would be a lamp), in a fire's warm colour, its
 	reach and brightness as Rendering/PartPool gives a block of that light (0.9 blocks a level, 1.6
 	bright at 15).
 ]]
-TransmitterModel.MACHINE_LIGHT = 10
 TransmitterModel.MACHINE_LIGHT_COLOUR = table.freeze({ 255, 156, 80 })
-local LIGHTS: { [string]: boolean } = { WoodStove = true, OilHeater = true }
 -- Machines whose window lights while they work, by BlockList `decor`: the window on each side face
 -- (BlockDecor pixels, from the face's top left), the same rectangle their decor draws dark.
 local GLOWS: { [string]: { x: number, y: number, w: number, h: number } } = {
@@ -387,34 +379,36 @@ local function chargeOf(block: number): { x: number, y: number, w: number, h: nu
 	return if decor then CHARGES[decor] else nil
 end
 
--- The decor (BlockList `decor`) of the machine `block`, nil for anything else.
-local function decorOf(block: number): string?
+-- The block entry of the machine `block`, nil for anything else.
+local function machineSpec(block: number): any
 	if not Machines.isMachine(block) or not Blocks.isValid(block) then
 		return nil
 	end
-	return Blocks.get(block).decor
+	return BlockList[block + 1]
 end
 
--- The colour the machine `block`'s window glows in while it works (GLOW_COLOUR, or its own).
+-- The colour the machine `block`'s window glows in while it works (its entry's `workGlow`, else
+-- GLOW_COLOUR).
 function TransmitterModel.glowColour(block: number): { number }
-	local decor = decorOf(block)
-	return (if decor then GLOW_COLOURS[decor] else nil) or TransmitterModel.GLOW_COLOUR
+	local spec = machineSpec(block)
+	return (if spec then spec.workGlow else nil) or TransmitterModel.GLOW_COLOUR
 end
 
 --[[
-	The light the machine `block` casts from what its record says (`look`, nil: none came): a
-	burning Wood Stove's or Oil Heater's (see MACHINE_LIGHT): its reach in blocks, brightness and
-	colour; nil while it is out and for every other block.
+	The light the machine `block` casts from what its record says (`look`, nil: none came): its
+	entry's `workLight` while it works (a burning Wood Stove's or Oil Heater's; see
+	MACHINE_LIGHT_COLOUR): its reach in blocks, brightness and colour; nil while it is out and for
+	every block without one.
 ]]
 function TransmitterModel.machineLight(
 	block: number,
 	look: MachineLook?
 ): { range: number, brightness: number, colour: { number } }?
-	local decor = decorOf(block)
-	if decor == nil or not LIGHTS[decor] or look == nil or not look.active then
+	local spec = machineSpec(block)
+	local level = if spec then spec.workLight else nil
+	if level == nil or look == nil or not look.active then
 		return nil
 	end
-	local level = TransmitterModel.MACHINE_LIGHT
 	return { range = level * 0.9, brightness = 1.6 * level / 15, colour = TransmitterModel.MACHINE_LIGHT_COLOUR }
 end
 

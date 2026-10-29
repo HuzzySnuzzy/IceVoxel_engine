@@ -82,6 +82,14 @@
 	  sounds           block        { [action] = event }: its own action sounds (Sounds.block)
 	  workSound        block        a machine: the event it plays looped while it works (Sounds
 	                                .workSound; client Audio/Ambience)
+	  workGlow         block        a machine: { r, g, b } its window glows in while it works (the
+	                                window its `decor` draws; client Rendering/TransmitterModel):
+	                                default a furnace fire's orange; the Electric Heater's element
+	                                red, the Air Conditioner's cold strip cyan, the Metal Miner's
+	                                grille yellow-orange
+	  workLight        block        a machine: the light it casts while it works, 0..15 (a burning
+	                                Wood Stove's or Oil Heater's 10, a fire's warm colour; client
+	                                Rendering/TransmitterModel.machineLight)
 	  equipSound       item         armor: the event putting it on plays (Sounds.armorEquip)
 	  loot             block        a loot table's name, or its pools: now and then what it gives
 	                                in place of its usual drop (Items.lootDrop)
@@ -348,6 +356,9 @@ export type BlockSpec = {
 	foliageClass: string?,
 	-- What it gives a room's air, HU a second, and how many count in one room (the header).
 	roomHeat: { hu: number, most: number? }?,
+	-- A machine's window glow and light while it works (the header).
+	workGlow: { number }?,
+	workLight: number?,
 }
 
 -- One box of an item's model (`model`).
@@ -1298,6 +1309,8 @@ Schema.BLOCK_FIELDS = {
 	tree = STRING,
 	foliageClass = enum(Schema.FOLIAGE_CLASSES),
 	roomHeat = record({ hu = NUMBER, most = NUMBER }, { "hu" }),
+	workGlow = RGB,
+	workLight = NUMBER,
 } :: { [string]: Check }
 
 --[[

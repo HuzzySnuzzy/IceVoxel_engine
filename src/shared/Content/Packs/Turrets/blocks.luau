@@ -71,6 +71,9 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			machine = { kind = "miner" },
 			energy = { capacity = Config.Miner.Capacity, input = Config.Miner.Capacity },
 			workSound = "block.metal_miner.hum",
+			-- (Working, its drill housing lights yellow-orange through its grille; the Ammo Press's
+			-- hot die is a furnace fire's orange.)
+			workGlow = { 255, 186, 52 },
 			lore = "Copies the ore block under it forever, for power. Pushes it out.",
 			age = if Config.Miner.Enabled then "electric" else nil,
 		},

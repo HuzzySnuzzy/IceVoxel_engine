@@ -2649,6 +2649,37 @@ return function(t, shared, require, _server, _client)
 		)
 	end)
 
+	t.test("content: a machine's workGlow and workLight reach the client's machine looks", function()
+		local env, root = fresh(function(env, packs)
+			local folder = env.folder(packs, "Patch")
+			env.module(folder, "pack", { order = 900, requires = { "Survival" } })
+			env.module(folder, "blocks", {
+				{
+					name = "BlueStove",
+					machine = { kind = "stove" },
+					energy = { capacity = 0 },
+					decor = "WoodStove",
+					workGlow = { 60, 120, 255 },
+					workLight = 7,
+				},
+			})
+		end)
+		local clientRoot = env.mount("src/client", "StarterPlayerScripts", "IceVoxel")
+		local TransmitterModel = env.require(clientRoot.Rendering.TransmitterModel)
+		local B = env.require(root.Blocks).id
+		t.eq(table.concat(TransmitterModel.glowColour(B.BlueStove), " "), "60 120 255", "its own glow")
+		t.eq(TransmitterModel.glowColour(B.HeatGenerator), TransmitterModel.GLOW_COLOUR, "the default")
+		local burning = { active = true, energy = 0, capacity = 0 }
+		t.near(assert(TransmitterModel.machineLight(B.BlueStove, burning)).range, 7 * 0.9, 1e-9, "its light")
+		t.eq(TransmitterModel.machineLight(B.BlueStove, { active = false, energy = 0, capacity = 0 }), nil, "out")
+		t.eq(TransmitterModel.machineLight(B.HeatGenerator, burning), nil, "none without one")
+		fails(
+			{ pack("P", { blocks = { { name = "A", workGlow = { 300, 0, 0 } } } }) },
+			{ "pack P, block A: workGlow[1] must be a number 0..255, not 300" },
+			"a glow colour"
+		)
+	end)
+
 	t.test("content: a registry's own check names the pack: two effects /effect finds by one word", function()
 		refused({
 			effects = {
