@@ -1298,11 +1298,11 @@ function Content.build(input: { PackData }): Content
 				return nil
 			end
 			local by: { Patch } = table.clone(from.patched or {})
-			local packs: { string } = {}
+			local patchers: { string } = {}
 			for _, patch in by do
-				table.insert(packs, patch.pack)
+				table.insert(patchers, patch.pack)
 			end
-			return { pack = from.pack, file = from.file, patched = packs, overrides = by, index = from.index }
+			return { pack = from.pack, file = from.file, patched = patchers, overrides = by, index = from.index }
 		elseif plural == "tags" then
 			local by = if type(name) == "string" then tagPacks[name] else nil
 			if by == nil then
