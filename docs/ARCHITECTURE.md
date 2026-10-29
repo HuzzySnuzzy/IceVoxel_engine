@@ -19,11 +19,12 @@ thousands of parts from the server is slow. IceVoxel never does either:
 
 ## Content packs (`Content/`, `Content/Schema`, `Content/Define`, `Content/Packs/`)
 
-Every block, item, recipe, item tag, texture, loot table, ore feature, Age, lore line, fuel tag,
-biome, status effect, potion, structure template, template pool, generated structure, sound event
-and music track comes from a content pack, a folder under `Content/Packs` the game finds as it
+Every block, item, recipe, tag, texture, loot table, ore feature, Age, skill node, lore line, fuel
+tag, biome, status effect, potion, structure template, template pool, generated structure, sound
+event and music track comes from a content pack, a folder under `Content/Packs` the game finds as it
 loads (Minecraft's data packs). The registries build themselves from what `Shared/Content` loads;
-none keeps a list of content of its own, nor any value about an entry by its name:
+none keeps a list of content of its own, nor any value about an entry by its name (but for the few
+rules listed under Per-entry fields):
 
 ```
 Content/Packs/<Pack>/  pack, blocks, items, recipes, tags, textures, loot, ores, ages, skills,
@@ -62,13 +63,23 @@ climate, weather, ground, trees, plants, tags), `effects` (status effects, Schem
 -> IVS1 text: a structure block's SAVE), `pools` (name -> template pool), `structures` (the
 jigsaw structures generation places; Structures below), `sounds` (sound events, Schema's
 SoundSpec) and `music` (tracks and cave moods, each in its set: Schema's TrackSpec). Each is a
-module of the kind's name:
-a Luau module returning its data, or a function the loader calls with `Content/Define` (the shared
-helpers and Config, for packs that build entries or read switches), or a `.json` file (Rojo 7
-makes one a ModuleScript returning its table; the Lune loader does the same and skips Rojo's
-`.model.json`, `.meta.json` and `.project.json`). Any other module in a pack is an error (a
-misspelt kind would be ignored), unless its name starts with `_`: the pack's own helpers, which its
-modules require (the Ores pack's `_metals`, the Minecraft pack's `_shapes` and `_models`).
+module of the kind's name: a Luau module returning its data, or a function the loader calls with
+`Content/Define` (the shared helpers and Config, for packs that build entries or read switches),
+or a `.json` file (Rojo 7 makes one a ModuleScript returning its table; the manifest may be
+`pack.json` too). Any other module in a pack is an error (a misspelt kind would be ignored),
+unless its name starts with `_`: the pack's own helpers, which its modules require (the Ores
+pack's `_metals`, the Minecraft pack's `_shapes` and `_models`). A module that gives nothing (a
+function without its `return`) is an error naming the pack, the kind and the file, and any error
+a module raises as it loads (a Define helper's, a JSON file that does not decode) is wrapped as
+"pack P's blocks does not load: ...". Packs are read as Rojo 7.7 builds them, the same in Roblox
+and in Lune (`tests/lib/Loader` follows Rojo's rules: `.lua` and `init` modules, `.json` and
+`.jsonc` read as JSON with comments, `.toml` and `.yaml` data modules, dotted names kept, `.txt`
+StringValues, two files of one name both kept), and what Rojo would make of a file that is no pack
+data fails the load, naming it: a name with a dot (`ores.old.luau`, Rojo's module "ores.old"),
+anything but a module or a folder, a name twice in the packs folder, at a pack's top or in a kind
+folder (`blocks.luau` beside `blocks.json` or a `blocks` folder: Rojo keeps both, and which one a
+script finds by the name is not said, so a client and the server could load different ones), and
+a module with modules in it (a kind folder's `init.luau`, whose siblings would never load).
 
 **Kind folders.** A kind may instead be a folder of the kind's name (`Minecraft/blocks/`), as
 Minecraft's data packs keep a file per recipe or loot table: each module in it (Luau, a function
@@ -78,62 +89,73 @@ each other (so a pack's blocks are its files' in name order); a named kind's (te
 lore, fuel, templates, pools) may not name one thing twice; tags join as across packs. Every
 message names the file: "pack Minecraft, blocks/plants, block Poppy" (`content.where` too). A
 pack has a kind as a module or as a folder, not both, and a kind folder holds only modules and
-folders: helpers (`_`) stay at the pack's top. The big packs use them, a file a feature (Minecraft's `blocks/terrain`,
-`blocks/wood`, `items/tools`, `recipes/smelting`, `textures/ores`...), so adding content may be
-adding a file.
+folders (no `init`: its files merge by their names); helpers (`_`) stay at the pack's top. The big
+packs use them, a file a feature (Minecraft's `blocks/terrain`, `blocks/wood`, `items/tools`,
+`recipes/smelting`, `textures/ores`...), so adding content may be adding a file.
 
 **Order and ids.** Packs load sorted by `order`, then by name, and a pack's entries keep their
-order; a pack's `requires` must load before it. A block's id is its place among every pack's
-blocks (Core, order 0, holds Air and Cave Air: ids 0 and 1, so a zero-filled chunk buffer is
-air), an item's ITEM_BASE (4096, now `Content.ITEM_BASE`) + its place among the items (every
-placeable block is an item with its block's id, as before), an effect's its place among the
-effects from 1 (a u8 on the wire: `Content.MAX_EFFECTS`, 255, at most), dense and given at load:
-no append-only rule, no positions to keep. There must be fewer blocks than ITEM_BASE (checked by
-Content and by Items), and the last item's id, ITEM_BASE + the items - 1, must fit 16 bits
-(checked by Items). Every machine loads the same packs in the same order, so client and server
+order; a pack's `requires` must load before it. `requires` only orders packs: the names an entry
+gives may be any pack's, checked once all have merged, and the content tool warns about an earlier
+pack named but not required (and says, as an info, when a pack names a later one). A block's id is
+its place among every pack's blocks (Core, order 0, holds Air and Cave Air: ids 0 and 1, so a
+zero-filled chunk buffer is air), an item's ITEM_BASE (4096, now `Content.ITEM_BASE`) + its place
+among the items (every placeable block is an item with its block's id, as before), an effect's its
+place among the effects from 1 (a u8 on the wire: `Content.MAX_EFFECTS`, 255, at most), dense and
+given at load: no append-only rule, no positions to keep. There must be fewer blocks than ITEM_BASE
+(checked by Content and by Items), and the last item's id, ITEM_BASE + the items - 1, must fit 16
+bits (checked by Items). Every machine loads the same packs in the same order, so client and server
 agree on every id; saves keep names, never ids (Saving worlds: Names, not ids), so ids may move
-between versions. Nothing may lean
-on where an entry stands: ids, the creative order (`Items.list`: blocks by id, then items) and
-JEI's fuel list follow the packs and their files' names, so code finds content by name (the
-turrets' blocks, the fluids Fluids names, a calibre's default round: WeaponList `default`), and a
-cave twin may stand before or after its block (Blocks resolves twins in a second pass).
+between versions. Nothing may lean on where an entry stands: ids, the creative order (`Items.list`:
+blocks by id, then items) and JEI's fuel list follow the packs and their files' names, so code finds
+content by name (the turrets' blocks, the fluids Fluids names, a calibre's default round: WeaponList
+`default`), and a cave twin may stand before or after its block (Blocks resolves twins in a second
+pass).
 
-**Merging.** Blocks and items merge by name: an entry with `override = true` patches the entry of
-that name an earlier pack made, field by field, keeping its place and id (`{ name = "Stone",
-override = true, hardness = 2 }`); without it a name already taken, by a block or an item, is an
-error naming both packs, and so is an override of nothing. Sound events and tracks merge the same
-way, each kind's names its own (`{ name = "ui.button.click", override = true, volume = 0.3 }`
-retunes the click in its place, so its number stays). Textures merge the same way (an
-override patches a texture's fields: a resource pack's new picture). Tags are a union: each pack's
-lists in load order, then every entry's `tags`, each name once (an entry's `tags = { "coals" }`
-joins Core's tag). Recipes, ore features (each named once) and Ages (each id once) append in load
-order; loot tables, lore lines, fuel tags and structure templates are named once. Skills merge
-by id as blocks do by name: `{ id = "forager", override = true, cost = 2 }` patches a node,
-keeping its place (each node's place among every pack's is its position, what the protocol sends
-as a u8). Biomes merge by name like blocks, keeping their place: an override patches a table
-of fields (`weather`, `patches`, `foliage` and its `flowers` and `herbs`) field by field in turn,
-replaces a list (`bands`, `features`, `plants`, `species`) whole and adds its `tags`; the patched
-biome is checked whole again. Template pools and structures merge by name with `override = true`
-as blocks do (structures keep their load order), and an override's list field replaces the
-earlier list whole, as every kind's does: a block's `shape`, a pool's `elements`, a structure's
-`biomes` (Minecraft's data packs replace a template_pool file whole too), but `tags`, which add
-(Content/Schema's `patch`); to add an element to a pool, an override lists the pool's own
-elements and the new one. Effects and potions merge by name
-as blocks and items do (each kind's names its own: the potion Strength gives the effect
-Strength). Once every pack has merged, each potion is brewed (`Content/Define`'s `brew`,
+**Merging.** The named kinds merge by name (skills by id): blocks and items (one set of names
+between them), textures, biomes, skills, effects, potions, pools, structures, sound events and
+music tracks (each of the others' names its own: the potion Strength gives the effect Strength). An
+entry with `override = true` patches the entry of that name an earlier pack made, keeping its place
+and so its id or number (`{ name = "Stone", override = true, hardness = 2 }`); without it a name
+already taken is an error naming both packs, and so is an override of nothing. Every override
+merges the same way (Content/Schema's `patch`):
+- each field it gives replaces the entry's;
+- a table of fields is patched key by key in turn: a record (a block's `texture` faces, an item's
+  `food`, a potion's `lore`, a biome's `weather`, `patches`, `foliage` and its `flowers` and
+  `herbs`) or a map of names (a block's `sounds`), so `{ name = "Grass", override = true, texture
+  = { Top = "..." } }` keeps Grass's Sides and Bottom;
+- `tags` add to the entry's own (a union, each name once), a block's, an item's or a biome's;
+- a list replaces the entry's whole (a block's `shape`, an item's `model`, a colour, a biome's
+  `bands`, `features`, `plants` and `species`, a pool's `elements`, a structure's `biomes`:
+  Minecraft's data packs replace a template_pool file whole too), and so does a table of another
+  kind (a skill's `perk`, a block's `loot`); nothing takes a field away.
+
+An override's own tables need none of their required fields, and the patched entry is checked
+whole again ("pack B, block Grass: once patched, fluid.group is missing"); to add an element to a
+pool, an override lists the pool's own elements and the new one. Tags are a union across packs:
+each pack's lists in load order, then every entry's `tags`, each name once (an entry's `tags = {
+"coals" }` joins Core's tag). Recipes, ore features (each named once) and Ages (each id once)
+append in load order; loot tables, lore lines, fuel tags and structure templates are named once,
+each one pack's.
+<!-- recipe overrides: added by the integrator -->
+
+**Potions.** Once every pack has merged, each potion is brewed (`Content/Define`'s `brew`,
 Minecraft's brewing in a grid) into its items, a Purified Water Bottle with its ingredient, the
 potion with Glow Dust (level II) and with a coal or charcoal (long), in its effect's colour with
 its own lore lines, icons and Ages and each one's `drink` (its effect, the Glass Bottle back), and
 their shapeless recipes, which go after its pack's own items and recipes ("pack Minecraft,
 potion Swiftness, item PotionOfSwiftness"). So a pack adds a potion, items, recipes, drinks and
 tooltip included, with one entry, and patches a potion's items by patching the potion.
-`content.where(kind, name)` says where a thing came from ("pack Minecraft (patched by Patch),
-blocks/terrain, block Stone") for every message, and `content.origin(kind, name)` gives it as
-data: the pack and kind folder file that made it, the packs that patched it in load order (a
-skill's, a biome's, an effect's, a potion's, a pool's and a structure's overrides too; a tag's:
-the first pack putting names in it and the packs adding to it; a brewed item's or recipe's: its
-potion's pack, its file `potion <Name>`), a recipe's (`name` its place in `content.recipes`) pack,
-file and place in that file's list (the content tool reads where things came from this way).
+
+**Where things came from.** `content.where(kind, name)` says it for every message ("pack Minecraft
+(patched by Patch's blocks/patches), blocks/terrain, block Stone"; a recipe by its place in
+`content.recipes`: "pack Minecraft, recipes/tools, recipe #3 (WoodenPickaxe)"), and
+`content.origin(kind, name)` gives it as data: the pack and kind folder file that made it, the
+packs that patched it in load order (`patched`) and each override's pack and file (`overrides`): a
+skill's, a biome's, an effect's, a potion's, a pool's and a structure's overrides too; a tag's: the
+first pack putting names in it and the packs adding to it, an override's `tags` its pack's; a
+brewed item's or recipe's: its potion's pack, its file `potion <Name>`, patched by the potion's
+patchers; a recipe's: its pack, file and `index`, its place in that file's list. The content tool
+reads where things came from this way.
 
 **Per-entry fields.** Every value about an entry is on the entry, and each registry reads it
 from there (`tests/spec/Content` follows each one end to end):
@@ -143,29 +165,58 @@ from there (`tests/spec/Content` follows each one end to end):
 | `lore` | block, item | Items/LoreList (with the packs' `lore`, lines for items a registry makes) |
 | `texture` (All, Sides, Top, Bottom, Front, Sprite) | block | TexturePack.Blocks |
 | `icon` ("rbxassetid://n" or "") | item | TexturePack.Icons; a block's `icon` stays its item model's boxes |
-| `age` (an Age id) | block, item | Progression/Ages (each Age's `recipes`) |
-| `skill` (a skill id) | block, item | Progression/Skills (each node's `recipes`) |
+| `age` (an Age id) | block, item | Progression/Ages (each Age's `recipes`: the entries naming it) |
+| `skill` (a skill id) | block, item | Progression/Skills (each node's `recipes`: the entries naming it) |
 | `knowledge = { mine?, smelt? }` | block, item | Progression/Knowledge (`ORES`, `SMELTED`) |
 | `miner = { ticks, joules, floor? }` | ore block | Machines/MinerRules (`ORES`: every block with `miner`, in id order) |
 | `radiation` (Sv/h) | block, item | Radiation (`STRENGTH`) |
 | `radiationShield` (share let through) | block | Radiation (`TRANSMISSION`; any other full solid block Config.Radiation.Shielding's `Solid`) |
 | `shielding` (share kept out) | armor item | Radiation (`SHIELDING`) |
 | `fuel` (ticks) | block, item | Crafting/Recipes' fuel (beating its tag's: the packs' `fuel`) |
-| `tags` | block, item | the packs' tags (Core's base tags) |
-| `heats`, `cools` | block | ToughAsNails/Temperature.HEATING_BLOCKS / COOLING_BLOCKS |
+| `tags` | block, item | the packs' tags (Core's base tags; the block tags the game reads, below) |
+| `heats`, `cools` | block | ToughAsNails/Temperature.HEATING_BLOCKS / COOLING_BLOCKS (a fluid's source: every level and its cave twin) |
+| `roomHeat = { hu, most? }` | block | server Players/Climate's room sources, Seasons/RoomWorld (a furnace's while lit, a machine's while it works; Config.Seasons.Heat's block numbers are gone) |
 | `sounds = { [action] = event }` | block | Sounds.block |
 | `workSound` | machine block | Sounds.workSound (client Rendering/TransmitterModel.machineLoop, Audio/Ambience: its loop while it works; TransmitterModel's LOOPS by decor are gone) |
+| `workGlow` (`{ r, g, b }`), `workLight` (0..15) | machine block | client Rendering/TransmitterModel (its window's glow and its light while it works; the old GLOW_COLOURS and LIGHTS are gone) |
 | `equipSound` | armor item | Sounds.armorEquip (else Sounds.ARMOR_DEFAULT) |
 | `loot` (a loot table's name or pools) | block | Items.lootDrop |
 | `blastResistance`, `zombieBreak`, `flammable` | block | (each entry gives its own: BlockList's old BLAST_RESISTANCE, ZOMBIE_BREAK and fire odds by name suffix are gone) |
 | `food = { heal, nutrition?, saturation?, effect?, useTicks?, cures?, effects?, aftermath?, setback?, sound?, burp? }` | item | Items/Foods.ITEMS (effects and cures by name) |
-| `drink = { thirst?, hydration?, chance?, effectTicks?, warmth?, chill?, effects?, mana?, empty?, sips? }` | item | ToughAsNails/Drinks.ITEMS (effects and `empty` by name) |
+| `drink = { thirst?, hydration?, chance?, effectTicks?, warmth?, chill?, effects?, mana?, empty?, sips?, purified? }` | item | ToughAsNails/Drinks.ITEMS (effects, `empty` and `purified` by name; Drinks.PURIFIED_OF) |
+| `fills` | item (an empty container) | ToughAsNails/Drinks.FILLS (the dirty water it becomes at a water source) |
+| `silkTouch` | block | Items.drops, Items.blockDrops (its drop needs its `tool`, Silk Touch's stand-in; nothing when it breaks by itself) |
+| `lit`, `fuse` (ticks) | block | server Behaviours/Tnt (an explosive's lit block, and that block's fuse) |
+| `spawnUnsafe` ("on", "in", "near") | block | server Players/SafeSpot (the old SpawnUnsafeBlocks is gone) |
+| `formerly` (old names) | block, item | Blocks.RENAMED, Items.RENAMED (Blocks.find, Items.find: saves, structure palettes, jigsaw final states) |
+| `poi` (a snake case id) | block | Shared/Poi (`/locate poi`'s types; Poi.TYPES is gone) |
+| `tree` (a tree builder) | sapling block | server Behaviours/Sapling (Generation/Structures' registry) |
+| `foliageClass` | block | Seasons/Foliage (the palette its colour follows through the year) |
+| `seasonClass` | biome | Seasons/SeasonClimate (SeasonClimate.CLASS_OF_NAME is gone) |
+| `oilWells` (a share), `lakes` (a weight), `puddles` (a share) | biome | Generation/OilWells (`chanceOf`), Generation/Lakes (`lakeWeight`, `puddleChance`; Config's biome lists are gone) |
+| `tags` | biome | Generation/Locate's `BIOME_TAGS` (`/locate biome #is_forest`) |
+
+The block tags the game reads by name (`Blocks.tagged`, an error naming the reader when no pack has
+the tag), so a pack's block joins a rule by joining a tag: `dirt` (plants with soil "dirt"; `sand`
+too for dead bushes: Blocks.mayPlaceOn), `mushroom_grow_block` (mushrooms'), `natural_dirt`
+(Generation/Foliage's ground with `sand`, Generation/Lakes' soil), `grass_blocks` (the tops lakes
+and surface caves grow back, what a nuke scorches), `spreads_onto_dirt` (Behaviours/Grass), `leaves`
+and `logs` (Behaviours/Leaves and Sapling, Weapons/FireRules' bullets, Seasons/Foliage, knowledge
+for a chopped log) and `ores` (Items/Tooltip). They were name lists and name suffixes in code.
 
 What stays out of the entries are rules, not values about one entry: Config's switches and
 global numbers (Config.Miner's `Enabled` and `Capacity`, Config.Radiation.Shielding's `Solid`,
 Config.ToughAsNails' `ProximityRadius`), and furnace fuel by item tag, Core's `fuel` (Minecraft
 burns logs and planks by their tags), so another pack's planks, put in `#planks`, burn the same
 (Crafting/Smelting burns the tags' first, so an item's own `fuel` beats its tag's).
+
+A few rules in code still name blocks, as rules of their own rather than values about an entry:
+Generation/Structures' tree soils (`TREE_SOIL`, the cactus's sand), Generation/Foliage's single
+forms (`SINGLE_FORM`: Tall Grass falls back to Short Grass), Snow beside the `grass_blocks` the
+lakes and surface caves grow back, CaveDecor's stones, the mineshafts' and cities' vine and ladder
+variants, MobSpawning's rails, `Config.Weapons.ShatterBlocks`, client FuseView's and WAILA's lit
+TNT and Nuke, `Poi.TAGS` (by POI type), the art behind each `decor` (client BlockDecor and
+TransmitterModel's windows and gauges), and each mob's drops (MobList, which is code).
 
 A block's `loot` is Minecraft's block loot table in short: when a player breaks it by hand or
 with a tool that harvests it (unless Shears harvested its `shearDrops`, `Items.sheared`: leaves
@@ -177,26 +228,45 @@ drawing only when they differ, each roll an entry by weight, its count drawn onl
 max differ: so gravel's flint (`{ "Flint", 1, 1, 1 }, { false, 9, 0, 0 }`), the leaves' (a sapling
 pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `loot`.
 
-**Checks**, as the packs load; every message names the pack, the kind and the entry:
+**Checks**, as the packs load; every message names the pack, the kind (the file, in a kind folder)
+and the entry:
+- The loader: a module that gives nothing, one that fails as it loads (wrapped: "pack P's blocks
+  does not load: ..."), a dotted name, a child that is no module or folder, a name twice, a kind
+  folder's `init`, an unknown module at a pack's top (A pack, above).
 - Schema (`Content/Schema`): each kind's fields and their types, nested ones too (a shape box's
   `size`, a miner's `floor`); an unknown field is an error with a "did you mean" (`harndess` ->
-  hardness, by edit distance), and so are a wrong type, a colour outside 0..255, a missing field
-  (a block's name, an item's model, a recipe's type and the fields its type needs, and only
-  those), a manifest's `order`; an effect's `icon` and `view` are one of the client's closed sets,
-  which live in the shared `Effects/Looks` (`ICONS`: client `Ui/EffectIcons` has a glyph for each
-  and no other, and asserts so as it loads; `VIEWS`: client `Rendering/EffectView`'s and the
-  server's Glowing), its `command` lower_snake and its `interval` at least 1;
-  a skill's perk is one of the kinds the game codes (SKILL_PERKS: knowledge, mining, wear,
-  thirst, insulation, boiling, none) with that kind's numbers only, each it needs, in range
+  hardness, by Damerau-Levenshtein distance, a swap one edit), and so are a wrong type, a colour
+  outside 0..255, a missing field (a block's name, an item's model, a recipe's type and the fields
+  its type needs, and only those), a manifest's `order`, and a loot pool's `rolls` (its fewest
+  below 0 or above its most). A name from a closed set is checked with a hint too (`enum`): a
+  block's `tool`, `menu`, `material`, `behaviour`, `structureMode`, `spawnUnsafe`, `foliageClass`,
+  a door's facing and hinge, a jigsaw's front and top; an item's `tool.kind`, `material`,
+  `accessory.worn` and `magic.projectile`; a box's `material`; a texture's `Material`; a biome's
+  `seasonClass`; an Age's milestones' `category`. The long sets code elsewhere keeps are lists in
+  Schema that the code checks as it loads (shared code can't require the server's): `MATERIALS`
+  (Roblox's Enum.Material names; tests/spec/Content compares them with Lune's), `BEHAVIOURS` (server
+  Behaviours requires every module in its folder and asserts each with `onTick` or
+  `onNeighborChanged` is listed, and only those), `PROJECTILES` (Magic/Projectiles' kinds),
+  `MILESTONES` (Knowledge.CATEGORIES, asserted by Progression/Ages). An effect's `icon` and `view`
+  are one of the client's closed sets, which live in the shared `Effects/Looks` (`ICONS`: client
+  `Ui/EffectIcons` has a glyph for each and no other, and asserts so as it loads; `VIEWS`: client
+  `Rendering/EffectView`'s and the server's Glowing), its `command` lower_snake and its `interval`
+  at least 1; a skill's perk is one of the kinds the game codes (SKILL_PERKS: knowledge, mining,
+  wear, thirst, insulation, boiling, none) with that kind's numbers only, each it needs, in range
   ("perk.factor is no number a wear perk has (it has chance)").
+- Define's generators (`Define/Fields`) check what they are given before they make anything, with
+  Schema's fields and hints, refusing a field a generator makes itself: "Content/Define: plant
+  MarshTulip: flamable is no field it may have (did you mean flammable?)".
 - Names and packs: a name taken twice, an override of nothing, two packs of one name, a
-  `requires` that is not there or loads later, a kind given as the wrong shape, an unknown module.
+  `requires` that is not there or loads later, a kind given as the wrong shape.
 - Every cross-reference: the items and blocks recipes, tags and loot tables name; the tags recipes
   name; `drops`, `shearDrops`, `item`, `places`, `caveTwin`, a plant's other half, a toggle's `to`;
-  a block's loot table; an ore feature's block; `age`; a block's textures and the blocks textures
-  are tinted like; the Ages' milestones; every lore line's item; a line given both by an entry
-  and by a pack's `lore`; a fuel tag's tag (and its ticks, above 0); a biome's blocks (top,
-  filler, steep, underwater, beach, patches) and plants (single plants or lower halves); a
+  a block's loot table; a fluid block's `fluid.group` (one of Fluids/FluidList's); an ore
+  feature's block; `age`; a block's textures and the blocks textures are tinted like; the Ages'
+  milestones (a key or a count, each; a key an item, a block, a biome or an Age as its category
+  says; a mob's Progression/Ages checks against the mobs); every lore line's item; a line given both
+  by an entry and by a pack's `lore`; a fuel tag's tag (and its ticks, above 0); a biome's blocks
+  (top, filler, steep, underwater, beach, patches) and plants (single plants or lower halves); a
   potion's effect and ingredient, and its variants against its effect (`Schema.checkVariants`: no
   `seconds` and no long variant for an instant effect, `seconds` for a lasting one, `strong` true
   or seconds as the effect takes, no lore line or icon for a variant it has not), and its items'
@@ -207,14 +277,21 @@ pool, then a sticks pool) and the grass's Straw, the Minecraft pack's entries' `
   fallback and a structure's start pool (a pool, a template or the templates named under it); a
   structure's biomes, by their exact names (at least one; left out, every biome); the sound
   events entries name (a block's `sounds`, `workSound` and toggle sound, an item's `equipSound`
-  and food sound). Unknown names come with a hint too (`Stnoe` -> Stone).
-- In the registries, as they load (with `where`): what only a registry knows of an entry's
-  value: a skill's row on the screen (1..6), its icon being an item, its perk's knowledge sources
-  and tool tiers, at most 255 nodes for the protocol's u8 (Skills), a block's sound action, an
-  event's numbers and its kind's limit, a machine's work sound (Sounds), the miner's numbers
-  (MinerRules), a radiation or shielding number (Radiation), a fuel's ticks (Recipes), a biome's
-  bands and that every band has one (Biomes), its tree builders (Generation/Structures), two
-  effects `/effect` would find by one word (Effects); the structure library
+  and food sound); an explosive's `lit` block (one with a `fuse`, whole ticks); a container's
+  `fills` and dirty water's `purified` (items: Drinks checks they are drinks); every `formerly`
+  (each old name claimed once, none an entry's name now). Unknown names come with a hint too
+  (`Stnoe` -> Stone).
+- In the registries, as they load (with `where`, so their messages name the pack too): what only
+  a registry knows of an entry's value: a skill's row on the screen (1..6), its icon being an item,
+  its perk's knowledge sources and tool tiers, at most 255 nodes for the protocol's u8 (Skills); a
+  block's sound type (with a hint) and sound action, a texture's Material and Tint (Blocks); an
+  item's icon and a loot entry's count (Items); a recipe's pattern keys and `keep`, an unknown item
+  or tag (Crafting, Smelting); an event's numbers and its kind's limit, a machine's work sound
+  (Sounds); a block's machine kind (with a hint) and its energy (Machines); the miner's numbers
+  (MinerRules); a radiation or shielding number (Radiation); a fuel's ticks (Recipes); an ore
+  feature's numbers (Generation/Ores); a biome's bands and that every band has one (Biomes), its
+  tree builders and a sapling's `tree` (Generation/Structures, with a hint); a POI tag's types
+  (Poi); two effects `/effect` would find by one word (Effects); the structure library
   (Structures/Library) builds the packs' part alone first and makes everything it would warn
   about an error naming the pack: a number out of range (a weight, a depth, a spacing and its
   separation), a start jigsaw no start piece has, a jigsaw's pool with no templates or its
@@ -307,9 +384,20 @@ and `caveFluid`, torches and lanterns, Mekanism's frames, `transmitter`, `cable`
 its items and recipes as Content makes them); `Define/Metal` (`metal(spec)`: a
 metal's ore, storage block and raw block, raw lump, ingot and nugget, their storage recipes both
 ways and smelting, and their blank textures, as `{ blocks, items, recipes, textures }` for each
-kind module to take its part of; `ore = false` for an alloy: brass). A helper only one pack uses
-is that pack's `_` module instead (the Minecraft pack's grass and lichen shapes, the turrets'
-part boxes, the Apocalypse pack's barricades' boards). `tests/spec/ContentDefine` checks each
+kind module to take its part of; `ore = false` for an alloy: brass); `Define/Sounds` (the files
+every client ships, the shared recordings, `blockSounds` and `mobVoice`). A helper only one pack
+uses is that pack's `_` module instead (the Minecraft pack's grass and lichen shapes, the turrets'
+part boxes, the Apocalypse pack's barricades' boards and gun shots). Every generator copies each
+field of its kind (Schema's) that the author gives onto what it makes, its own defaults only where
+one is left out, so an iron door, an armor set with `shielding` or a flower on sand is written like
+any other entry; `Define/Fields` checks a generator's argument first (an unknown field with a "did
+you mean", a wrong type, a missing field, a field it makes itself: a door's `shape`, a fence's
+`fence`). The other blocks a generator makes of one entry (a fluid's flows, a door's other halves,
+a fence's arms, layers 2 to 8) and cave twins keep every field but `Define.OWN_FIELDS`, the item's
+own: `lore`, `texture`, `age`, `skill`, `fuel`, `tags`, `knowledge`, `miner`, `formerly` and `poi`
+(they are no items, take their item's or twin's faces and POI type, and each would be an ore of its
+own, or claim its item's former names twice). A list of what is dropped, not of what passes, so a
+block field added later passes to twins by default. `tests/spec/ContentDefine` checks each
 generator's entries and that every helper the header lists is there.
 
 **Ore features.** Each pack's `ores` append in load order, and Generation/Ores places them in that
@@ -337,10 +425,13 @@ recipe's `#tag` can't pick up biomes, as Minecraft keeps `tags/item` and
 MushroomFields, the Plains of the void, Single Biome, Superflat and the debug worlds) uses
 `Biomes.need(name, who)`, an error naming both when no pack makes it.
 
-**Recipe order.** `Crafting.match` answers the first recipe that matches, and recipes merge in
-load order, so a pack's recipe could hide another's with the same grid. `tests/spec/CraftingGrids`
-builds every recipe's own grid (one item a key, a tag's first name; a smelting input in a lit
-furnace) and checks it makes that recipe's result: none is hidden.
+**Recipe order.** `Crafting.match` answers the first recipe that matches (every shaped one before
+any shapeless one), Crafting/Smelting the first recipe for an input (`Smelting.recipes()` still
+lists them all), and recipes merge in load order, so a pack's recipe could hide another's with the
+same grid or input: the content tool's `recipe` check warns of it ("never crafted", "never
+smelted: ... comes first"), and `tests/spec/CraftingGrids` builds every recipe's own grid (one
+item a key, a tag's first name; a smelting input in a lit furnace) and checks it makes that
+recipe's result: none of the game's is hidden.
 
 **Cost.** Content loads once (`Content.default`); merging and checking every pack takes about
 5 to 10 ms in Lune, and the first load, compiling and running every pack module, about 0.2 s, as
@@ -363,7 +454,13 @@ An author's pack breaks none of it: a grafted fixture loads after every pack the
 (`tests/lib/GamePacks`' `graftLast`) and names what it makes "Fixture...", the game's entries are
 checked by the pack that made them (`origin`), not `where`'s whole text, and the generation
 digests (Generation, OreGeneration, WorldTypeGenerators' Default world) are the shipped packs'
-alone (`GamePacks.mountShipped`: an ore feature or a biome an author adds changes the world).
+alone (`GamePacks.mountShipped`: an ore feature or a biome an author adds changes the world). What
+still does: an override of an entry a spec pins (Stone's hardness, the outpost's house pool), which
+is a change to that entry; a skill node in a cell the specs' own nodes take (the Stone Age's row 2,
+the Content spec's in-memory node; the Electric Age's row 2, FixtureSkilled's); and the game specs
+that still count content: PlantsServer (36 plants), Progression (five Ages; three skill nodes an
+Age and a tree dearer than the last Age's level), StructureGeneration (the outpost the only
+structure) and WorldTypeGenerators' structures debug world (a one-piece structure unturned).
 
 **The content tool** (`tests/content`: `check`, `list`, `show`, `new`; README, Development) sees
 what the game sees: `tests/lib/ContentGame` mounts `src/shared` with the Lune loader, requires
@@ -374,14 +471,17 @@ faces, the Ages' names, Crafting.match, Items' drops, a potion's items) and of t
 blocks the generators' sources name, the ore features', biomes' and structure templates' blocks,
 the chests' loot tables, mobs' drops, buckets and fills). `tests/lib/ContentTool` is pure over a
 View: the checks (lore, faces, icons, unused textures, Ages, recipes Crafting.match never
-reaches, loot tables nothing rolls, a pack naming another's entries without requiring it, and
+reaches and smelting recipes an earlier one shadows, loot tables nothing rolls, a pack naming another's entries without requiring it, and
 survival's reach: the least fixed point of the earliest Age each item can be had in, through
 drops, recipes, placing and fills, an item out of reach named by its cause; the creative tier's
 machines, a machine kind with `creative` such as the Creative Energy Cube, are by design never
 made, so left out), the
 summary, lists, pages (a structure template's size and palette, read with
 `Structures/TemplateText.head`, and the pools holding it; a pool's elements, or the templates its
-name gathers, and the structures starting from it) and a new pack's text.
+name gathers, and the structures starting from it) and a new pack's text (`new`: a block, an item,
+a shaped and a smelting recipe, a texture and a loot table, the recipe on a grid no recipe takes
+yet, so any number of new packs pass the check; its `pack.luau` names a module of the game's packs
+to copy for each other kind and says where `--order` put it).
 `tests/spec/ContentTool` runs it on `tests/fixtures/content/tool` (FixtureLint, one of each
 finding; FixtureLintPatch, a JSON override) grafted into a fresh game, and on new packs built in
 memory (the loader's `source`) before any file is written.
@@ -2915,7 +3015,8 @@ viewport and EquipmentLooks follows the faded head; targeting casts from the cam
 
 ## Texture pack (`TexturePack`, `Blocks`, `tests/build_textures`, client `Rendering/TextureLooks`)
 
-The user's textures go from one hand-edited module to every part, image and mesh:
+The user's textures go from the content packs' `textures` (and each entry's `texture` and `icon`)
+to every part, image and mesh:
 
 ```
 Shared/TexturePack ─► Blocks (faces per block, appearances, variantTexture, alignLut)
@@ -4983,9 +5084,9 @@ Water, lava, oil and fuel. Everything that holds or tells fluids apart asks Shar
 of naming water: blocks, buckets, Fluid Tanks and pipes, machines' tanks, the protocol, movement,
 item physics, burning, the view from inside a fluid, sounds, WAILA and JEI.
 
-**The registry** (`Fluids`, its data in `Fluids/FluidList`). Fluid ids are u8 list positions and
-append only (they are sent and saved in items): 0 none, 1 water, 2 lava, 3 oil, 4 fuel (`COUNT`).
-A record holds its BlockList group (`name`: the blocks <name>, <name>Flow1..7 and <name>Falling),
+**The registry** (`Fluids`, its data in `Fluids/FluidList`). Fluid ids are u8 list positions, sent
+the same everywhere (saves keep fluids by name, so the list may change): 0 none, 1 water, 2 lava, 3
+oil, 4 fuel (`COUNT`). A record holds its blocks' group (`name`: the blocks <name>, <name>Flow1..7 and <name>Falling),
 its blocks (`source`, `caveSource`), full bucket (`bucket`), `color`, `light`, movement (`physics`
 "water" or "lava": the branch of Minecraft's LivingEntity.travel and the fluid tag it belongs to;
 `drag`, `push`, `swim`), harm (`damage` every `damageInterval` ticks, `burnSeconds`,
@@ -7096,8 +7197,9 @@ as R15 rigs. Tested in `tests/spec/Mobs` (the world, physics, spawning, costs), 
 `MobRigPool`, `ZombieVoices` and `ZombieRigProbe` (the client), and `tests/spec/ApocalypseGlue`
 (all of it together on a real world server over a generated town).
 
-**Kinds** (`Shared/Entities/MobList`, append only: a kind's id is a u8 on the wire; monsters are
-never saved, so the three monsters the list once had gave their ids 6-8 to zombie kinds). A record
+**Kinds** (`Shared/Entities/MobList`: a kind's id is its place in the list, a u8 on the wire, the
+same on every machine; saves keep mob kinds by name, Saving worlds: Names, not ids, so kinds may go
+anywhere in it). A record
 holds Minecraft's numbers (box, eyes, health, MOVEMENT_SPEED, armor, attack damage, the goals'
 speed modifiers, `follow`), its loot (`drops`), its spawn weights (`spawn`: `weight` in the wild,
 `cityWeight` in a city, `hordeWeight` in a blood moon's waves grown by `hordeGrowth` a moon,
@@ -8250,8 +8352,8 @@ the miner and the press in the Electric Age, the Ultimates in the Atomic Age. Lo
 item, blank icons for the eight items (the fourteen blocks are machines: never textured), three
 sounds (below). `Config.Turrets.Enabled`, `Miner.Enabled` and `AmmoPress.Enabled` false make each
 the identity: no recipes or Ages for it (the Servo Motor stays while the press needs it), its kinds
-inert, no demand rule, no service, no messages; blocks and items stay registered (ids are
-append-only).
+inert, no demand rule, no service, no messages; blocks and items stay registered (so the switch
+moves no id).
 
 **Specs**: `Turrets` (registries, Specs, the maths, the kind on a fake service, the panels, the
 frozen layouts, the codec, the decor, the features off), `TurretFeed` (the feeder and demand rules
@@ -10167,19 +10269,22 @@ Saving worlds).
 
 - Saved worlds outlive versions: `Save/RegionCodec`, `PlayerCodec` and `WorldMeta` carry a format
   version and are read by tags and lengths; add record tags and fields, never change what an
-  existing one means (bump the version and keep reading the old one), and keep block, item, mob
-  and fluid ids append-only (a saved world stores them). State another part keeps with a world
-  goes through `WorldSave.registerSection`, not new keys.
+  existing one means (bump the version and keep reading the old one). Records keep content by
+  name (palettes: Saving worlds, Names, not ids), never by id, and a number in data or a container
+  that is an id is listed as one (`ItemData.ID_KEYS`, a machine kind's `types`), so ids may move
+  between versions. State another part keeps with a world goes through
+  `WorldSave.registerSection`, not new keys.
 - Generation must stay deterministic: use `Util/Hash` (never `math.random` or `Random`) and only
   the seed and coordinates as inputs. Clients and server must agree on every unedited block.
 - Block and item ids (items from 4096) are places in the content packs' merged lists (Content
-  packs), given at load: nothing may count on an entry's place (find it by name), and until saves
-  keep names a saved world needs the packs it was made with.
+  packs), given at load, dense and the same on every machine, which is what the protocol sends:
+  nothing may count on an entry's place (find it by name), and every value about an entry goes on
+  the entry, never in a table of names in code.
 - Status effect ids are places among the content packs' effects (sent as a u8, at most 255),
   given at load like block and item ids: code names an effect by name (`Effects.id.Speed`).
   Content brews every pack's potions into their items and recipes, so a new potion is a
-  `potions` entry in any pack. A new item gets a blank `TexturePack.Icons` entry, so its
-  picture is one id to paste later. Every hurt a player takes on the server goes through `Players/Effects.incomingDamage`
+  `potions` entry in any pack. A new item gets a blank `icon = ""` on its entry, so its picture is
+  one id to paste later. Every hurt a player takes on the server goes through `Players/Effects.incomingDamage`
   (Resistance), and the mining factor reaches both the client's progress and ServerNet's check
   (`Mining`'s `factor`), or their timings drift apart.
 - `Inventory/Menu` and `Crafting` must stay pure and deterministic: the client predicts every
@@ -10264,11 +10369,10 @@ Saving worlds).
   twin is a source of its group, and `Blocks.fluidId` never answers one), and glow lichen
   generation (`Generation/CaveDecor`) decides each cell from the seed, its position and its
   in-buffer neighbourhood only, like foliage. A lichen is 2 parts: caves hold thousands.
-- Fluid ids (`Fluids/FluidList` positions) are sent and saved in items: append a fluid, never
-  reorder (at most 255). Code that holds or tells fluids apart asks Shared/Fluids (`blockLut`,
-  `ofBucket`, the record), never names water; every fluid group needs its flow `RULES`
-  (Behaviours/Fluid) and its own bucket item, and the registry checks BlockList and ItemList
-  against it at load.
+- Fluid ids (`Fluids/FluidList` positions) are sent as a u8 (at most 255) and saved by name. Code
+  that holds or tells fluids apart asks Shared/Fluids (`blockLut`, `ofBucket`, the record), never
+  names water; every fluid group needs its flow `RULES` (Behaviours/Fluid) and its own bucket
+  item, and the registry checks the packs' blocks and items against it at load.
 - Mineshafts are planned from the seed and the full detail terrain only (never a chunk's blocks),
   and write an opaque or ordinary block from the plan, cell hashes and its own column only; only
   cave twins may read their four sides. Everything they put into cave air is cave air or a cave
@@ -10319,8 +10423,9 @@ Saving worlds).
   reuse one. A setting's effect key needs a function registered in the client script
   (`Settings.missing()` lists those without), and anything a worker needs travels in its jobs:
   worker actors keep their own Config.
-- Textures are set only in `Shared/TexturePack`, which stays pure data (every VM requires it).
-  After editing it run `lune run tests/build_textures`; `src/textures` is generated and never
+- Textures are set only in the content packs (their `textures`, each block's `texture`, each
+  item's `icon`); `Shared/TexturePack` gathers them and stays pure data (every VM requires it).
+  After changing one run `lune run tests/build_textures`; `src/textures` is generated and never
   edited by hand (`--check` and the TexturePack spec fail when it is stale). Cave twins never get
   entries. `Blocks.variantTexture` is the one rule for a cube's MaterialVariant: TextureLooks and
   `alignLut` both follow it.
@@ -10332,7 +10437,7 @@ Saving worlds).
   colours from TextureLooks, to parts live in a record only; materials, variants and images
   never change that way. A part's palette generation is kept beside its record's parts (`tone`),
   so the sweep writes a part at most once per palette and only when its colour changed.
-- Mob kinds (`Entities/MobList` positions) go on the wire as a u8: append, never reorder. Mobs
+- Mob kinds (`Entities/MobList` positions) go on the wire as a u8 and are saved by name. Mobs
   only tick in the chunks World/Simulation keeps (loaded, near a player) and read blocks with
   `peekBlock`; spawning never generates terrain and never places a mob in a chunk that doesn't
   tick. Mob AI and physics stay pure (MobWorld, MobAI, MobCrowd, MobSpawning, MobTracking,
