@@ -3618,8 +3618,8 @@ is its burn time in ticks (Fuel).
 ```lua
 -- Wetlands/recipes.luau, in its list
 { type = "smelting", input = "Peat", result = "PeatBrick" },
-{ type = "shaped", pattern = { "BBB", "B B", "BBB" }, key = { B = "PeatBrick" }, result = "Furnace" },
-{ type = "shapeless", ingredients = { "PeatBrick", "Stick" }, result = "Torch", count = 2 },
+{ type = "shaped", name = "FurnaceFromPeatBrick", pattern = { "BBB", "B B", "BBB" }, key = { B = "PeatBrick" }, result = "Furnace" },
+{ type = "shapeless", name = "TorchFromPeatBrick", ingredients = { "PeatBrick", "Stick" }, result = "Torch", count = 2 },
 ```
 
 A shaped recipe fits anywhere in the grid, mirrored too; `count` is how many it makes, and `keep`
@@ -3629,7 +3629,26 @@ hands one ingredient's item data to the result (a battery's charge). In a functi
 records. Recipes add up in load order; a grid crafts the first recipe that fits it (every shaped
 one before any shapeless one) and a furnace smelts the first recipe for its input, so a later
 recipe for a grid or an input already taken is never made, which the check warns of.
-<!-- recipe overrides: added by the integrator -->
+
+Every recipe has a name: its result's item name unless it gives a `name`, so a second recipe for
+the same item needs one, as Furnace and Torch do above (in a function of `define`,
+`define.named("RopeFromString", define.shaped(...))`). A later pack replaces another pack's recipe
+by giving a whole recipe of that name with `override = true` (it keeps its place, so JEI's pages
+stay in order), or removes it with `{ name = "GoldIngotFromGoldBlock", remove = true }`:
+
+```lua
+-- WetlandsTweaks/recipes.luau (a pack loading after Minecraft's)
+return {
+	{ type = "shaped", override = true, pattern = { "###", "# #", "###" }, key = { ["#"] = "#planks" }, result = "Chest", count = 2 },
+	{ type = "smelting", name = "GoldIngotFromRawGold", override = true, input = "RawGold", result = "GoldIngot", count = 2 },
+	{ name = "GoldIngotFromGoldBlock", remove = true },
+}
+```
+
+`lune run tests/content list recipes` lists every recipe with its name, and `show <name>` shows
+one, with the pack and file of each override. When a new recipe never crafts or smelts because an
+earlier pack's takes its grid or input, `tests/content check` names that recipe and suggests
+overriding it by name.
 
 **Tags** are a pack's `tags`, Minecraft's item tags (a recipe's `"#planks"` takes any of them):
 

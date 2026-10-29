@@ -133,10 +133,22 @@ An override's own tables need none of their required fields, and the patched ent
 whole again ("pack B, block Grass: once patched, fluid.group is missing"); to add an element to a
 pool, an override lists the pool's own elements and the new one. Tags are a union across packs:
 each pack's lists in load order, then every entry's `tags`, each name once (an entry's `tags = {
-"coals" }` joins Core's tag). Recipes, ore features (each named once) and Ages (each id once)
-append in load order; loot tables, lore lines, fuel tags and structure templates are named once,
-each one pack's.
-<!-- recipe overrides: added by the integrator -->
+"coals" }` joins Core's tag). Ore features (each named once) and Ages (each id once) append in
+load order; loot tables, lore lines, fuel tags and structure templates are named once, each one
+pack's.
+
+**Recipes** merge by name, in load order. A recipe's name is its `name`, else its result's item
+name (`Torch`), as Minecraft names a recipe by its id; two recipes with one name are a load error
+that names both packs and files and suggests a name, so a second recipe for a result gives one of
+its own (`IronIngotFromRawIron`: `define.named(name, recipe)` sets it, `define.storage` names its
+unpacking recipe `<item>From<block>`, `define.metal` its smelting `<Metal>IngotFromRaw<Metal>` and
+`<Metal>IngotFrom<Metal>Ore`, and a brewed potion's recipe takes its item's name). A recipe with
+`override = true` replaces the earlier recipe of its name whole and keeps its place, so the
+crafting order, JEI's pages and every other recipe's place stay the same; `{ name = "Torch",
+remove = true }` takes a recipe away; overriding or removing a name no earlier pack gave is an
+error with a "did you mean". Crafting still takes the first recipe that fits and smelting the
+first for an input, so a later pack's *new* recipe for the same grid or input is never made
+(`tests/content check` warns of it and suggests overriding the winner by name).
 
 **Potions.** Once every pack has merged, each potion is brewed (`Content/Define`'s `brew`,
 Minecraft's brewing in a grid) into its items, a Purified Water Bottle with its ingredient, the
@@ -147,14 +159,16 @@ potion Swiftness, item PotionOfSwiftness"). So a pack adds a potion, items, reci
 tooltip included, with one entry, and patches a potion's items by patching the potion.
 
 **Where things came from.** `content.where(kind, name)` says it for every message ("pack Minecraft
-(patched by Patch's blocks/patches), blocks/terrain, block Stone"; a recipe by its place in
-`content.recipes`: "pack Minecraft, recipes/tools, recipe #3 (WoodenPickaxe)"), and
+(patched by Patch's blocks/patches), blocks/terrain, block Stone"; a recipe by its name or its
+place in `content.recipes`: "pack Minecraft, recipes/tools, recipe #3 (WoodenPickaxe)"), and
 `content.origin(kind, name)` gives it as data: the pack and kind folder file that made it, the
 packs that patched it in load order (`patched`) and each override's pack and file (`overrides`): a
 skill's, a biome's, an effect's, a potion's, a pool's and a structure's overrides too; a tag's: the
 first pack putting names in it and the packs adding to it, an override's `tags` its pack's; a
 brewed item's or recipe's: its potion's pack, its file `potion <Name>`, patched by the potion's
-patchers; a recipe's: its pack, file and `index`, its place in that file's list. The content tool
+patchers; a recipe's: its pack, file and `index`, its place in that file's list, and the
+overrides that replaced it ("pack Minecraft (patched by Patch's recipes/torch), recipes/lights,
+recipe #1 (Torch)"). The content tool
 reads where things came from this way.
 
 **Per-entry fields.** Every value about an entry is on the entry, and each registry reads it
