@@ -641,6 +641,10 @@ return function(t, shared, require)
 			tags = { "x" },
 			knowledge = { mine = 3 },
 			miner = { ticks = 10, joules = 10 },
+			-- (A twin claiming its item's former names would claim them twice; a variant takes its
+			-- item's point of interest type.)
+			formerly = { "OldX" },
+			poi = "x",
 		}
 		local function ore(fields: { [string]: any }): any
 			local spec = table.clone(ORE)
