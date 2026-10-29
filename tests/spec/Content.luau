@@ -2620,6 +2620,35 @@ return function(t, shared, require, _server, _client)
 		)
 	end)
 
+	t.test("content: a block's roomHeat: a pack's brazier warms rooms, a furnace or machine while working", function()
+		local env, root, serverRoot = fresh(function(env, packs)
+			local folder = env.folder(packs, "Patch")
+			env.module(folder, "pack", { order = 900, requires = { "Minecraft" } })
+			env.module(folder, "blocks", {
+				{ name = "Brazier", heats = true, roomHeat = { hu = 12, most = 2 } },
+				{ name = "Kiln", menu = "Furnace", container = 3, roomHeat = { hu = 6 } },
+			})
+		end)
+		local Climate = env.require(serverRoot.Players.Climate)
+		local B = env.require(root.Blocks).id
+		local brazier, most = Climate.roomSource(B.Brazier)
+		t.eq(assert(brazier)(0, 0, 0, B.Brazier), 12, "a pack's room source")
+		t.eq(most, 2)
+		t.eq(Climate.roomSource(B.Kiln), nil, "a furnace's is the server's, while lit")
+		local kiln = nil
+		for _, source in Climate.WORKING_ROOM_HEAT do
+			if source.block == B.Kiln then
+				kiln = source
+			end
+		end
+		t.ok(kiln ~= nil and kiln.hu == 6 and kiln.furnace, "a furnace: while lit")
+		fails(
+			{ pack("P", { blocks = { { name = "A", roomHeat = { most = 2 } } } }) },
+			{ "pack P, block A: roomHeat.hu is missing" },
+			"a room heat's HU"
+		)
+	end)
+
 	t.test("content: a registry's own check names the pack: two effects /effect finds by one word", function()
 		refused({
 			effects = {

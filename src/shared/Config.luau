@@ -656,11 +656,11 @@ local Config = {
 			OutsideLimit = 15,
 		},
 		--[[
-			Heat and cold in heat units (HU) a second, what each source gives a room (Players/
-			Climate's room sources) and what the heaters, coolers and stoves cost (Shared/Machines
-			kinds "heater", "cooler", "stove", "oilheater"): a Campfire, each Fire (at most
-			FireMax), each Lava block (at most LavaMax), a lit Furnace, a working Heat or
-			Combustion Generator, each player inside. The Wood Stove burns furnace fuel for
+			Heat and cold in heat units (HU) a second, what the heaters, coolers and stoves give a
+			room and cost (Shared/Machines kinds "heater", "cooler", "stove", "oilheater") and what
+			each player inside gives (Players/Climate's room sources; a block's own is its entry's
+			`roomHeat`: a Campfire 20, each Fire 15, each Lava block 10, a lit Furnace 8, a working
+			Heat or Combustion Generator 10). The Wood Stove burns furnace fuel for
 			StoveBurnFactor x its burn time; the Oil Heater's tank holds OilTank mB, a mB of Oil
 			lasting OilTicks at full output, of Fuel FuelTicks. Electric heaters take
 			HeaterJoules a tick per HU, coolers CoolerJoules, the fan FanJoules while it runs.
@@ -669,13 +669,6 @@ local Config = {
 			StandbyRadius stands by. Thermostats hold SetPointMin..SetPointMax.
 		]]
 		Heat = {
-			Campfire = 20,
-			Fire = 15,
-			FireMax = 3,
-			Lava = 10,
-			LavaMax = 6,
-			Furnace = 8,
-			Generator = 10,
 			Player = 1,
 			WoodStove = 30,
 			OilHeater = 35,

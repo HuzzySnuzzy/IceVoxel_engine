@@ -320,6 +320,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 		lore = "Molten rock. Burns anything that touches it.",
 		heats = true,
 		spawnUnsafe = "near",
+		-- (A room's air: 10 HU a second a block, every level and CaveLava, at most 6 counted.)
+		roomHeat = { hu = 10, most = 6 },
 	}, 30)
 	define.append(list, lava)
 	table.insert(list, define.caveFluid(lava[1]))

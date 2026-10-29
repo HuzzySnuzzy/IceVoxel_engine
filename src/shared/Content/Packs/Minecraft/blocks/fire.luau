@@ -59,6 +59,8 @@ return function(define: Define.Context): { Schema.BlockSpec }
 			sounds = { ["break"] = "block.fire.extinguish" },
 			heats = true,
 			spawnUnsafe = "near",
+			-- (A room's air: 15 HU a second a fire, at most 3 counted.)
+			roomHeat = { hu = 15, most = 3 },
 		},
 		{
 			name = "Tnt",

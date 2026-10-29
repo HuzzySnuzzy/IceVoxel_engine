@@ -90,6 +90,8 @@ return function(define: Define.Context): { BlockSpec }
 			lore = "Burns Fuel for a lot of energy.",
 			age = "electric",
 			poi = "combustion_generator",
+			-- (Working, it warms a room's air by 10 HU a second: the seasons' rooms.)
+			roomHeat = { hu = 10 },
 		},
 	})
 	return list

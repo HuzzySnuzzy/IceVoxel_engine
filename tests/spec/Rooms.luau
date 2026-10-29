@@ -23,6 +23,11 @@ return function(t, shared, require)
 	local B = Blocks.id
 	local G = FakeRooms.GROUND
 	local HEAT = Config.Seasons.Heat
+	-- (A block's room heat is its entry's `roomHeat`.)
+	local function roomHeat(name: string): { hu: number, most: number? }
+		return (assert(require(shared.Content).default.block(name)) :: any).roomHeat
+	end
+	local CAMPFIRE_HU = roomHeat("Campfire").hu
 
 	-- The design's house: 5 x 5 x 3 planks on grass, a closed oak door in the front wall and a glass
 	-- window in each side wall. Returns the world and the interior's corner.
@@ -98,7 +103,7 @@ return function(t, shared, require)
 		local cold = Rooms.steady(room, -6.7, Rooms.GROUND, 0)
 		t.near(cold, -5.57, 0.01, "unheated")
 		t.eq(Temperature.zone(math.floor(cold + 0.5)), Temperature.COLD, "-6: COLD")
-		local campfire = Rooms.steady(room, -6.7, Rooms.GROUND, HEAT.Campfire)
+		local campfire = Rooms.steady(room, -6.7, Rooms.GROUND, CAMPFIRE_HU)
 		t.near(campfire, 1.17, 0.01, "a campfire")
 		t.eq(Temperature.zone(math.floor(campfire + 0.5)), Temperature.NEUTRAL)
 		local heater = Rooms.thermostat(1, 1, room, -6.7, Rooms.GROUND, 0, HEAT.ElectricHeater)
@@ -109,7 +114,7 @@ return function(t, shared, require)
 		t.near(heater * HEAT.HeaterJoules * 24000 * 0.55 / 1e6, 1.03, 0.01, "MJ a winter night")
 		-- Taiga, winter night (-14.2).
 		t.near(Rooms.steady(room, -14.2, Rooms.GROUND, 0), -11.8, 0.05, "unheated: ICY")
-		t.near(Rooms.steady(room, -14.2, Rooms.GROUND, HEAT.Campfire), -5.06, 0.01, "a campfire: COLD")
+		t.near(Rooms.steady(room, -14.2, Rooms.GROUND, CAMPFIRE_HU), -5.06, 0.01, "a campfire: COLD")
 		t.near(Rooms.thermostat(1, 1, room, -14.2, Rooms.GROUND, 0, 40), 38.0, 0.05, "nearly the heater's most")
 		local insulated = assert(fill(plankHouse(B.InsulatedPlanks), 2, G, 2))
 		t.near(insulated.uaOut, 81 * 0.006 + 0.2 + 0.24, 1e-9)
@@ -183,7 +188,7 @@ return function(t, shared, require)
 		igloo.house(20, 20, 3, 3, 2, B.Snow)
 		local inside = assert(fill(igloo, 21, G, 21))
 		t.near(inside.uaOut, (4 * 3 * 2 + 9) * 0.015, 1e-9)
-		t.ok(Rooms.steady(inside, -14.2, Rooms.GROUND, HEAT.Campfire) > 2, "igloos work")
+		t.ok(Rooms.steady(inside, -14.2, Rooms.GROUND, CAMPFIRE_HU) > 2, "igloos work")
 		-- Too big: a hall over MaxExtent long, one over MaxVolume cells.
 		local long = FakeRooms.new(Blocks, Rooms)
 		long.house(-100, 0, 40, 2, 2, B.Stone)

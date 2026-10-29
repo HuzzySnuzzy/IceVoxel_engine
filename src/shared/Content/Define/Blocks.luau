@@ -114,8 +114,8 @@ local wallBounds = Blocks.wallBounds
 	over FLUID_DEFAULTS (not solid, replaceable, hardness 100, no drop, server Behaviours/Fluid),
 	ticking every `tickDelay`. `flowing`: fields of the flowing and falling levels only (flowing
 	fuel burns like a fuse, its source explodes). `spec`'s own fields (OWN_FIELDS: its lore...) and
-	`heats` / `cools` are the source's alone: the source is the fluid's item, and a fluid's name
-	warms or cools at every level (ToughAsNails/Temperature). The levels' names (the source's is
+	`heats` / `cools` / `roomHeat` are the source's alone: the source is the fluid's item, and a
+	fluid's name warms or cools at every level (ToughAsNails/Temperature, server Players/Climate). The levels' names (the source's is
 	the group's), `fluid` and `placeable` (the source alone) are made here. Every group is a fluid
 	of Shared/Fluids (FluidList: its id, bucket, colour and light; checked at load), and its flow
 	rules are Behaviours/Fluid's RULES.
@@ -138,6 +138,7 @@ local FLOWING_MADE = table.freeze({
 local SOURCE_ONLY: { [string]: boolean } = table.clone(OWN)
 SOURCE_ONLY.heats = true
 SOURCE_ONLY.cools = true
+SOURCE_ONLY.roomHeat = true
 function Blocks.fluid(group: string, spec: BlockSpec, tickDelay: number, flowing: { [string]: any }?): { BlockSpec }
 	Fields.check(`fluid {group}`, spec, { kind = "blocks", made = FLUID_MADE })
 	if spec.name ~= nil and spec.name ~= group then
@@ -203,11 +204,12 @@ function Blocks.caveTwin(spec: BlockSpec, extra: { [string]: any }?): BlockSpec
 end
 
 -- A fluid source's cave twin (CaveLava, CaveOil): `caveTwin`, shown by the source's name ("Lava").
--- (Without `heats` / `cools`: the fluid's name warms or cools its cave twin too, Temperature.)
+-- (Without `heats` / `cools` / `roomHeat`: the fluid's name warms or cools its cave twin too,
+-- Temperature, server Players/Climate.)
 function Blocks.caveFluid(source: BlockSpec): BlockSpec
 	local twin = Blocks.caveTwin(source)
 	twin.displayName = source.displayName or source.name
-	twin.heats, twin.cools = nil, nil
+	twin.heats, twin.cools, twin.roomHeat = nil, nil, nil
 	return twin
 end
 

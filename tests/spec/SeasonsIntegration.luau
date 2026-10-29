@@ -72,6 +72,11 @@ return function(t, shared, require, server, client)
 	local HEATER, CUBE, CAMPFIRE = B.ElectricHeater, B.CreativeEnergyCube, B.Campfire
 	local SIZE = ChunkLayout.SIZE
 	local HEAT = Config.Seasons.Heat
+	-- (A block's room heat is its entry's `roomHeat`.)
+	local function roomHeat(name: string): { hu: number, most: number? }
+		return (assert(require(shared.Content).default.block(name)) :: any).roomHeat
+	end
+	local CAMPFIRE_HU = roomHeat("Campfire").hu
 	local ROOM_MELT = Config.Seasons.Snow.RoomMelt
 	local PLAINS = (Biomes.byName("Plains") :: any).index
 	local DAY = Calendar.TICKS_PER_DAY
@@ -395,7 +400,7 @@ return function(t, shared, require, server, client)
 		t.ok(hot >= ROOM_MELT, `house B at {hot}`)
 		t.eq(RoomWorld.temperatureIn(g.rooms, 20, G + 3, 4), hot, "its roof block reads its air")
 		local sample = assert(RoomWorld.sampleIn(g.rooms, 20.5, G, 4.5))
-		t.eq(sample.heat, 2 * HEAT.Campfire, "two campfires' 20 HU")
+		t.eq(sample.heat, 2 * CAMPFIRE_HU, "two campfires' 20 HU")
 		t.near(
 			hot,
 			Rooms.steady(sample, sample.outside, Rooms.GROUND, sample.heat),

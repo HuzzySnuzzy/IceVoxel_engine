@@ -99,8 +99,9 @@
 	             are the seasons' Wood Stove and Oil Heater (radiant) and Electric Heater (within
 	             Config.Seasons.Heat.SpaceHeaterRadius) while they deliver heat (their `heat`
 	             field), and the Air Conditioner and Electric Fan (within FanRadius) cold sources
-	             while they cool. Rooms (server Seasons/RoomWorld) take the same machines' heat
-	             through Climate.addRoomSource: a lit Furnace, a working generator, the heaters,
+	             while they cool. Rooms (server Seasons/RoomWorld) take the furnaces' and machines'
+	             heat through Climate.addRoomSource: their entries' `roomHeat` while they burn or
+	             work (Climate.WORKING_ROOM_HEAT: a lit Furnace, a working generator), the heaters,
 	             coolers and stoves' `heat`; those are registered at the start whatever thirst
 	             and temperature say (rooms run with both off).
 	  Seasons    while the calendar is on (Shared/Seasons: Calendar's state enabled), each
@@ -917,24 +918,30 @@ local function registerHeatSources()
 end
 
 --[[
-	What the machines give a room's air (server Seasons/RoomWorld, through Climate.addRoomSource):
-	a lit Furnace, a working generator, the heaters', coolers' and stoves' `heat`. Registered at
-	the start whatever thirst and temperature say: rooms run with Tough As Nails off too.
+	What the furnaces and machines give a room's air (server Seasons/RoomWorld, through
+	Climate.addRoomSource): each block of Climate.WORKING_ROOM_HEAT its entry's `roomHeat` while
+	it burns (a furnace: a lit Furnace) or works (a machine: the Heat and Combustion Generators),
+	and every machine whose kind keeps a `heat` field (the heaters', coolers' and stoves') that
+	field. Registered at the start whatever thirst and temperature say: rooms run with Tough As
+	Nails off too.
 ]]
 local function registerRoomSources()
-	local heat = Config.Seasons.Heat
-	Climate.addRoomSource(Blocks.id.Furnace, function(x: number, y: number, z: number): number
+	local function lit(x: number, y: number, z: number): boolean
 		local container = Containers.peek(x, y, z)
 		local data = container and container.data
-		return if data ~= nil and (data[1] or 0) > 0 then heat.Furnace else 0
-	end)
-	local function generator(x: number, y: number, z: number): number
-		return if working(x, y, z) then heat.Generator else 0
+		return data ~= nil and (data[1] or 0) > 0
 	end
-	Climate.addRoomSource(Blocks.id.HeatGenerator, generator)
-	Climate.addRoomSource(Blocks.id.CombustionGenerator, generator)
-	for _, name in { "WoodStove", "OilHeater", "ElectricHeater", "AirConditioner", "ElectricFan" } do
-		Climate.addRoomSource(Blocks.id[name], heatOf)
+	for _, source in Climate.WORKING_ROOM_HEAT do
+		local hu = source.hu
+		local burning: (number, number, number) -> boolean = if source.furnace then lit else working
+		Climate.addRoomSource(source.block, function(x: number, y: number, z: number): number
+			return if burning(x, y, z) then hu else 0
+		end, source.most)
+	end
+	for block = 0, Blocks.count - 1 do
+		if SharedMachines.field(block, "heat") then
+			Climate.addRoomSource(block, heatOf)
+		end
 	end
 end
 

@@ -95,6 +95,8 @@ return function(define: Define.Context): { BlockSpec }
 			lore = "Burns furnace fuel or lava for energy. Lava around it helps.",
 			age = "industrial",
 			poi = "heat_generator",
+			-- (Working, it warms a room's air by 10 HU a second: the seasons' rooms.)
+			roomHeat = { hu = 10 },
 		},
 		{
 			name = "ElectricFurnace",

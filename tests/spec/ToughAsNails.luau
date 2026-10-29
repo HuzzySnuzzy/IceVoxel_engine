@@ -1200,8 +1200,10 @@ return function(t, shared, require, server)
 		t.ok(Climate.isRadiant(Blocks.fluidId("Lava", 0)), "lava")
 		blocks["1,64,0"] = nil
 		-- Room sources: what a block gives a room's air, and how many count.
+		-- (Each block's `roomHeat`: a campfire's 20, every one counted; a fire's 15, three at most;
+		-- a lava block's 10, six at most, every level and the cave twin together.)
 		local campfire, campfires = Climate.roomSource(B.Campfire)
-		t.eq(assert(campfire)(0, 0, 0, B.Campfire), Config.Seasons.Heat.Campfire)
+		t.eq(assert(campfire)(0, 0, 0, B.Campfire), 20)
 		t.eq(campfires, nil, "every campfire counts")
 		local fire, fires = Climate.roomSource(B.Fire)
 		t.eq(assert(fire)(0, 0, 0, B.Fire), 15)
@@ -1209,6 +1211,17 @@ return function(t, shared, require, server)
 		local lava, lavas = Climate.roomSource(Blocks.fluidId("Lava", 0))
 		t.eq(assert(lava)(0, 0, 0, 0), 10)
 		t.eq(lavas, 6)
+		t.eq(Climate.roomSource(Blocks.fluidId("Lava", 3)), lava, "every level counts as one source")
+		t.eq(Climate.roomSource(B.CaveLava), lava, "and the cave twin")
+		-- A lit furnace's and a working generator's are the server's to register, by their entries.
+		local working: { [string]: any } = {}
+		for _, source in Climate.WORKING_ROOM_HEAT do
+			working[Blocks.get(source.block).name] = source
+		end
+		t.ok(working.Furnace.hu == 8 and working.Furnace.furnace, "a lit furnace")
+		t.ok(working.HeatGenerator.hu == 10 and not working.HeatGenerator.furnace, "a working generator")
+		t.eq(working.CombustionGenerator.hu, 10)
+		t.eq(Climate.roomSource(B.Furnace), nil, "not registered here")
 		t.eq(Climate.roomSource(B.Stone), nil)
 		t.eq(Climate.PLAYER_HU, 1)
 		local made = Climate.addRoomSource(B.Chest, function()
@@ -1291,10 +1304,10 @@ return function(t, shared, require, server)
 		local roomSources = assert(string.match(tan, "local function registerRoomSources%(%)(.-)\nend\n"))
 		for _, needle in
 			{
-				"Climate.addRoomSource(Blocks.id.Furnace,",
-				"Climate.addRoomSource(Blocks.id.HeatGenerator, generator)",
-				"Climate.addRoomSource(Blocks.id.CombustionGenerator, generator)",
-				'{ "WoodStove", "OilHeater", "ElectricHeater", "AirConditioner", "ElectricFan" }',
+				"for _, source in Climate.WORKING_ROOM_HEAT do",
+				"if source.furnace then lit else working",
+				'if SharedMachines.field(block, "heat") then',
+				"Climate.addRoomSource(block, heatOf)",
 			}
 		do
 			t.ok(string.find(roomSources, needle, 1, true) ~= nil, needle)

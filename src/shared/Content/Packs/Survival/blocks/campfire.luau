@@ -66,5 +66,7 @@ return {
 		spawnUnsafe = "near",
 		-- (/locate poi finds it: Shared/Poi.)
 		poi = "campfire",
+		-- (Warms a room's air by 20 HU a second, every campfire counted: the seasons' rooms.)
+		roomHeat = { hu = 20 },
 	},
 } :: { Schema.BlockSpec }

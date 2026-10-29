@@ -72,6 +72,13 @@
 	                                (listed first in a tool's tooltip)
 	  heats, cools     block        true: it warms / cools a player near it, Tough As Nails
 	                                (ToughAsNails/Temperature.HEATING_BLOCKS / COOLING_BLOCKS)
+	  roomHeat         block        { hu, most? }: the heat it gives the air of a room it stands in
+	                                or walls, HU a second (the seasons' rooms: server Players/
+	                                Climate, Seasons/RoomWorld), at most `most` of it counted in
+	                                one room (a fluid's every level and cave twin together). A
+	                                furnace (`menu` "Furnace") gives it while lit, a machine while
+	                                it works, anything else always; a machine whose kind keeps a
+	                                `heat` field (the heaters, coolers, stoves) gives that instead
 	  sounds           block        { [action] = event }: its own action sounds (Sounds.block)
 	  workSound        block        a machine: the event it plays looped while it works (Sounds
 	                                .workSound; client Audio/Ambience)
@@ -339,6 +346,8 @@ export type BlockSpec = {
 	tree: string?,
 	-- The seasons' palette its colour follows (the header).
 	foliageClass: string?,
+	-- What it gives a room's air, HU a second, and how many count in one room (the header).
+	roomHeat: { hu: number, most: number? }?,
 }
 
 -- One box of an item's model (`model`).
@@ -1288,6 +1297,7 @@ Schema.BLOCK_FIELDS = {
 	poi = SNAKE_ID,
 	tree = STRING,
 	foliageClass = enum(Schema.FOLIAGE_CLASSES),
+	roomHeat = record({ hu = NUMBER, most = NUMBER }, { "hu" }),
 } :: { [string]: Check }
 
 --[[

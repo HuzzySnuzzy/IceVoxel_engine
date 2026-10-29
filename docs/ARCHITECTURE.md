@@ -3977,10 +3977,11 @@ tests/spec/Rooms).
   outside value; cells of the old room the new one did not take (a wall built across) stay the
   old room's and are filled again, so both halves keep its air. A dirty room whose fill finds no
   room (its roof blown off) goes at once, all of it: one fill, one failure.
-- *Heat.* The room sources in the room or its walls (Players/Climate.roomSource: a campfire 20
-  HU, fire 15 (at most 3), lava 10 (at most 6), a lit furnace 8, a working generator 10, the
-  heaters', coolers' and stoves' `heat` field; Players/ToughAsNails registers the machines' at
-  the start whatever thirst and temperature say) and 1 HU per player whose feet are in it. A
+- *Heat.* The room sources in the room or its walls (Players/Climate.roomSource: each block
+  entry's `roomHeat`, a campfire 20 HU, fire 15 (at most 3), lava 10 (at most 6), a lit furnace
+  8, a working generator 10, and the heaters', coolers' and stoves' `heat` field; Players/
+  ToughAsNails registers the furnaces' and machines' at the start whatever thirst and
+  temperature say) and 1 HU per player whose feet are in it. A
   source in a wall between two rooms heats one: the room `climateAt` answers for its cell, so a
   thermostat heats the room it measures and pays for what that room gets. `climateAt` sums it
   again for each call, so a thermostat's `others` (the room's heat less its own) is exact and

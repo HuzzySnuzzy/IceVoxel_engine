@@ -48,11 +48,15 @@
 	  snowedOn          snow falling at the feet or the head (View `snowing`:
 	                    World/WeatherServer.snowingAt, open to the sky)
 	Room sources (`addRoomSource(block, output, limit)`): what a block in a room or its walls
-	gives the room's air, in HU a second (Config.Seasons.Heat; server Seasons/RoomWorld reads
-	them through `roomSource`, so it never requires the machines): a Campfire 20, each Fire 15
-	(at most 3 counted), each Lava block 10 (at most 6) here; Players/ToughAsNails registers the
-	machines' (a lit Furnace 8, a working Heat or Combustion Generator 10, the heaters, coolers
-	and stoves their `heat` field). Each player in a room gives PLAYER_HU.
+	gives the room's air, in HU a second (server Seasons/RoomWorld reads them through
+	`roomSource`, so it never requires the machines). The packs' blocks say theirs (`roomHeat = {
+	hu, most? }`, by name: a fluid's at every level and its cave twin's, as `heats`): those that
+	always give it are registered here (a Campfire 20, each Fire 15, at most 3 counted, each Lava
+	block 10, at most 6), those that give it only while they burn or work (`WORKING_ROOM_HEAT`: a
+	furnace while lit, a machine while it works: the Furnace 8, the Heat and Combustion
+	Generators 10) by Players/ToughAsNails, with the machines whose kind keeps a `heat` field
+	(the heaters, coolers and stoves: what that field says). Each player in a room gives
+	PLAYER_HU (Config.Seasons.Heat.Player).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -60,6 +64,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Biomes = require(Shared.Biomes)
 local Blocks = require(Shared.Blocks)
+local BlockList = require(Shared.Blocks.BlockList)
 local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local Fluids = require(Shared.Fluids)
@@ -226,11 +231,28 @@ function Climate.isRadiant(block: number): boolean
 	return radiant[block] == true
 end
 
-do
-	local heat = Config.Seasons.Heat
-	Climate.addRoomSource("Campfire", heat.Campfire)
-	Climate.addRoomSource("Fire", heat.Fire, heat.FireMax)
-	Climate.addRoomSource("Lava", heat.Lava, heat.LavaMax)
+-- A block whose `roomHeat` applies only while it burns or works (a furnace while lit, a machine
+-- while it works: Players/ToughAsNails checks which), its id, HU a second and limit.
+export type WorkingRoomHeat = { block: number, hu: number, most: number?, furnace: boolean }
+
+--[[
+	The packs' blocks with a `roomHeat` (see the header): those that always give it are room
+	sources now, by name (a fluid's name means every level of it and its cave twin, sharing one
+	limit); the furnaces and machines, whose heat comes and goes, are WORKING_ROOM_HEAT's.
+]]
+Climate.WORKING_ROOM_HEAT = {} :: { WorkingRoomHeat }
+for id = 0, Blocks.count - 1 do
+	local spec = BlockList[id + 1]
+	local heat = spec.roomHeat
+	if heat then
+		local furnace: boolean = spec.menu == "Furnace"
+		if furnace or spec.machine then
+			local source: WorkingRoomHeat = { block = id, hu = heat.hu, most = heat.most, furnace = furnace }
+			table.insert(Climate.WORKING_ROOM_HEAT, source)
+		else
+			Climate.addRoomSource(spec.name, heat.hu, heat.most)
+		end
+	end
 end
 
 -- Does `block` heat (true for a source with a check: it might)? Does it cool?

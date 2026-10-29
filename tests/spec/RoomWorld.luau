@@ -48,6 +48,12 @@ return function(t, shared, require, server)
 	local G = FakeRooms.GROUND
 	local SETTINGS = Config.Seasons.Rooms
 	local HEAT = Config.Seasons.Heat
+	-- (A block's room heat is its entry's `roomHeat`.)
+	local function roomHeat(name: string): { hu: number, most: number? }
+		return (assert(require(shared.Content).default.block(name)) :: any).roomHeat
+	end
+	local CAMPFIRE_HU = roomHeat("Campfire").hu
+	local FIRE_HU, FIRE_MOST = roomHeat("Fire").hu, roomHeat("Fire").most :: number
 	local PLAINS = (Biomes.byName("Plains") :: any).index
 
 	-- A fake game round `world`: players' feet in `players`, a clock moved by hand, sources by block
@@ -109,7 +115,7 @@ return function(t, shared, require, server)
 	end
 
 	local function campfire(): number
-		return HEAT.Campfire
+		return CAMPFIRE_HU
 	end
 
 	local function plankHouse(x0: number?, z0: number?): any
@@ -317,7 +323,7 @@ return function(t, shared, require, server)
 		local burning = true
 		world.set(21, G, 1, B.Campfire)
 		local function fire(): number
-			return if burning then HEAT.Campfire else 0
+			return if burning then CAMPFIRE_HU else 0
 		end
 		local fake = game(world, sourced(B.Campfire, fire))
 		RoomWorld.sampleIn(fake.rooms, 2.5, G, 2.5)
@@ -390,14 +396,14 @@ return function(t, shared, require, server)
 		world.set(31, G, 0, B.Fire)
 		world.set(31, G, 2, B.Fire)
 		local function fire(): number
-			return HEAT.Fire
+			return FIRE_HU
 		end
-		local fake = game(world, sourced(B.Fire, fire, HEAT.FireMax))
+		local fake = game(world, sourced(B.Fire, fire, FIRE_MOST))
 		RoomWorld.sampleIn(fake.rooms, 2.5, G, 2.5)
 		RoomWorld.sampleIn(fake.rooms, 30.5, G, 2.5)
 		fake.run(2, 1)
 		local fires = assert(RoomWorld.sampleIn(fake.rooms, 30.5, G, 2.5))
-		t.eq(fires.heat, HEAT.Fire * HEAT.FireMax, "five fires, three counted")
+		t.eq(fires.heat, FIRE_HU * FIRE_MOST, "five fires, three counted")
 		local cell = RoomWorld.temperatureIn(fake.rooms, 2, G + 1, 2)
 		t.ok(cell ~= nil, "a cell")
 		t.eq(RoomWorld.temperatureIn(fake.rooms, 2, G + 3, 2), cell, "the roof over it")

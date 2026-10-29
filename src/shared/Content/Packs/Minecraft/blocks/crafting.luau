@@ -56,5 +56,7 @@ return {
 		texture = { Top = "furnace top", Sides = "furnace side", Bottom = "furnace top" },
 		lore = "Smelts ores, cooks food and purifies water with fuel.",
 		poi = "furnace",
+		-- (Lit, it warms a room's air by 8 HU a second: the seasons' rooms.)
+		roomHeat = { hu = 8 },
 	},
 } :: { BlockSpec }
