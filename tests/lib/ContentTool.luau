@@ -1411,24 +1411,17 @@ function ContentTool.check(view: any): { Finding }
 			add(pack, "warning", "recipe", subject, `never crafted: {problem}`)
 			continue
 		end
-		local made, count = view.craft(grid, ContentTool.GRID)
+		local made, count, which = view.craft(grid, ContentTool.GRID)
 		local want = recipe.count or 1
 		if made ~= recipe.result or count ~= want then
 			local what = `{made}{if (count or 1) ~= 1 then ` x{count}` else ""}`
-			-- (The recipe that wins, when one other recipe could: the first in Crafting's order.)
-			local winners = {}
-			for _, other in order do
-				if other ~= index and content.recipes[other].result == made then
-					table.insert(winners, other)
-				end
-			end
+			-- (The recipe that wins: Crafting.which's place in Crafting's order, which is `order`'s.)
+			local won = if which then order[which] else nil
 			local winner, fix = "another recipe", ""
-			if #winners == 1 then
-				local otherPack, otherPlace = recipeFrom(view, winners[1])
-				winner = `pack {otherPack}'s {otherPlace} ({recipeName(content.recipes[winners[1]])})`
-				fix = replacing(pack, winners[1])
-			elseif #winners > 1 then
-				winner = `one of the {#winners} recipes for {made}`
+			if won and won ~= index then
+				local otherPack, otherPlace = recipeFrom(view, won)
+				winner = `pack {otherPack}'s {otherPlace} ({recipeName(content.recipes[won])})`
+				fix = replacing(pack, won)
 			end
 			add(
 				pack,

@@ -203,7 +203,8 @@ return function(t, shared, require, _server, _client)
 		-- (A pack after every other smelting the Minecraft pack's Cobblestone, and Core's logs, into
 		-- Glass: a furnace takes the first recipe for an input, Crafting/Smelting. Each named: a
 		-- recipe's name is its result's, and the Minecraft pack's sand has Glass's. And a torch's
-		-- grid making a Lantern: Torch's recipe fits it first.)
+		-- grid making a Lantern: Torch's recipe fits it first, named though a second recipe gives
+		-- Torch too: Crafting.which says which one takes the grid.)
 		local view, problem = fresh(function(env, packs)
 			local order = GamePacks.orderAfter(env, packs, 900)
 			local later = env.folder(packs, "Later")
@@ -217,6 +218,12 @@ return function(t, shared, require, _server, _client)
 					key = { X = "Coal", ["#"] = "Stick" },
 					result = "Lantern",
 					name = "LanternFromCoal",
+				},
+				{
+					type = "shapeless",
+					ingredients = { "Coal", "Coal", "Stick" },
+					result = "Torch",
+					name = "TorchFromCoals",
 				},
 			})
 		end)

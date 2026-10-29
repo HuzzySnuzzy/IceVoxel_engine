@@ -398,24 +398,25 @@ local function build(env: any, shared: any, words: { [string]: string }): any
 		return out
 	end
 
-	-- A crafting grid of names (nil: empty) -> what Crafting.match makes, and how many.
-	local function craft(grid: { [number]: string }, width: number): (string?, number?)
+	-- A crafting grid of names (nil: empty) -> what Crafting.match makes, how many, and which
+	-- recipe made it (its place in Crafting.recipes, Crafting.which; nil for a repair).
+	local function craft(grid: { [number]: string }, width: number): (string?, number?, number?)
 		local stacks: { [number]: any } = {}
 		for slot = 1, width * width do
 			local name = grid[slot]
 			if name then
 				local id = Items.find(name)
 				if id == nil then
-					return nil, nil
+					return nil, nil, nil
 				end
 				stacks[slot] = { item = id, count = 1 }
 			end
 		end
 		local result = Crafting.match(stacks, width)
 		if result == nil then
-			return nil, nil
+			return nil, nil, nil
 		end
-		return nameOf(result.item), result.count
+		return nameOf(result.item), result.count, Crafting.which(stacks, width)
 	end
 
 	return {

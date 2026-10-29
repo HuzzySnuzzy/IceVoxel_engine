@@ -255,8 +255,8 @@ local function repair(stacks: { Stack }): Stack?
 	return { item = a.item, count = 1, damage = if damage > 0 then damage else nil }
 end
 
--- The result of a width x width grid (slots 1..width^2, row by row), or nil.
-function Crafting.match(grid: { [number]: Stack? }, width: number): Stack?
+-- The grid's stacks, in slot order.
+local function stacksOf(grid: { [number]: Stack? }, width: number): { Stack }
 	local stacks: { Stack } = {}
 	for slot = 1, width * width do
 		local stack = grid[slot]
@@ -264,10 +264,12 @@ function Crafting.match(grid: { [number]: Stack? }, width: number): Stack?
 			table.insert(stacks, stack)
 		end
 	end
-	if #stacks == 0 then
-		return nil
-	end
-	for _, recipe in recipes do
+	return stacks
+end
+
+-- The first recipe fitting the grid (its place in `recipes`), and the stack whose data it keeps.
+local function firstFit(grid: { [number]: Stack? }, width: number, stacks: { Stack }): (number?, Stack?)
+	for index, recipe in recipes do
 		local ok, from = false, nil
 		if recipe.kind == "shaped" then
 			local kept
@@ -277,15 +279,40 @@ function Crafting.match(grid: { [number]: Stack? }, width: number): Stack?
 			ok, from = matchesShapeless(recipe, stacks)
 		end
 		if ok then
-			-- (A result keeps an ingredient's data and wear only where its recipe says: Recipes
-			-- `keep`; the wear only when the result wears too.)
-			local data = if from then Items.cleanData(from.data) else nil
-			local def = Items.get(recipe.result)
-			local damage = if from and def and def.durability then Items.cleanDamage(from.damage) else nil
-			return { item = recipe.result, count = recipe.count, data = data, damage = damage }
+			return index, from
 		end
 	end
+	return nil, nil
+end
+
+-- The result of a width x width grid (slots 1..width^2, row by row), or nil.
+function Crafting.match(grid: { [number]: Stack? }, width: number): Stack?
+	local stacks = stacksOf(grid, width)
+	if #stacks == 0 then
+		return nil
+	end
+	local index, from = firstFit(grid, width, stacks)
+	if index then
+		local recipe = recipes[index]
+		-- (A result keeps an ingredient's data and wear only where its recipe says: Recipes
+		-- `keep`; the wear only when the result wears too.)
+		local data = if from then Items.cleanData(from.data) else nil
+		local def = Items.get(recipe.result)
+		local damage = if from and def and def.durability then Items.cleanDamage(from.damage) else nil
+		return { item = recipe.result, count = recipe.count, data = data, damage = damage }
+	end
 	return repair(stacks)
+end
+
+-- Which recipe `match` takes for the grid: its place in `Crafting.recipes` (every shaped recipe in
+-- load order, then every shapeless one), or nil (none fits; a repair is no recipe). For the content
+-- tool, naming the recipe a grid makes.
+function Crafting.which(grid: { [number]: Stack? }, width: number): number?
+	local stacks = stacksOf(grid, width)
+	if #stacks == 0 then
+		return nil
+	end
+	return (firstFit(grid, width, stacks))
 end
 
 -- The grid after one craft: one item less in every used slot (new stack tables, wear and data
